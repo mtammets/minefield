@@ -1,18 +1,21 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
-import { ambientLight, sunLight, ground } from './environment.js';
+import { ambientLight, skyLight, sunLight, ground, updateGroundMotion } from './environment.js';
 import { car, updateCarVisuals } from './car.js';
 import { camera, updateCamera } from './camera.js';
 import { updatePlayerPhysics, getVehicleState, keys } from './carphysics.js';
 import { addStars } from './stars.js';
+import { createCollectibleSystem } from './collectibles.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
 let physicsAccumulator = 0;
+const MAX_PHYSICS_STEPS_PER_FRAME = 6;
 
 // Stseeni ja renderdamise algne seadistamine
 const scene = initializeScene();
 const renderer = initializeRenderer();
-addStars(scene);
+const starsController = addStars(scene);
+const collectibleSystem = createCollectibleSystem(scene);
 
 // Klaviatuurikontrollide ja akna suuruse muutuste kuulamine
 initializeControls();
@@ -25,7 +28,7 @@ animate();
 // Stseeni initsialiseerimine ja objektide lisamine
 function initializeScene() {
     const scene = new THREE.Scene();
-    scene.add(ambientLight, sunLight, car, ground);
+    scene.add(ambientLight, skyLight, sunLight, car, ground);
     return scene;
 }
 
@@ -34,7 +37,11 @@ function initializeRenderer() {
     const renderer = new THREE.WebGLRenderer({
         canvas: document.getElementById('gameCanvas'),
     });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     return renderer;
@@ -64,6 +71,7 @@ function handleKey(event, isKeyDown) {
 
 // Akna suuruse muutmisel rendereri ja kaamera uuendamine
 function onWindowResize() {
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
@@ -86,14 +94,24 @@ function animate() {
     const frameDelta = Math.min(clock.getDelta(), 0.05);
     physicsAccumulator += frameDelta;
 
-    while (physicsAccumulator >= physicsStep) {
+    let physicsSteps = 0;
+    while (physicsAccumulator >= physicsStep && physicsSteps < MAX_PHYSICS_STEPS_PER_FRAME) {
         updatePlayerPhysics(car, physicsStep);
         physicsAccumulator -= physicsStep;
+        physicsSteps += 1;
+    }
+
+    // Avoid a catch-up spiral when rendering falls behind.
+    if (physicsSteps === MAX_PHYSICS_STEPS_PER_FRAME && physicsAccumulator > physicsStep) {
+        physicsAccumulator = physicsStep;
     }
 
     const vehicleState = getVehicleState();
     updateCarVisuals(vehicleState, frameDelta);
     updateCamera(car, vehicleState.speed, frameDelta);
+    updateGroundMotion(car.position, vehicleState.speed);
+    starsController.update(frameDelta);
+    collectibleSystem.update(car.position, frameDelta);
 
     updateSunLightPosition();
     renderer.render(scene, camera);

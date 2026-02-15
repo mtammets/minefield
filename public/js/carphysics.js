@@ -3,30 +3,41 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 export const keys = { forward: false, backward: false, left: false, right: false };
 
 const TUNING = {
-    maxForwardSpeed: 22,
+    maxForwardSpeed: 95,
     maxReverseSpeed: 8,
-    engineAcceleration: 26,
+    engineAcceleration: 80,
+    launchAcceleration: 30,
     reverseAcceleration: 14,
     brakeDeceleration: 36,
-    rollingResistance: 2.2,
-    aerodynamicDrag: 0.028,
+    rollingResistance: 0.9,
+    aerodynamicDrag: 0.01,
     wheelBase: 2.6,
-    lowSpeedSteer: 0.58,
-    highSpeedSteer: 0.20,
-    steerFadeSpeed: 20,
-    steerResponse: 6.5,
-    steerReturn: 10,
+    lowSpeedSteer: 0.38,
+    highSpeedSteer: 0.09,
+    steerFadeSpeed: 45,
+    steerResponse: 3.8,
+    steerReturn: 6.5,
     lowSpeedGrip: 60,
     highSpeedGrip: 30,
     minTurningSpeed: 0.2,
+    throttleRise: 9,
+    throttleFall: 7,
+    brakeRise: 16,
+    brakeFall: 12,
+    holdRampTime: 2.0,
+    holdBoost: 1.6,
+    holdDecay: 2.4,
 };
 
 const vehicleState = {
     speed: 0,
+    acceleration: 0,
     steerInput: 0,
     steerAngle: 0,
     throttle: 0,
     brake: 0,
+    throttleHoldTime: 0,
+    powerBoost: 1,
     velocity: new THREE.Vector2(0, 0),
 };
 
@@ -50,6 +61,7 @@ export function updatePlayerPhysics(player, deltaTime = 1 / 60) {
     vehicleState.steerAngle = vehicleState.steerInput * steerLimit;
 
     const acceleration = calculateLongitudinalAcceleration();
+    vehicleState.acceleration = acceleration;
     vehicleState.speed += acceleration * dt;
     vehicleState.speed = THREE.MathUtils.clamp(vehicleState.speed, -TUNING.maxReverseSpeed, TUNING.maxForwardSpeed);
 
@@ -83,22 +95,42 @@ function updateDriverInputs(dt) {
     const steerRate = steerTarget === 0 ? TUNING.steerReturn : TUNING.steerResponse;
     vehicleState.steerInput = moveToward(vehicleState.steerInput, steerTarget, steerRate * dt);
 
-    vehicleState.throttle = 0;
-    vehicleState.brake = 0;
+    let targetThrottle = 0;
+    let targetBrake = 0;
 
     if (keys.forward && !keys.backward) {
         if (vehicleState.speed < -0.5) {
-            vehicleState.brake = 1;
+            targetBrake = 1;
         } else {
-            vehicleState.throttle = 1;
+            targetThrottle = 1;
         }
     } else if (keys.backward && !keys.forward) {
         if (vehicleState.speed > 0.5) {
-            vehicleState.brake = 1;
+            targetBrake = 1;
         } else {
-            vehicleState.throttle = -1;
+            targetThrottle = -1;
         }
     }
+
+    const throttleRate = targetThrottle === 0 ? TUNING.throttleFall : TUNING.throttleRise;
+    const brakeRate = targetBrake === 0 ? TUNING.brakeFall : TUNING.brakeRise;
+    vehicleState.throttle = moveToward(vehicleState.throttle, targetThrottle, throttleRate * dt);
+    vehicleState.brake = moveToward(vehicleState.brake, targetBrake, brakeRate * dt);
+
+    if (vehicleState.throttle > 0.1 && vehicleState.brake < 0.1) {
+        vehicleState.throttleHoldTime = Math.min(
+            vehicleState.throttleHoldTime + dt,
+            TUNING.holdRampTime
+        );
+    } else {
+        vehicleState.throttleHoldTime = Math.max(
+            0,
+            vehicleState.throttleHoldTime - dt * TUNING.holdDecay
+        );
+    }
+
+    const holdRatio = THREE.MathUtils.clamp(vehicleState.throttleHoldTime / TUNING.holdRampTime, 0, 1);
+    vehicleState.powerBoost = 1 + holdRatio * TUNING.holdBoost;
 }
 
 function calculateLongitudinalAcceleration() {
@@ -106,8 +138,11 @@ function calculateLongitudinalAcceleration() {
     const speedAbs = Math.abs(vehicleState.speed);
 
     if (vehicleState.throttle > 0) {
-        const powerFade = 1 - THREE.MathUtils.clamp(vehicleState.speed / TUNING.maxForwardSpeed, 0, 1);
-        acceleration += TUNING.engineAcceleration * (0.35 + powerFade * 0.65);
+        const speedNorm = THREE.MathUtils.clamp(vehicleState.speed / TUNING.maxForwardSpeed, 0, 1);
+        const powerFade = 1 - speedNorm;
+        const launchBoost = Math.exp(-speedAbs / 6) * TUNING.launchAcceleration;
+        const boostedEngine = TUNING.engineAcceleration * (0.32 + powerFade * 0.68) * vehicleState.powerBoost;
+        acceleration += (boostedEngine + launchBoost) * vehicleState.throttle;
     } else if (vehicleState.throttle < 0) {
         const reverseFade = 1 - THREE.MathUtils.clamp(speedAbs / TUNING.maxReverseSpeed, 0, 1);
         acceleration -= TUNING.reverseAcceleration * (0.4 + reverseFade * 0.6);

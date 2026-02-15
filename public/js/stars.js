@@ -2,7 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 
 export function addStars(scene) {
     const starGeometry = new THREE.BufferGeometry();
-    const starCount = 88000;
+    const starCount = window.innerWidth < 900 ? 12000 : 22000;
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3); // Värvide lisamine
 
@@ -35,10 +35,10 @@ export function addStars(scene) {
     const stars = new THREE.Points(starGeometry, starMaterial);
     scene.add(stars);
 
-    // Tähtede liikumine (nt pöörlemine)
-    function animateStars() {
-        stars.rotation.y += 0.0005; // Väike pöörlemine
-        requestAnimationFrame(animateStars);
-    }
-    animateStars();
+    return {
+        update(deltaTime = 1 / 60) {
+            const dt = Math.min(deltaTime, 0.05);
+            stars.rotation.y += dt * 0.03;
+        },
+    };
 }
