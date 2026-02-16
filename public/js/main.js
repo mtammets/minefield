@@ -76,6 +76,9 @@ const BATTERY_MAX = 100;
 const BATTERY_PICKUP_GAIN = 24;
 const BATTERY_IDLE_DRAIN_PER_SEC = 0;
 const BATTERY_SPEED_DRAIN_PER_SPEED = 0.055;
+const ROUND_TOTAL_PICKUPS = 10;
+const PLAYER_CAR_POOL_SIZE = 3;
+const PLAYER_RESPAWN_DELAY_MS = 850;
 const REPLAY_EVENT_PICKUP = 'pickup';
 const REPLAY_EVENT_CRASH = 'crash';
 const debrisPieces = [];
@@ -88,11 +91,21 @@ const bodyPartBaselines = new Map();
 const debrisBottomProbeBox = new THREE.Box3();
 const objectiveUi = createObjectiveUiController();
 const botStatusUi = createBotStatusController();
+const finalScoreboardUi = createFinalScoreboardController();
+const playerSpawnState = {
+    position: car.position.clone(),
+    rotationY: car.rotation.y,
+};
 let isCarDestroyed = false;
 let explosionLight = null;
 let explosionLightLife = 0;
 let botTrafficSystem = null;
 let playerBattery = BATTERY_MAX;
+let playerCollectedCount = 0;
+let totalCollectedCount = 0;
+let playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
+let pendingRespawnTimeout = null;
+let pickupRoundFinished = false;
 let vehicleImpactStatusCooldown = 0;
 
 initializeBodyPartBaselines();
@@ -107,6 +120,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         botTrafficSystem?.setSharedTargetColor(targetColorHex);
     },
     onCorrectPickup: ({ pickupColorHex, collectorId, position }) => {
+        totalCollectedCount += 1;
         replayController.recordEvent(REPLAY_EVENT_PICKUP, {
             x: position.x,
             y: position.y,
@@ -116,6 +130,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         });
 
         if (collectorId === 'player') {
+            playerCollectedCount += 1;
             addBattery(BATTERY_PICKUP_GAIN);
             objectiveUi.flashCorrect(pickupColorHex, Math.round(playerBattery));
             return;
@@ -135,8 +150,12 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         });
         triggerCarExplosion(position, pickupColorHex, targetColorHex);
     },
+    onExhausted: ({ totalPickups, collectedPickups }) => {
+        finalizePickupRound(totalPickups, collectedPickups);
+    },
     singleType: true,
     singleShapeIndex: SHARED_PICKUP_COLOR_INDEX,
+    finiteTotalPickups: ROUND_TOTAL_PICKUPS,
     activeCellRadius: 5,
     maxActivePickups: 6,
     pickupLifetimeSec: 7,
@@ -201,7 +220,7 @@ function initializeControls() {
 // Klahvide vajutamise töötlemine
 function handleKey(event, isKeyDown) {
     const key = event.key.toLowerCase();
-    if (isKeyDown && event.repeat && (key === 'k' || key === 'v' || key === 'f' || key === 'q')) {
+    if (isKeyDown && event.repeat && (key === 'k' || key === 'v' || key === 'f' || key === 'q' || key === 'enter')) {
         return;
     }
     const isArrowKey = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright';
@@ -215,7 +234,13 @@ function handleKey(event, isKeyDown) {
         arrowleft: () => (keys.left = isKeyDown),
         arrowright: () => (keys.right = isKeyDown),
         f: () => isKeyDown && toggleFullscreen(),
-        q: () => isKeyDown && location.reload(),
+        q: () => isKeyDown && startNewGame(),
+        enter: () => {
+            if (!isKeyDown || !finalScoreboardUi.isVisible()) {
+                return;
+            }
+            startNewGame();
+        },
         k: () => {
             if (!isKeyDown) {
                 return;
@@ -223,6 +248,7 @@ function handleKey(event, isKeyDown) {
 
             if (replayController.isPlaybackActive()) {
                 replayController.stopPlayback();
+                clearPendingRespawn();
                 clearReplayEffects();
                 clearDebris();
                 initializePlayerPhysics(car);
@@ -232,7 +258,11 @@ function handleKey(event, isKeyDown) {
             }
 
             if (isCarDestroyed) {
-                objectiveUi.showInfo('Pärast avariid salvestust ei alusta. Vajuta Q restart.');
+                objectiveUi.showInfo(
+                    playerCarsRemaining > 0
+                        ? 'Avarii pooleli. Oota uue auto ilmumist.'
+                        : 'Kõik autod on otsas. Vajuta Q restart.'
+                );
                 return;
             }
 
@@ -261,6 +291,7 @@ function handleKey(event, isKeyDown) {
 
             if (replayController.isPlaybackActive()) {
                 replayController.stopPlayback();
+                clearPendingRespawn();
                 clearReplayEffects();
                 clearDebris();
                 initializePlayerPhysics(car);
@@ -327,12 +358,13 @@ function animate() {
 
         if (!replayController.isPlaybackActive()) {
             clearReplayEffects();
+            clearPendingRespawn();
             initializePlayerPhysics(car);
             resetPlayerDamageState();
             physicsAccumulator = 0;
             objectiveUi.showInfo('Tele-replay lõppes.');
         }
-    } else if (!isCarDestroyed) {
+    } else if (!isCarDestroyed && !pickupRoundFinished) {
         physicsAccumulator += frameDelta;
         const vehicleCollisionSnapshots = botTrafficSystem?.getCollisionSnapshots?.() || [];
 
@@ -385,13 +417,16 @@ function animate() {
     }
     updateGroundMotion(car.position, cameraSpeed);
     starsController.update(frameDelta);
-    if (!replayActive) {
+    if (!replayActive && !pickupRoundFinished) {
         const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
         botTrafficSystem.update(car.position, visiblePickupsForBots, frameDelta);
         collectibleSystem.updateForCollectors([
             { id: 'player', position: car.position },
             ...botTrafficSystem.getCollectorDescriptors(),
         ], frameDelta);
+        if (!pickupRoundFinished && totalCollectedCount >= ROUND_TOTAL_PICKUPS) {
+            finalizePickupRound(ROUND_TOTAL_PICKUPS, totalCollectedCount);
+        }
         minimapAccumulator += frameDelta;
         if (minimapAccumulator >= MINIMAP_UPDATE_INTERVAL) {
             const visiblePickups = collectibleSystem.getVisiblePickups();
@@ -425,9 +460,10 @@ function updateSunLightPosition() {
 }
 
 function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, options = {}) {
-    if (isCarDestroyed) {
+    if (isCarDestroyed || pickupRoundFinished) {
         return;
     }
+    clearPendingRespawn();
 
     const replayCollision = options.collision
         ? {
@@ -451,17 +487,27 @@ function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, option
     isCarDestroyed = true;
     collectibleSystem.setEnabled(false);
     car.visible = false;
-    keys.forward = false;
-    keys.backward = false;
-    keys.left = false;
-    keys.right = false;
+    clearDriveKeys();
 
-    if (options.statusText) {
-        objectiveUi.showCrash(options.statusText);
-    } else {
-        objectiveUi.showFailure(pickupColorHex, targetColorHex);
-    }
+    playerCarsRemaining = Math.max(0, playerCarsRemaining - 1);
+
+    const crashReason = options.statusText
+        || `Vale (${colorNameFromHex(pickupColorHex)})! Õige oli ${colorNameFromHex(targetColorHex)}.`;
     spawnCarDebris(hitPosition, options.collision || null);
+
+    if (playerCarsRemaining > 0) {
+        objectiveUi.showCrash(
+            `${crashReason} Uus auto saabub ${Math.round(PLAYER_RESPAWN_DELAY_MS / 100) / 10}s pärast. `
+            + `Autosid järel: ${playerCarsRemaining}/${PLAYER_CAR_POOL_SIZE}.`
+        );
+        pendingRespawnTimeout = window.setTimeout(() => {
+            pendingRespawnTimeout = null;
+            respawnPlayerCar();
+        }, PLAYER_RESPAWN_DELAY_MS);
+        return;
+    }
+
+    objectiveUi.showCrash(`${crashReason} Kõik autod on otsas. Vajuta Q restart.`);
 }
 
 function triggerObstacleCrash(collision) {
@@ -470,13 +516,13 @@ function triggerObstacleCrash(collision) {
         : (collision.obstacleCategory === 'tree' ? 'puusse' : 'lambiposti');
     const speedLabel = Math.round(collision.impactSpeed);
     triggerCarExplosion(collision.position, 0xffa66b, 0xff4b4b, {
-        statusText: `Sõitsid suure hooga ${obstacleLabel} (${speedLabel}). Vajuta Q restart.`,
+        statusText: `Sõitsid suure hooga ${obstacleLabel} (${speedLabel}).`,
         collision,
     });
 }
 
 function updateBattery(vehicleState, dt) {
-    if (isCarDestroyed) {
+    if (isCarDestroyed || pickupRoundFinished) {
         return;
     }
 
@@ -491,7 +537,7 @@ function updateBattery(vehicleState, dt) {
 
     if (playerBattery <= 0.001) {
         triggerCarExplosion(car.position.clone(), 0xffb07d, 0xff4b4b, {
-            statusText: 'Aku sai tühjaks. Vajuta Q restart.',
+            statusText: 'Aku sai tühjaks.',
         });
     }
 }
@@ -499,6 +545,47 @@ function updateBattery(vehicleState, dt) {
 function addBattery(amount) {
     playerBattery = Math.min(BATTERY_MAX, playerBattery + Math.max(0, amount));
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+}
+
+function finalizePickupRound(totalPickups, collectedPickups) {
+    if (pickupRoundFinished) {
+        return;
+    }
+
+    pickupRoundFinished = true;
+    clearPendingRespawn();
+    collectibleSystem.setEnabled(false);
+    clearDriveKeys();
+    botStatusUi.render(botTrafficSystem?.getHudState?.() || []);
+
+    const scoreboard = [
+        { name: 'Sina', collectedCount: playerCollectedCount },
+        ...(botTrafficSystem?.getHudState?.() || []).map((bot) => ({
+            name: bot.name,
+            collectedCount: bot.collectedCount || 0,
+        })),
+    ];
+    scoreboard.sort((a, b) => (b.collectedCount || 0) - (a.collectedCount || 0));
+
+    let topScore = 0;
+    for (let i = 0; i < scoreboard.length; i += 1) {
+        topScore = Math.max(topScore, scoreboard[i].collectedCount || 0);
+    }
+    const winners = scoreboard.filter((entry) => (entry.collectedCount || 0) === topScore);
+    const winnerLabel = winners.map((entry) => entry.name).join(', ');
+    const resolvedTotal = Number.isFinite(totalPickups) ? totalPickups : ROUND_TOTAL_PICKUPS;
+    const resolvedCollectedRaw = Number.isFinite(collectedPickups) ? collectedPickups : totalCollectedCount;
+    const resolvedCollected = THREE.MathUtils.clamp(Math.round(resolvedCollectedRaw), 0, resolvedTotal);
+    const tiePrefix = winners.length > 1 ? 'Viik' : 'Võitja';
+
+    objectiveUi.showResult(
+        `Objektid otsas (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore}).`
+    );
+    finalScoreboardUi.show({
+        summaryText: `Korjatud ${resolvedCollected}/${resolvedTotal} objekti.`,
+        entries: scoreboard,
+        topScore,
+    });
 }
 
 function processVehicleCollisionContacts(contacts) {
@@ -944,18 +1031,15 @@ function spawnCrashPartDebris(part, crashContext) {
             wobblePhase: Math.random() * Math.PI * 2,
             wobbleRate: 3.2 + Math.random() * 3.1,
             spin: 10 + Math.random() * 12,
-            restPose: Math.random() < 0.72 ? 'upright' : 'flat',
+            restPose: 'flat',
             restYaw: Math.random() * Math.PI * 2,
         };
     }
     let bodyRest = null;
-    if (part.type === 'body_panel') {
-        const sideAxis = Math.random() < 0.5 ? 'x' : 'z';
+    if (part.type !== 'wheel') {
+        const travelYaw = Math.atan2(-velocity.x, -velocity.z);
         bodyRest = {
-            pose: Math.random() < 0.54 ? 'flat' : 'side',
-            sideAxis,
-            sideSign: Math.random() < 0.5 ? 1 : -1,
-            yaw: Math.random() * Math.PI * 2,
+            yaw: travelYaw + (Math.random() - 0.5) * 0.55,
         };
     }
 
@@ -1059,18 +1143,9 @@ function alignBodyPanelDebrisPose(piece, dt) {
     }
 
     const alignRate = BODY_PANEL_ORIENTATION_ALIGN_RATE;
-    if (bodyRest.pose === 'flat') {
-        piece.mesh.rotation.x = dampAngle(piece.mesh.rotation.x, 0, alignRate, dt);
-        piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, 0, alignRate, dt);
-        piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, bodyRest.yaw || 0, alignRate * 0.58, dt);
-        return;
-    }
-
-    const sideTargetX = bodyRest.sideAxis === 'x' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
-    const sideTargetZ = bodyRest.sideAxis === 'z' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
-    piece.mesh.rotation.x = dampAngle(piece.mesh.rotation.x, sideTargetX, alignRate * 0.96, dt);
-    piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, sideTargetZ, alignRate * 0.96, dt);
-    piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, bodyRest.yaw || 0, alignRate * 0.5, dt);
+    piece.mesh.rotation.x = dampAngle(piece.mesh.rotation.x, 0, alignRate, dt);
+    piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, 0, alignRate, dt);
+    piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, bodyRest.yaw || 0, alignRate * 0.58, dt);
 }
 
 function snapBodyPanelDebrisPose(piece) {
@@ -1079,15 +1154,8 @@ function snapBodyPanelDebrisPose(piece) {
         return;
     }
 
-    if (bodyRest.pose === 'flat') {
-        piece.mesh.rotation.x = 0;
-        piece.mesh.rotation.z = 0;
-        piece.mesh.rotation.y = bodyRest.yaw || piece.mesh.rotation.y;
-        return;
-    }
-
-    piece.mesh.rotation.x = bodyRest.sideAxis === 'x' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
-    piece.mesh.rotation.z = bodyRest.sideAxis === 'z' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
+    piece.mesh.rotation.x = 0;
+    piece.mesh.rotation.z = 0;
     piece.mesh.rotation.y = bodyRest.yaw || piece.mesh.rotation.y;
 }
 
@@ -1140,8 +1208,12 @@ function updateDebris(dt) {
         piece.mesh.rotation.z += piece.angularVelocity.z * dt;
 
         const bottomY = getDebrisBottomY(piece);
-        if (bottomY < DEBRIS_GROUND_Y) {
-            piece.mesh.position.y += (DEBRIS_GROUND_Y - bottomY);
+        const groundPenetration = DEBRIS_GROUND_Y - bottomY;
+        const nearGroundContact = groundPenetration >= -0.0025;
+        if (groundPenetration > 0) {
+            piece.mesh.position.y += groundPenetration;
+        }
+        if (nearGroundContact) {
             if (piece.velocity.y < 0) {
                 piece.velocity.y = -piece.velocity.y * (piece.bounce || DEBRIS_BOUNCE_DAMPING);
             }
@@ -1230,6 +1302,7 @@ function createObjectiveUiController() {
     const colorNameEl = document.getElementById('targetColorName');
     const statusEl = document.getElementById('objectiveStatus');
     let statusTimer = null;
+    let statusLocked = false;
 
     if (!swatchEl || !colorNameEl || !statusEl) {
         return {
@@ -1238,6 +1311,8 @@ function createObjectiveUiController() {
             showFailure() {},
             showCrash() {},
             showInfo() {},
+            showResult() {},
+            resetStatus() {},
         };
     }
 
@@ -1267,9 +1342,21 @@ function createObjectiveUiController() {
         showInfo(messageText, timeoutMs = 2000) {
             setStatus(messageText, '#a7d5ff', timeoutMs);
         },
+        showResult(messageText) {
+            statusLocked = true;
+            setStatus(messageText, '#ffe08f', 0, true);
+        },
+        resetStatus() {
+            statusLocked = false;
+            setStatus(STATUS_DEFAULT_TEXT, 'rgba(195, 228, 255, 0.9)', 0, true);
+        },
     };
 
-    function setStatus(text, color, timeoutMs = 1400) {
+    function setStatus(text, color, timeoutMs = 1400, force = false) {
+        if (statusLocked && !force) {
+            return;
+        }
+
         statusEl.textContent = text;
         statusEl.style.color = color;
         if (statusTimer) {
@@ -1277,7 +1364,7 @@ function createObjectiveUiController() {
             statusTimer = null;
         }
 
-        if (!isCarDestroyed) {
+        if (!isCarDestroyed && timeoutMs > 0) {
             statusTimer = setTimeout(() => {
                 statusEl.textContent = STATUS_DEFAULT_TEXT;
                 statusEl.style.color = 'rgba(195, 228, 255, 0.9)';
@@ -1291,6 +1378,37 @@ function clearDriveKeys() {
     keys.backward = false;
     keys.left = false;
     keys.right = false;
+}
+
+function clearPendingRespawn() {
+    if (pendingRespawnTimeout == null) {
+        return;
+    }
+    clearTimeout(pendingRespawnTimeout);
+    pendingRespawnTimeout = null;
+}
+
+function respawnPlayerCar() {
+    if (playerCarsRemaining <= 0) {
+        return;
+    }
+
+    isCarDestroyed = false;
+    car.visible = true;
+    car.position.copy(playerSpawnState.position);
+    car.rotation.set(0, playerSpawnState.rotationY, 0);
+    collectibleSystem.setEnabled(true);
+    clearDriveKeys();
+    resetPlayerDamageState();
+    playerBattery = BATTERY_MAX;
+    setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    initializePlayerPhysics(car);
+    physicsAccumulator = 0;
+
+    objectiveUi.showInfo(
+        `Uus auto rajal. Autosid järel: ${playerCarsRemaining}/${PLAYER_CAR_POOL_SIZE}.`,
+        2300
+    );
 }
 
 function createEmptyDamageState() {
@@ -1384,12 +1502,59 @@ function resetPlayerDamageState() {
 }
 
 function resetRunStateForReplay() {
+    clearPendingRespawn();
+    objectiveUi.resetStatus();
+    finalScoreboardUi.hide();
+    pickupRoundFinished = false;
+    playerCollectedCount = 0;
+    totalCollectedCount = 0;
     isCarDestroyed = false;
     car.visible = true;
+    car.position.copy(playerSpawnState.position);
+    car.rotation.set(0, playerSpawnState.rotationY, 0);
     collectibleSystem.setEnabled(true);
+    playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
+    playerBattery = BATTERY_MAX;
+    setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
     resetPlayerDamageState();
+    clearDriveKeys();
     clearReplayEffects();
     clearDebris();
+}
+
+function startNewGame() {
+    replayController.stopRecording();
+    replayController.stopPlayback();
+    replayController.clear();
+
+    clearPendingRespawn();
+    clearReplayEffects();
+    clearDebris();
+
+    objectiveUi.resetStatus();
+    finalScoreboardUi.hide();
+    pickupRoundFinished = false;
+    playerCollectedCount = 0;
+    totalCollectedCount = 0;
+    isCarDestroyed = false;
+    playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
+    playerBattery = BATTERY_MAX;
+    setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+
+    car.visible = true;
+    car.position.copy(playerSpawnState.position);
+    car.rotation.set(0, playerSpawnState.rotationY, 0);
+
+    collectibleSystem.reset?.();
+    collectibleSystem.setEnabled(true);
+    botTrafficSystem?.reset?.({ sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX });
+    botStatusUi.render(botTrafficSystem?.getHudState?.() || []);
+
+    resetPlayerDamageState();
+    clearDriveKeys();
+    initializePlayerPhysics(car);
+    physicsAccumulator = 0;
+    minimapAccumulator = MINIMAP_UPDATE_INTERVAL;
 }
 
 function clearDebris() {
@@ -1575,6 +1740,54 @@ function createBotStatusController() {
                     );
                 })
                 .join('');
+        },
+    };
+}
+
+function createFinalScoreboardController() {
+    const rootEl = document.getElementById('finalLeaderboard');
+    const summaryEl = document.getElementById('leaderboardSummary');
+    const listEl = document.getElementById('leaderboardList');
+    const restartBtnEl = document.getElementById('leaderboardRestartBtn');
+
+    if (!rootEl || !summaryEl || !listEl) {
+        return {
+            show() {},
+            hide() {},
+            isVisible() {
+                return false;
+            },
+        };
+    }
+    restartBtnEl?.addEventListener('click', () => {
+        startNewGame();
+    });
+
+    return {
+        show({ summaryText = '', entries = [], topScore = 0 } = {}) {
+            summaryEl.textContent = summaryText;
+            listEl.innerHTML = entries
+                .map((entry, index) => {
+                    const isWinner = (entry.collectedCount || 0) === topScore;
+                    const rowClass = isWinner ? 'leaderboardRow winner' : 'leaderboardRow';
+                    return (
+                        `<div class="${rowClass}">`
+                        + `<span class="leaderboardRank">#${index + 1}</span>`
+                        + `<span class="leaderboardName">${entry.name}</span>`
+                        + `<span class="leaderboardScore">${entry.collectedCount || 0}</span>`
+                        + `</div>`
+                    );
+                })
+                .join('');
+            rootEl.hidden = false;
+        },
+        hide() {
+            rootEl.hidden = true;
+            listEl.innerHTML = '';
+            summaryEl.textContent = '';
+        },
+        isVisible() {
+            return !rootEl.hidden;
         },
     };
 }

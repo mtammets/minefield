@@ -43,11 +43,12 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         botCount = DEFAULT_BOT_COUNT,
         sharedTargetColorHex = 0x7cf9ff,
     } = options;
+    let resolvedSharedTargetColorHex = sharedTargetColorHex;
 
     const bots = [];
     const botsByCollectorId = new Map();
     for (let i = 0; i < Math.max(0, botCount); i += 1) {
-        const bot = createBot(scene, worldBounds, staticObstacles, bots, i, sharedTargetColorHex);
+        const bot = createBot(scene, worldBounds, staticObstacles, bots, i, resolvedSharedTargetColorHex);
         bots.push(bot);
         botsByCollectorId.set(bot.collectorId, bot);
     }
@@ -103,9 +104,19 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             }
         },
         setSharedTargetColor(targetColorHex) {
+            resolvedSharedTargetColorHex = targetColorHex;
             bots.forEach((bot) => {
                 bot.targetColorHex = targetColorHex;
             });
+        },
+        reset({ sharedTargetColorHex: nextTargetColorHex = resolvedSharedTargetColorHex } = {}) {
+            resolvedSharedTargetColorHex = nextTargetColorHex;
+            const placedBots = [];
+            for (let i = 0; i < bots.length; i += 1) {
+                const bot = bots[i];
+                resetBot(bot, i, worldBounds, staticObstacles, placedBots, resolvedSharedTargetColorHex);
+                placedBots.push(bot);
+            }
         },
         getMiniMapMarkers() {
             return bots
@@ -125,6 +136,59 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             }));
         },
     };
+}
+
+function resetBot(bot, index, worldBounds, staticObstacles, placedBots, sharedTargetColorHex) {
+    const spawnPosition = findSpawnPoint(index, worldBounds, staticObstacles, placedBots);
+    bot.car.position.x = spawnPosition.x;
+    bot.car.position.z = spawnPosition.z;
+    bot.car.rotation.y = spawnPosition.rotationY;
+    bot.car.visible = true;
+
+    if (bot.indicator?.root) {
+        bot.indicator.root.visible = true;
+    }
+
+    bot.destroyed = false;
+    bot.state.speed = 0;
+    bot.state.acceleration = 0;
+    bot.state.steerInput = 0;
+    bot.state.steerAngle = 0;
+    bot.state.velocity.set(0, 0);
+    bot.wanderTarget = pickWanderTarget(worldBounds);
+    bot.collectedCount = 0;
+    bot.targetColorHex = sharedTargetColorHex;
+    bot.lastDamageAtMs = 0;
+    bot.detachedPartIds.clear();
+
+    const freshDamageState = createEmptyBotDamageState();
+    bot.damageState.wheelLossCount = freshDamageState.wheelLossCount;
+    bot.damageState.leftLoss = freshDamageState.leftLoss;
+    bot.damageState.rightLoss = freshDamageState.rightLoss;
+    bot.damageState.frontLoss = freshDamageState.frontLoss;
+    bot.damageState.rearLoss = freshDamageState.rearLoss;
+    bot.damageState.suspensionLoss = freshDamageState.suspensionLoss;
+
+    bot.bodyDamageVisual.left = 0;
+    bot.bodyDamageVisual.right = 0;
+    bot.bodyDamageVisual.front = 0;
+    bot.bodyDamageVisual.rear = 0;
+
+    for (let i = 0; i < bot.crashParts.length; i += 1) {
+        const part = bot.crashParts[i];
+        if (!part?.source) {
+            continue;
+        }
+        part.source.visible = true;
+        const base = bot.bodyPartBaselines.get(part.id);
+        if (base) {
+            part.source.position.copy(base.position);
+            part.source.rotation.copy(base.rotation);
+            part.source.scale.copy(base.scale);
+        }
+    }
+
+    bot.updateVisuals(bot.state, 1 / 60);
 }
 
 function createBot(scene, worldBounds, staticObstacles, existingBots, index, sharedTargetColorHex) {
