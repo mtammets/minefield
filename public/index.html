@@ -12,6 +12,20 @@
 <body>
     <!-- Mängu kanvas -->
     <canvas id="gameCanvas"></canvas>
+    <div id="objectivePanel" aria-label="Korje eesmärk">
+        <div id="objectiveTitle">KORJE EESMÄRK</div>
+        <div id="objectiveRow">
+            <span id="objectiveLabel">Kogu ainult:</span>
+            <span id="targetColorSwatch" aria-hidden="true"></span>
+            <span id="targetColorName">-</span>
+        </div>
+        <div id="objectiveStatus">Vale värv = auto plahvatab</div>
+    </div>
+    <div id="minimap" aria-label="Minikaart">
+        <div id="minimapTitle">KAART</div>
+        <canvas id="minimapCanvas" width="190" height="190"></canvas>
+        <div id="minimapInfo">X 0 | Z 0</div>
+    </div>
 
     <!-- Põhiloogika -->
     <script type="module" src="js/main.js"></script>

@@ -4,8 +4,8 @@ const PICKUP_RADIUS = 3.2;
 const PICKUP_RADIUS_SQ = PICKUP_RADIUS * PICKUP_RADIUS;
 const CELL_SIZE = 34;
 const CELL_MARGIN = 4;
-const CELL_PICKUP_CHANCE = 0.34;
-const ACTIVE_CELL_RADIUS = 8;
+const CELL_PICKUP_CHANCE = 0.18;
+const ACTIVE_CELL_RADIUS = 6;
 const PICKUP_GROUND_HEIGHT = 1.35;
 
 const shapeGeometries = [
@@ -42,7 +42,14 @@ const haloMaterials = shapeColors.map((color) => (
 const effectBurstGeometry = new THREE.IcosahedronGeometry(0.7, 1);
 const effectRingGeometry = new THREE.TorusGeometry(1.2, 0.12, 12, 40);
 
-export function createCollectibleSystem(scene) {
+export function createCollectibleSystem(scene, worldBounds = null, options = {}) {
+    const {
+        onTargetColorChanged = () => {},
+        onCorrectPickup = () => {},
+        onWrongPickup = () => {},
+        initialTargetColorIndex = Math.floor(Math.random() * shapeColors.length),
+    } = options;
+
     const pickupGroup = new THREE.Group();
     pickupGroup.name = 'magicPickups';
     scene.add(pickupGroup);
@@ -55,12 +62,23 @@ export function createCollectibleSystem(scene) {
     const consumedPickups = new Set();
     const effects = [];
     const activePickupIds = new Set();
+    const visiblePickupCache = [];
+    const worldCellBounds = worldBounds ? getWorldCellBounds(worldBounds) : null;
+    let targetColorIndex = normalizeColorIndex(initialTargetColorIndex);
+    let enabled = true;
     let lastSyncedCellX = Number.NaN;
     let lastSyncedCellZ = Number.NaN;
+
+    emitTargetColorChanged();
 
     return {
         update(carPosition, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
+            if (!enabled) {
+                updateEffects(effects, effectGroup, dt);
+                return;
+            }
+
             const carCellX = Math.floor(carPosition.x / CELL_SIZE);
             const carCellZ = Math.floor(carPosition.z / CELL_SIZE);
             if (carCellX !== lastSyncedCellX || carCellZ !== lastSyncedCellZ) {
@@ -70,7 +88,9 @@ export function createCollectibleSystem(scene) {
                     consumedPickups,
                     carCellX,
                     carCellZ,
-                    activePickupIds
+                    activePickupIds,
+                    worldBounds,
+                    worldCellBounds
                 );
                 lastSyncedCellX = carCellX;
                 lastSyncedCellZ = carCellZ;
@@ -80,22 +100,108 @@ export function createCollectibleSystem(scene) {
                 const distanceSq = pickup.mesh.position.distanceToSquared(carPosition);
                 if (distanceSq <= PICKUP_RADIUS_SQ) {
                     pickupGroup.remove(pickup.mesh);
-                    createCollectEffect(effectGroup, effects, pickup.mesh.position, pickup.color);
+                    const pickupPosition = pickup.mesh.position.clone();
+                    const isCorrectPickup = pickup.shapeIndex === targetColorIndex;
+                    const effectColor = isCorrectPickup ? pickup.color : 0xff4b4b;
+                    createCollectEffect(effectGroup, effects, pickupPosition, effectColor);
                     disposePickup(pickup);
                     pickups.delete(pickupId);
                     consumedPickups.add(pickupId);
+
+                    if (isCorrectPickup) {
+                        onCorrectPickup({
+                            pickupId,
+                            pickupColorIndex: pickup.shapeIndex,
+                            pickupColorHex: pickup.color,
+                            position: pickupPosition,
+                        });
+
+                        targetColorIndex = getNextTargetColorIndex(targetColorIndex);
+                        emitTargetColorChanged();
+                    } else {
+                        enabled = false;
+                        onWrongPickup({
+                            pickupId,
+                            pickupColorIndex: pickup.shapeIndex,
+                            pickupColorHex: pickup.color,
+                            targetColorIndex,
+                            targetColorHex: shapeColors[targetColorIndex],
+                            position: pickupPosition,
+                        });
+                        clearPickups();
+                        break;
+                    }
                 }
             }
 
             updateEffects(effects, effectGroup, dt);
         },
+        setEnabled(nextEnabled) {
+            enabled = Boolean(nextEnabled);
+            if (!enabled) {
+                clearPickups();
+            }
+        },
+        getVisiblePickups() {
+            visiblePickupCache.length = 0;
+            if (!enabled) {
+                return visiblePickupCache;
+            }
+
+            for (const pickup of pickups.values()) {
+                visiblePickupCache.push({
+                    x: pickup.mesh.position.x,
+                    z: pickup.mesh.position.z,
+                    colorHex: pickup.color,
+                    isTarget: pickup.shapeIndex === targetColorIndex,
+                });
+            }
+
+            return visiblePickupCache;
+        },
     };
+
+    function clearPickups() {
+        for (const [pickupId, pickup] of pickups) {
+            pickupGroup.remove(pickup.mesh);
+            disposePickup(pickup);
+            pickups.delete(pickupId);
+        }
+    }
+
+    function emitTargetColorChanged() {
+        onTargetColorChanged({
+            targetColorIndex,
+            targetColorHex: shapeColors[targetColorIndex],
+        });
+    }
 }
 
-function syncPickupsAroundCar(pickups, pickupGroup, consumedPickups, carCellX, carCellZ, activePickupIds) {
+function syncPickupsAroundCar(
+    pickups,
+    pickupGroup,
+    consumedPickups,
+    carCellX,
+    carCellZ,
+    activePickupIds,
+    worldBounds,
+    worldCellBounds
+) {
     activePickupIds.clear();
-    for (let x = carCellX - ACTIVE_CELL_RADIUS; x <= carCellX + ACTIVE_CELL_RADIUS; x += 1) {
-        for (let z = carCellZ - ACTIVE_CELL_RADIUS; z <= carCellZ + ACTIVE_CELL_RADIUS; z += 1) {
+    let startCellX = carCellX - ACTIVE_CELL_RADIUS;
+    let endCellX = carCellX + ACTIVE_CELL_RADIUS;
+    let startCellZ = carCellZ - ACTIVE_CELL_RADIUS;
+    let endCellZ = carCellZ + ACTIVE_CELL_RADIUS;
+
+    if (worldCellBounds) {
+        startCellX = Math.max(startCellX, worldCellBounds.minCellX);
+        endCellX = Math.min(endCellX, worldCellBounds.maxCellX);
+        startCellZ = Math.max(startCellZ, worldCellBounds.minCellZ);
+        endCellZ = Math.min(endCellZ, worldCellBounds.maxCellZ);
+    }
+
+    for (let x = startCellX; x <= endCellX; x += 1) {
+        for (let z = startCellZ; z <= endCellZ; z += 1) {
             const pickupId = `${x}:${z}`;
             if (consumedPickups.has(pickupId) || !cellShouldHavePickup(x, z)) {
                 continue;
@@ -103,9 +209,11 @@ function syncPickupsAroundCar(pickups, pickupGroup, consumedPickups, carCellX, c
 
             activePickupIds.add(pickupId);
             if (!pickups.has(pickupId)) {
-                const pickup = createPickupForCell(x, z);
-                pickups.set(pickupId, pickup);
-                pickupGroup.add(pickup.mesh);
+                const pickup = createPickupForCell(x, z, worldBounds);
+                if (pickup) {
+                    pickups.set(pickupId, pickup);
+                    pickupGroup.add(pickup.mesh);
+                }
             }
         }
     }
@@ -119,16 +227,37 @@ function syncPickupsAroundCar(pickups, pickupGroup, consumedPickups, carCellX, c
     }
 }
 
-function createPickupForCell(cellX, cellZ) {
+function createPickupForCell(cellX, cellZ, worldBounds) {
     const span = CELL_SIZE - CELL_MARGIN * 2;
     const x = cellX * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 11) * span;
     const z = cellZ * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 12) * span;
+    if (worldBounds && !isInsideWorldBounds(x, z, worldBounds)) {
+        return null;
+    }
     const y = PICKUP_GROUND_HEIGHT;
     const shapeIndex = Math.floor(
         randomFromCell(cellX, cellZ, 14) * shapeGeometries.length
     ) % shapeGeometries.length;
 
     return createPickup(x, y, z, shapeIndex, randomFromCell(cellX, cellZ, 22));
+}
+
+function getWorldCellBounds(worldBounds) {
+    return {
+        minCellX: Math.ceil((worldBounds.minX - CELL_SIZE + CELL_MARGIN) / CELL_SIZE),
+        maxCellX: Math.floor((worldBounds.maxX - CELL_MARGIN) / CELL_SIZE),
+        minCellZ: Math.ceil((worldBounds.minZ - CELL_SIZE + CELL_MARGIN) / CELL_SIZE),
+        maxCellZ: Math.floor((worldBounds.maxZ - CELL_MARGIN) / CELL_SIZE),
+    };
+}
+
+function isInsideWorldBounds(x, z, worldBounds) {
+    return (
+        x >= worldBounds.minX &&
+        x <= worldBounds.maxX &&
+        z >= worldBounds.minZ &&
+        z <= worldBounds.maxZ
+    );
 }
 
 function cellShouldHavePickup(cellX, cellZ) {
@@ -167,6 +296,7 @@ function createPickup(x, y, z, shapeIndex, rotYFactor = 0) {
         mesh,
         halo,
         color,
+        shapeIndex,
     };
 }
 
@@ -248,4 +378,21 @@ function updateEffects(effects, effectGroup, dt) {
             effects.splice(i, 1);
         }
     }
+}
+
+function normalizeColorIndex(index) {
+    const safe = Number.isFinite(index) ? Math.floor(index) : 0;
+    return ((safe % shapeColors.length) + shapeColors.length) % shapeColors.length;
+}
+
+function getNextTargetColorIndex(currentIndex) {
+    if (shapeColors.length <= 1) {
+        return currentIndex;
+    }
+
+    let nextIndex = currentIndex;
+    while (nextIndex === currentIndex) {
+        nextIndex = Math.floor(Math.random() * shapeColors.length);
+    }
+    return nextIndex;
 }

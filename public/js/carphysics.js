@@ -5,29 +5,31 @@ export const keys = { forward: false, backward: false, left: false, right: false
 const TUNING = {
     maxForwardSpeed: 95,
     maxReverseSpeed: 8,
-    engineAcceleration: 80,
-    launchAcceleration: 30,
+    engineAcceleration: 62,
+    launchAcceleration: 10,
     reverseAcceleration: 14,
     brakeDeceleration: 36,
     rollingResistance: 0.9,
     aerodynamicDrag: 0.01,
     wheelBase: 2.6,
-    lowSpeedSteer: 0.38,
-    highSpeedSteer: 0.09,
+    lowSpeedSteer: 0.3,
+    highSpeedSteer: 0.075,
     steerFadeSpeed: 45,
-    steerResponse: 3.8,
-    steerReturn: 6.5,
+    steerResponse: 2.8,
+    steerReturn: 5.2,
     lowSpeedGrip: 60,
     highSpeedGrip: 30,
-    minTurningSpeed: 0.2,
-    throttleRise: 9,
-    throttleFall: 7,
+    minTurningSpeed: 0.35,
+    throttleRise: 5.5,
+    throttleFall: 6.2,
     brakeRise: 16,
     brakeFall: 12,
-    holdRampTime: 2.0,
-    holdBoost: 1.6,
-    holdDecay: 2.4,
+    holdRampTime: 2.8,
+    holdBoost: 0.8,
+    holdDecay: 2.0,
 };
+const VEHICLE_COLLISION_RADIUS = 1.15;
+const OBSTACLE_COLLISION_ITERATIONS = 2;
 
 const vehicleState = {
     speed: 0,
@@ -44,13 +46,36 @@ const vehicleState = {
 const forward = new THREE.Vector2();
 const right = new THREE.Vector2();
 const movement = new THREE.Vector3();
+const collisionNormal = new THREE.Vector2();
+const physicsPosition = new THREE.Vector3();
+const previousPhysicsPosition = new THREE.Vector3();
+const interpolatedPosition = new THREE.Vector3();
+
+let physicsRotationY = 0;
+let previousPhysicsRotationY = 0;
+let isPhysicsInitialized = false;
 
 export function getVehicleState() {
     return vehicleState;
 }
 
-export function updatePlayerPhysics(player, deltaTime = 1 / 60) {
+export function initializePlayerPhysics(player) {
+    physicsPosition.copy(player.position);
+    previousPhysicsPosition.copy(player.position);
+    physicsRotationY = player.rotation.y;
+    previousPhysicsRotationY = player.rotation.y;
+    isPhysicsInitialized = true;
+}
+
+export function updatePlayerPhysics(player, deltaTime = 1 / 60, worldBounds = null, staticObstacles = null) {
+    if (!isPhysicsInitialized) {
+        initializePlayerPhysics(player);
+    }
+
     const dt = Math.min(deltaTime, 0.05);
+
+    previousPhysicsPosition.copy(physicsPosition);
+    previousPhysicsRotationY = physicsRotationY;
 
     const speedAbs = Math.abs(vehicleState.speed);
     const speedRatio = THREE.MathUtils.clamp(speedAbs / TUNING.steerFadeSpeed, 0, 1);
@@ -70,9 +95,9 @@ export function updatePlayerPhysics(player, deltaTime = 1 / 60) {
     }
 
     const yawRate = calculateYawRate(vehicleState.speed, vehicleState.steerAngle);
-    player.rotation.y += yawRate * dt;
+    physicsRotationY += yawRate * dt;
 
-    forward.set(-Math.sin(player.rotation.y), -Math.cos(player.rotation.y));
+    forward.set(-Math.sin(physicsRotationY), -Math.cos(physicsRotationY));
     right.set(-forward.y, forward.x);
 
     const lateralSpeed = vehicleState.velocity.dot(right);
@@ -85,9 +110,191 @@ export function updatePlayerPhysics(player, deltaTime = 1 / 60) {
     vehicleState.velocity.addScaledVector(right, stabilizedLateralSpeed);
 
     movement.set(vehicleState.velocity.x, 0, vehicleState.velocity.y).multiplyScalar(dt);
-    player.position.add(movement);
+    physicsPosition.add(movement);
+    constrainToWorld(physicsPosition, worldBounds);
+    constrainToObstacles(physicsPosition, staticObstacles);
+
+    player.position.copy(physicsPosition);
+    player.rotation.y = physicsRotationY;
 
     return vehicleState;
+}
+
+function constrainToObstacles(position, staticObstacles) {
+    if (!staticObstacles || staticObstacles.length === 0) {
+        return;
+    }
+
+    let collided = false;
+    collisionNormal.set(0, 0);
+
+    for (let iteration = 0; iteration < OBSTACLE_COLLISION_ITERATIONS; iteration += 1) {
+        let collidedThisPass = false;
+
+        for (let i = 0; i < staticObstacles.length; i += 1) {
+            const obstacle = staticObstacles[i];
+            if (obstacle.type === 'circle') {
+                const nx = position.x - obstacle.x;
+                const nz = position.z - obstacle.z;
+                const combinedRadius = obstacle.radius + VEHICLE_COLLISION_RADIUS;
+                const distanceSq = nx * nx + nz * nz;
+                if (distanceSq >= combinedRadius * combinedRadius) {
+                    continue;
+                }
+
+                let normalX = nx;
+                let normalZ = nz;
+                let distance = Math.sqrt(distanceSq);
+
+                if (distance < 0.0001) {
+                    normalX = -Math.sin(physicsRotationY);
+                    normalZ = -Math.cos(physicsRotationY);
+                    distance = 1;
+                } else {
+                    normalX /= distance;
+                    normalZ /= distance;
+                }
+
+                const penetration = combinedRadius - distance;
+                position.x += normalX * penetration;
+                position.z += normalZ * penetration;
+                collisionNormal.x += normalX;
+                collisionNormal.y += normalZ;
+                collided = true;
+                collidedThisPass = true;
+                continue;
+            }
+
+            if (obstacle.type !== 'aabb') {
+                continue;
+            }
+
+            const closestX = THREE.MathUtils.clamp(position.x, obstacle.minX, obstacle.maxX);
+            const closestZ = THREE.MathUtils.clamp(position.z, obstacle.minZ, obstacle.maxZ);
+            let dx = position.x - closestX;
+            let dz = position.z - closestZ;
+            let distanceSq = dx * dx + dz * dz;
+            if (distanceSq >= VEHICLE_COLLISION_RADIUS * VEHICLE_COLLISION_RADIUS) {
+                continue;
+            }
+
+            let normalX = dx;
+            let normalZ = dz;
+            let distance = Math.sqrt(distanceSq);
+
+            if (distance < 0.0001) {
+                const toLeft = Math.abs(position.x - obstacle.minX);
+                const toRight = Math.abs(obstacle.maxX - position.x);
+                const toBottom = Math.abs(position.z - obstacle.minZ);
+                const toTop = Math.abs(obstacle.maxZ - position.z);
+                const minDistance = Math.min(toLeft, toRight, toBottom, toTop);
+
+                if (minDistance === toLeft) {
+                    normalX = -1;
+                    normalZ = 0;
+                } else if (minDistance === toRight) {
+                    normalX = 1;
+                    normalZ = 0;
+                } else if (minDistance === toBottom) {
+                    normalX = 0;
+                    normalZ = -1;
+                } else {
+                    normalX = 0;
+                    normalZ = 1;
+                }
+                distance = 0;
+            } else {
+                normalX /= distance;
+                normalZ /= distance;
+            }
+
+            const penetration = VEHICLE_COLLISION_RADIUS - distance;
+            position.x += normalX * penetration;
+            position.z += normalZ * penetration;
+            collisionNormal.x += normalX;
+            collisionNormal.y += normalZ;
+            collided = true;
+            collidedThisPass = true;
+        }
+
+        if (!collidedThisPass) {
+            break;
+        }
+    }
+
+    if (!collided) {
+        return;
+    }
+
+    if (collisionNormal.lengthSq() > 0.0001) {
+        collisionNormal.normalize();
+        const inwardSpeed = vehicleState.velocity.dot(collisionNormal);
+        if (inwardSpeed < 0) {
+            vehicleState.velocity.addScaledVector(collisionNormal, -inwardSpeed);
+        }
+    }
+
+    vehicleState.velocity.multiplyScalar(0.82);
+    vehicleState.speed = THREE.MathUtils.clamp(
+        vehicleState.velocity.dot(forward),
+        -TUNING.maxReverseSpeed,
+        TUNING.maxForwardSpeed
+    );
+    if (Math.abs(vehicleState.speed) < 0.1) {
+        vehicleState.speed = 0;
+    }
+}
+
+export function applyInterpolatedPlayerTransform(player, alpha) {
+    if (!isPhysicsInitialized) {
+        return;
+    }
+
+    const blend = THREE.MathUtils.clamp(alpha, 0, 1);
+    interpolatedPosition.lerpVectors(previousPhysicsPosition, physicsPosition, blend);
+    player.position.copy(interpolatedPosition);
+    player.rotation.y = lerpAngle(previousPhysicsRotationY, physicsRotationY, blend);
+}
+
+function constrainToWorld(position, worldBounds) {
+    if (!worldBounds) {
+        return;
+    }
+
+    let hitX = false;
+    let hitZ = false;
+
+    if (position.x < worldBounds.minX) {
+        position.x = worldBounds.minX;
+        hitX = true;
+    } else if (position.x > worldBounds.maxX) {
+        position.x = worldBounds.maxX;
+        hitX = true;
+    }
+
+    if (position.z < worldBounds.minZ) {
+        position.z = worldBounds.minZ;
+        hitZ = true;
+    } else if (position.z > worldBounds.maxZ) {
+        position.z = worldBounds.maxZ;
+        hitZ = true;
+    }
+
+    if (!hitX && !hitZ) {
+        return;
+    }
+
+    if (hitX) {
+        vehicleState.velocity.x = 0;
+    }
+    if (hitZ) {
+        vehicleState.velocity.y = 0;
+    }
+
+    vehicleState.speed *= 0.35;
+    if (Math.abs(vehicleState.speed) < 0.2) {
+        vehicleState.speed = 0;
+    }
 }
 
 function updateDriverInputs(dt) {
@@ -139,13 +346,19 @@ function calculateLongitudinalAcceleration() {
 
     if (vehicleState.throttle > 0) {
         const speedNorm = THREE.MathUtils.clamp(vehicleState.speed / TUNING.maxForwardSpeed, 0, 1);
-        const powerFade = 1 - speedNorm;
-        const launchBoost = Math.exp(-speedAbs / 6) * TUNING.launchAcceleration;
-        const boostedEngine = TUNING.engineAcceleration * (0.32 + powerFade * 0.68) * vehicleState.powerBoost;
-        acceleration += (boostedEngine + launchBoost) * vehicleState.throttle;
+        const speedCurve = 1 - Math.pow(speedNorm, 1.15);
+        const throttleCurve = Math.pow(THREE.MathUtils.clamp(vehicleState.throttle, 0, 1), 1.35);
+        const standingStartLimiter = THREE.MathUtils.lerp(
+            0.5,
+            1,
+            THREE.MathUtils.clamp(speedAbs / 10, 0, 1)
+        );
+        const launchBoost = Math.exp(-speedAbs / 5.2) * TUNING.launchAcceleration;
+        const boostedEngine = TUNING.engineAcceleration * (0.22 + speedCurve * 0.78) * vehicleState.powerBoost;
+        acceleration += (boostedEngine + launchBoost) * throttleCurve * standingStartLimiter;
     } else if (vehicleState.throttle < 0) {
         const reverseFade = 1 - THREE.MathUtils.clamp(speedAbs / TUNING.maxReverseSpeed, 0, 1);
-        acceleration -= TUNING.reverseAcceleration * (0.4 + reverseFade * 0.6);
+        acceleration += TUNING.reverseAcceleration * (0.4 + reverseFade * 0.6) * vehicleState.throttle;
     }
 
     if (vehicleState.brake > 0 && speedAbs > 0) {
@@ -166,7 +379,7 @@ function calculateYawRate(speed, steerAngle) {
     }
 
     const baseYawRate = (speed / TUNING.wheelBase) * Math.tan(steerAngle);
-    const lowSpeedAssist = THREE.MathUtils.clamp(speedAbs / 7, 0.15, 1);
+    const lowSpeedAssist = THREE.MathUtils.clamp(speedAbs / 9.5, 0.08, 1);
     return baseYawRate * lowSpeedAssist;
 }
 
@@ -175,4 +388,9 @@ function moveToward(current, target, maxDelta) {
         return Math.min(current + maxDelta, target);
     }
     return Math.max(current - maxDelta, target);
+}
+
+function lerpAngle(a, b, t) {
+    const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a));
+    return a + delta * t;
 }

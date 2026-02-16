@@ -6,9 +6,12 @@ camera.position.set(0, 3, 8);
 let cameraViewMode = 0;
 let cinematicMode = false;
 let cinematicAngle = 0;
+let smoothedHeading = 0;
+let hasCameraState = false;
 
 const targetPosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
+const smoothedLookTarget = new THREE.Vector3();
 
 document.addEventListener('keydown', (event) => {
     if (event.key >= '1' && event.key <= '5') {
@@ -24,8 +27,20 @@ document.addEventListener('keydown', (event) => {
 function updateCamera(car, speed, deltaTime = 1 / 60) {
     const dt = Math.min(deltaTime, 0.05);
     const speedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 20, 0, 1);
-    const followResponsiveness = THREE.MathUtils.lerp(5, 9, speedRatio);
+    const followResponsiveness = THREE.MathUtils.lerp(4, 7.5, speedRatio);
+    const lookResponsiveness = THREE.MathUtils.lerp(5, 8.5, speedRatio);
+    const headingResponsiveness = THREE.MathUtils.lerp(4.5, 8, speedRatio);
     const followLerp = 1 - Math.exp(-followResponsiveness * dt);
+    const lookLerp = 1 - Math.exp(-lookResponsiveness * dt);
+    const headingLerp = 1 - Math.exp(-headingResponsiveness * dt);
+
+    if (!hasCameraState) {
+        smoothedHeading = car.rotation.y;
+        smoothedLookTarget.set(car.position.x, car.position.y + 0.5, car.position.z);
+        hasCameraState = true;
+    }
+
+    smoothedHeading = lerpAngle(smoothedHeading, car.rotation.y, headingLerp);
 
     if (cinematicMode) {
         cinematicAngle += dt * 0.8;
@@ -38,9 +53,10 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
             car.position.z + Math.sin(cinematicAngle) * cinematicRadius
         );
 
-        camera.position.lerp(targetPosition, 1 - Math.exp(-4.5 * dt));
+        camera.position.lerp(targetPosition, 1 - Math.exp(-3.8 * dt));
         lookTarget.set(car.position.x, car.position.y + 1, car.position.z);
-        camera.lookAt(lookTarget);
+        smoothedLookTarget.lerp(lookTarget, lookLerp);
+        camera.lookAt(smoothedLookTarget);
         return;
     }
 
@@ -48,9 +64,9 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
         case 1:
             targetPosition.set(car.position.x, car.position.y + 2, car.position.z);
             lookTarget.set(
-                car.position.x - Math.sin(car.rotation.y) * 10,
+                car.position.x - Math.sin(smoothedHeading) * 10,
                 car.position.y + 2,
-                car.position.z - Math.cos(car.rotation.y) * 10
+                car.position.z - Math.cos(smoothedHeading) * 10
             );
             break;
         case 2:
@@ -59,40 +75,46 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
             break;
         case 3:
             targetPosition.set(
-                car.position.x + Math.sin(car.rotation.y) * 4,
+                car.position.x + Math.sin(smoothedHeading) * 4,
                 car.position.y + 1,
-                car.position.z + Math.cos(car.rotation.y) * 4
+                car.position.z + Math.cos(smoothedHeading) * 4
             );
             lookTarget.set(car.position.x, car.position.y, car.position.z);
             break;
         case 4:
             targetPosition.set(
-                car.position.x + Math.cos(car.rotation.y) * 5,
+                car.position.x + Math.cos(smoothedHeading) * 5,
                 car.position.y + 2,
-                car.position.z - Math.sin(car.rotation.y) * 5
+                car.position.z - Math.sin(smoothedHeading) * 5
             );
             lookTarget.set(car.position.x, car.position.y + 1, car.position.z);
             break;
         case 5:
             targetPosition.set(
-                car.position.x + Math.sin(car.rotation.y) * 10,
+                car.position.x + Math.sin(smoothedHeading) * 10,
                 car.position.y + 8,
-                car.position.z + Math.cos(car.rotation.y) * 10
+                car.position.z + Math.cos(smoothedHeading) * 10
             );
             lookTarget.set(car.position.x, car.position.y, car.position.z);
             break;
         default:
             targetPosition.set(
-                car.position.x + Math.sin(car.rotation.y) * 6,
+                car.position.x + Math.sin(smoothedHeading) * 6,
                 car.position.y + 3,
-                car.position.z + Math.cos(car.rotation.y) * 6
+                car.position.z + Math.cos(smoothedHeading) * 6
             );
             lookTarget.set(car.position.x, car.position.y + 0.5, car.position.z);
             break;
     }
 
     camera.position.lerp(targetPosition, followLerp);
-    camera.lookAt(lookTarget);
+    smoothedLookTarget.lerp(lookTarget, lookLerp);
+    camera.lookAt(smoothedLookTarget);
 }
 
 export { camera, updateCamera };
+
+function lerpAngle(a, b, t) {
+    const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a));
+    return a + delta * t;
+}

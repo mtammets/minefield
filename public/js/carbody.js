@@ -29,30 +29,63 @@ function createMaterial({ color, emissive = 0x000000, emissiveIntensity = 0, met
 function addLightsToCar(car, lightConfig = {}) {
     const {
         headlightColor = HEADLIGHT_COLOR,
-        headlightIntensity = 3,
-        headlightDistance = 50,
-        headlightAngle = Math.PI / 6,
-        headlightPenumbra = 0.4,
+        headlightIntensity = 54,
+        headlightDistance = 240,
+        headlightAngle = THREE.MathUtils.degToRad(15),
+        headlightPenumbra = 0.36,
+        headlightDecay = 1.5,
+        nearFillIntensity = 9,
+        nearFillDistance = 84,
+        nearFillAngle = THREE.MathUtils.degToRad(28),
+        nearFillPenumbra = 0.56,
+        facadeFillIntensity = 10,
+        facadeFillDistance = 122,
+        facadeFillAngle = THREE.MathUtils.degToRad(24),
+        facadeFillPenumbra = 0.66,
+        facadeFillForwardAim = 68,
+        facadeFillLateralAim = 10.5,
+        facadeFillVerticalAim = 3.4,
         headlightPositions = [
-            { position: [-0.3, 0.5, -1.85], target: [-0.7, 0.2, -10] },
-            { position: [0.3, 0.5, -1.85], target: [0.7, 0.2, -10] },
+            { position: [-0.31, 0.53, -1.87], target: [-0.95, 0.22, -95] },
+            { position: [0.31, 0.53, -1.87], target: [0.95, 0.22, -95] },
         ],
         taillightColor = TAILLIGHT_COLOR,
-        taillightIntensity = 1,
-        taillightDistance = 10,
+        taillightIntensity = 1.8,
+        taillightDistance = 16,
+        taillightDecay = 2.1,
         taillightPositions = [
             { position: [-0.3, 0.4, 2] },
             { position: [0.3, 0.4, 2] },
         ],
     } = lightConfig;
 
-    const createLight = (LightType, color, intensity, distance, position, target = null, angle = null, penumbra = null) => {
-        const light = new LightType(color, intensity, distance, angle, penumbra);
+    const createSpot = ({
+        color,
+        intensity,
+        distance,
+        angle,
+        penumbra,
+        decay,
+        position,
+        target,
+    }) => {
+        const light = new THREE.SpotLight(color, intensity, distance, angle, penumbra, decay);
         light.position.set(...position);
-        if (target) {
-            light.target.position.set(...target);
-            car.add(light.target);
-        }
+        light.target.position.set(...target);
+        light.castShadow = false;
+        light.shadow.mapSize.set(512, 512);
+        light.shadow.camera.near = 0.2;
+        light.shadow.camera.far = Math.max(distance, 30);
+        light.shadow.focus = 0.5;
+        car.add(light.target);
+        car.add(light);
+        return light;
+    };
+
+    const createPoint = ({ color, intensity, distance, decay, position }) => {
+        const light = new THREE.PointLight(color, intensity, distance, decay);
+        light.position.set(...position);
+        light.castShadow = false;
         car.add(light);
         return light;
     };
@@ -70,21 +103,75 @@ function addLightsToCar(car, lightConfig = {}) {
 
     // Esituled
     headlightPositions.forEach(({ position, target }) => {
-        createLight(THREE.SpotLight, headlightColor, headlightIntensity, headlightDistance, position, target, headlightAngle, headlightPenumbra);
-        createLightMesh(THREE.CylinderGeometry.bind(null, 0.1, 0.1, 0.2, 16), headlightColor, headlightColor, 2, [position[0], position[1], position[2] - 0.1], [Math.PI / 2, 0, 0]);
+        const side = Math.sign(position[0]) || 1;
+
+        createSpot({
+            color: headlightColor,
+            intensity: headlightIntensity,
+            distance: headlightDistance,
+            angle: headlightAngle,
+            penumbra: headlightPenumbra,
+            decay: headlightDecay,
+            position,
+            target,
+        });
+        createSpot({
+            color: headlightColor,
+            intensity: nearFillIntensity,
+            distance: nearFillDistance,
+            angle: nearFillAngle,
+            penumbra: nearFillPenumbra,
+            decay: headlightDecay,
+            position: [position[0], position[1] - 0.02, position[2]],
+            target: [target[0] * 0.7, 0.14, target[2] * 0.48],
+        });
+        createSpot({
+            color: headlightColor,
+            intensity: facadeFillIntensity,
+            distance: facadeFillDistance,
+            angle: facadeFillAngle,
+            penumbra: facadeFillPenumbra,
+            decay: headlightDecay,
+            position: [position[0], position[1] + 0.02, position[2] + 0.06],
+            target: [
+                side * facadeFillLateralAim,
+                facadeFillVerticalAim,
+                -facadeFillForwardAim,
+            ],
+        });
+        createLightMesh(
+            THREE.CylinderGeometry.bind(null, 0.1, 0.1, 0.2, 16),
+            headlightColor,
+            headlightColor,
+            3.2,
+            [position[0], position[1], position[2] - 0.1],
+            [Math.PI / 2, 0, 0]
+        );
     });
 
     // Tagatuled
     taillightPositions.forEach(({ position }) => {
-        createLight(THREE.PointLight, taillightColor, taillightIntensity, taillightDistance, position);
-        createLightMesh(THREE.BoxGeometry.bind(null, 0.2, 0.1, 0.1), taillightColor, taillightColor, 1, position);
+        createPoint({
+            color: taillightColor,
+            intensity: taillightIntensity,
+            distance: taillightDistance,
+            decay: taillightDecay,
+            position,
+        });
+        createLightMesh(
+            THREE.BoxGeometry.bind(null, 0.2, 0.1, 0.1),
+            taillightColor,
+            taillightColor,
+            1.3,
+            position
+        );
     });
 }
 
 // Luksusliku kere lisamine
 function addLuxuryBody(car, bodyConfig = {}) {
     const {
-        bodyColor = 0x101010,
+        bodyColor = 0x2d67a6,
         bodyDimensions = DEFAULT_BODY_DIMENSIONS,
         wheelPositions = DEFAULT_WHEEL_POSITIONS,
     } = bodyConfig;
@@ -94,8 +181,10 @@ function addLuxuryBody(car, bodyConfig = {}) {
         new THREE.BoxGeometry(bodyDimensions.width, bodyDimensions.height, bodyDimensions.depth),
         createMaterial({
             color: bodyColor,
+            emissive: 0x10233d,
+            emissiveIntensity: 0.3,
             metalness: 1,
-            roughness: 0.1,
+            roughness: 0.18,
             clearcoat: 1,
             clearcoatRoughness: 0.05,
         })
