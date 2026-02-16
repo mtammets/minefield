@@ -49,9 +49,10 @@ const wheelMirrorConfig = {
 const WHEEL_RADIUS = 0.5;
 const TIRE_WIDTH = 0.3;
 const STEER_RESPONSE = 14;
-const VISUAL_STEER_GAIN = 1.35;
-const VISUAL_MIN_STEER = THREE.MathUtils.degToRad(8);
 const VISUAL_MAX_STEER = THREE.MathUtils.degToRad(26);
+const REAR_DRIVE_VISUAL_SLIP = 5.8;
+const REAR_DRIVE_VISUAL_SLIP_FADE_SPEED = 22;
+const REAR_DRIVE_LAUNCH_SPIN = 10.5;
 
 function createTire() {
     return new THREE.Mesh(
@@ -158,19 +159,67 @@ function createSteerableWheel(x, z, car, mirror = false) {
     return { steeringPivot, wheel };
 }
 
-function initializeWheels(car) {
+function initializeWheels(car, options = {}) {
+    const {
+        addWheelWellLights = true,
+    } = options;
     const frontLeft = createSteerableWheel(-1.2, -1.8, car, wheelMirrorConfig.frontLeft);
     const frontRight = createSteerableWheel(1.2, -1.8, car, wheelMirrorConfig.frontRight);
     const backLeft = createWheel(-1.2, 1.8, car, wheelMirrorConfig.backLeft);
     const backRight = createWheel(1.2, 1.8, car, wheelMirrorConfig.backRight);
 
-    createWheelWellLight(-1.2, -1.8, car);
-    createWheelWellLight(1.2, -1.8, car);
-    createWheelWellLight(-1.2, 1.8, car);
-    createWheelWellLight(1.2, 1.8, car);
+    if (addWheelWellLights) {
+        createWheelWellLight(-1.2, -1.8, car);
+        createWheelWellLight(1.2, -1.8, car);
+        createWheelWellLight(-1.2, 1.8, car);
+        createWheelWellLight(1.2, 1.8, car);
+    }
 
-    const wheelMeshes = [frontLeft.wheel, frontRight.wheel, backLeft, backRight];
+    const frontWheelMeshes = [frontLeft.wheel, frontRight.wheel];
+    const rearWheelMeshes = [backLeft, backRight];
     const steerPivots = [frontLeft.steeringPivot, frontRight.steeringPivot];
+    const detachableWheels = [
+        {
+            id: 'wheel_front_left',
+            type: 'wheel',
+            side: 'left',
+            zone: 'front',
+            source: frontLeft.wheel,
+            groundOffset: WHEEL_RADIUS,
+            baseLife: 5.8,
+            mass: 1.05,
+        },
+        {
+            id: 'wheel_front_right',
+            type: 'wheel',
+            side: 'right',
+            zone: 'front',
+            source: frontRight.wheel,
+            groundOffset: WHEEL_RADIUS,
+            baseLife: 5.8,
+            mass: 1.05,
+        },
+        {
+            id: 'wheel_rear_left',
+            type: 'wheel',
+            side: 'left',
+            zone: 'rear',
+            source: backLeft,
+            groundOffset: WHEEL_RADIUS,
+            baseLife: 5.8,
+            mass: 1.1,
+        },
+        {
+            id: 'wheel_rear_right',
+            type: 'wheel',
+            side: 'right',
+            zone: 'rear',
+            source: backRight,
+            groundOffset: WHEEL_RADIUS,
+            baseLife: 5.8,
+            mass: 1.1,
+        },
+    ];
 
     return {
         update(vehicleState, deltaTime = 1 / 60) {
@@ -185,25 +234,32 @@ function initializeWheels(car) {
             const longitudinalSpeed = vehicleState.velocity.length() < 0.01
                 ? 0
                 : vehicleState.speed;
-            const rollAmount = (longitudinalSpeed / WHEEL_RADIUS) * dt;
-            wheelMeshes.forEach((wheel) => {
-                wheel.rotation.x -= rollAmount;
+            const baseRollAmount = (longitudinalSpeed / WHEEL_RADIUS) * dt;
+            const speedAbs = Math.abs(vehicleState.speed || 0);
+            const throttle = vehicleState.throttle || 0;
+            const throttleAbs = Math.abs(throttle);
+            const launchSlip = THREE.MathUtils.clamp(vehicleState.launchSlip || 0, 0, 1);
+            const slipFade = 1 - THREE.MathUtils.clamp(speedAbs / REAR_DRIVE_VISUAL_SLIP_FADE_SPEED, 0, 1);
+            const wheelSpinDirection = Math.sign(throttle) || Math.sign(longitudinalSpeed) || 1;
+            const rearDriveSlipRoll = throttleAbs * slipFade * REAR_DRIVE_VISUAL_SLIP * dt * wheelSpinDirection;
+            const launchSlipRoll = launchSlip * REAR_DRIVE_LAUNCH_SPIN * dt * wheelSpinDirection;
+
+            frontWheelMeshes.forEach((wheel) => {
+                wheel.rotation.x -= baseRollAmount;
             });
+            rearWheelMeshes.forEach((wheel) => {
+                wheel.rotation.x -= (baseRollAmount + rearDriveSlipRoll + launchSlipRoll);
+            });
+        },
+        getDetachableWheels() {
+            return detachableWheels;
         },
     };
 }
 
 function getVisualSteerAngle(vehicleState) {
-    const input = vehicleState.steerInput || 0;
-    if (Math.abs(input) < 0.001) {
-        return 0;
-    }
-
     const physicalSteer = vehicleState.steerAngle || 0;
-    const boostedSteer = physicalSteer * VISUAL_STEER_GAIN;
-    const minVisibleSteer = input * VISUAL_MIN_STEER;
-    const targetSteer = Math.sign(input) * Math.max(Math.abs(boostedSteer), Math.abs(minVisibleSteer));
-    return THREE.MathUtils.clamp(targetSteer, -VISUAL_MAX_STEER, VISUAL_MAX_STEER);
+    return THREE.MathUtils.clamp(physicalSteer, -VISUAL_MAX_STEER, VISUAL_MAX_STEER);
 }
 
 export { initializeWheels };

@@ -48,7 +48,58 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         onCorrectPickup = () => {},
         onWrongPickup = () => {},
         initialTargetColorIndex = Math.floor(Math.random() * shapeColors.length),
+        idPrefix = 'pickup',
+        seedOffset = 0,
+        activeCellRadius = ACTIVE_CELL_RADIUS,
+        enableEffects = true,
+        singleType = false,
+        singleShapeIndex = 0,
+        maxActivePickups = 7,
+        pickupLifetimeSec = 8,
+        pickupLifetimeJitterSec = 3,
+        pickupRespawnDelaySec = 1.8,
+        pickupRespawnJitterSec = 1.8,
+        pickupBlinkWindowSec = 2.2,
     } = options;
+
+    const resolvedIdPrefix = typeof idPrefix === 'string' && idPrefix ? idPrefix : 'pickup';
+    const resolvedSeedOffset = Number.isFinite(seedOffset) ? Math.floor(seedOffset) : 0;
+    const resolvedActiveCellRadius = Number.isFinite(activeCellRadius)
+        ? THREE.MathUtils.clamp(Math.floor(activeCellRadius), 1, 12)
+        : ACTIVE_CELL_RADIUS;
+    const resolvedEnableEffects = Boolean(enableEffects);
+    const resolvedSingleType = Boolean(singleType);
+    const resolvedSingleShapeIndex = normalizeColorIndex(singleShapeIndex);
+    const resolvedMaxActivePickups = THREE.MathUtils.clamp(
+        Math.floor(normalizePositiveNumber(maxActivePickups, 7)),
+        1,
+        64
+    );
+    const resolvedPickupLifetimeSec = THREE.MathUtils.clamp(
+        normalizePositiveNumber(pickupLifetimeSec, 8),
+        1,
+        120
+    );
+    const resolvedPickupLifetimeJitterSec = THREE.MathUtils.clamp(
+        normalizePositiveNumber(pickupLifetimeJitterSec, 3),
+        0,
+        60
+    );
+    const resolvedPickupRespawnDelaySec = THREE.MathUtils.clamp(
+        normalizePositiveNumber(pickupRespawnDelaySec, 1.8),
+        0,
+        30
+    );
+    const resolvedPickupRespawnJitterSec = THREE.MathUtils.clamp(
+        normalizePositiveNumber(pickupRespawnJitterSec, 1.8),
+        0,
+        30
+    );
+    const resolvedPickupBlinkWindowSec = THREE.MathUtils.clamp(
+        normalizePositiveNumber(pickupBlinkWindowSec, 2.2),
+        0.3,
+        10
+    );
 
     const pickupGroup = new THREE.Group();
     pickupGroup.name = 'magicPickups';
@@ -59,87 +110,129 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     scene.add(effectGroup);
 
     const pickups = new Map();
-    const consumedPickups = new Set();
+    const pickupCooldownUntil = new Map();
     const effects = [];
     const activePickupIds = new Set();
     const visiblePickupCache = [];
     const worldCellBounds = worldBounds ? getWorldCellBounds(worldBounds) : null;
-    let targetColorIndex = normalizeColorIndex(initialTargetColorIndex);
+
+    let targetColorIndex = resolvedSingleType
+        ? resolvedSingleShapeIndex
+        : normalizeColorIndex(initialTargetColorIndex);
     let enabled = true;
-    let lastSyncedCellX = Number.NaN;
-    let lastSyncedCellZ = Number.NaN;
+    let elapsedTime = 0;
+    let lastSyncSignature = '';
 
     emitTargetColorChanged();
 
     return {
         update(carPosition, deltaTime = 1 / 60) {
+            return this.updateForCollectors([
+                {
+                    id: 'player',
+                    position: carPosition,
+                },
+            ], deltaTime);
+        },
+        updateForCollectors(collectorEntries, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
-            if (!enabled) {
-                updateEffects(effects, effectGroup, dt);
+            elapsedTime += dt;
+            const collectors = normalizeCollectors(collectorEntries);
+
+            if (!enabled || collectors.length === 0) {
+                if (resolvedEnableEffects) {
+                    updateEffects(effects, effectGroup, dt);
+                }
                 return;
             }
 
-            const carCellX = Math.floor(carPosition.x / CELL_SIZE);
-            const carCellZ = Math.floor(carPosition.z / CELL_SIZE);
-            if (carCellX !== lastSyncedCellX || carCellZ !== lastSyncedCellZ) {
-                syncPickupsAroundCar(
+            const syncTick = Math.floor(elapsedTime * 2);
+            const syncSignature = `${buildCollectorCellSignature(collectors)}|${syncTick}`;
+            if (syncSignature !== lastSyncSignature) {
+                syncPickupsAroundCollectors({
                     pickups,
                     pickupGroup,
-                    consumedPickups,
-                    carCellX,
-                    carCellZ,
+                    pickupCooldownUntil,
+                    collectors,
                     activePickupIds,
                     worldBounds,
-                    worldCellBounds
-                );
-                lastSyncedCellX = carCellX;
-                lastSyncedCellZ = carCellZ;
+                    worldCellBounds,
+                    idPrefix: resolvedIdPrefix,
+                    seedOffset: resolvedSeedOffset,
+                    activeCellRadius: resolvedActiveCellRadius,
+                    singleType: resolvedSingleType,
+                    singleShapeIndex: resolvedSingleShapeIndex,
+                    elapsedTime,
+                    maxActivePickups: resolvedMaxActivePickups,
+                });
+                lastSyncSignature = syncSignature;
             }
 
             for (const [pickupId, pickup] of pickups) {
-                const distanceSq = pickup.mesh.position.distanceToSquared(carPosition);
-                if (distanceSq <= PICKUP_RADIUS_SQ) {
-                    pickupGroup.remove(pickup.mesh);
-                    const pickupPosition = pickup.mesh.position.clone();
-                    const isCorrectPickup = pickup.shapeIndex === targetColorIndex;
-                    const effectColor = isCorrectPickup ? pickup.color : 0xff4b4b;
-                    createCollectEffect(effectGroup, effects, pickupPosition, effectColor);
-                    disposePickup(pickup);
-                    pickups.delete(pickupId);
-                    consumedPickups.add(pickupId);
-
-                    if (isCorrectPickup) {
-                        onCorrectPickup({
-                            pickupId,
-                            pickupColorIndex: pickup.shapeIndex,
-                            pickupColorHex: pickup.color,
-                            position: pickupPosition,
-                        });
-
-                        targetColorIndex = getNextTargetColorIndex(targetColorIndex);
-                        emitTargetColorChanged();
-                    } else {
-                        enabled = false;
-                        onWrongPickup({
-                            pickupId,
-                            pickupColorIndex: pickup.shapeIndex,
-                            pickupColorHex: pickup.color,
-                            targetColorIndex,
-                            targetColorHex: shapeColors[targetColorIndex],
-                            position: pickupPosition,
-                        });
-                        clearPickups();
-                        break;
-                    }
+                const timeLeft = pickup.expireAt - elapsedTime;
+                if (timeLeft <= 0) {
+                    removePickup(pickupId, pickup, true);
+                    continue;
                 }
+
+                updatePickupVisual(pickup, timeLeft, elapsedTime, resolvedPickupBlinkWindowSec);
             }
 
-            updateEffects(effects, effectGroup, dt);
+            for (const [pickupId, pickup] of pickups) {
+                const collector = findCollectorInRange(pickup.mesh.position, collectors);
+                if (!collector) {
+                    continue;
+                }
+
+                const pickupPosition = pickup.mesh.position.clone();
+                const isCorrectPickup = resolvedSingleType || pickup.shapeIndex === targetColorIndex;
+                const effectColor = isCorrectPickup ? pickup.color : 0xff4b4b;
+
+                if (resolvedEnableEffects) {
+                    createCollectEffect(effectGroup, effects, pickupPosition, effectColor);
+                }
+
+                removePickup(pickupId, pickup, true);
+
+                if (isCorrectPickup) {
+                    onCorrectPickup({
+                        pickupId,
+                        pickupColorIndex: pickup.shapeIndex,
+                        pickupColorHex: pickup.color,
+                        position: pickupPosition,
+                        collectorId: collector.id,
+                    });
+
+                    if (!resolvedSingleType) {
+                        targetColorIndex = getNextTargetColorIndex(targetColorIndex);
+                        emitTargetColorChanged();
+                    }
+                    continue;
+                }
+
+                enabled = false;
+                onWrongPickup({
+                    pickupId,
+                    pickupColorIndex: pickup.shapeIndex,
+                    pickupColorHex: pickup.color,
+                    targetColorIndex,
+                    targetColorHex: shapeColors[targetColorIndex],
+                    position: pickupPosition,
+                    collectorId: collector.id,
+                });
+                clearPickups(false);
+                break;
+            }
+
+            if (resolvedEnableEffects) {
+                updateEffects(effects, effectGroup, dt);
+            }
         },
         setEnabled(nextEnabled) {
             enabled = Boolean(nextEnabled);
+            lastSyncSignature = '';
             if (!enabled) {
-                clearPickups();
+                clearPickups(false);
             }
         },
         getVisiblePickups() {
@@ -153,7 +246,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                     x: pickup.mesh.position.x,
                     z: pickup.mesh.position.z,
                     colorHex: pickup.color,
-                    isTarget: pickup.shapeIndex === targetColorIndex,
+                    isTarget: !resolvedSingleType && pickup.shapeIndex === targetColorIndex,
                 });
             }
 
@@ -161,11 +254,25 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         },
     };
 
-    function clearPickups() {
+    function clearPickups(applyCooldown) {
         for (const [pickupId, pickup] of pickups) {
-            pickupGroup.remove(pickup.mesh);
-            disposePickup(pickup);
-            pickups.delete(pickupId);
+            removePickup(pickupId, pickup, applyCooldown);
+        }
+    }
+
+    function removePickup(pickupId, pickup, applyCooldown) {
+        pickupGroup.remove(pickup.mesh);
+        disposePickup(pickup);
+        pickups.delete(pickupId);
+        if (applyCooldown) {
+            const cooldown = resolvedPickupRespawnDelaySec
+                + randomFromCell(
+                    pickup.cellX,
+                    pickup.cellZ,
+                    131,
+                    resolvedSeedOffset + Math.floor(elapsedTime * 100)
+                ) * resolvedPickupRespawnJitterSec;
+            pickupCooldownUntil.set(pickupId, elapsedTime + cooldown);
         }
     }
 
@@ -175,71 +282,193 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             targetColorHex: shapeColors[targetColorIndex],
         });
     }
-}
 
-function syncPickupsAroundCar(
-    pickups,
-    pickupGroup,
-    consumedPickups,
-    carCellX,
-    carCellZ,
-    activePickupIds,
-    worldBounds,
-    worldCellBounds
-) {
-    activePickupIds.clear();
-    let startCellX = carCellX - ACTIVE_CELL_RADIUS;
-    let endCellX = carCellX + ACTIVE_CELL_RADIUS;
-    let startCellZ = carCellZ - ACTIVE_CELL_RADIUS;
-    let endCellZ = carCellZ + ACTIVE_CELL_RADIUS;
-
-    if (worldCellBounds) {
-        startCellX = Math.max(startCellX, worldCellBounds.minCellX);
-        endCellX = Math.min(endCellX, worldCellBounds.maxCellX);
-        startCellZ = Math.max(startCellZ, worldCellBounds.minCellZ);
-        endCellZ = Math.min(endCellZ, worldCellBounds.maxCellZ);
+    function makePickupExpireAt(cellX, cellZ) {
+        const lifetime = resolvedPickupLifetimeSec
+            + randomFromCell(
+                cellX,
+                cellZ,
+                171,
+                resolvedSeedOffset + Math.floor(elapsedTime * 60)
+            ) * resolvedPickupLifetimeJitterSec;
+        return elapsedTime + lifetime;
     }
 
-    for (let x = startCellX; x <= endCellX; x += 1) {
-        for (let z = startCellZ; z <= endCellZ; z += 1) {
-            const pickupId = `${x}:${z}`;
-            if (consumedPickups.has(pickupId) || !cellShouldHavePickup(x, z)) {
-                continue;
+    function syncPickupsAroundCollectors(context) {
+        const {
+            pickups,
+            pickupGroup,
+            pickupCooldownUntil,
+            collectors,
+            activePickupIds,
+            worldBounds,
+            worldCellBounds,
+            idPrefix,
+            seedOffset,
+            activeCellRadius,
+            singleType,
+            singleShapeIndex,
+            elapsedTime,
+            maxActivePickups,
+        } = context;
+
+        activePickupIds.clear();
+
+        for (let i = 0; i < collectors.length; i += 1) {
+            const collector = collectors[i];
+            const collectorCellX = Math.floor(collector.position.x / CELL_SIZE);
+            const collectorCellZ = Math.floor(collector.position.z / CELL_SIZE);
+
+            let startCellX = collectorCellX - activeCellRadius;
+            let endCellX = collectorCellX + activeCellRadius;
+            let startCellZ = collectorCellZ - activeCellRadius;
+            let endCellZ = collectorCellZ + activeCellRadius;
+
+            if (worldCellBounds) {
+                startCellX = Math.max(startCellX, worldCellBounds.minCellX);
+                endCellX = Math.min(endCellX, worldCellBounds.maxCellX);
+                startCellZ = Math.max(startCellZ, worldCellBounds.minCellZ);
+                endCellZ = Math.min(endCellZ, worldCellBounds.maxCellZ);
             }
 
-            activePickupIds.add(pickupId);
-            if (!pickups.has(pickupId)) {
-                const pickup = createPickupForCell(x, z, worldBounds);
-                if (pickup) {
+            for (let x = startCellX; x <= endCellX; x += 1) {
+                for (let z = startCellZ; z <= endCellZ; z += 1) {
+                    const pickupId = `${idPrefix}:${x}:${z}`;
+                    if (!cellShouldHavePickup(x, z, seedOffset)) {
+                        continue;
+                    }
+
+                    activePickupIds.add(pickupId);
+                    if (pickups.has(pickupId)) {
+                        continue;
+                    }
+                    if (pickups.size >= maxActivePickups) {
+                        continue;
+                    }
+
+                    const cooldownUntil = pickupCooldownUntil.get(pickupId) || 0;
+                    if (cooldownUntil > elapsedTime) {
+                        continue;
+                    }
+
+                    const pickup = createPickupForCell(
+                        x,
+                        z,
+                        worldBounds,
+                        seedOffset,
+                        singleType,
+                        singleShapeIndex
+                    );
+                    if (!pickup) {
+                        continue;
+                    }
+
+                    pickup.cellX = x;
+                    pickup.cellZ = z;
+                    pickup.expireAt = makePickupExpireAt(x, z);
+                    pickup.pulseOffset = randomFromCell(x, z, 199, seedOffset) * Math.PI * 2;
+
                     pickups.set(pickupId, pickup);
                     pickupGroup.add(pickup.mesh);
                 }
             }
         }
-    }
 
-    for (const [pickupId, pickup] of pickups) {
-        if (!activePickupIds.has(pickupId)) {
-            pickupGroup.remove(pickup.mesh);
-            disposePickup(pickup);
-            pickups.delete(pickupId);
+        for (const [pickupId, pickup] of pickups) {
+            if (!activePickupIds.has(pickupId)) {
+                pickupGroup.remove(pickup.mesh);
+                disposePickup(pickup);
+                pickups.delete(pickupId);
+            }
         }
     }
 }
 
-function createPickupForCell(cellX, cellZ, worldBounds) {
+function normalizeCollectors(collectorEntries) {
+    if (!collectorEntries) {
+        return [];
+    }
+
+    const entries = Array.isArray(collectorEntries) ? collectorEntries : [collectorEntries];
+    const collectors = [];
+
+    for (let i = 0; i < entries.length; i += 1) {
+        const entry = entries[i];
+        if (!entry) {
+            continue;
+        }
+
+        if (entry.isVector3) {
+            collectors.push({
+                id: `collector-${i}`,
+                position: entry,
+            });
+            continue;
+        }
+
+        if (entry.position?.isVector3) {
+            collectors.push({
+                id: entry.id || `collector-${i}`,
+                position: entry.position,
+            });
+        }
+    }
+
+    return collectors;
+}
+
+function buildCollectorCellSignature(collectors) {
+    const keys = [];
+    for (let i = 0; i < collectors.length; i += 1) {
+        const collector = collectors[i];
+        const cellX = Math.floor(collector.position.x / CELL_SIZE);
+        const cellZ = Math.floor(collector.position.z / CELL_SIZE);
+        keys.push(`${cellX}:${cellZ}`);
+    }
+
+    keys.sort();
+    return keys.join('|');
+}
+
+function findCollectorInRange(pickupPosition, collectors) {
+    for (let i = 0; i < collectors.length; i += 1) {
+        const collector = collectors[i];
+        const distanceSq = pickupPosition.distanceToSquared(collector.position);
+        if (distanceSq <= PICKUP_RADIUS_SQ) {
+            return collector;
+        }
+    }
+
+    return null;
+}
+
+function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {
+    if (timeLeft >= blinkWindowSec) {
+        pickup.mesh.scale.setScalar(1);
+        return;
+    }
+
+    const urgency = 1 - THREE.MathUtils.clamp(timeLeft / blinkWindowSec, 0, 1);
+    const blink = 0.5 + Math.sin(elapsedTime * (8 + urgency * 14) + pickup.pulseOffset) * 0.5;
+    const pulseScale = 0.86 + blink * 0.28 + urgency * 0.06;
+    pickup.mesh.scale.setScalar(pulseScale);
+}
+
+function createPickupForCell(cellX, cellZ, worldBounds, seedOffset = 0, singleType = false, singleShapeIndex = 0) {
     const span = CELL_SIZE - CELL_MARGIN * 2;
-    const x = cellX * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 11) * span;
-    const z = cellZ * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 12) * span;
+    const x = cellX * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 11, seedOffset) * span;
+    const z = cellZ * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 12, seedOffset) * span;
     if (worldBounds && !isInsideWorldBounds(x, z, worldBounds)) {
         return null;
     }
     const y = PICKUP_GROUND_HEIGHT;
-    const shapeIndex = Math.floor(
-        randomFromCell(cellX, cellZ, 14) * shapeGeometries.length
-    ) % shapeGeometries.length;
+    const shapeIndex = singleType
+        ? normalizeColorIndex(singleShapeIndex)
+        : Math.floor(
+            randomFromCell(cellX, cellZ, 14, seedOffset) * shapeGeometries.length
+        ) % shapeGeometries.length;
 
-    return createPickup(x, y, z, shapeIndex, randomFromCell(cellX, cellZ, 22));
+    return createPickup(x, y, z, shapeIndex, randomFromCell(cellX, cellZ, 22, seedOffset));
 }
 
 function getWorldCellBounds(worldBounds) {
@@ -260,20 +489,25 @@ function isInsideWorldBounds(x, z, worldBounds) {
     );
 }
 
-function cellShouldHavePickup(cellX, cellZ) {
-    return randomFromCell(cellX, cellZ, 7) < CELL_PICKUP_CHANCE;
+function cellShouldHavePickup(cellX, cellZ, seedOffset = 0) {
+    return randomFromCell(cellX, cellZ, 7, seedOffset) < CELL_PICKUP_CHANCE;
 }
 
-function randomFromCell(cellX, cellZ, salt) {
-    return hashToUnit(hashCell(cellX, cellZ, salt));
+function randomFromCell(cellX, cellZ, salt, seedOffset = 0) {
+    return hashToUnit(hashCell(cellX, cellZ, salt, seedOffset));
 }
 
 function hashToUnit(value) {
     return value / 4294967295;
 }
 
-function hashCell(cellX, cellZ, salt) {
-    let h = (cellX * 374761393 + cellZ * 668265263 + salt * 1442695041) | 0;
+function hashCell(cellX, cellZ, salt, seedOffset = 0) {
+    let h = (
+        cellX * 374761393
+        + cellZ * 668265263
+        + salt * 1442695041
+        + seedOffset * 1013904223
+    ) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     h ^= h >>> 16;
     return h >>> 0;
@@ -395,4 +629,8 @@ function getNextTargetColorIndex(currentIndex) {
         nextIndex = Math.floor(Math.random() * shapeColors.length);
     }
     return nextIndex;
+}
+
+function normalizePositiveNumber(value, fallback) {
+    return Number.isFinite(value) ? value : fallback;
 }

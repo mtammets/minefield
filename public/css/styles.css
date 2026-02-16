@@ -111,6 +111,72 @@ canvas#gameCanvas {
     color: rgba(195, 228, 255, 0.9);
 }
 
+#botPanel {
+    position: fixed;
+    left: 18px;
+    top: 132px;
+    z-index: 4;
+    width: 260px;
+    padding: 10px 12px 9px;
+    border: 1px solid rgba(132, 184, 255, 0.44);
+    border-radius: 10px;
+    background: rgba(7, 12, 22, 0.7);
+    backdrop-filter: blur(3px);
+    color: #d9eeff;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+}
+
+#botTitle {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+    margin-bottom: 6px;
+}
+
+#botList {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 12px;
+}
+
+.botRow {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+}
+
+.botName {
+    color: rgba(210, 235, 255, 0.95);
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.botTarget {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: rgba(236, 246, 255, 0.96);
+}
+
+.botSwatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 1px solid rgba(230, 242, 255, 0.72);
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.19);
+    flex: 0 0 auto;
+}
+
+.botScore {
+    color: #ffffff;
+    font-weight: 800;
+    min-width: 24px;
+    text-align: right;
+}
+
 @media (max-width: 860px) {
     #objectivePanel {
         left: 10px;
@@ -124,5 +190,12 @@ canvas#gameCanvas {
         top: 10px;
         transform: scale(0.88);
         transform-origin: top right;
+    }
+
+    #botPanel {
+        left: 10px;
+        top: 112px;
+        transform: scale(0.88);
+        transform-origin: top left;
     }
 }

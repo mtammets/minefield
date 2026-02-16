@@ -123,19 +123,11 @@ function createWorldBoundary() {
         roughness: 0.86,
         metalness: 0.12,
     });
-    const topStripMaterial = new THREE.MeshBasicMaterial({
-        color: 0x80b6ff,
-        transparent: true,
-        opacity: 0.65,
-    });
-
     const horizontalLength = worldBounds.size + wallThickness * 2;
     const verticalLength = worldBounds.size + wallThickness * 2;
 
     const northSouthGeometry = new THREE.BoxGeometry(horizontalLength, wallHeight, wallThickness);
     const eastWestGeometry = new THREE.BoxGeometry(wallThickness, wallHeight, verticalLength);
-    const stripHorizontalGeometry = new THREE.BoxGeometry(horizontalLength, 0.22, 0.4);
-    const stripVerticalGeometry = new THREE.BoxGeometry(0.4, 0.22, verticalLength);
 
     const northWall = new THREE.Mesh(northSouthGeometry, wallMaterial);
     northWall.position.set(0, wallHeight * 0.5, worldBounds.minZ - wallThickness * 0.5);
@@ -152,22 +144,6 @@ function createWorldBoundary() {
     const eastWall = new THREE.Mesh(eastWestGeometry, wallMaterial);
     eastWall.position.set(worldBounds.maxX + wallThickness * 0.5, wallHeight * 0.5, 0);
     boundary.add(eastWall);
-
-    const northStrip = new THREE.Mesh(stripHorizontalGeometry, topStripMaterial);
-    northStrip.position.set(0, wallHeight + 0.05, worldBounds.minZ - wallThickness * 0.5);
-    boundary.add(northStrip);
-
-    const southStrip = new THREE.Mesh(stripHorizontalGeometry, topStripMaterial);
-    southStrip.position.set(0, wallHeight + 0.05, worldBounds.maxZ + wallThickness * 0.5);
-    boundary.add(southStrip);
-
-    const westStrip = new THREE.Mesh(stripVerticalGeometry, topStripMaterial);
-    westStrip.position.set(worldBounds.minX - wallThickness * 0.5, wallHeight + 0.05, 0);
-    boundary.add(westStrip);
-
-    const eastStrip = new THREE.Mesh(stripVerticalGeometry, topStripMaterial);
-    eastStrip.position.set(worldBounds.maxX + wallThickness * 0.5, wallHeight + 0.05, 0);
-    boundary.add(eastStrip);
 
     return boundary;
 }
@@ -236,7 +212,6 @@ function createRoadLayer() {
     const roadLength = worldBounds.size + CITY_GRID_SPACING * 2;
     const roadY = 0.028;
     const sidewalkY = 0.034;
-    const markingY = 0.05;
 
     const roadMaterial = new THREE.MeshStandardMaterial({
         color: 0x1b2736,
@@ -244,13 +219,22 @@ function createRoadLayer() {
         emissiveIntensity: 0.42,
         roughness: 0.9,
         metalness: 0.04,
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1,
     });
+    const roadMaterialOverlay = roadMaterial.clone();
+    roadMaterialOverlay.polygonOffsetFactor = 2;
+    roadMaterialOverlay.polygonOffsetUnits = 2;
     const intersectionMaterial = new THREE.MeshStandardMaterial({
         color: 0x202e3f,
         emissive: 0x141c2a,
         emissiveIntensity: 0.5,
         roughness: 0.86,
         metalness: 0.06,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
     });
     const sidewalkMaterial = new THREE.MeshStandardMaterial({
         color: 0x42556e,
@@ -259,15 +243,10 @@ function createRoadLayer() {
         roughness: 0.9,
         metalness: 0.08,
     });
-    const centerLineMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffdf8f,
-    });
     const verticalRoadGeometry = new THREE.PlaneGeometry(roadWidth, roadLength);
     const horizontalRoadGeometry = new THREE.PlaneGeometry(roadLength, roadWidth);
     const verticalSidewalkGeometry = new THREE.PlaneGeometry(sidewalkWidth, roadLength);
     const horizontalSidewalkGeometry = new THREE.PlaneGeometry(roadLength, sidewalkWidth);
-    const verticalCenterLineGeometry = new THREE.PlaneGeometry(0.6, roadLength);
-    const horizontalCenterLineGeometry = new THREE.PlaneGeometry(roadLength, 0.6);
     const intersectionGeometry = new THREE.PlaneGeometry(roadWidth, roadWidth);
 
     for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
@@ -291,10 +270,6 @@ function createRoadLayer() {
         sidewalkEast.position.set(lineX + roadWidth * 0.5 + sidewalkWidth * 0.5, sidewalkY, 0);
         layer.add(sidewalkEast);
 
-        const centerLine = new THREE.Mesh(verticalCenterLineGeometry, centerLineMaterial);
-        centerLine.rotation.x = -Math.PI / 2;
-        centerLine.position.set(lineX, markingY, 0);
-        layer.add(centerLine);
     }
 
     for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
@@ -303,7 +278,7 @@ function createRoadLayer() {
         }
 
         const lineZ = gridZ * CITY_GRID_SPACING;
-        const road = new THREE.Mesh(horizontalRoadGeometry, roadMaterial);
+        const road = new THREE.Mesh(horizontalRoadGeometry, roadMaterialOverlay);
         road.rotation.x = -Math.PI / 2;
         road.position.set(0, roadY, lineZ);
         layer.add(road);
@@ -318,10 +293,6 @@ function createRoadLayer() {
         sidewalkSouth.position.set(0, sidewalkY, lineZ + roadWidth * 0.5 + sidewalkWidth * 0.5);
         layer.add(sidewalkSouth);
 
-        const centerLine = new THREE.Mesh(horizontalCenterLineGeometry, centerLineMaterial);
-        centerLine.rotation.x = -Math.PI / 2;
-        centerLine.position.set(0, markingY, lineZ);
-        layer.add(centerLine);
     }
 
     for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
@@ -405,7 +376,7 @@ function createBuildingLayer() {
 
         color.setHSL(0.58 + building.tint * 0.04, 0.2, 0.28 + building.tint * 0.08);
         buildings.setColorAt(index, color);
-        addObstacleAabb(building.x, building.z, building.width, building.depth, -0.5);
+        addObstacleAabb(building.x, building.z, building.width, building.depth, -0.5, 'building');
     });
     buildings.instanceMatrix.needsUpdate = true;
     buildings.instanceColor.needsUpdate = true;
@@ -525,7 +496,7 @@ function createParkLayer() {
 
         canopyColor.setHSL(0.33 + randomFromGrid(index, trees.length, 121) * 0.03, 0.42, 0.28);
         canopies.setColorAt(index, canopyColor);
-        addObstacleCircle(tree.x, tree.z, 0.62 * tree.scale);
+        addObstacleCircle(tree.x, tree.z, 0.62 * tree.scale, 'tree');
     });
 
     trunks.instanceMatrix.needsUpdate = true;
@@ -579,7 +550,7 @@ function createStreetLampLayer(lampLights) {
             pole.castShadow = false;
             pole.receiveShadow = false;
             layer.add(pole);
-            addObstacleCircle(positionX, positionZ, 0.58);
+            addObstacleCircle(positionX, positionZ, 0.58, 'lamp_post');
 
             const lampHead = new THREE.Mesh(headGeometry, glowMaterial);
             lampHead.position.set(positionX, 8.6, positionZ);
@@ -631,16 +602,17 @@ function hashGrid(gridX, gridZ, salt) {
     return hash >>> 0;
 }
 
-function addObstacleCircle(x, z, radius) {
+function addObstacleCircle(x, z, radius, category = 'generic') {
     staticObstacles.push({
         type: 'circle',
         x,
         z,
         radius,
+        category,
     });
 }
 
-function addObstacleAabb(x, z, width, depth, padding = 0) {
+function addObstacleAabb(x, z, width, depth, padding = 0, category = 'generic') {
     const halfWidth = Math.max(0.25, width * 0.5 + padding);
     const halfDepth = Math.max(0.25, depth * 0.5 + padding);
     staticObstacles.push({
@@ -649,5 +621,6 @@ function addObstacleAabb(x, z, width, depth, padding = 0) {
         maxX: x + halfWidth,
         minZ: z - halfDepth,
         maxZ: z + halfDepth,
+        category,
     });
 }

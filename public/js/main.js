@@ -13,24 +13,29 @@ import {
     worldBoundary,
     updateGroundMotion,
 } from './environment.js';
-import { car, updateCarVisuals } from './car.js';
+import { car, updateCarVisuals, setPlayerBatteryLevel, getPlayerCarCrashParts } from './car.js';
 import { camera, updateCamera } from './camera.js';
 import {
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
     initializePlayerPhysics,
     getVehicleState,
+    consumeCrashCollision,
+    consumeVehicleCollisionContacts,
+    setVehicleDamageState,
     keys,
 } from './carphysics.js';
 import { addStars } from './stars.js';
 import { createCollectibleSystem } from './collectibles.js';
 import { createMiniMapController } from './minimap.js';
+import { createBotTrafficSystem } from './bots.js';
+import { createReplayController } from './replay.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
 let physicsAccumulator = 0;
 const MAX_PHYSICS_STEPS_PER_FRAME = 6;
-const MINIMAP_UPDATE_INTERVAL = 1 / 20;
+const MINIMAP_UPDATE_INTERVAL = 1 / 12;
 let minimapAccumulator = 0;
 const COLOR_NAMES = {
     [0x7cf9ff]: 'Neo türkiis',
@@ -41,14 +46,56 @@ const COLOR_NAMES = {
 const DEBRIS_GRAVITY = 26;
 const DEBRIS_DRAG = 2.2;
 const DEBRIS_BOUNCE_DAMPING = 0.32;
-const DEBRIS_LIFETIME = 3.5;
-const DEBRIS_COUNT = 30;
-const STATUS_DEFAULT_TEXT = 'Vale värv = auto plahvatab';
+const DEBRIS_GROUND_Y = 0.028;
+const DEBRIS_BASE_VERTICAL_BOOST = 2.2;
+const DEBRIS_SETTLE_VERTICAL_SPEED = 0.45;
+const DEBRIS_SETTLE_HORIZONTAL_SPEED = 0.5;
+const DEBRIS_SETTLE_ANGULAR_SPEED = 0.85;
+const PART_BASE_LATERAL_BOOST = 2.6;
+const PART_BASE_BLAST_BOOST = 4.1;
+const PART_BASE_FORWARD_CARRY_BOOST = 8.4;
+const PART_BASE_IMPACT_INERTIA_SCALE = 0.16;
+const PART_BASE_ANGULAR_BOOST = 8.6;
+const WHEEL_ROLL_RANDOM_BOOST = 4.4;
+const WHEEL_ROLL_DRIVE_MIN = 4.2;
+const WHEEL_ROLL_DRIVE_MAX = 9.8;
+const WHEEL_ORIENTATION_ALIGN_RATE = 14;
+const BODY_PANEL_ORIENTATION_ALIGN_RATE = 9.5;
+const OBSTACLE_CRASH_MIN_SPEED = 38;
+const OBSTACLE_CRASH_MAX_SPEED = 84;
+const VEHICLE_DAMAGE_COLLISION_MIN = 8;
+const VEHICLE_DAMAGE_COLLISION_MED = 14;
+const VEHICLE_DAMAGE_COLLISION_HIGH = 22;
+const VEHICLE_WHEEL_DETACH_SPEED = 28;
+const VEHICLE_SECOND_WHEEL_DETACH_SPEED = 36;
+const VEHICLE_DENT_MAX = 1.7;
+const STATUS_DEFAULT_TEXT = 'Tagaveoline ja võimas: juhitav nii edasi kui tagurdades. Kogu energiasfääre.';
+const SHARED_PICKUP_COLOR_INDEX = 0;
+const SHARED_PICKUP_COLOR_HEX = 0x7cf9ff;
+const BATTERY_MAX = 100;
+const BATTERY_PICKUP_GAIN = 24;
+const BATTERY_IDLE_DRAIN_PER_SEC = 0;
+const BATTERY_SPEED_DRAIN_PER_SPEED = 0.055;
+const REPLAY_EVENT_PICKUP = 'pickup';
+const REPLAY_EVENT_CRASH = 'crash';
 const debrisPieces = [];
+const replayEffects = [];
+const crashParts = getPlayerCarCrashParts();
+const detachedCrashPartIds = new Set();
+const playerDamageState = createEmptyDamageState();
+const bodyDamageVisual = { left: 0, right: 0, front: 0, rear: 0 };
+const bodyPartBaselines = new Map();
+const debrisBottomProbeBox = new THREE.Box3();
 const objectiveUi = createObjectiveUiController();
+const botStatusUi = createBotStatusController();
 let isCarDestroyed = false;
 let explosionLight = null;
 let explosionLightLife = 0;
+let botTrafficSystem = null;
+let playerBattery = BATTERY_MAX;
+let vehicleImpactStatusCooldown = 0;
+
+initializeBodyPartBaselines();
 
 // Stseeni ja renderdamise algne seadistamine
 const scene = initializeScene();
@@ -57,16 +104,57 @@ const starsController = addStars(scene);
 const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     onTargetColorChanged: ({ targetColorHex }) => {
         objectiveUi.setTargetColor(targetColorHex);
+        botTrafficSystem?.setSharedTargetColor(targetColorHex);
     },
-    onCorrectPickup: ({ pickupColorHex }) => {
-        objectiveUi.flashCorrect(pickupColorHex);
+    onCorrectPickup: ({ pickupColorHex, collectorId, position }) => {
+        replayController.recordEvent(REPLAY_EVENT_PICKUP, {
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            colorHex: pickupColorHex,
+            wrong: false,
+        });
+
+        if (collectorId === 'player') {
+            addBattery(BATTERY_PICKUP_GAIN);
+            objectiveUi.flashCorrect(pickupColorHex, Math.round(playerBattery));
+            return;
+        }
+        botTrafficSystem?.registerCollected(collectorId);
     },
-    onWrongPickup: ({ pickupColorHex, targetColorHex, position }) => {
+    onWrongPickup: ({ pickupColorHex, targetColorHex, position, collectorId }) => {
+        if (collectorId !== 'player') {
+            return;
+        }
+        replayController.recordEvent(REPLAY_EVENT_PICKUP, {
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            colorHex: pickupColorHex,
+            wrong: true,
+        });
         triggerCarExplosion(position, pickupColorHex, targetColorHex);
     },
+    singleType: true,
+    singleShapeIndex: SHARED_PICKUP_COLOR_INDEX,
+    activeCellRadius: 5,
+    maxActivePickups: 6,
+    pickupLifetimeSec: 7,
+    pickupLifetimeJitterSec: 2,
+    pickupRespawnDelaySec: 1.2,
+    pickupRespawnJitterSec: 1.4,
+    pickupBlinkWindowSec: 2,
+});
+botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
+    botCount: 3,
+    sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
 });
 const miniMapController = createMiniMapController(worldBounds);
+const replayController = createReplayController(car, camera);
+botStatusUi.render(botTrafficSystem.getHudState());
 initializePlayerPhysics(car);
+resetPlayerDamageState();
+setPlayerBatteryLevel(1);
 
 // Klaviatuurikontrollide ja akna suuruse muutuste kuulamine
 initializeControls();
@@ -89,6 +177,7 @@ function initializeScene() {
 function initializeRenderer() {
     const renderer = new THREE.WebGLRenderer({
         canvas: document.getElementById('gameCanvas'),
+        antialias: false,
         powerPreference: 'high-performance',
     });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, renderSettings.maxPixelRatio));
@@ -112,6 +201,14 @@ function initializeControls() {
 // Klahvide vajutamise töötlemine
 function handleKey(event, isKeyDown) {
     const key = event.key.toLowerCase();
+    if (isKeyDown && event.repeat && (key === 'k' || key === 'v' || key === 'f' || key === 'q')) {
+        return;
+    }
+    const isArrowKey = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright';
+    if (isArrowKey && replayController.isPlaybackActive()) {
+        return;
+    }
+
     const actions = {
         arrowup: () => (keys.forward = isKeyDown),
         arrowdown: () => (keys.backward = isKeyDown),
@@ -119,6 +216,72 @@ function handleKey(event, isKeyDown) {
         arrowright: () => (keys.right = isKeyDown),
         f: () => isKeyDown && toggleFullscreen(),
         q: () => isKeyDown && location.reload(),
+        k: () => {
+            if (!isKeyDown) {
+                return;
+            }
+
+            if (replayController.isPlaybackActive()) {
+                replayController.stopPlayback();
+                clearReplayEffects();
+                clearDebris();
+                initializePlayerPhysics(car);
+                resetPlayerDamageState();
+                physicsAccumulator = 0;
+                objectiveUi.showInfo('Taasesitus peatatud.');
+            }
+
+            if (isCarDestroyed) {
+                objectiveUi.showInfo('Pärast avariid salvestust ei alusta. Vajuta Q restart.');
+                return;
+            }
+
+            if (replayController.isRecording()) {
+                replayController.stopRecording();
+                const duration = replayController.getDuration();
+                if (duration > 0.2) {
+                    objectiveUi.showInfo(`Salvestus valmis (${duration.toFixed(1)}s). Vajuta V taasesituseks.`);
+                } else {
+                    objectiveUi.showInfo('Salvestus liiga lühike. Tee pikem sõit ja proovi uuesti.');
+                }
+                return;
+            }
+
+            replayController.startRecording(getVehicleState());
+            objectiveUi.showInfo('Salvestus käib. Vajuta K lõpetamiseks.');
+        },
+        v: () => {
+            if (!isKeyDown) {
+                return;
+            }
+
+            if (replayController.isRecording()) {
+                replayController.stopRecording();
+            }
+
+            if (replayController.isPlaybackActive()) {
+                replayController.stopPlayback();
+                clearReplayEffects();
+                clearDebris();
+                initializePlayerPhysics(car);
+                resetPlayerDamageState();
+                physicsAccumulator = 0;
+                objectiveUi.showInfo('Taasesitus peatatud.');
+                return;
+            }
+
+            if (!replayController.hasReplay()) {
+                objectiveUi.showInfo('Replay puudub. Vajuta K ja salvesta sõit.');
+                return;
+            }
+
+            resetRunStateForReplay();
+            clearDriveKeys();
+            if (replayController.startPlayback()) {
+                clearReplayEffects();
+                objectiveUi.showInfo('Tele-replay käivitus. V peatab, K alustab uut salvestust.');
+            }
+        },
     };
     if (actions[key]) actions[key]();
 }
@@ -134,9 +297,9 @@ function onWindowResize() {
 
 // Täisekraani režiimi lülitamine
 function toggleFullscreen() {
-    const canvas = document.getElementById('gameCanvas');
+    const fullscreenRoot = document.documentElement;
     if (!document.fullscreenElement) {
-        canvas.requestFullscreen().catch(console.error);
+        fullscreenRoot.requestFullscreen().catch(console.error);
     } else {
         document.exitFullscreen().catch(console.error);
     }
@@ -147,14 +310,41 @@ function animate() {
     requestAnimationFrame(animate);
 
     const frameDelta = Math.min(clock.getDelta(), 0.05);
+    vehicleImpactStatusCooldown = Math.max(0, vehicleImpactStatusCooldown - frameDelta);
 
     const vehicleState = getVehicleState();
-    if (!isCarDestroyed) {
+    const replayActive = replayController.isPlaybackActive();
+    let visualState = vehicleState;
+
+    if (replayActive) {
+        physicsAccumulator = 0;
+        const replayFrame = replayController.updatePlayback(frameDelta);
+        if (replayFrame?.vehicleState) {
+            visualState = replayFrame.vehicleState;
+        }
+        updateCarVisuals(visualState, frameDelta);
+        processReplayEvents(replayFrame?.events);
+
+        if (!replayController.isPlaybackActive()) {
+            clearReplayEffects();
+            initializePlayerPhysics(car);
+            resetPlayerDamageState();
+            physicsAccumulator = 0;
+            objectiveUi.showInfo('Tele-replay lõppes.');
+        }
+    } else if (!isCarDestroyed) {
         physicsAccumulator += frameDelta;
+        const vehicleCollisionSnapshots = botTrafficSystem?.getCollisionSnapshots?.() || [];
 
         let physicsSteps = 0;
         while (physicsAccumulator >= physicsStep && physicsSteps < MAX_PHYSICS_STEPS_PER_FRAME) {
-            updatePlayerPhysics(car, physicsStep, worldBounds, staticObstacles);
+            updatePlayerPhysics(
+                car,
+                physicsStep,
+                worldBounds,
+                staticObstacles,
+                vehicleCollisionSnapshots
+            );
             physicsAccumulator -= physicsStep;
             physicsSteps += 1;
         }
@@ -164,27 +354,63 @@ function animate() {
             physicsAccumulator = physicsStep;
         }
 
-        const interpolationAlpha = physicsAccumulator / physicsStep;
-        applyInterpolatedPlayerTransform(car, interpolationAlpha);
-        updateCarVisuals(vehicleState, frameDelta);
+        const vehicleContacts = consumeVehicleCollisionContacts();
+        if (vehicleContacts.length > 0) {
+            processVehicleCollisionContacts(vehicleContacts);
+        }
+
+        const crashCollision = consumeCrashCollision();
+        if (crashCollision && !isCarDestroyed) {
+            triggerObstacleCrash(crashCollision);
+        }
+
+        if (!isCarDestroyed) {
+            const interpolationAlpha = physicsAccumulator / physicsStep;
+            applyInterpolatedPlayerTransform(car, interpolationAlpha);
+            updateCarVisuals(vehicleState, frameDelta);
+            updateBattery(vehicleState, frameDelta);
+            replayController.updateRecording(frameDelta, vehicleState);
+        } else {
+            physicsAccumulator = 0;
+            updateDebris(frameDelta);
+        }
     } else {
         physicsAccumulator = 0;
         updateDebris(frameDelta);
     }
 
-    const cameraSpeed = isCarDestroyed ? 0 : vehicleState.speed;
-    updateCamera(car, cameraSpeed, frameDelta);
+    const cameraSpeed = isCarDestroyed ? 0 : (visualState?.speed || 0);
+    if (!replayActive) {
+        updateCamera(car, cameraSpeed, frameDelta);
+    }
     updateGroundMotion(car.position, cameraSpeed);
     starsController.update(frameDelta);
-    collectibleSystem.update(car.position, frameDelta);
-    minimapAccumulator += frameDelta;
-    if (minimapAccumulator >= MINIMAP_UPDATE_INTERVAL) {
-        miniMapController.update(
-            car.position,
-            car.rotation.y,
-            collectibleSystem.getVisiblePickups()
-        );
-        minimapAccumulator = 0;
+    if (!replayActive) {
+        const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
+        botTrafficSystem.update(car.position, visiblePickupsForBots, frameDelta);
+        collectibleSystem.updateForCollectors([
+            { id: 'player', position: car.position },
+            ...botTrafficSystem.getCollectorDescriptors(),
+        ], frameDelta);
+        minimapAccumulator += frameDelta;
+        if (minimapAccumulator >= MINIMAP_UPDATE_INTERVAL) {
+            const visiblePickups = collectibleSystem.getVisiblePickups();
+            const botMarkers = botTrafficSystem.getMiniMapMarkers();
+            miniMapController.update(
+                car.position,
+                car.rotation.y,
+                visiblePickups,
+                botMarkers,
+                { hidePlayer: isCarDestroyed }
+            );
+            botStatusUi.render(botTrafficSystem.getHudState());
+            minimapAccumulator = 0;
+        }
+    }
+
+    updateReplayEffects(frameDelta);
+    if ((replayActive || !isCarDestroyed) && (debrisPieces.length > 0 || explosionLight)) {
+        updateDebris(frameDelta);
     }
 
     updateSunLightPosition();
@@ -198,11 +424,30 @@ function updateSunLightPosition() {
     sunLight.target.updateMatrixWorld();
 }
 
-function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex) {
+function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, options = {}) {
     if (isCarDestroyed) {
         return;
     }
 
+    const replayCollision = options.collision
+        ? {
+            obstacleCategory: options.collision.obstacleCategory,
+            impactSpeed: options.collision.impactSpeed,
+            impactNormalX: options.collision.impactNormal?.x || 0,
+            impactNormalZ: options.collision.impactNormal?.z || 0,
+        }
+        : null;
+
+    replayController.recordEvent(REPLAY_EVENT_CRASH, {
+        x: hitPosition.x,
+        y: hitPosition.y,
+        z: hitPosition.z,
+        pickupColorHex,
+        targetColorHex,
+        collision: replayCollision,
+    });
+    replayController.stopRecording();
+    replayController.stopPlayback();
     isCarDestroyed = true;
     collectibleSystem.setEnabled(false);
     car.visible = false;
@@ -211,11 +456,258 @@ function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex) {
     keys.left = false;
     keys.right = false;
 
-    objectiveUi.showFailure(pickupColorHex, targetColorHex);
-    spawnCarDebris(hitPosition, pickupColorHex, targetColorHex);
+    if (options.statusText) {
+        objectiveUi.showCrash(options.statusText);
+    } else {
+        objectiveUi.showFailure(pickupColorHex, targetColorHex);
+    }
+    spawnCarDebris(hitPosition, options.collision || null);
 }
 
-function spawnCarDebris(hitPosition, pickupColorHex, targetColorHex) {
+function triggerObstacleCrash(collision) {
+    const obstacleLabel = collision.obstacleCategory === 'building'
+        ? 'majja'
+        : (collision.obstacleCategory === 'tree' ? 'puusse' : 'lambiposti');
+    const speedLabel = Math.round(collision.impactSpeed);
+    triggerCarExplosion(collision.position, 0xffa66b, 0xff4b4b, {
+        statusText: `Sõitsid suure hooga ${obstacleLabel} (${speedLabel}). Vajuta Q restart.`,
+        collision,
+    });
+}
+
+function updateBattery(vehicleState, dt) {
+    if (isCarDestroyed) {
+        return;
+    }
+
+    const speedAbs = Math.abs(vehicleState.speed || 0);
+    const drain = (BATTERY_IDLE_DRAIN_PER_SEC + speedAbs * BATTERY_SPEED_DRAIN_PER_SPEED) * dt;
+    if (drain <= 0) {
+        return;
+    }
+
+    playerBattery = Math.max(0, playerBattery - drain);
+    setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+
+    if (playerBattery <= 0.001) {
+        triggerCarExplosion(car.position.clone(), 0xffb07d, 0xff4b4b, {
+            statusText: 'Aku sai tühjaks. Vajuta Q restart.',
+        });
+    }
+}
+
+function addBattery(amount) {
+    playerBattery = Math.min(BATTERY_MAX, playerBattery + Math.max(0, amount));
+    setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+}
+
+function processVehicleCollisionContacts(contacts) {
+    if (!contacts || contacts.length === 0 || isCarDestroyed) {
+        return;
+    }
+
+    const strongestByBot = new Map();
+    for (let i = 0; i < contacts.length; i += 1) {
+        const contact = contacts[i];
+        if (!contact?.botId) {
+            continue;
+        }
+        const previous = strongestByBot.get(contact.botId);
+        if (!previous || (contact.impactSpeed || 0) > (previous.impactSpeed || 0)) {
+            strongestByBot.set(contact.botId, contact);
+        }
+    }
+    const condensedContacts = Array.from(strongestByBot.values());
+    if (condensedContacts.length === 0) {
+        return;
+    }
+
+    botTrafficSystem?.applyCollisionImpulses?.(condensedContacts);
+
+    let strongestImpact = 0;
+    for (let i = 0; i < condensedContacts.length; i += 1) {
+        const contact = condensedContacts[i];
+        const impactSpeed = contact.impactSpeed || 0;
+        if (impactSpeed > strongestImpact) {
+            strongestImpact = impactSpeed;
+        }
+        applyLocalizedVehicleDamage(contact);
+    }
+
+    if (strongestImpact >= VEHICLE_DAMAGE_COLLISION_MIN && vehicleImpactStatusCooldown <= 0) {
+        objectiveUi.showInfo(
+            strongestImpact >= VEHICLE_WHEEL_DETACH_SPEED
+                ? `Tugev kokkupõrge (${Math.round(strongestImpact)}): võimalik rattakahjustus.`
+                : `Kontakt teise autoga (${Math.round(strongestImpact)}).`,
+            strongestImpact >= VEHICLE_DAMAGE_COLLISION_HIGH ? 1400 : 900
+        );
+        vehicleImpactStatusCooldown = 0.85;
+    }
+}
+
+function applyLocalizedVehicleDamage(contact) {
+    const impactSpeed = contact?.impactSpeed || 0;
+    if (impactSpeed < VEHICLE_DAMAGE_COLLISION_MIN) {
+        return;
+    }
+
+    const collision = {
+        obstacleCategory: 'vehicle',
+        impactSpeed,
+        impactNormal: new THREE.Vector3(contact.normalX || 0, 0, contact.normalZ || 0),
+    };
+    const crashContext = buildCrashContext(contact.position || car.position.clone(), collision);
+    const hitSide = crashContext.hitSide;
+    const hitZone = crashContext.hitZone;
+    const oppositeZone = hitZone === 'front' ? 'rear' : 'front';
+
+    applyPersistentHandlingDamage(crashContext, impactSpeed);
+    addBodyDentFromImpact(crashContext, impactSpeed);
+
+    if (impactSpeed >= VEHICLE_WHEEL_DETACH_SPEED) {
+        tryDetachCrashPart((part) => (
+            part.type === 'wheel'
+            && part.side === hitSide
+            && part.zone === hitZone
+        ), crashContext);
+    }
+
+    if (impactSpeed >= VEHICLE_SECOND_WHEEL_DETACH_SPEED) {
+        tryDetachCrashPart((part) => (
+            part.type === 'wheel'
+            && part.side === hitSide
+            && part.zone === oppositeZone
+        ), crashContext);
+    }
+}
+
+function applyPersistentHandlingDamage(crashContext, impactSpeed) {
+    const damageNorm = THREE.MathUtils.clamp(
+        (impactSpeed - VEHICLE_DAMAGE_COLLISION_MIN)
+        / (VEHICLE_WHEEL_DETACH_SPEED - VEHICLE_DAMAGE_COLLISION_MIN),
+        0,
+        1.25
+    );
+    if (damageNorm <= 0.02) {
+        return;
+    }
+
+    const localGain = damageNorm * 0.32;
+    const zoneGain = damageNorm * 0.26;
+    const suspensionGain = damageNorm * 0.22;
+
+    if (crashContext.hitSide === 'left') {
+        playerDamageState.leftLoss += localGain;
+    } else if (crashContext.hitSide === 'right') {
+        playerDamageState.rightLoss += localGain;
+    }
+
+    if (crashContext.hitZone === 'front') {
+        playerDamageState.frontLoss += zoneGain;
+    } else if (crashContext.hitZone === 'rear') {
+        playerDamageState.rearLoss += zoneGain;
+    }
+
+    playerDamageState.suspensionLoss += suspensionGain;
+    setVehicleDamageState(playerDamageState);
+}
+
+function addBodyDentFromImpact(crashContext, impactSpeed) {
+    const dentNorm = THREE.MathUtils.clamp(
+        (impactSpeed - VEHICLE_DAMAGE_COLLISION_MIN)
+        / (VEHICLE_DAMAGE_COLLISION_HIGH - VEHICLE_DAMAGE_COLLISION_MIN),
+        0,
+        1.2
+    );
+    if (dentNorm <= 0.03) {
+        return;
+    }
+
+    const dentGain = dentNorm * 0.28;
+    if (crashContext.hitSide === 'left') {
+        bodyDamageVisual.left = THREE.MathUtils.clamp(bodyDamageVisual.left + dentGain, 0, VEHICLE_DENT_MAX);
+    } else if (crashContext.hitSide === 'right') {
+        bodyDamageVisual.right = THREE.MathUtils.clamp(bodyDamageVisual.right + dentGain, 0, VEHICLE_DENT_MAX);
+    }
+
+    if (crashContext.hitZone === 'front') {
+        bodyDamageVisual.front = THREE.MathUtils.clamp(bodyDamageVisual.front + dentGain * 0.94, 0, VEHICLE_DENT_MAX);
+    } else if (crashContext.hitZone === 'rear') {
+        bodyDamageVisual.rear = THREE.MathUtils.clamp(bodyDamageVisual.rear + dentGain * 0.94, 0, VEHICLE_DENT_MAX);
+    }
+
+    applyBodyDentVisuals();
+}
+
+function tryDetachCrashPart(predicate, crashContext) {
+    const part = crashParts.find((candidate) => (
+        candidate?.source
+        && !detachedCrashPartIds.has(candidate.id)
+        && predicate(candidate)
+    ));
+    if (!part) {
+        return false;
+    }
+    detachCrashPart(part, crashContext);
+    return true;
+}
+
+function detachCrashPart(part, crashContext) {
+    if (!part?.source || detachedCrashPartIds.has(part.id)) {
+        return false;
+    }
+
+    detachedCrashPartIds.add(part.id);
+    part.source.visible = false;
+    spawnCrashPartDebris(part, crashContext);
+    registerDetachedPartDamage(part);
+    return true;
+}
+
+function registerDetachedPartDamage(part) {
+    if (part.type === 'wheel') {
+        playerDamageState.wheelLossCount += 1;
+    } else if (part.type === 'suspension_link') {
+        playerDamageState.suspensionLoss += 1;
+    }
+
+    if (part.side === 'left') {
+        playerDamageState.leftLoss += 1;
+    } else if (part.side === 'right') {
+        playerDamageState.rightLoss += 1;
+    }
+
+    if (part.zone === 'front') {
+        playerDamageState.frontLoss += 1;
+    } else if (part.zone === 'rear') {
+        playerDamageState.rearLoss += 1;
+    }
+
+    setVehicleDamageState(playerDamageState);
+}
+
+function spawnCarDebris(hitPosition, collision = null) {
+    if (!crashParts || crashParts.length === 0) {
+        return;
+    }
+
+    const crashContext = buildCrashContext(hitPosition, collision);
+    const visibleParts = crashParts.filter((part) => part?.source?.visible);
+    const selectedParts = visibleParts.length > 0
+        ? visibleParts
+        : selectCrashPartsForImpact(crashContext, true);
+    selectedParts.forEach((part) => {
+        spawnCrashPartDebris(part, crashContext);
+    });
+
+    explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
+    explosionLight.position.copy(crashContext.origin);
+    explosionLight.position.y += 1.2;
+    explosionLightLife = 0.7;
+    scene.add(explosionLight);
+}
+
+function buildCrashContext(hitPosition, collision) {
     const origin = car.position.clone();
     const hitDirection = new THREE.Vector3().subVectors(hitPosition, origin);
     hitDirection.y = 0;
@@ -224,84 +716,485 @@ function spawnCarDebris(hitPosition, pickupColorHex, targetColorHex) {
     }
     hitDirection.normalize();
 
-    const palette = [0x2d67a6, 0x8da6c9, 0x1f2733, pickupColorHex, targetColorHex];
+    const carForward = new THREE.Vector3(0, 0, -1).applyQuaternion(car.quaternion).setY(0).normalize();
+    const carRight = new THREE.Vector3(1, 0, 0).applyQuaternion(car.quaternion).setY(0).normalize();
+    const impactNormal = collision?.impactNormal
+        ? collision.impactNormal.clone()
+        : hitDirection.clone().multiplyScalar(-1);
+    impactNormal.y = 0;
+    if (impactNormal.lengthSq() < 0.0001) {
+        impactNormal.copy(carForward).multiplyScalar(-1);
+    }
+    impactNormal.normalize();
 
-    for (let i = 0; i < DEBRIS_COUNT; i += 1) {
-        const sizeX = 0.12 + Math.random() * 0.34;
-        const sizeY = 0.09 + Math.random() * 0.26;
-        const sizeZ = 0.11 + Math.random() * 0.32;
-        const geometry = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
-        const colorHex = palette[Math.floor(Math.random() * palette.length)];
-        const material = new THREE.MeshStandardMaterial({
-            color: colorHex,
-            emissive: colorHex,
-            emissiveIntensity: 0.14,
-            roughness: 0.46,
-            metalness: 0.62,
-        });
-        const piece = new THREE.Mesh(geometry, material);
+    const impactSpeed = collision?.impactSpeed || OBSTACLE_CRASH_MAX_SPEED;
+    const impactNorm = THREE.MathUtils.clamp(
+        (impactSpeed - OBSTACLE_CRASH_MIN_SPEED) / (OBSTACLE_CRASH_MAX_SPEED - OBSTACLE_CRASH_MIN_SPEED),
+        0,
+        1
+    );
+    const crashIntensity = collision ? (0.35 + impactNorm * 0.65) : 1;
+    const frontalImpact = THREE.MathUtils.clamp(-impactNormal.dot(carForward), 0, 1);
+    const physicsState = getVehicleState();
+    const impactVelocity = physicsState?.velocity
+        ? new THREE.Vector3(physicsState.velocity.x || 0, 0, physicsState.velocity.y || 0)
+        : new THREE.Vector3();
+    if (impactVelocity.lengthSq() < 0.04) {
+        impactVelocity.copy(carForward).multiplyScalar(impactSpeed * 0.62);
+    }
+    const impactTravelDirection = impactVelocity.lengthSq() > 0.0001
+        ? impactVelocity.clone().normalize()
+        : carForward.clone();
+    const impactTravelSpeed = Math.max(impactVelocity.length(), impactSpeed * 0.58);
 
-        piece.position.copy(origin);
-        piece.position.x += (Math.random() - 0.5) * 1.6;
-        piece.position.y += 0.45 + Math.random() * 1.1;
-        piece.position.z += (Math.random() - 0.5) * 1.9;
-        piece.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
-        scene.add(piece);
+    const localHit = hitPosition.clone();
+    car.worldToLocal(localHit);
+    const hitSide = Math.abs(localHit.x) > 0.12
+        ? (localHit.x < 0 ? 'left' : 'right')
+        : (impactNormal.dot(carRight) >= 0 ? 'left' : 'right');
+    const hitZone = localHit.z < 0 ? 'front' : 'rear';
 
-        const outward = new THREE.Vector3(
-            (Math.random() - 0.5) * 2,
-            0.38 + Math.random() * 1.15,
-            (Math.random() - 0.5) * 2
-        ).normalize();
-        outward.addScaledVector(hitDirection, 0.62).normalize();
+    return {
+        origin,
+        hitDirection,
+        impactNormal,
+        carForward,
+        carRight,
+        hitSide,
+        hitZone,
+        crashIntensity,
+        frontalImpact,
+        impactSpeed,
+        impactTravelDirection,
+        impactTravelSpeed,
+        obstacleCategory: collision?.obstacleCategory || 'generic',
+        isObstacleCollision: Boolean(collision),
+    };
+}
 
-        debrisPieces.push({
-            mesh: piece,
-            velocity: outward.multiplyScalar(8 + Math.random() * 10),
-            angularVelocity: new THREE.Vector3(
-                (Math.random() - 0.5) * 11,
-                (Math.random() - 0.5) * 11,
-                (Math.random() - 0.5) * 11
-            ),
-            life: DEBRIS_LIFETIME + Math.random() * 1.1,
-        });
+function selectCrashPartsForImpact(crashContext, excludeDetached = false) {
+    if (!crashContext.isObstacleCollision) {
+        return excludeDetached
+            ? crashParts.filter((part) => !detachedCrashPartIds.has(part.id))
+            : crashParts;
     }
 
-    explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
-    explosionLight.position.copy(origin);
-    explosionLight.position.y += 1.2;
-    explosionLightLife = 0.7;
-    scene.add(explosionLight);
+    const selected = [];
+    const selectedIds = new Set();
+    const sideDominant = Math.abs(crashContext.impactNormal.dot(crashContext.carRight)) > 0.58;
+
+    crashParts.forEach((part) => {
+        if (excludeDetached && detachedCrashPartIds.has(part.id)) {
+            return;
+        }
+        const sideMatch = part.side === crashContext.hitSide;
+        const zoneMatch = part.zone === crashContext.hitZone;
+        const centered = part.side === 'center';
+        let detach = false;
+
+        if (part.type === 'wheel') {
+            if (sideDominant) {
+                detach = sideMatch;
+            } else {
+                detach = zoneMatch;
+            }
+            if (crashContext.crashIntensity > 0.88 && sideMatch && zoneMatch) {
+                detach = true;
+            }
+        } else if (part.type === 'suspension_link') {
+            detach = sideDominant
+                ? sideMatch
+                : (zoneMatch || (sideMatch && crashContext.crashIntensity > 0.72));
+            detach = detach && crashContext.crashIntensity > 0.26;
+        } else {
+            detach = sideDominant
+                ? (sideMatch || (centered && zoneMatch))
+                : (zoneMatch || (sideMatch && crashContext.crashIntensity > 0.66));
+            if (centered && crashContext.crashIntensity > 0.75) {
+                detach = true;
+            }
+        }
+
+        if (detach) {
+            selected.push(part);
+            selectedIds.add(part.id);
+        }
+    });
+
+    if (!selected.some((part) => part.type === 'wheel')) {
+        const fallbackWheel = crashParts.find((part) => (
+            part.type === 'wheel'
+            && part.side === crashContext.hitSide
+            && part.zone === crashContext.hitZone
+            && (!excludeDetached || !detachedCrashPartIds.has(part.id))
+        ));
+        if (fallbackWheel && !selectedIds.has(fallbackWheel.id)) {
+            selected.push(fallbackWheel);
+            selectedIds.add(fallbackWheel.id);
+        }
+    }
+
+    if (!selected.some((part) => part.type === 'body_panel')) {
+        const fallbackPanel = crashParts.find((part) => (
+            part.type === 'body_panel'
+            && (part.side === crashContext.hitSide || part.zone === crashContext.hitZone)
+            && (!excludeDetached || !detachedCrashPartIds.has(part.id))
+        )) || crashParts.find((part) => (
+            part.type === 'body_panel'
+            && (!excludeDetached || !detachedCrashPartIds.has(part.id))
+        ));
+        if (fallbackPanel && !selectedIds.has(fallbackPanel.id)) {
+            selected.push(fallbackPanel);
+            selectedIds.add(fallbackPanel.id);
+        }
+    }
+
+    return selected;
+}
+
+function spawnCrashPartDebris(part, crashContext) {
+    if (!part?.source) {
+        return;
+    }
+
+    const source = part.source;
+    source.updateWorldMatrix(true, true);
+    const debrisMesh = cloneCrashPartSource(source);
+    source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
+    scene.add(debrisMesh);
+
+    const relative = debrisMesh.position.clone().sub(crashContext.origin);
+    relative.y = 0;
+
+    const partSideSign = part.side === 'left' ? -1 : (part.side === 'right' ? 1 : 0);
+    const partZoneSign = part.zone === 'front' ? 1 : (part.zone === 'rear' ? -1 : 0);
+    const radialDirection = relative.lengthSq() > 0.0001
+        ? relative.normalize()
+        : crashContext.hitDirection.clone();
+    const frontalImpact = crashContext.frontalImpact || 0;
+    const lampPostFrontBoost = (
+        crashContext.obstacleCategory === 'lamp_post'
+        && crashContext.hitZone === 'front'
+    )
+        ? (1.18 + crashContext.crashIntensity * 0.34)
+        : 1;
+    const blastScale = 0.58 + crashContext.crashIntensity * 0.72 + Math.random() * 0.35;
+    const reducedBlastScale = blastScale * (1 - frontalImpact * 0.72);
+    const forwardCarryScale = (0.4 + frontalImpact * 2.4 + (crashContext.hitZone === 'front' ? 1.05 : 0.12))
+        * lampPostFrontBoost
+        * (0.86 + Math.random() * 0.34);
+    const inertiaCarryScale = (0.72 + frontalImpact * 1.2 + crashContext.crashIntensity * 0.46)
+        * lampPostFrontBoost
+        * (0.8 + Math.random() * 0.45);
+    const inertiaCarryBoost = crashContext.impactTravelSpeed * PART_BASE_IMPACT_INERTIA_SCALE * inertiaCarryScale;
+
+    const velocity = new THREE.Vector3()
+        .addScaledVector(
+            crashContext.impactNormal,
+            PART_BASE_BLAST_BOOST * reducedBlastScale
+        )
+        .addScaledVector(
+            crashContext.carForward,
+            PART_BASE_FORWARD_CARRY_BOOST * forwardCarryScale
+        )
+        .addScaledVector(
+            crashContext.impactTravelDirection,
+            inertiaCarryBoost
+        )
+        .addScaledVector(
+            radialDirection,
+            PART_BASE_LATERAL_BOOST * (0.55 + Math.random() * 0.8)
+        )
+        .addScaledVector(
+            crashContext.carRight,
+            (partSideSign || (crashContext.hitSide === 'left' ? -1 : 1)) * (1 + Math.random() * 1.4)
+        )
+        .addScaledVector(
+            crashContext.carForward,
+            (partZoneSign || (crashContext.hitZone === 'front' ? 1 : -1)) * (0.8 + Math.random() * 1.3)
+        );
+
+    velocity.y = DEBRIS_BASE_VERTICAL_BOOST
+        + Math.random() * 2.1
+        + crashContext.crashIntensity * 1.9
+        + (part.type === 'wheel' ? 1.35 : 0);
+
+    const angularBase = PART_BASE_ANGULAR_BOOST / Math.max(part.mass || 1, 0.25);
+    const angularBoost = part.type === 'wheel' ? angularBase * 1.5 : angularBase;
+    const angularVelocity = new THREE.Vector3(
+        (Math.random() - 0.5) * angularBoost,
+        (Math.random() - 0.5) * angularBoost * 1.1,
+        (Math.random() - 0.5) * angularBoost
+    );
+    let wheelRoll = null;
+    if (part.type === 'wheel') {
+        const randomHeading = Math.random() * Math.PI * 2;
+        const randomBoost = 1.6 + Math.random() * WHEEL_ROLL_RANDOM_BOOST;
+        velocity.x += Math.cos(randomHeading) * randomBoost;
+        velocity.z += Math.sin(randomHeading) * randomBoost;
+        wheelRoll = {
+            heading: Math.atan2(velocity.z, velocity.x) + (Math.random() - 0.5) * 0.9,
+            drive: THREE.MathUtils.lerp(
+                WHEEL_ROLL_DRIVE_MIN,
+                WHEEL_ROLL_DRIVE_MAX,
+                THREE.MathUtils.clamp(crashContext.crashIntensity, 0, 1)
+            ) * (0.75 + Math.random() * 0.55),
+            decel: 1.4 + Math.random() * 1.1,
+            turnRate: 0.8 + Math.random() * 1.3,
+            wobblePhase: Math.random() * Math.PI * 2,
+            wobbleRate: 3.2 + Math.random() * 3.1,
+            spin: 10 + Math.random() * 12,
+            restPose: Math.random() < 0.72 ? 'upright' : 'flat',
+            restYaw: Math.random() * Math.PI * 2,
+        };
+    }
+    let bodyRest = null;
+    if (part.type === 'body_panel') {
+        const sideAxis = Math.random() < 0.5 ? 'x' : 'z';
+        bodyRest = {
+            pose: Math.random() < 0.54 ? 'flat' : 'side',
+            sideAxis,
+            sideSign: Math.random() < 0.5 ? 1 : -1,
+            yaw: Math.random() * Math.PI * 2,
+        };
+    }
+
+    addDebrisPiece({
+        mesh: debrisMesh,
+        velocity,
+        angularVelocity,
+        groundOffset: part.groundOffset || estimateDebrisGroundOffset(debrisMesh),
+        drag: DEBRIS_DRAG * (0.92 + (part.mass || 1) * 0.08),
+        bounce: Math.max(0.16, DEBRIS_BOUNCE_DAMPING - (part.mass || 1) * 0.04),
+        wheelRoll,
+        bodyRest,
+    });
+}
+
+function cloneCrashPartSource(source) {
+    const clone = source.clone(true);
+    clone.traverse((node) => {
+        if (node.isMesh) {
+            if (node.geometry) {
+                node.geometry = node.geometry.clone();
+            }
+            if (Array.isArray(node.material)) {
+                node.material = node.material.map((material) => material?.clone?.() || material);
+            } else if (node.material?.clone) {
+                node.material = node.material.clone();
+            }
+            node.castShadow = true;
+            node.receiveShadow = true;
+        }
+    });
+    return clone;
+}
+
+function estimateDebrisGroundOffset(object3D) {
+    const box = new THREE.Box3().setFromObject(object3D);
+    if (!Number.isFinite(box.min.y) || !Number.isFinite(box.max.y)) {
+        return 0.14;
+    }
+    return Math.max((box.max.y - box.min.y) * 0.5, 0.08);
+}
+
+function getDebrisBottomY(piece) {
+    piece.mesh.updateWorldMatrix(true, true);
+    debrisBottomProbeBox.setFromObject(piece.mesh);
+    if (Number.isFinite(debrisBottomProbeBox.min.y)) {
+        return debrisBottomProbeBox.min.y;
+    }
+    return piece.mesh.position.y - (piece.groundOffset ?? 0.14);
+}
+
+function dampAngle(current, target, rate, dt) {
+    const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+    const blend = 1 - Math.exp(-Math.max(rate, 0.001) * dt);
+    return current + delta * blend;
+}
+
+function alignWheelDebrisPose(piece, dt) {
+    const wheelRoll = piece.wheelRoll;
+    if (!wheelRoll) {
+        return;
+    }
+
+    const rolling = wheelRoll.drive > 0.26;
+    const targetPose = rolling ? 'upright' : (wheelRoll.restPose || 'upright');
+    const alignRate = WHEEL_ORIENTATION_ALIGN_RATE * (rolling ? 1.5 : 1);
+
+    if (targetPose === 'flat') {
+        piece.mesh.rotation.x = dampAngle(piece.mesh.rotation.x, 0, alignRate * 0.78, dt);
+        piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, Math.PI * 0.5, alignRate, dt);
+        piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, wheelRoll.restYaw || 0, alignRate * 0.62, dt);
+        return;
+    }
+
+    const targetYaw = wheelRoll.heading + Math.PI * 0.5;
+    piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, targetYaw, alignRate, dt);
+    piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, 0, alignRate, dt);
+}
+
+function snapWheelDebrisPose(piece) {
+    const wheelRoll = piece.wheelRoll;
+    if (!wheelRoll) {
+        return;
+    }
+
+    if ((wheelRoll.restPose || 'upright') === 'flat') {
+        piece.mesh.rotation.x = 0;
+        piece.mesh.rotation.z = Math.PI * 0.5;
+        piece.mesh.rotation.y = wheelRoll.restYaw || piece.mesh.rotation.y;
+        return;
+    }
+
+    piece.mesh.rotation.z = 0;
+    piece.mesh.rotation.y = wheelRoll.heading + Math.PI * 0.5;
+}
+
+function alignBodyPanelDebrisPose(piece, dt) {
+    const bodyRest = piece.bodyRest;
+    if (!bodyRest) {
+        return;
+    }
+
+    const alignRate = BODY_PANEL_ORIENTATION_ALIGN_RATE;
+    if (bodyRest.pose === 'flat') {
+        piece.mesh.rotation.x = dampAngle(piece.mesh.rotation.x, 0, alignRate, dt);
+        piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, 0, alignRate, dt);
+        piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, bodyRest.yaw || 0, alignRate * 0.58, dt);
+        return;
+    }
+
+    const sideTargetX = bodyRest.sideAxis === 'x' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
+    const sideTargetZ = bodyRest.sideAxis === 'z' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
+    piece.mesh.rotation.x = dampAngle(piece.mesh.rotation.x, sideTargetX, alignRate * 0.96, dt);
+    piece.mesh.rotation.z = dampAngle(piece.mesh.rotation.z, sideTargetZ, alignRate * 0.96, dt);
+    piece.mesh.rotation.y = dampAngle(piece.mesh.rotation.y, bodyRest.yaw || 0, alignRate * 0.5, dt);
+}
+
+function snapBodyPanelDebrisPose(piece) {
+    const bodyRest = piece.bodyRest;
+    if (!bodyRest) {
+        return;
+    }
+
+    if (bodyRest.pose === 'flat') {
+        piece.mesh.rotation.x = 0;
+        piece.mesh.rotation.z = 0;
+        piece.mesh.rotation.y = bodyRest.yaw || piece.mesh.rotation.y;
+        return;
+    }
+
+    piece.mesh.rotation.x = bodyRest.sideAxis === 'x' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
+    piece.mesh.rotation.z = bodyRest.sideAxis === 'z' ? bodyRest.sideSign * Math.PI * 0.5 : 0;
+    piece.mesh.rotation.y = bodyRest.yaw || piece.mesh.rotation.y;
+}
+
+function addDebrisPiece({
+    mesh,
+    velocity,
+    angularVelocity,
+    life,
+    groundOffset = 0.14,
+    drag = DEBRIS_DRAG,
+    bounce = DEBRIS_BOUNCE_DAMPING,
+    wheelRoll = null,
+    bodyRest = null,
+}) {
+    debrisPieces.push({
+        mesh,
+        velocity,
+        angularVelocity,
+        life: Number.isFinite(life) ? life : Number.POSITIVE_INFINITY,
+        groundOffset,
+        drag,
+        bounce,
+        settled: false,
+        wheelRoll,
+        bodyRest,
+    });
 }
 
 function updateDebris(dt) {
     for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
         const piece = debrisPieces[i];
-        piece.life -= dt;
+        if (Number.isFinite(piece.life)) {
+            piece.life -= dt;
+            if (piece.life <= 0) {
+                scene.remove(piece.mesh);
+                disposeDebrisObject(piece.mesh);
+                debrisPieces.splice(i, 1);
+                continue;
+            }
+        }
+        if (piece.settled) {
+            continue;
+        }
 
         piece.velocity.y -= DEBRIS_GRAVITY * dt;
-        piece.velocity.multiplyScalar(Math.exp(-DEBRIS_DRAG * dt));
+        piece.velocity.multiplyScalar(Math.exp(-(piece.drag || DEBRIS_DRAG) * dt));
         piece.mesh.position.addScaledVector(piece.velocity, dt);
         piece.mesh.rotation.x += piece.angularVelocity.x * dt;
         piece.mesh.rotation.y += piece.angularVelocity.y * dt;
         piece.mesh.rotation.z += piece.angularVelocity.z * dt;
 
-        if (piece.mesh.position.y < 0.14) {
-            piece.mesh.position.y = 0.14;
+        const bottomY = getDebrisBottomY(piece);
+        if (bottomY < DEBRIS_GROUND_Y) {
+            piece.mesh.position.y += (DEBRIS_GROUND_Y - bottomY);
             if (piece.velocity.y < 0) {
-                piece.velocity.y = -piece.velocity.y * DEBRIS_BOUNCE_DAMPING;
+                piece.velocity.y = -piece.velocity.y * (piece.bounce || DEBRIS_BOUNCE_DAMPING);
             }
             piece.velocity.x *= 0.88;
             piece.velocity.z *= 0.88;
             piece.angularVelocity.multiplyScalar(0.96);
+
+            const wheelRoll = piece.wheelRoll;
+            if (wheelRoll && wheelRoll.drive > 0.02) {
+                wheelRoll.wobblePhase += dt * wheelRoll.wobbleRate;
+                wheelRoll.heading += Math.sin(wheelRoll.wobblePhase) * wheelRoll.turnRate * dt;
+                piece.velocity.x += Math.cos(wheelRoll.heading) * wheelRoll.drive * dt;
+                piece.velocity.z += Math.sin(wheelRoll.heading) * wheelRoll.drive * dt;
+                wheelRoll.drive = Math.max(0, wheelRoll.drive - wheelRoll.decel * dt);
+                wheelRoll.spin = Math.max(0, wheelRoll.spin - (3.2 + wheelRoll.decel * 0.7) * dt);
+                piece.mesh.rotation.x += wheelRoll.spin * dt;
+            }
+            if (wheelRoll) {
+                alignWheelDebrisPose(piece, dt);
+            }
+            if (piece.bodyRest) {
+                alignBodyPanelDebrisPose(piece, dt);
+            }
+
+            const horizontalSpeed = Math.hypot(piece.velocity.x, piece.velocity.z);
+            const angularSpeed = piece.angularVelocity.length();
+            const settleHorizontalThreshold = piece.wheelRoll
+                ? DEBRIS_SETTLE_HORIZONTAL_SPEED * 1.6
+                : DEBRIS_SETTLE_HORIZONTAL_SPEED;
+            const settleAngularThreshold = piece.wheelRoll
+                ? DEBRIS_SETTLE_ANGULAR_SPEED * 1.8
+                : DEBRIS_SETTLE_ANGULAR_SPEED;
+            const wheelStillRolling = Boolean(piece.wheelRoll && piece.wheelRoll.drive > 0.08);
+            if (
+                !wheelStillRolling
+                && Math.abs(piece.velocity.y) <= DEBRIS_SETTLE_VERTICAL_SPEED
+                && horizontalSpeed <= settleHorizontalThreshold
+                && angularSpeed <= settleAngularThreshold
+            ) {
+                piece.velocity.set(0, 0, 0);
+                piece.angularVelocity.set(0, 0, 0);
+                if (piece.wheelRoll) {
+                    piece.wheelRoll.drive = 0;
+                    piece.wheelRoll.spin = 0;
+                    snapWheelDebrisPose(piece);
+                }
+                if (piece.bodyRest) {
+                    snapBodyPanelDebrisPose(piece);
+                }
+                piece.settled = true;
+            }
         }
 
-        if (piece.life <= 0) {
-            scene.remove(piece.mesh);
-            piece.mesh.geometry.dispose();
-            piece.mesh.material.dispose();
-            debrisPieces.splice(i, 1);
-        }
     }
 
     if (explosionLight) {
@@ -316,6 +1209,22 @@ function updateDebris(dt) {
     }
 }
 
+function disposeDebrisObject(object3D) {
+    object3D.traverse((node) => {
+        if (!node.isMesh) {
+            return;
+        }
+        if (node.geometry) {
+            node.geometry.dispose();
+        }
+        if (Array.isArray(node.material)) {
+            node.material.forEach((material) => material?.dispose?.());
+            return;
+        }
+        node.material?.dispose?.();
+    });
+}
+
 function createObjectiveUiController() {
     const swatchEl = document.getElementById('targetColorSwatch');
     const colorNameEl = document.getElementById('targetColorName');
@@ -327,6 +1236,8 @@ function createObjectiveUiController() {
             setTargetColor() {},
             flashCorrect() {},
             showFailure() {},
+            showCrash() {},
+            showInfo() {},
         };
     }
 
@@ -335,8 +1246,11 @@ function createObjectiveUiController() {
             swatchEl.style.background = toCssHex(colorHex);
             colorNameEl.textContent = colorNameFromHex(colorHex);
         },
-        flashCorrect(colorHex) {
-            setStatus(`Õige: ${colorNameFromHex(colorHex)}`, '#8dff9a');
+        flashCorrect(colorHex, batteryPercent = null) {
+            const batteryLabel = Number.isFinite(batteryPercent)
+                ? ` | Aku ${Math.round(batteryPercent)}%`
+                : '';
+            setStatus(`Õige: ${colorNameFromHex(colorHex)}${batteryLabel}`, '#8dff9a');
         },
         showFailure(wrongColorHex, targetColorHex) {
             const wrongName = colorNameFromHex(wrongColorHex);
@@ -346,6 +1260,12 @@ function createObjectiveUiController() {
                 '#ff8e8e',
                 5000
             );
+        },
+        showCrash(messageText) {
+            setStatus(messageText, '#ff9c7f', 5000);
+        },
+        showInfo(messageText, timeoutMs = 2000) {
+            setStatus(messageText, '#a7d5ff', timeoutMs);
         },
     };
 
@@ -364,6 +1284,299 @@ function createObjectiveUiController() {
             }, timeoutMs);
         }
     }
+}
+
+function clearDriveKeys() {
+    keys.forward = false;
+    keys.backward = false;
+    keys.left = false;
+    keys.right = false;
+}
+
+function createEmptyDamageState() {
+    return {
+        wheelLossCount: 0,
+        leftLoss: 0,
+        rightLoss: 0,
+        frontLoss: 0,
+        rearLoss: 0,
+        suspensionLoss: 0,
+    };
+}
+
+function initializeBodyPartBaselines() {
+    bodyPartBaselines.clear();
+    for (let i = 0; i < crashParts.length; i += 1) {
+        const part = crashParts[i];
+        if (part?.type !== 'body_panel' || !part.source) {
+            continue;
+        }
+        bodyPartBaselines.set(part.id, {
+            position: part.source.position.clone(),
+            rotation: part.source.rotation.clone(),
+            scale: part.source.scale.clone(),
+        });
+    }
+}
+
+function applyBodyDentVisuals() {
+    const sideMagnitude = THREE.MathUtils.clamp((bodyDamageVisual.left + bodyDamageVisual.right) * 0.28, 0, 0.34);
+    const sideBias = THREE.MathUtils.clamp(bodyDamageVisual.right - bodyDamageVisual.left, -1.5, 1.5);
+    const zoneMagnitude = THREE.MathUtils.clamp((bodyDamageVisual.front + bodyDamageVisual.rear) * 0.24, 0, 0.31);
+    const zoneBias = THREE.MathUtils.clamp(bodyDamageVisual.rear - bodyDamageVisual.front, -1.5, 1.5);
+
+    for (let i = 0; i < crashParts.length; i += 1) {
+        const part = crashParts[i];
+        if (part?.type !== 'body_panel' || !part.source) {
+            continue;
+        }
+        const base = bodyPartBaselines.get(part.id);
+        if (!base) {
+            continue;
+        }
+
+        part.source.scale.set(
+            base.scale.x * (1 - sideMagnitude * 0.2),
+            base.scale.y * (1 - (sideMagnitude + zoneMagnitude) * 0.08),
+            base.scale.z * (1 - zoneMagnitude * 0.26)
+        );
+        part.source.rotation.set(
+            base.rotation.x + zoneBias * 0.05,
+            base.rotation.y,
+            base.rotation.z + sideBias * 0.07
+        );
+        part.source.position.set(
+            base.position.x - sideBias * 0.045,
+            base.position.y - (sideMagnitude + zoneMagnitude) * 0.03,
+            base.position.z + zoneBias * 0.04
+        );
+    }
+}
+
+function resetPlayerDamageState() {
+    detachedCrashPartIds.clear();
+    vehicleImpactStatusCooldown = 0;
+    const freshState = createEmptyDamageState();
+    playerDamageState.wheelLossCount = freshState.wheelLossCount;
+    playerDamageState.leftLoss = freshState.leftLoss;
+    playerDamageState.rightLoss = freshState.rightLoss;
+    playerDamageState.frontLoss = freshState.frontLoss;
+    playerDamageState.rearLoss = freshState.rearLoss;
+    playerDamageState.suspensionLoss = freshState.suspensionLoss;
+    bodyDamageVisual.left = 0;
+    bodyDamageVisual.right = 0;
+    bodyDamageVisual.front = 0;
+    bodyDamageVisual.rear = 0;
+
+    for (let i = 0; i < crashParts.length; i += 1) {
+        const part = crashParts[i];
+        if (part?.source) {
+            part.source.visible = true;
+            const base = bodyPartBaselines.get(part.id);
+            if (base) {
+                part.source.position.copy(base.position);
+                part.source.rotation.copy(base.rotation);
+                part.source.scale.copy(base.scale);
+            }
+        }
+    }
+    setVehicleDamageState(playerDamageState);
+}
+
+function resetRunStateForReplay() {
+    isCarDestroyed = false;
+    car.visible = true;
+    collectibleSystem.setEnabled(true);
+    resetPlayerDamageState();
+    clearReplayEffects();
+    clearDebris();
+}
+
+function clearDebris() {
+    for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
+        scene.remove(debrisPieces[i].mesh);
+        disposeDebrisObject(debrisPieces[i].mesh);
+    }
+    debrisPieces.length = 0;
+
+    if (explosionLight) {
+        scene.remove(explosionLight);
+        explosionLight = null;
+        explosionLightLife = 0;
+    }
+}
+
+function processReplayEvents(events = []) {
+    if (!events || events.length === 0) {
+        return;
+    }
+
+    for (let i = 0; i < events.length; i += 1) {
+        const event = events[i];
+        if (!event) {
+            continue;
+        }
+
+        if (event.type === REPLAY_EVENT_PICKUP) {
+            const position = new THREE.Vector3(
+                event.payload?.x || 0,
+                event.payload?.y || 1.2,
+                event.payload?.z || 0
+            );
+            spawnReplayPickupEffect(
+                position,
+                event.payload?.wrong ? 0xff556a : (event.payload?.colorHex || 0x7cf9ff)
+            );
+            continue;
+        }
+
+        if (event.type === REPLAY_EVENT_CRASH) {
+            const hitPosition = new THREE.Vector3(
+                event.payload?.x || car.position.x,
+                event.payload?.y || car.position.y,
+                event.payload?.z || car.position.z
+            );
+            const collisionPayload = event.payload?.collision || null;
+            const replayCollision = collisionPayload
+                ? {
+                    obstacleCategory: collisionPayload.obstacleCategory || 'building',
+                    impactSpeed: collisionPayload.impactSpeed || OBSTACLE_CRASH_MAX_SPEED,
+                    impactNormal: new THREE.Vector3(
+                        collisionPayload.impactNormalX || 0,
+                        0,
+                        collisionPayload.impactNormalZ || 0
+                    ),
+                }
+                : null;
+            spawnCarDebris(
+                hitPosition,
+                replayCollision
+            );
+        }
+    }
+}
+
+function spawnReplayPickupEffect(position, colorHex) {
+    const burstGroup = new THREE.Group();
+    burstGroup.position.copy(position);
+    burstGroup.position.y += 0.22;
+
+    const coreMaterial = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+    const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 1), coreMaterial);
+    burstGroup.add(core);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        transparent: true,
+        opacity: 0.68,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.72, 30), ringMaterial);
+    ring.rotation.x = -Math.PI * 0.5;
+    burstGroup.add(ring);
+
+    const light = new THREE.PointLight(colorHex, 1.8, 11, 2.1);
+    light.position.set(0, 0.2, 0);
+    burstGroup.add(light);
+
+    scene.add(burstGroup);
+    replayEffects.push({
+        mesh: burstGroup,
+        coreMaterial,
+        ringMaterial,
+        light,
+        life: 0.54,
+        maxLife: 0.54,
+    });
+}
+
+function updateReplayEffects(dt) {
+    for (let i = replayEffects.length - 1; i >= 0; i -= 1) {
+        const effect = replayEffects[i];
+        effect.life -= dt;
+
+        const t = THREE.MathUtils.clamp(effect.life / effect.maxLife, 0, 1);
+        const eased = 1 - t;
+        const baseScale = 1 + eased * 2.6;
+
+        effect.mesh.scale.setScalar(baseScale);
+        effect.mesh.position.y += dt * (0.5 + eased * 1.7);
+        effect.mesh.rotation.y += dt * 2.4;
+        effect.coreMaterial.opacity = 0.18 + t * 0.72;
+        effect.ringMaterial.opacity = 0.1 + t * 0.58;
+        effect.light.intensity = 0.2 + t * 1.8;
+        effect.light.distance = 5 + t * 8;
+
+        if (effect.life <= 0) {
+            scene.remove(effect.mesh);
+            effect.mesh.traverse((node) => {
+                if (node.isMesh) {
+                    node.geometry?.dispose?.();
+                    node.material?.dispose?.();
+                }
+            });
+            replayEffects.splice(i, 1);
+        }
+    }
+}
+
+function clearReplayEffects() {
+    for (let i = replayEffects.length - 1; i >= 0; i -= 1) {
+        const effect = replayEffects[i];
+        scene.remove(effect.mesh);
+        effect.mesh.traverse((node) => {
+            if (node.isMesh) {
+                node.geometry?.dispose?.();
+                node.material?.dispose?.();
+            }
+        });
+    }
+    replayEffects.length = 0;
+}
+
+function createBotStatusController() {
+    const listEl = document.getElementById('botList');
+    if (!listEl) {
+        return {
+            render() {},
+        };
+    }
+
+    return {
+        render(botStateList = []) {
+            if (!botStateList.length) {
+                listEl.textContent = 'Botid puuduvad';
+                return;
+            }
+
+            listEl.innerHTML = botStateList
+                .map((bot) => {
+                    const targetHex = bot.targetColorHex ?? 0x6b84a5;
+                    const targetName = bot.targetColorHex == null
+                        ? '-'
+                        : colorNameFromHex(targetHex);
+                    return (
+                        `<div class="botRow">`
+                        + `<span class="botName">${bot.name}</span>`
+                        + `<span class="botTarget">`
+                        + `<span class="botSwatch" style="background:${toCssHex(targetHex)}"></span>`
+                        + `${targetName}`
+                        + `</span>`
+                        + `<span class="botScore">${bot.collectedCount}</span>`
+                        + `</div>`
+                    );
+                })
+                .join('');
+        },
+    };
 }
 
 function toCssHex(colorHex) {

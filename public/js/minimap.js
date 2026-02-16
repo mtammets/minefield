@@ -21,7 +21,8 @@ export function createMiniMapController(worldBounds) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
 
-    function update(position, rotationY, pickups = []) {
+    function update(position, rotationY, pickups = [], botMarkers = [], options = {}) {
+        const hidePlayer = Boolean(options?.hidePlayer);
         const width = baseSize;
         const height = baseSize;
         const padding = 16;
@@ -83,36 +84,66 @@ export function createMiniMapController(worldBounds) {
             ctx.globalAlpha = 1;
         }
 
-        const normalizedX = (position.x - worldBounds.minX) / rangeX;
-        const normalizedZ = (position.z - worldBounds.minZ) / rangeZ;
-        const clampedX = Math.max(0, Math.min(1, normalizedX));
-        const clampedZ = Math.max(0, Math.min(1, normalizedZ));
-        const px = padding + clampedX * innerSize;
-        const py = padding + clampedZ * innerSize;
+        if (botMarkers.length > 0) {
+            for (let i = 0; i < botMarkers.length; i += 1) {
+                const bot = botMarkers[i];
+                const normalizedBotX = (bot.x - worldBounds.minX) / rangeX;
+                const normalizedBotZ = (bot.z - worldBounds.minZ) / rangeZ;
+                const clampedBotX = Math.max(0, Math.min(1, normalizedBotX));
+                const clampedBotZ = Math.max(0, Math.min(1, normalizedBotZ));
+                const botPx = padding + clampedBotX * innerSize;
+                const botPy = padding + clampedBotZ * innerSize;
+                const forwardX = -Math.sin(bot.rotationY);
+                const forwardY = -Math.cos(bot.rotationY);
+                const sideX = -forwardY;
+                const sideY = forwardX;
 
-        const forwardX = -Math.sin(rotationY);
-        const forwardY = -Math.cos(rotationY);
-        const sideX = -forwardY;
-        const sideY = forwardX;
+                ctx.fillStyle = toCssHex(bot.colorHex || 0x8fa0b8);
+                ctx.globalAlpha = 0.95;
+                ctx.beginPath();
+                ctx.moveTo(botPx + forwardX * 6.6, botPy + forwardY * 6.6);
+                ctx.lineTo(botPx - forwardX * 3.9 + sideX * 3.9, botPy - forwardY * 3.9 + sideY * 3.9);
+                ctx.lineTo(botPx - forwardX * 3.9 - sideX * 3.9, botPy - forwardY * 3.9 - sideY * 3.9);
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
 
-        const noseLength = 10;
-        const wingLength = 5.8;
-        const tailLength = 4.6;
+        if (!hidePlayer) {
+            const normalizedX = (position.x - worldBounds.minX) / rangeX;
+            const normalizedZ = (position.z - worldBounds.minZ) / rangeZ;
+            const clampedX = Math.max(0, Math.min(1, normalizedX));
+            const clampedZ = Math.max(0, Math.min(1, normalizedZ));
+            const px = padding + clampedX * innerSize;
+            const py = padding + clampedZ * innerSize;
 
-        ctx.fillStyle = '#ff8e7c';
-        ctx.beginPath();
-        ctx.moveTo(px + forwardX * noseLength, py + forwardY * noseLength);
-        ctx.lineTo(px - forwardX * tailLength + sideX * wingLength, py - forwardY * tailLength + sideY * wingLength);
-        ctx.lineTo(px - forwardX * tailLength - sideX * wingLength, py - forwardY * tailLength - sideY * wingLength);
-        ctx.closePath();
-        ctx.fill();
+            const forwardX = -Math.sin(rotationY);
+            const forwardY = -Math.cos(rotationY);
+            const sideX = -forwardY;
+            const sideY = forwardX;
 
-        ctx.fillStyle = 'rgba(124, 255, 237, 0.95)';
-        ctx.beginPath();
-        ctx.arc(px, py, 2.8, 0, Math.PI * 2);
-        ctx.fill();
+            const noseLength = 10;
+            const wingLength = 5.8;
+            const tailLength = 4.6;
 
-        info.textContent = `X ${position.x.toFixed(0)} | Z ${position.z.toFixed(0)} | OBJ ${pickups.length}`;
+            ctx.fillStyle = '#ff8e7c';
+            ctx.beginPath();
+            ctx.moveTo(px + forwardX * noseLength, py + forwardY * noseLength);
+            ctx.lineTo(px - forwardX * tailLength + sideX * wingLength, py - forwardY * tailLength + sideY * wingLength);
+            ctx.lineTo(px - forwardX * tailLength - sideX * wingLength, py - forwardY * tailLength - sideY * wingLength);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = 'rgba(124, 255, 237, 0.95)';
+            ctx.beginPath();
+            ctx.arc(px, py, 2.8, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        info.textContent = hidePlayer
+            ? `X - | Z - | OBJ ${pickups.length} | BOT ${botMarkers.length}`
+            : `X ${position.x.toFixed(0)} | Z ${position.z.toFixed(0)} | OBJ ${pickups.length} | BOT ${botMarkers.length}`;
     }
 
     resize();
