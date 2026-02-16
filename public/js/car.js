@@ -10,11 +10,14 @@ const SUSPENSION = {
     pitchAccelNorm: 42,
     bodySpring: 36,
     bodyDamping: 8.4,
-    heaveSpring: 28,
-    heaveDamping: 7.2,
+    heaveSpring: 22,
+    heaveDamping: 5.8,
     rollFromSteer: 0.92,
     roadBaseAmplitude: 0.004,
     roadSpeedAmplitude: 0.014,
+    terrainCompressionHeave: 0.086,
+    terrainReboundHeave: 0.058,
+    terrainVerticalSpeedHeave: 0.0085,
     damageRollPerWheel: THREE.MathUtils.degToRad(4.6),
     damagePitchPerWheel: THREE.MathUtils.degToRad(2.8),
     damageTurnRollGain: THREE.MathUtils.degToRad(1.8),
@@ -62,6 +65,7 @@ export function createCarRig(options = {}) {
     const batteryIndicator = showBatteryIndicator
         ? createBatteryIndicator(bodyRig, bodyMeta)
         : null;
+    let batteryLevelNormalized = 1;
     const detachableWheels = wheelController?.getDetachableWheels?.() || [];
     const detachableParts = [
         ...(bodyMeta?.detachablePanels || []),
@@ -85,6 +89,10 @@ export function createCarRig(options = {}) {
 
     function updateVisuals(vehicleState, deltaTime) {
         const dt = Math.min(deltaTime || 1 / 60, 0.05);
+        bodyMeta?.update?.({
+            ...(vehicleState || {}),
+            batteryLevelNormalized,
+        }, dt);
         wheelController.update(vehicleState, dt);
         lightController?.update(vehicleState, dt);
         collectMissingWheelState(detachableWheels, missingWheelState);
@@ -124,9 +132,20 @@ export function createCarRig(options = {}) {
         const roadShake = Math.sin(suspensionState.roadPhase) * 0.65
             + Math.sin(suspensionState.roadPhase * 1.9 + 0.7) * 0.35;
         const roadAmplitude = SUSPENSION.roadBaseAmplitude + speedRatio * SUSPENSION.roadSpeedAmplitude;
+        const terrainCompression = THREE.MathUtils.clamp(vehicleState.terrainCompression || 0, -1.2, 1.2);
+        const terrainGrounded = THREE.MathUtils.clamp(vehicleState.terrainGrounded ?? 1, 0, 1);
+        const terrainVerticalSpeed = THREE.MathUtils.clamp(vehicleState.verticalSpeed || 0, -8, 8);
+        const terrainCompressionHeave = -Math.max(0, terrainCompression) * SUSPENSION.terrainCompressionHeave;
+        const terrainReboundHeave = Math.max(0, -terrainCompression) * SUSPENSION.terrainReboundHeave;
+        const terrainSpeedHeave = -terrainVerticalSpeed * SUSPENSION.terrainVerticalSpeedHeave;
+        const terrainHeave = THREE.MathUtils.clamp(
+            (terrainCompressionHeave + terrainReboundHeave + terrainSpeedHeave) * (0.5 + terrainGrounded * 0.5),
+            -0.15,
+            0.12
+        );
         const dynamicSink = -Math.abs(targetRoll) * 0.15 - Math.abs(targetPitchWithDamage) * 0.12;
         const wheelLossSink = -missingWheels.total * SUSPENSION.damageHeaveSinkPerWheel;
-        const targetHeave = roadShake * roadAmplitude + dynamicSink + wheelLossSink;
+        const targetHeave = roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave;
         const targetLateralOffset = -sideWheelDelta * SUSPENSION.damageLateralShiftPerWheel;
 
         springToTarget(
@@ -179,7 +198,9 @@ export function createCarRig(options = {}) {
             return detachableParts;
         },
         setBatteryLevel(levelNormalized) {
-            batteryIndicator?.setLevel(levelNormalized);
+            batteryLevelNormalized = THREE.MathUtils.clamp(levelNormalized, 0, 1);
+            batteryIndicator?.setLevel(batteryLevelNormalized);
+            bodyMeta?.setBatteryLevel?.(batteryLevelNormalized);
         },
     };
 }
@@ -532,7 +553,7 @@ const playerCarRig = createCarRig({
         enableNearFillProjectors: false,
         enableFacadeFillProjectors: false,
     },
-    showBatteryIndicator: true,
+    showBatteryIndicator: false,
 });
 
 const car = playerCarRig.car;

@@ -90,6 +90,19 @@ const VEHICLE_COLLISION_RADIUS = 1.15;
 const OBSTACLE_COLLISION_ITERATIONS = 2;
 const VEHICLE_COLLISION_MASS = 1.35;
 const VEHICLE_COLLISION_PENETRATION_SHARE = 0.7;
+const VEHICLE_RIDE_HEIGHT = 0.06;
+const TERRAIN_TRACK_HALF_WIDTH = 0.9;
+const TERRAIN_TILT_RESPONSE = 10.5;
+const TERRAIN_MAX_PITCH = THREE.MathUtils.degToRad(12);
+const TERRAIN_MAX_ROLL = THREE.MathUtils.degToRad(14);
+const TERRAIN_SUSPENSION_STIFFNESS = 150;
+const TERRAIN_SUSPENSION_COMPRESSION_DAMPING = 15;
+const TERRAIN_SUSPENSION_REBOUND_DAMPING = 11;
+const TERRAIN_GRAVITY = 34;
+const TERRAIN_MAX_COMPRESSION = 0.042;
+const TERRAIN_MAX_AIR_CLEARANCE = 1.8;
+const TERRAIN_LANDING_IMPACT_SPEED = 2.4;
+const TERRAIN_LANDING_BOUNCE = 0.16;
 
 const vehicleState = {
     speed: 0,
@@ -109,6 +122,9 @@ const vehicleState = {
     burnout: 0,
     yawRate: 0,
     velocity: new THREE.Vector2(0, 0),
+    verticalSpeed: 0,
+    terrainCompression: 0,
+    terrainGrounded: 1,
 };
 
 const forward = new THREE.Vector2();
@@ -121,6 +137,11 @@ const interpolatedPosition = new THREE.Vector3();
 
 let physicsRotationY = 0;
 let previousPhysicsRotationY = 0;
+let physicsPitch = 0;
+let previousPhysicsPitch = 0;
+let physicsRoll = 0;
+let previousPhysicsRoll = 0;
+let physicsVerticalVelocity = 0;
 let isPhysicsInitialized = false;
 let pendingCrashCollision = null;
 const pendingVehicleCollisionContacts = [];
@@ -179,11 +200,19 @@ export function initializePlayerPhysics(player) {
     vehicleState.burnout = 0;
     vehicleState.yawRate = 0;
     vehicleState.velocity.set(0, 0);
+    vehicleState.verticalSpeed = 0;
+    vehicleState.terrainCompression = 0;
+    vehicleState.terrainGrounded = 1;
 
     physicsPosition.copy(player.position);
     previousPhysicsPosition.copy(player.position);
     physicsRotationY = player.rotation.y;
     previousPhysicsRotationY = player.rotation.y;
+    physicsPitch = player.rotation.x;
+    previousPhysicsPitch = player.rotation.x;
+    physicsRoll = player.rotation.z;
+    previousPhysicsRoll = player.rotation.z;
+    physicsVerticalVelocity = 0;
     isPhysicsInitialized = true;
     pendingCrashCollision = null;
     pendingVehicleCollisionContacts.length = 0;
@@ -194,7 +223,8 @@ export function updatePlayerPhysics(
     deltaTime = 1 / 60,
     worldBounds = null,
     staticObstacles = null,
-    dynamicVehicles = null
+    dynamicVehicles = null,
+    sampleGroundHeight = null
 ) {
     if (!isPhysicsInitialized) {
         initializePlayerPhysics(player);
@@ -204,6 +234,8 @@ export function updatePlayerPhysics(
 
     previousPhysicsPosition.copy(physicsPosition);
     previousPhysicsRotationY = physicsRotationY;
+    previousPhysicsPitch = physicsPitch;
+    previousPhysicsRoll = physicsRoll;
 
     updateDriverInputs(dt);
 
@@ -320,9 +352,18 @@ export function updatePlayerPhysics(
     constrainToWorld(physicsPosition, worldBounds);
     constrainToObstacles(physicsPosition, staticObstacles, Math.abs(vehicleState.speed));
     constrainToVehicles(physicsPosition, dynamicVehicles);
+    if (typeof sampleGroundHeight === 'function') {
+        applyTerrainSupport(sampleGroundHeight, dt);
+    } else {
+        physicsPitch = moveToward(physicsPitch, 0, TERRAIN_TILT_RESPONSE * 0.5 * dt);
+        physicsRoll = moveToward(physicsRoll, 0, TERRAIN_TILT_RESPONSE * 0.5 * dt);
+        vehicleState.verticalSpeed = moveToward(vehicleState.verticalSpeed, 0, 8 * dt);
+        vehicleState.terrainCompression = moveToward(vehicleState.terrainCompression, 0, 6 * dt);
+        vehicleState.terrainGrounded = 0;
+    }
 
     player.position.copy(physicsPosition);
-    player.rotation.y = physicsRotationY;
+    player.rotation.set(physicsPitch, physicsRotationY, physicsRoll);
 
     return vehicleState;
 }
@@ -579,7 +620,9 @@ export function applyInterpolatedPlayerTransform(player, alpha) {
     const blend = THREE.MathUtils.clamp(alpha, 0, 1);
     interpolatedPosition.lerpVectors(previousPhysicsPosition, physicsPosition, blend);
     player.position.copy(interpolatedPosition);
+    player.rotation.x = THREE.MathUtils.lerp(previousPhysicsPitch, physicsPitch, blend);
     player.rotation.y = lerpAngle(previousPhysicsRotationY, physicsRotationY, blend);
+    player.rotation.z = THREE.MathUtils.lerp(previousPhysicsRoll, physicsRoll, blend);
 }
 
 function constrainToWorld(position, worldBounds) {
@@ -859,6 +902,96 @@ function moveToward(current, target, maxDelta) {
 function lerpAngle(a, b, t) {
     const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a));
     return a + delta * t;
+}
+
+function applyTerrainSupport(sampleGroundHeight, dt) {
+    const previousY = physicsPosition.y;
+    const forwardX = -Math.sin(physicsRotationY);
+    const forwardZ = -Math.cos(physicsRotationY);
+    const rightX = Math.cos(physicsRotationY);
+    const rightZ = -Math.sin(physicsRotationY);
+
+    const frontOffset = TUNING.frontAxleDistance;
+    const rearOffset = TUNING.rearAxleDistance;
+    const trackOffset = TERRAIN_TRACK_HALF_WIDTH;
+
+    const frontLeftHeight = sampleGroundHeight(
+        physicsPosition.x + forwardX * frontOffset + rightX * trackOffset,
+        physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset
+    );
+    const frontRightHeight = sampleGroundHeight(
+        physicsPosition.x + forwardX * frontOffset - rightX * trackOffset,
+        physicsPosition.z + forwardZ * frontOffset - rightZ * trackOffset
+    );
+    const rearLeftHeight = sampleGroundHeight(
+        physicsPosition.x - forwardX * rearOffset + rightX * trackOffset,
+        physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset
+    );
+    const rearRightHeight = sampleGroundHeight(
+        physicsPosition.x - forwardX * rearOffset - rightX * trackOffset,
+        physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset
+    );
+
+    const frontAverage = (frontLeftHeight + frontRightHeight) * 0.5;
+    const rearAverage = (rearLeftHeight + rearRightHeight) * 0.5;
+    const leftAverage = (frontLeftHeight + rearLeftHeight) * 0.5;
+    const rightAverage = (frontRightHeight + rearRightHeight) * 0.5;
+
+    const wheelBase = Math.max(0.01, TUNING.frontAxleDistance + TUNING.rearAxleDistance);
+    const trackWidth = Math.max(0.01, TERRAIN_TRACK_HALF_WIDTH * 2);
+
+    const targetPitch = THREE.MathUtils.clamp(
+        Math.atan2(frontAverage - rearAverage, wheelBase),
+        -TERRAIN_MAX_PITCH,
+        TERRAIN_MAX_PITCH
+    );
+    const targetRoll = THREE.MathUtils.clamp(
+        Math.atan2(leftAverage - rightAverage, trackWidth),
+        -TERRAIN_MAX_ROLL,
+        TERRAIN_MAX_ROLL
+    );
+
+    const tiltBlend = 1 - Math.exp(-TERRAIN_TILT_RESPONSE * dt);
+    physicsPitch = THREE.MathUtils.lerp(physicsPitch, targetPitch, tiltBlend);
+    physicsRoll = THREE.MathUtils.lerp(physicsRoll, targetRoll, tiltBlend);
+
+    const centerHeight = sampleGroundHeight(physicsPosition.x, physicsPosition.z);
+    const averageHeight = (frontAverage + rearAverage) * 0.5;
+    const maxWheelHeight = Math.max(frontLeftHeight, frontRightHeight, rearLeftHeight, rearRightHeight);
+    const supportedGroundHeight = Math.max(centerHeight, averageHeight);
+    const targetRideHeight = supportedGroundHeight + VEHICLE_RIDE_HEIGHT;
+    const minRideOffset = Math.max(0.01, VEHICLE_RIDE_HEIGHT - TERRAIN_MAX_COMPRESSION);
+    const compressionFloor = maxWheelHeight + minRideOffset;
+
+    const springDamping = physicsVerticalVelocity < 0
+        ? TERRAIN_SUSPENSION_COMPRESSION_DAMPING
+        : TERRAIN_SUSPENSION_REBOUND_DAMPING;
+    const springAcceleration = (targetRideHeight - physicsPosition.y) * TERRAIN_SUSPENSION_STIFFNESS;
+    const dampingAcceleration = -physicsVerticalVelocity * springDamping;
+    physicsVerticalVelocity += (springAcceleration + dampingAcceleration - TERRAIN_GRAVITY) * dt;
+    physicsPosition.y += physicsVerticalVelocity * dt;
+
+    if (physicsPosition.y < compressionFloor) {
+        if (physicsVerticalVelocity < -TERRAIN_LANDING_IMPACT_SPEED) {
+            physicsVerticalVelocity = -physicsVerticalVelocity * TERRAIN_LANDING_BOUNCE;
+        } else if (physicsVerticalVelocity < 0) {
+            physicsVerticalVelocity = 0;
+        }
+        physicsPosition.y = compressionFloor;
+    }
+
+    const maxRideHeight = targetRideHeight + TERRAIN_MAX_AIR_CLEARANCE;
+    if (physicsPosition.y > maxRideHeight) {
+        physicsPosition.y = maxRideHeight;
+        if (physicsVerticalVelocity > 0) {
+            physicsVerticalVelocity = 0;
+        }
+    }
+
+    vehicleState.verticalSpeed = (physicsPosition.y - previousY) / Math.max(0.0001, dt);
+    const normalizedCompression = (targetRideHeight - physicsPosition.y) / Math.max(0.001, TERRAIN_MAX_COMPRESSION);
+    vehicleState.terrainCompression = THREE.MathUtils.clamp(normalizedCompression, -1.2, 1.2);
+    vehicleState.terrainGrounded = physicsPosition.y <= compressionFloor + 0.006 ? 1 : 0;
 }
 
 function getBurnoutFactor(totalSpeed) {

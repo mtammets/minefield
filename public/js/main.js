@@ -11,6 +11,7 @@ import {
     ground,
     cityScenery,
     worldBoundary,
+    getGroundHeightAt,
     updateGroundMotion,
 } from './environment.js';
 import { car, updateCarVisuals, setPlayerBatteryLevel, getPlayerCarCrashParts } from './car.js';
@@ -46,7 +47,8 @@ const COLOR_NAMES = {
 const DEBRIS_GRAVITY = 26;
 const DEBRIS_DRAG = 2.2;
 const DEBRIS_BOUNCE_DAMPING = 0.32;
-const DEBRIS_GROUND_Y = 0.028;
+const DEBRIS_GROUND_CLEARANCE = 0.028;
+const PLAYER_RIDE_HEIGHT = 0.06;
 const DEBRIS_BASE_VERTICAL_BOOST = 2.2;
 const DEBRIS_SETTLE_VERTICAL_SPEED = 0.45;
 const DEBRIS_SETTLE_HORIZONTAL_SPEED = 0.5;
@@ -92,6 +94,15 @@ const debrisBottomProbeBox = new THREE.Box3();
 const objectiveUi = createObjectiveUiController();
 const botStatusUi = createBotStatusController();
 const finalScoreboardUi = createFinalScoreboardController();
+const pauseMenuUi = createPauseMenuController({
+    onExit() {
+        exitFullscreenFromPauseMenu();
+    },
+    onResume() {
+        setPauseState(false);
+    },
+});
+car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
 const playerSpawnState = {
     position: car.position.clone(),
     rotationY: car.rotation.y,
@@ -107,6 +118,9 @@ let playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
 let pendingRespawnTimeout = null;
 let pickupRoundFinished = false;
 let vehicleImpactStatusCooldown = 0;
+let isGamePaused = false;
+const ESC_FULLSCREEN_FALLBACK_WINDOW_MS = 460;
+let lastEscapeKeyDownAtMs = -10_000;
 
 initializeBodyPartBaselines();
 
@@ -163,10 +177,12 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     pickupRespawnDelaySec: 1.2,
     pickupRespawnJitterSec: 1.4,
     pickupBlinkWindowSec: 2,
+    getGroundHeightAt,
 });
 botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
     botCount: 3,
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
+    getGroundHeightAt,
 });
 const miniMapController = createMiniMapController(worldBounds);
 const replayController = createReplayController(car, camera);
@@ -213,16 +229,40 @@ function initializeRenderer() {
 function initializeControls() {
     document.addEventListener('keydown', (e) => handleKey(e, true));
     document.addEventListener('keyup', (e) => handleKey(e, false));
-
+    document.addEventListener('fullscreenchange', onFullscreenChange);
     window.addEventListener('resize', onWindowResize);
 }
 
 // Klahvide vajutamise töötlemine
 function handleKey(event, isKeyDown) {
     const key = event.key.toLowerCase();
-    if (isKeyDown && event.repeat && (key === 'k' || key === 'v' || key === 'f' || key === 'q' || key === 'enter')) {
+    if (isKeyDown && event.repeat && (
+        key === 'k'
+        || key === 'v'
+        || key === 'f'
+        || key === 'q'
+        || key === 'enter'
+        || key === 'escape'
+    )) {
         return;
     }
+
+    if (key === 'escape') {
+        event.preventDefault();
+        if (isKeyDown) {
+            lastEscapeKeyDownAtMs = performance.now();
+        }
+        if (isKeyDown && !finalScoreboardUi.isVisible()) {
+            setPauseState(!isGamePaused);
+            void lockEscapeKeyInFullscreen();
+        }
+        return;
+    }
+
+    if (isGamePaused) {
+        return;
+    }
+
     const isArrowKey = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright';
     if (isArrowKey && replayController.isPlaybackActive()) {
         return;
@@ -330,9 +370,73 @@ function onWindowResize() {
 function toggleFullscreen() {
     const fullscreenRoot = document.documentElement;
     if (!document.fullscreenElement) {
-        fullscreenRoot.requestFullscreen().catch(console.error);
+        fullscreenRoot
+            .requestFullscreen()
+            .then(() => lockEscapeKeyInFullscreen())
+            .catch(console.error);
     } else {
+        unlockKeyboardLock();
         document.exitFullscreen().catch(console.error);
+    }
+}
+
+function exitFullscreenFromPauseMenu() {
+    if (!document.fullscreenElement) {
+        setPauseState(false);
+        return;
+    }
+
+    unlockKeyboardLock();
+    document
+        .exitFullscreen()
+        .then(() => {
+            setPauseState(false);
+        })
+        .catch(() => {
+            // Keep modal visible if fullscreen exit fails.
+        });
+}
+
+function onFullscreenChange() {
+    if (document.fullscreenElement) {
+        void lockEscapeKeyInFullscreen();
+        return;
+    }
+
+    unlockKeyboardLock();
+    const escapedRecently = (performance.now() - lastEscapeKeyDownAtMs) <= ESC_FULLSCREEN_FALLBACK_WINDOW_MS;
+    if (escapedRecently && !isGamePaused && !finalScoreboardUi.isVisible()) {
+        setPauseState(true);
+    }
+}
+
+async function lockEscapeKeyInFullscreen() {
+    if (!document.fullscreenElement) {
+        return;
+    }
+
+    const keyboardApi = navigator.keyboard;
+    if (!keyboardApi || typeof keyboardApi.lock !== 'function') {
+        return;
+    }
+
+    try {
+        await keyboardApi.lock(['Escape']);
+    } catch {
+        // Ignore unsupported/browser-denied keyboard lock requests.
+    }
+}
+
+function unlockKeyboardLock() {
+    const keyboardApi = navigator.keyboard;
+    if (!keyboardApi || typeof keyboardApi.unlock !== 'function') {
+        return;
+    }
+
+    try {
+        keyboardApi.unlock();
+    } catch {
+        // Ignore unsupported/browser-denied keyboard unlock requests.
     }
 }
 
@@ -341,111 +445,114 @@ function animate() {
     requestAnimationFrame(animate);
 
     const frameDelta = Math.min(clock.getDelta(), 0.05);
-    vehicleImpactStatusCooldown = Math.max(0, vehicleImpactStatusCooldown - frameDelta);
+    if (!isGamePaused) {
+        vehicleImpactStatusCooldown = Math.max(0, vehicleImpactStatusCooldown - frameDelta);
 
-    const vehicleState = getVehicleState();
-    const replayActive = replayController.isPlaybackActive();
-    let visualState = vehicleState;
+        const vehicleState = getVehicleState();
+        const replayActive = replayController.isPlaybackActive();
+        let visualState = vehicleState;
 
-    if (replayActive) {
-        physicsAccumulator = 0;
-        const replayFrame = replayController.updatePlayback(frameDelta);
-        if (replayFrame?.vehicleState) {
-            visualState = replayFrame.vehicleState;
-        }
-        updateCarVisuals(visualState, frameDelta);
-        processReplayEvents(replayFrame?.events);
-
-        if (!replayController.isPlaybackActive()) {
-            clearReplayEffects();
-            clearPendingRespawn();
-            initializePlayerPhysics(car);
-            resetPlayerDamageState();
+        if (replayActive) {
             physicsAccumulator = 0;
-            objectiveUi.showInfo('Tele-replay lõppes.');
-        }
-    } else if (!isCarDestroyed && !pickupRoundFinished) {
-        physicsAccumulator += frameDelta;
-        const vehicleCollisionSnapshots = botTrafficSystem?.getCollisionSnapshots?.() || [];
+            const replayFrame = replayController.updatePlayback(frameDelta);
+            if (replayFrame?.vehicleState) {
+                visualState = replayFrame.vehicleState;
+            }
+            updateCarVisuals(visualState, frameDelta);
+            processReplayEvents(replayFrame?.events);
 
-        let physicsSteps = 0;
-        while (physicsAccumulator >= physicsStep && physicsSteps < MAX_PHYSICS_STEPS_PER_FRAME) {
-            updatePlayerPhysics(
-                car,
-                physicsStep,
-                worldBounds,
-                staticObstacles,
-                vehicleCollisionSnapshots
-            );
-            physicsAccumulator -= physicsStep;
-            physicsSteps += 1;
-        }
+            if (!replayController.isPlaybackActive()) {
+                clearReplayEffects();
+                clearPendingRespawn();
+                initializePlayerPhysics(car);
+                resetPlayerDamageState();
+                physicsAccumulator = 0;
+                objectiveUi.showInfo('Tele-replay lõppes.');
+            }
+        } else if (!isCarDestroyed && !pickupRoundFinished) {
+            physicsAccumulator += frameDelta;
+            const vehicleCollisionSnapshots = botTrafficSystem?.getCollisionSnapshots?.() || [];
 
-        // Avoid a catch-up spiral when rendering falls behind.
-        if (physicsSteps === MAX_PHYSICS_STEPS_PER_FRAME && physicsAccumulator > physicsStep) {
-            physicsAccumulator = physicsStep;
-        }
+            let physicsSteps = 0;
+            while (physicsAccumulator >= physicsStep && physicsSteps < MAX_PHYSICS_STEPS_PER_FRAME) {
+                updatePlayerPhysics(
+                    car,
+                    physicsStep,
+                    worldBounds,
+                    staticObstacles,
+                    vehicleCollisionSnapshots,
+                    getGroundHeightAt
+                );
+                physicsAccumulator -= physicsStep;
+                physicsSteps += 1;
+            }
 
-        const vehicleContacts = consumeVehicleCollisionContacts();
-        if (vehicleContacts.length > 0) {
-            processVehicleCollisionContacts(vehicleContacts);
-        }
+            // Avoid a catch-up spiral when rendering falls behind.
+            if (physicsSteps === MAX_PHYSICS_STEPS_PER_FRAME && physicsAccumulator > physicsStep) {
+                physicsAccumulator = physicsStep;
+            }
 
-        const crashCollision = consumeCrashCollision();
-        if (crashCollision && !isCarDestroyed) {
-            triggerObstacleCrash(crashCollision);
-        }
+            const vehicleContacts = consumeVehicleCollisionContacts();
+            if (vehicleContacts.length > 0) {
+                processVehicleCollisionContacts(vehicleContacts);
+            }
 
-        if (!isCarDestroyed) {
-            const interpolationAlpha = physicsAccumulator / physicsStep;
-            applyInterpolatedPlayerTransform(car, interpolationAlpha);
-            updateCarVisuals(vehicleState, frameDelta);
-            updateBattery(vehicleState, frameDelta);
-            replayController.updateRecording(frameDelta, vehicleState);
+            const crashCollision = consumeCrashCollision();
+            if (crashCollision && !isCarDestroyed) {
+                triggerObstacleCrash(crashCollision);
+            }
+
+            if (!isCarDestroyed) {
+                const interpolationAlpha = physicsAccumulator / physicsStep;
+                applyInterpolatedPlayerTransform(car, interpolationAlpha);
+                updateCarVisuals(vehicleState, frameDelta);
+                updateBattery(vehicleState, frameDelta);
+                replayController.updateRecording(frameDelta, vehicleState);
+            } else {
+                physicsAccumulator = 0;
+                updateDebris(frameDelta);
+            }
         } else {
             physicsAccumulator = 0;
             updateDebris(frameDelta);
         }
-    } else {
-        physicsAccumulator = 0;
-        updateDebris(frameDelta);
-    }
 
-    const cameraSpeed = isCarDestroyed ? 0 : (visualState?.speed || 0);
-    if (!replayActive) {
-        updateCamera(car, cameraSpeed, frameDelta);
-    }
-    updateGroundMotion(car.position, cameraSpeed);
-    starsController.update(frameDelta);
-    if (!replayActive && !pickupRoundFinished) {
-        const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
-        botTrafficSystem.update(car.position, visiblePickupsForBots, frameDelta);
-        collectibleSystem.updateForCollectors([
-            { id: 'player', position: car.position },
-            ...botTrafficSystem.getCollectorDescriptors(),
-        ], frameDelta);
-        if (!pickupRoundFinished && totalCollectedCount >= ROUND_TOTAL_PICKUPS) {
-            finalizePickupRound(ROUND_TOTAL_PICKUPS, totalCollectedCount);
+        const cameraSpeed = isCarDestroyed ? 0 : (visualState?.speed || 0);
+        if (!replayActive) {
+            updateCamera(car, cameraSpeed, frameDelta);
         }
-        minimapAccumulator += frameDelta;
-        if (minimapAccumulator >= MINIMAP_UPDATE_INTERVAL) {
-            const visiblePickups = collectibleSystem.getVisiblePickups();
-            const botMarkers = botTrafficSystem.getMiniMapMarkers();
-            miniMapController.update(
-                car.position,
-                car.rotation.y,
-                visiblePickups,
-                botMarkers,
-                { hidePlayer: isCarDestroyed }
-            );
-            botStatusUi.render(botTrafficSystem.getHudState());
-            minimapAccumulator = 0;
+        updateGroundMotion(car.position, cameraSpeed);
+        starsController.update(frameDelta);
+        if (!replayActive && !pickupRoundFinished) {
+            const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
+            botTrafficSystem.update(car.position, visiblePickupsForBots, frameDelta);
+            collectibleSystem.updateForCollectors([
+                { id: 'player', position: car.position },
+                ...botTrafficSystem.getCollectorDescriptors(),
+            ], frameDelta);
+            if (!pickupRoundFinished && totalCollectedCount >= ROUND_TOTAL_PICKUPS) {
+                finalizePickupRound(ROUND_TOTAL_PICKUPS, totalCollectedCount);
+            }
+            minimapAccumulator += frameDelta;
+            if (minimapAccumulator >= MINIMAP_UPDATE_INTERVAL) {
+                const visiblePickups = collectibleSystem.getVisiblePickups();
+                const botMarkers = botTrafficSystem.getMiniMapMarkers();
+                miniMapController.update(
+                    car.position,
+                    car.rotation.y,
+                    visiblePickups,
+                    botMarkers,
+                    { hidePlayer: isCarDestroyed }
+                );
+                botStatusUi.render(botTrafficSystem.getHudState());
+                minimapAccumulator = 0;
+            }
         }
-    }
 
-    updateReplayEffects(frameDelta);
-    if ((replayActive || !isCarDestroyed) && (debrisPieces.length > 0 || explosionLight)) {
-        updateDebris(frameDelta);
+        updateReplayEffects(frameDelta);
+        if ((replayActive || !isCarDestroyed) && (debrisPieces.length > 0 || explosionLight)) {
+            updateDebris(frameDelta);
+        }
     }
 
     updateSunLightPosition();
@@ -1091,6 +1198,10 @@ function getDebrisBottomY(piece) {
     return piece.mesh.position.y - (piece.groundOffset ?? 0.14);
 }
 
+function getDebrisGroundHeightAt(x, z) {
+    return getGroundHeightAt(x, z) + DEBRIS_GROUND_CLEARANCE;
+}
+
 function dampAngle(current, target, rate, dt) {
     const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current));
     const blend = 1 - Math.exp(-Math.max(rate, 0.001) * dt);
@@ -1208,7 +1319,8 @@ function updateDebris(dt) {
         piece.mesh.rotation.z += piece.angularVelocity.z * dt;
 
         const bottomY = getDebrisBottomY(piece);
-        const groundPenetration = DEBRIS_GROUND_Y - bottomY;
+        const groundY = getDebrisGroundHeightAt(piece.mesh.position.x, piece.mesh.position.z);
+        const groundPenetration = groundY - bottomY;
         const nearGroundContact = groundPenetration >= -0.0025;
         if (groundPenetration > 0) {
             piece.mesh.position.y += groundPenetration;
@@ -1380,12 +1492,31 @@ function clearDriveKeys() {
     keys.right = false;
 }
 
+function setPauseState(nextPaused) {
+    const shouldPause = Boolean(nextPaused);
+    if (isGamePaused === shouldPause) {
+        return;
+    }
+
+    isGamePaused = shouldPause;
+    if (isGamePaused) {
+        clearDriveKeys();
+        pauseMenuUi.show();
+        return;
+    }
+    pauseMenuUi.hide();
+}
+
 function clearPendingRespawn() {
     if (pendingRespawnTimeout == null) {
         return;
     }
     clearTimeout(pendingRespawnTimeout);
     pendingRespawnTimeout = null;
+}
+
+function snapCarToGround() {
+    car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
 }
 
 function respawnPlayerCar() {
@@ -1396,6 +1527,7 @@ function respawnPlayerCar() {
     isCarDestroyed = false;
     car.visible = true;
     car.position.copy(playerSpawnState.position);
+    snapCarToGround();
     car.rotation.set(0, playerSpawnState.rotationY, 0);
     collectibleSystem.setEnabled(true);
     clearDriveKeys();
@@ -1511,6 +1643,7 @@ function resetRunStateForReplay() {
     isCarDestroyed = false;
     car.visible = true;
     car.position.copy(playerSpawnState.position);
+    snapCarToGround();
     car.rotation.set(0, playerSpawnState.rotationY, 0);
     collectibleSystem.setEnabled(true);
     playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
@@ -1523,6 +1656,7 @@ function resetRunStateForReplay() {
 }
 
 function startNewGame() {
+    setPauseState(false);
     replayController.stopRecording();
     replayController.stopPlayback();
     replayController.clear();
@@ -1543,6 +1677,7 @@ function startNewGame() {
 
     car.visible = true;
     car.position.copy(playerSpawnState.position);
+    snapCarToGround();
     car.rotation.set(0, playerSpawnState.rotationY, 0);
 
     collectibleSystem.reset?.();
@@ -1785,6 +1920,40 @@ function createFinalScoreboardController() {
             rootEl.hidden = true;
             listEl.innerHTML = '';
             summaryEl.textContent = '';
+        },
+        isVisible() {
+            return !rootEl.hidden;
+        },
+    };
+}
+
+function createPauseMenuController({ onExit, onResume } = {}) {
+    const rootEl = document.getElementById('pauseModal');
+    const exitBtnEl = document.getElementById('pauseExitBtn');
+    const resumeBtnEl = document.getElementById('pauseResumeBtn');
+    if (!rootEl || !exitBtnEl || !resumeBtnEl) {
+        return {
+            show() {},
+            hide() {},
+            isVisible() {
+                return false;
+            },
+        };
+    }
+
+    exitBtnEl.addEventListener('click', () => {
+        onExit?.();
+    });
+    resumeBtnEl.addEventListener('click', () => {
+        onResume?.();
+    });
+
+    return {
+        show() {
+            rootEl.hidden = false;
+        },
+        hide() {
+            rootEl.hidden = true;
         },
         isVisible() {
             return !rootEl.hidden;

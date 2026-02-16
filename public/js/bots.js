@@ -29,6 +29,7 @@ const BOT_INDICATOR_HEIGHT = 1.52;
 const BOT_INDICATOR_BOB_AMPLITUDE = 0.1;
 const BOT_INDICATOR_BOB_SPEED = 1.9;
 const BOT_INDICATOR_PULSE_SPEED = 4.2;
+const BOT_RIDE_HEIGHT = 0.06;
 
 const BOT_BODY_COLORS = [0x6cb3ff, 0xff8f7d, 0x9cf89c, 0xe9a3ff, 0xffd86b];
 const BOT_NAMES = ['NOVA-1', 'AXIS-2', 'RIFT-3', 'PULSE-4', 'ORBIT-5'];
@@ -42,13 +43,22 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     const {
         botCount = DEFAULT_BOT_COUNT,
         sharedTargetColorHex = 0x7cf9ff,
+        getGroundHeightAt = null,
     } = options;
     let resolvedSharedTargetColorHex = sharedTargetColorHex;
 
     const bots = [];
     const botsByCollectorId = new Map();
     for (let i = 0; i < Math.max(0, botCount); i += 1) {
-        const bot = createBot(scene, worldBounds, staticObstacles, bots, i, resolvedSharedTargetColorHex);
+        const bot = createBot(
+            scene,
+            worldBounds,
+            staticObstacles,
+            bots,
+            i,
+            resolvedSharedTargetColorHex,
+            getGroundHeightAt
+        );
         bots.push(bot);
         botsByCollectorId.set(bot.collectorId, bot);
     }
@@ -60,7 +70,16 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 if (bots[i].destroyed) {
                     continue;
                 }
-                updateBot(bots[i], bots, playerPosition, visiblePickups, dt, worldBounds, staticObstacles);
+                updateBot(
+                    bots[i],
+                    bots,
+                    playerPosition,
+                    visiblePickups,
+                    dt,
+                    worldBounds,
+                    staticObstacles,
+                    getGroundHeightAt
+                );
             }
         },
         getCollisionSnapshots() {
@@ -114,7 +133,15 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             const placedBots = [];
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
-                resetBot(bot, i, worldBounds, staticObstacles, placedBots, resolvedSharedTargetColorHex);
+                resetBot(
+                    bot,
+                    i,
+                    worldBounds,
+                    staticObstacles,
+                    placedBots,
+                    resolvedSharedTargetColorHex,
+                    getGroundHeightAt
+                );
                 placedBots.push(bot);
             }
         },
@@ -138,10 +165,26 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     };
 }
 
-function resetBot(bot, index, worldBounds, staticObstacles, placedBots, sharedTargetColorHex) {
+function resolveBotGroundHeight(x, z, getGroundHeightAt) {
+    if (typeof getGroundHeightAt !== 'function') {
+        return BOT_RIDE_HEIGHT;
+    }
+    return getGroundHeightAt(x, z) + BOT_RIDE_HEIGHT;
+}
+
+function resetBot(
+    bot,
+    index,
+    worldBounds,
+    staticObstacles,
+    placedBots,
+    sharedTargetColorHex,
+    getGroundHeightAt
+) {
     const spawnPosition = findSpawnPoint(index, worldBounds, staticObstacles, placedBots);
     bot.car.position.x = spawnPosition.x;
     bot.car.position.z = spawnPosition.z;
+    bot.car.position.y = resolveBotGroundHeight(spawnPosition.x, spawnPosition.z, getGroundHeightAt);
     bot.car.rotation.y = spawnPosition.rotationY;
     bot.car.visible = true;
 
@@ -191,7 +234,15 @@ function resetBot(bot, index, worldBounds, staticObstacles, placedBots, sharedTa
     bot.updateVisuals(bot.state, 1 / 60);
 }
 
-function createBot(scene, worldBounds, staticObstacles, existingBots, index, sharedTargetColorHex) {
+function createBot(
+    scene,
+    worldBounds,
+    staticObstacles,
+    existingBots,
+    index,
+    sharedTargetColorHex,
+    getGroundHeightAt
+) {
     const name = BOT_NAMES[index] || `BOT-${index + 1}`;
     const bodyColor = BOT_BODY_COLORS[index % BOT_BODY_COLORS.length];
     const collectorId = `bot-${index + 1}`;
@@ -211,6 +262,7 @@ function createBot(scene, worldBounds, staticObstacles, existingBots, index, sha
     const spawnPosition = findSpawnPoint(index, worldBounds, staticObstacles, existingBots);
     carRig.car.position.x = spawnPosition.x;
     carRig.car.position.z = spawnPosition.z;
+    carRig.car.position.y = resolveBotGroundHeight(spawnPosition.x, spawnPosition.z, getGroundHeightAt);
     carRig.car.rotation.y = spawnPosition.rotationY;
     scene.add(carRig.car);
     const indicator = createBotIndicator(name, bodyColor);
@@ -247,7 +299,16 @@ function createBot(scene, worldBounds, staticObstacles, existingBots, index, sha
     return bot;
 }
 
-function updateBot(bot, allBots, playerPosition, visiblePickups, dt, worldBounds, staticObstacles) {
+function updateBot(
+    bot,
+    allBots,
+    playerPosition,
+    visiblePickups,
+    dt,
+    worldBounds,
+    staticObstacles,
+    getGroundHeightAt
+) {
     const damageDynamics = getBotDamageDynamics(bot.damageState);
     const targetPickup = findNearestPickup(bot.car.position, visiblePickups);
 
@@ -328,6 +389,11 @@ function updateBot(bot, allBots, playerPosition, visiblePickups, dt, worldBounds
 
     constrainToWorld(bot.car.position, bot.state, worldBounds);
     constrainToObstacles(bot.car.position, bot.state, staticObstacles);
+    bot.car.position.y = resolveBotGroundHeight(
+        bot.car.position.x,
+        bot.car.position.z,
+        getGroundHeightAt
+    );
 
     bot.updateVisuals(bot.state, dt);
     updateBotIndicator(bot, dt);

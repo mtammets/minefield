@@ -13,6 +13,150 @@ const SPEED_GLOW_MAX = 30;
 const LAMP_REAL_LIGHT_GRID_RADIUS = 3;
 const BUILDING_DISTRICT_RADIUS = 3;
 const WORLD_HALF_SIZE = CITY_GRID_SPACING * (CITY_GRID_RANGE + 0.5);
+const TERRAIN_SEGMENTS = 220;
+const JUMP_RAMP_SURFACE_Y = 0.046;
+const JUMP_RAMPS = [
+    createJumpRampConfig({
+        x: 0,
+        z: -168,
+        headingDeg: 0,
+        height: 1.08,
+        approachLength: 8.2,
+        tableLength: 4.2,
+        width: 8.2,
+        sideFade: 1.2,
+    }),
+    createJumpRampConfig({
+        x: 0,
+        z: -84,
+        headingDeg: 0,
+        height: 1.14,
+        approachLength: 8.7,
+        tableLength: 4.2,
+        width: 8.6,
+        sideFade: 1.3,
+    }),
+    createJumpRampConfig({
+        x: -84,
+        z: -84,
+        headingDeg: 90,
+        height: 0.98,
+        approachLength: 7.8,
+        tableLength: 3.8,
+        width: 7.8,
+        sideFade: 1.1,
+    }),
+    createJumpRampConfig({
+        x: 84,
+        z: -84,
+        headingDeg: 90,
+        height: 0.98,
+        approachLength: 7.8,
+        tableLength: 3.8,
+        width: 7.8,
+        sideFade: 1.1,
+    }),
+    createJumpRampConfig({
+        x: -168,
+        z: 0,
+        headingDeg: 90,
+        height: 1.08,
+        approachLength: 8.1,
+        tableLength: 4.1,
+        width: 8.2,
+        sideFade: 1.2,
+    }),
+    createJumpRampConfig({
+        x: -84,
+        z: 0,
+        headingDeg: 90,
+        height: 1.08,
+        approachLength: 8.4,
+        tableLength: 4.2,
+        width: 8.2,
+        sideFade: 1.2,
+    }),
+    createJumpRampConfig({
+        x: 84,
+        z: 0,
+        headingDeg: 90,
+        height: 1.08,
+        approachLength: 8.4,
+        tableLength: 4.2,
+        width: 8.2,
+        sideFade: 1.2,
+    }),
+    createJumpRampConfig({
+        x: 168,
+        z: 0,
+        headingDeg: 90,
+        height: 1.08,
+        approachLength: 8.1,
+        tableLength: 4.1,
+        width: 8.2,
+        sideFade: 1.2,
+    }),
+    createJumpRampConfig({
+        x: -84,
+        z: 84,
+        headingDeg: 90,
+        height: 0.98,
+        approachLength: 7.8,
+        tableLength: 3.8,
+        width: 7.8,
+        sideFade: 1.1,
+    }),
+    createJumpRampConfig({
+        x: 0,
+        z: 84,
+        headingDeg: 0,
+        height: 1.14,
+        approachLength: 8.7,
+        tableLength: 4.2,
+        width: 8.6,
+        sideFade: 1.3,
+    }),
+    createJumpRampConfig({
+        x: 84,
+        z: 84,
+        headingDeg: 90,
+        height: 0.98,
+        approachLength: 7.8,
+        tableLength: 3.8,
+        width: 7.8,
+        sideFade: 1.1,
+    }),
+    createJumpRampConfig({
+        x: 0,
+        z: 168,
+        headingDeg: 0,
+        height: 1.08,
+        approachLength: 8.2,
+        tableLength: 4.2,
+        width: 8.2,
+        sideFade: 1.2,
+    }),
+    createJumpRampConfig({
+        x: -168,
+        z: -168,
+        headingDeg: 45,
+        height: 1.22,
+        approachLength: 8.9,
+        tableLength: 4.6,
+        width: 8.8,
+        sideFade: 1.4,
+    }),
+    createJumpRampConfig({
+        x: 168,
+        z: 168,
+        headingDeg: 135,
+        height: 1.22,
+        approachLength: 8.9,
+        tableLength: 4.6,
+        width: 8.8,
+        sideFade: 1.4,
+    }),
+];
 const worldBounds = {
     minX: -WORLD_HALF_SIZE,
     maxX: WORLD_HALF_SIZE,
@@ -55,6 +199,7 @@ export {
     ground,
     cityScenery,
     worldBoundary,
+    getGroundHeightAt,
     updateGroundMotion,
 };
 
@@ -88,12 +233,32 @@ function createGround({ texture, size, positionY }) {
     material.emissive = new THREE.Color(0x233852);
     material.emissiveIntensity = material.userData.baseEmissive;
 
-    const geometry = new THREE.PlaneGeometry(...size);
+    const geometry = new THREE.PlaneGeometry(size[0], size[1], TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
+    geometry.rotateX(-Math.PI / 2);
+    const positions = geometry.attributes.position;
+    for (let i = 0; i < positions.count; i += 1) {
+        const x = positions.getX(i);
+        const z = positions.getZ(i);
+        positions.setY(i, getGroundHeightAt(x, z));
+    }
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.rotation.x = -Math.PI / 2;
     mesh.position.y = positionY;
     mesh.receiveShadow = false;
     return mesh;
+}
+
+function getGroundHeightAt(_x, _z) {
+    let height = 0;
+    for (let i = 0; i < JUMP_RAMPS.length; i += 1) {
+        const rampHeight = sampleJumpRampHeight(_x, _z, JUMP_RAMPS[i]);
+        if (rampHeight > height) {
+            height = rampHeight;
+        }
+    }
+    return height;
 }
 
 function updateGroundMotion(_playerPosition, playerSpeed = 0) {
@@ -196,11 +361,65 @@ function createCityScenery() {
     staticObstacles.length = 0;
 
     group.add(createRoadLayer());
+    group.add(createJumpRampLayer());
     group.add(createParkLayer());
     group.add(createBuildingLayer());
     group.add(createStreetLampLayer(group.userData.lampLights));
 
     return group;
+}
+
+function createJumpRampLayer() {
+    const layer = new THREE.Group();
+    layer.name = 'jumpRampLayer';
+
+    const rampMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4b627f,
+        emissive: 0x284462,
+        emissiveIntensity: 0.66,
+        roughness: 0.7,
+        metalness: 0.16,
+    });
+    const markerGeometry = new THREE.RingGeometry(2.6, 3.6, 24);
+    const markerMaterial = new THREE.MeshBasicMaterial({
+        color: 0x8fdbff,
+        transparent: true,
+        opacity: 0.32,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+
+    for (let i = 0; i < JUMP_RAMPS.length; i += 1) {
+        const ramp = JUMP_RAMPS[i];
+        const width = ramp.halfWidth * 2 + ramp.sideFade * 1.8;
+        const length = ramp.totalHalfLength * 2;
+        const geometry = new THREE.PlaneGeometry(width, length, 7, 22);
+        geometry.rotateX(-Math.PI / 2);
+
+        const positions = geometry.attributes.position;
+        for (let vertex = 0; vertex < positions.count; vertex += 1) {
+            const localLat = positions.getX(vertex);
+            const localLong = positions.getZ(vertex);
+            positions.setY(vertex, getJumpRampLocalHeight(localLong, localLat, ramp));
+        }
+        positions.needsUpdate = true;
+        geometry.computeVertexNormals();
+
+        const mesh = new THREE.Mesh(geometry, rampMaterial);
+        mesh.position.set(ramp.x, JUMP_RAMP_SURFACE_Y, ramp.z);
+        mesh.rotation.y = ramp.headingRad;
+        mesh.receiveShadow = false;
+        mesh.castShadow = false;
+        layer.add(mesh);
+
+        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+        marker.rotation.x = -Math.PI / 2;
+        marker.position.set(ramp.x, JUMP_RAMP_SURFACE_Y + ramp.height + 0.03, ramp.z);
+        layer.add(marker);
+    }
+
+    return layer;
 }
 
 function createRoadLayer() {
@@ -483,13 +702,14 @@ function createParkLayer() {
     const canopyColor = new THREE.Color();
 
     trees.forEach((tree, index) => {
-        dummy.position.set(tree.x, 1.25 * tree.scale, tree.z);
+        const baseY = getGroundHeightAt(tree.x, tree.z);
+        dummy.position.set(tree.x, baseY + 1.25 * tree.scale, tree.z);
         dummy.scale.set(tree.scale, tree.scale, tree.scale);
         dummy.rotation.set(0, randomFromGrid(index, trees.length, 120) * Math.PI * 2, 0);
         dummy.updateMatrix();
         trunks.setMatrixAt(index, dummy.matrix);
 
-        dummy.position.set(tree.x, 3.2 * tree.scale, tree.z);
+        dummy.position.set(tree.x, baseY + 3.2 * tree.scale, tree.z);
         dummy.scale.set(tree.scale, tree.scale, tree.scale);
         dummy.updateMatrix();
         canopies.setMatrixAt(index, dummy.matrix);
@@ -544,20 +764,21 @@ function createStreetLampLayer(lampLights) {
 
             const positionX = gridX * CITY_GRID_SPACING + (Math.abs(gridX) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
             const positionZ = gridZ * CITY_GRID_SPACING + (Math.abs(gridZ) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
+            const baseY = getGroundHeightAt(positionX, positionZ);
 
             const pole = new THREE.Mesh(poleGeometry, poleMaterial);
-            pole.position.set(positionX, 4.3, positionZ);
+            pole.position.set(positionX, baseY + 4.3, positionZ);
             pole.castShadow = false;
             pole.receiveShadow = false;
             layer.add(pole);
             addObstacleCircle(positionX, positionZ, 0.58, 'lamp_post');
 
             const lampHead = new THREE.Mesh(headGeometry, glowMaterial);
-            lampHead.position.set(positionX, 8.6, positionZ);
+            lampHead.position.set(positionX, baseY + 8.6, positionZ);
             layer.add(lampHead);
 
             const pool = new THREE.Mesh(poolGeometry, poolMaterial);
-            pool.position.set(positionX, 0.07, positionZ);
+            pool.position.set(positionX, baseY + 0.07, positionZ);
             pool.rotation.x = -Math.PI / 2;
             pool.scale.setScalar(0.9 + randomFromGrid(gridX, gridZ, 38) * 0.45);
             layer.add(pool);
@@ -568,7 +789,7 @@ function createStreetLampLayer(lampLights) {
             const isAlternatingSlot = Math.abs(gridX + gridZ) % 4 === 1;
             if (canHaveLight && isAlternatingSlot) {
                 const light = new THREE.PointLight(0xffcf8d, 1.35, 42, 2);
-                light.position.set(positionX, 8.2, positionZ);
+                light.position.set(positionX, baseY + 8.2, positionZ);
                 light.userData.baseIntensity = 1.08 + randomFromGrid(gridX, gridZ, 21) * 0.34;
                 light.castShadow = false;
                 lampLights.push(light);
@@ -623,4 +844,76 @@ function addObstacleAabb(x, z, width, depth, padding = 0, category = 'generic') 
         maxZ: z + halfDepth,
         category,
     });
+}
+
+function createJumpRampConfig({
+    x,
+    z,
+    headingDeg = 0,
+    height = 1,
+    approachLength = 8,
+    tableLength = 4,
+    width = 8,
+    sideFade = 1.2,
+}) {
+    const headingRad = THREE.MathUtils.degToRad(headingDeg);
+    return {
+        x,
+        z,
+        headingRad,
+        dirX: Math.sin(headingRad),
+        dirZ: Math.cos(headingRad),
+        height,
+        approachLength,
+        tableHalfLength: tableLength * 0.5,
+        halfWidth: width * 0.5,
+        sideFade,
+        totalHalfLength: approachLength + tableLength * 0.5,
+    };
+}
+
+function sampleJumpRampHeight(x, z, ramp) {
+    const dx = x - ramp.x;
+    const dz = z - ramp.z;
+    const localLong = dx * ramp.dirX + dz * ramp.dirZ;
+    const localLat = -dx * ramp.dirZ + dz * ramp.dirX;
+    return getJumpRampLocalHeight(localLong, localLat, ramp);
+}
+
+function getJumpRampLocalHeight(localLong, localLat, ramp) {
+    const absLat = Math.abs(localLat);
+    const maxLat = ramp.halfWidth + ramp.sideFade;
+    if (absLat >= maxLat) {
+        return 0;
+    }
+
+    const longitudinalHeight = getJumpRampLongitudinalHeight(localLong, ramp);
+    if (longitudinalHeight <= 0) {
+        return 0;
+    }
+
+    if (absLat <= ramp.halfWidth) {
+        return longitudinalHeight;
+    }
+
+    const fade = (absLat - ramp.halfWidth) / Math.max(0.001, ramp.sideFade);
+    return longitudinalHeight * (1 - smoothStep01(fade));
+}
+
+function getJumpRampLongitudinalHeight(localLong, ramp) {
+    const absLong = Math.abs(localLong);
+    if (absLong >= ramp.totalHalfLength) {
+        return 0;
+    }
+    if (absLong <= ramp.tableHalfLength) {
+        return ramp.height;
+    }
+
+    const slopeT = (absLong - ramp.tableHalfLength) / Math.max(0.001, ramp.approachLength);
+    return ramp.height * (1 - smoothStep01(slopeT));
+}
+
+function smoothStep01(value) {
+    const t = THREE.MathUtils.clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
 }

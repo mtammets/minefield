@@ -283,6 +283,82 @@ canvas#gameCanvas {
     filter: brightness(0.96);
 }
 
+#pauseModal {
+    position: fixed;
+    inset: 0;
+    z-index: 9;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(4, 7, 13, 0.62);
+    backdrop-filter: blur(4px);
+}
+
+#pauseModal[hidden] {
+    display: none;
+}
+
+.pauseCard {
+    width: min(360px, calc(100vw - 28px));
+    border: 1px solid rgba(157, 198, 255, 0.56);
+    border-radius: 14px;
+    padding: 16px;
+    background: linear-gradient(170deg, rgba(18, 28, 47, 0.95), rgba(9, 15, 29, 0.95));
+    box-shadow: 0 16px 54px rgba(0, 0, 0, 0.48);
+    color: #e9f5ff;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+}
+
+#pauseTitle {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    margin-bottom: 12px;
+    color: #dff0ff;
+}
+
+.pauseActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.pauseBtn {
+    border: 1px solid rgba(183, 217, 255, 0.65);
+    border-radius: 9px;
+    padding: 10px 12px;
+    background: rgba(25, 47, 79, 0.74);
+    color: #f4fbff;
+    font-family: 'Trebuchet MS', Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+    transition: transform 120ms ease, filter 120ms ease, background 120ms ease;
+}
+
+.pauseBtn.exit {
+    border-color: rgba(255, 160, 160, 0.72);
+    background: rgba(103, 39, 47, 0.62);
+    color: #ffe5e5;
+}
+
+.pauseBtn.resume {
+    border-color: rgba(164, 238, 188, 0.72);
+    background: rgba(35, 88, 56, 0.62);
+    color: #e9ffef;
+}
+
+.pauseBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+}
+
+.pauseBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+}
+
 @media (max-width: 860px) {
     #objectivePanel {
         left: 10px;

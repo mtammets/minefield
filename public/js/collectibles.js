@@ -6,7 +6,7 @@ const CELL_SIZE = 34;
 const CELL_MARGIN = 4;
 const CELL_PICKUP_CHANCE = 0.18;
 const ACTIVE_CELL_RADIUS = 6;
-const PICKUP_GROUND_HEIGHT = 1.35;
+const PICKUP_HEIGHT_ABOVE_GROUND = 1.35;
 
 const shapeGeometries = [
     new THREE.IcosahedronGeometry(1.35, 0),
@@ -62,6 +62,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         pickupRespawnDelaySec = 1.8,
         pickupRespawnJitterSec = 1.8,
         pickupBlinkWindowSec = 2.2,
+        getGroundHeightAt = null,
     } = options;
 
     const resolvedIdPrefix = typeof idPrefix === 'string' && idPrefix ? idPrefix : 'pickup';
@@ -187,6 +188,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                         singleShapeIndex: resolvedSingleShapeIndex,
                         elapsedTime,
                         maxActivePickups: resolvedMaxActivePickups,
+                        getGroundHeightAt,
                     });
                     lastSyncSignature = syncSignature;
                 }
@@ -393,7 +395,8 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 worldBounds,
                 resolvedSeedOffset + queueItem.seedOffset,
                 resolvedSingleType,
-                resolvedSingleShapeIndex
+                resolvedSingleShapeIndex,
+                getGroundHeightAt
             );
             if (!pickup) {
                 continue;
@@ -454,6 +457,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             singleShapeIndex,
             elapsedTime,
             maxActivePickups,
+            getGroundHeightAt,
         } = context;
 
         activePickupIds.clear();
@@ -501,7 +505,8 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                         worldBounds,
                         seedOffset,
                         singleType,
-                        singleShapeIndex
+                        singleShapeIndex,
+                        getGroundHeightAt
                     );
                     if (!pickup) {
                         continue;
@@ -666,14 +671,25 @@ function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {
     pickup.mesh.scale.setScalar(pulseScale);
 }
 
-function createPickupForCell(cellX, cellZ, worldBounds, seedOffset = 0, singleType = false, singleShapeIndex = 0) {
+function createPickupForCell(
+    cellX,
+    cellZ,
+    worldBounds,
+    seedOffset = 0,
+    singleType = false,
+    singleShapeIndex = 0,
+    getGroundHeightAt = null
+) {
     const span = CELL_SIZE - CELL_MARGIN * 2;
     const x = cellX * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 11, seedOffset) * span;
     const z = cellZ * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 12, seedOffset) * span;
     if (worldBounds && !isInsideWorldBounds(x, z, worldBounds)) {
         return null;
     }
-    const y = PICKUP_GROUND_HEIGHT;
+    const groundHeight = typeof getGroundHeightAt === 'function'
+        ? getGroundHeightAt(x, z)
+        : 0;
+    const y = groundHeight + PICKUP_HEIGHT_ABOVE_GROUND;
     const shapeIndex = singleType
         ? normalizeColorIndex(singleShapeIndex)
         : Math.floor(
