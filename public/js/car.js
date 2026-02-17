@@ -3,6 +3,7 @@ import { initializeWheels } from './wheels.js';
 import { addLightsToCar, addLuxuryBody, createSuspensionLinkage } from './carbody.js';
 
 const DEFAULT_CAR_BASE_RIDE_HEIGHT = 0.06;
+const PLAYER_REAR_LIGHT_Z = 2.045;
 
 const SUSPENSION = {
     maxPitch: THREE.MathUtils.degToRad(4.8),
@@ -69,6 +70,9 @@ export function createCarRig(options = {}) {
     const car = new THREE.Group();
     const bodyRig = new THREE.Group();
     const wheelRig = new THREE.Group();
+    const lightRig = new THREE.Group();
+    lightRig.name = 'light_rig';
+    bodyRig.add(lightRig);
     car.add(wheelRig, bodyRig);
 
     // Keep tire contact visually aligned with the raised road surface planes.
@@ -76,7 +80,7 @@ export function createCarRig(options = {}) {
 
     const bodyMeta = addLuxuryBody(bodyRig, { bodyColor, displayName });
     const wheelController = initializeWheels(wheelRig, { addWheelWellLights });
-    const lightController = addLights ? addLightsToCar(bodyRig, lightConfig) : null;
+    const lightController = addLights ? addLightsToCar(lightRig, lightConfig) : null;
     const suspensionLinkage = createSuspensionLinkage(car, bodyRig, wheelRig, bodyMeta);
     const batteryIndicator = showBatteryIndicator
         ? createBatteryIndicator(bodyRig, bodyMeta)
@@ -90,6 +94,18 @@ export function createCarRig(options = {}) {
     ];
     const missingWheelState = createMissingWheelState();
     const scrapeSparkSystem = createScrapeSparkSystem(car);
+    const wheelEditGroups = wheelController?.getEditGroups?.() || {};
+    const editablePartDescriptors = buildEditablePartDescriptors({
+        detachableParts,
+        bodyMeta,
+        wheelEditGroups,
+        suspensionLinkage,
+        lightRig,
+        batteryIndicator,
+    });
+    const editablePartIndex = new Map(
+        editablePartDescriptors.map((descriptor) => [descriptor.id, descriptor])
+    );
 
     const suspensionState = {
         pitch: 0,
@@ -329,7 +345,194 @@ export function createCarRig(options = {}) {
         setBodyColor(colorHex) {
             bodyMeta?.setBodyColor?.(colorHex);
         },
+        getEditableParts() {
+            return editablePartDescriptors.map((descriptor) => ({
+                id: descriptor.id,
+                label: descriptor.label,
+                category: descriptor.category,
+                visible: isEditablePartVisible(descriptor),
+            }));
+        },
+        setEditablePartVisibility(partId, isVisible) {
+            const descriptor = editablePartIndex.get(partId);
+            if (!descriptor) {
+                return false;
+            }
+            setEditablePartVisibility(descriptor, isVisible);
+            return true;
+        },
+        setAllEditablePartsVisibility(isVisible) {
+            for (let i = 0; i < editablePartDescriptors.length; i += 1) {
+                setEditablePartVisibility(editablePartDescriptors[i], isVisible);
+            }
+        },
+        captureEditablePartVisibility() {
+            const snapshot = {};
+            for (let i = 0; i < editablePartDescriptors.length; i += 1) {
+                const descriptor = editablePartDescriptors[i];
+                snapshot[descriptor.id] = isEditablePartVisible(descriptor);
+            }
+            return snapshot;
+        },
+        restoreEditablePartVisibility(snapshot = null) {
+            if (!snapshot || typeof snapshot !== 'object') {
+                return;
+            }
+            for (let i = 0; i < editablePartDescriptors.length; i += 1) {
+                const descriptor = editablePartDescriptors[i];
+                if (!(descriptor.id in snapshot)) {
+                    continue;
+                }
+                setEditablePartVisibility(descriptor, snapshot[descriptor.id]);
+            }
+        },
     };
+
+    function isEditablePartVisible(descriptor) {
+        return descriptor.sources.some((source) => source?.visible !== false);
+    }
+
+    function setEditablePartVisibility(descriptor, isVisible) {
+        const visible = Boolean(isVisible);
+        for (let i = 0; i < descriptor.sources.length; i += 1) {
+            const source = descriptor.sources[i];
+            if (source) {
+                source.visible = visible;
+            }
+        }
+    }
+}
+
+function buildEditablePartDescriptors({
+    detachableParts = [],
+    bodyMeta = null,
+    wheelEditGroups = null,
+    suspensionLinkage = null,
+    lightRig = null,
+    batteryIndicator = null,
+} = {}) {
+    const descriptors = [];
+    const descriptorIds = new Set();
+
+    const register = ({ id, label, category, sources }) => {
+        if (!id || descriptorIds.has(id)) {
+            return;
+        }
+        const resolvedSources = (Array.isArray(sources) ? sources : [sources]).filter(Boolean);
+        if (resolvedSources.length === 0) {
+            return;
+        }
+        descriptorIds.add(id);
+        descriptors.push({
+            id,
+            label,
+            category,
+            sources: resolvedSources,
+        });
+    };
+
+    register({
+        id: 'module_body_shell',
+        label: 'Kere kest',
+        category: 'Moodulid',
+        sources: bodyMeta?.editGroups?.bodyShellGroup,
+    });
+    register({
+        id: 'module_roof',
+        label: 'Katuse moodul',
+        category: 'Moodulid',
+        sources: bodyMeta?.editGroups?.roofAssemblyGroup,
+    });
+    register({
+        id: 'module_nameplate',
+        label: 'Nimeplaat',
+        category: 'Moodulid',
+        sources: bodyMeta?.editGroups?.nameplateAssemblyGroup,
+    });
+    register({
+        id: 'module_front_axle',
+        label: 'Eesmine telg',
+        category: 'Moodulid',
+        sources: wheelEditGroups?.frontAxleGroup,
+    });
+    register({
+        id: 'module_rear_axle',
+        label: 'Tagumine telg',
+        category: 'Moodulid',
+        sources: wheelEditGroups?.rearAxleGroup,
+    });
+    register({
+        id: 'module_suspension',
+        label: 'Vedrustus',
+        category: 'Moodulid',
+        sources: (suspensionLinkage?.detachableLinks || []).map((link) => link?.source),
+    });
+    register({
+        id: 'module_lights',
+        label: 'Tuled',
+        category: 'Moodulid',
+        sources: lightRig,
+    });
+    register({
+        id: 'module_wheel_well_lights',
+        label: 'Koopa valgustid',
+        category: 'Moodulid',
+        sources: wheelEditGroups?.wheelLightGroup,
+    });
+    register({
+        id: 'module_battery',
+        label: 'Aku indikaator',
+        category: 'Moodulid',
+        sources: batteryIndicator?.group,
+    });
+
+    for (let i = 0; i < detachableParts.length; i += 1) {
+        const part = detachableParts[i];
+        if (!part?.id || !part?.source) {
+            continue;
+        }
+        register({
+            id: part.id,
+            label: getEditablePartLabel(part),
+            category: getEditablePartCategory(part),
+            sources: part.source,
+        });
+    }
+
+    return descriptors;
+}
+
+function getEditablePartCategory(part) {
+    if (part?.type === 'wheel') {
+        return 'Rattad';
+    }
+    if (part?.type === 'suspension_link') {
+        return 'Vedrustus';
+    }
+    if (part?.type === 'body_panel') {
+        return 'Kere';
+    }
+    return 'Detailid';
+}
+
+function getEditablePartLabel(part) {
+    const sideLabel = part?.side === 'left'
+        ? 'vasak'
+        : (part?.side === 'right' ? 'parem' : 'kesk');
+    const zoneLabel = part?.zone === 'front'
+        ? 'ees'
+        : (part?.zone === 'rear' ? 'taga' : 'kesk');
+
+    if (part?.type === 'wheel') {
+        return `Ratas: ${zoneLabel} ${sideLabel}`;
+    }
+    if (part?.type === 'suspension_link') {
+        return `Vedrustus: ${zoneLabel} ${sideLabel}`;
+    }
+    if (part?.type === 'body_panel') {
+        return 'Kerepaneel';
+    }
+    return part?.id || 'Detail';
 }
 
 function springToTarget(state, valueKey, velocityKey, target, spring, damping, dt) {
@@ -605,7 +808,7 @@ function createBatteryIndicator(bodyRig, bodyMeta) {
 
     setLevel(1);
 
-    return { setLevel };
+    return { setLevel, group };
 
     function setLevel(levelNormalized) {
         const level = THREE.MathUtils.clamp(levelNormalized, 0, 1);
@@ -684,8 +887,8 @@ const playerCarRig = createCarRig({
         taillightDistance: 7,
         taillightDecay: 3.4,
         taillightPositions: [
-            { position: [-0.52, 0.54, 2.14] },
-            { position: [0.52, 0.54, 2.14] },
+            { position: [-0.52, 0.54, PLAYER_REAR_LIGHT_Z] },
+            { position: [0.52, 0.54, PLAYER_REAR_LIGHT_Z] },
         ],
     },
     showBatteryIndicator: false,
@@ -703,6 +906,11 @@ const setPlayerRoofMenuMode = playerCarRig.setRoofMenuMode;
 const setPlayerRoofMenuModeFromUv = playerCarRig.setRoofMenuModeFromUv;
 const getPlayerRoofMenuMode = playerCarRig.getRoofMenuMode;
 const setPlayerCarBodyColor = playerCarRig.setBodyColor;
+const getPlayerCarEditableParts = playerCarRig.getEditableParts;
+const setPlayerCarPartVisibility = playerCarRig.setEditablePartVisibility;
+const setAllPlayerCarPartsVisibility = playerCarRig.setAllEditablePartsVisibility;
+const capturePlayerCarPartVisibility = playerCarRig.captureEditablePartVisibility;
+const restorePlayerCarPartVisibility = playerCarRig.restoreEditablePartVisibility;
 
 export {
     car,
@@ -717,4 +925,9 @@ export {
     setPlayerRoofMenuModeFromUv,
     getPlayerRoofMenuMode,
     setPlayerCarBodyColor,
+    getPlayerCarEditableParts,
+    setPlayerCarPartVisibility,
+    setAllPlayerCarPartsVisibility,
+    capturePlayerCarPartVisibility,
+    restorePlayerCarPartVisibility,
 };

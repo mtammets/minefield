@@ -19,6 +19,7 @@ const TAILLIGHT_RUNNING_DISTANCE_FACTOR = 0.64;
 const TAILLIGHT_BRAKE_DISTANCE_FACTOR = 1.08;
 const TAILLIGHT_RUNNING_EMISSIVE = 0.62;
 const TAILLIGHT_BRAKE_EMISSIVE = 2.45;
+const WIRELESS_CHARGE_GLOW_COLOR = 0x88eeff;
 
 // Abifunktsioon materjalide loomiseks
 function createMaterial({ color, emissive = 0x000000, emissiveIntensity = 0, metalness = 0, roughness = 1, clearcoat = 0, clearcoatRoughness = 0 }) {
@@ -31,6 +32,38 @@ function createMaterial({ color, emissive = 0x000000, emissiveIntensity = 0, met
         clearcoat,
         clearcoatRoughness,
     });
+}
+
+function createAccentChargeFlowTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 384;
+    canvas.height = 96;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const centerY = canvas.height * 0.5;
+    const coreGradient = ctx.createLinearGradient(0, centerY, canvas.width, centerY);
+    coreGradient.addColorStop(0, 'rgba(191, 245, 255, 0)');
+    coreGradient.addColorStop(0.2, 'rgba(191, 245, 255, 0.22)');
+    coreGradient.addColorStop(0.5, 'rgba(230, 254, 255, 0.95)');
+    coreGradient.addColorStop(0.8, 'rgba(191, 245, 255, 0.22)');
+    coreGradient.addColorStop(1, 'rgba(191, 245, 255, 0)');
+    ctx.fillStyle = coreGradient;
+    ctx.fillRect(0, centerY - 16, canvas.width, 32);
+
+    const haloGradient = ctx.createLinearGradient(0, centerY, canvas.width, centerY);
+    haloGradient.addColorStop(0, 'rgba(115, 224, 255, 0)');
+    haloGradient.addColorStop(0.3, 'rgba(115, 224, 255, 0.15)');
+    haloGradient.addColorStop(0.5, 'rgba(171, 247, 255, 0.44)');
+    haloGradient.addColorStop(0.7, 'rgba(115, 224, 255, 0.15)');
+    haloGradient.addColorStop(1, 'rgba(115, 224, 255, 0)');
+    ctx.fillStyle = haloGradient;
+    ctx.fillRect(0, centerY - 28, canvas.width, 56);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    return texture;
 }
 
 // Esitulede ja tagatulede lisamine
@@ -86,10 +119,19 @@ function addLightsToCar(car, lightConfig = {}) {
     const taillightMeshes = [];
     const lightState = { brakeLevel: 0 };
     const accentStripMaterials = [];
+    const accentStripBaseColors = [];
     const accentGlowMaterials = [];
+    const accentGlowBaseColors = [];
     const accentPointLights = [];
+    const accentPointBaseColors = [];
     const accentPulseOffsets = [];
+    const accentChargeFlowMeshes = [];
+    const accentChargeFlowMaterials = [];
+    const accentChargeFlowOffsets = [];
     const accentState = { phase: Math.random() * Math.PI * 2 };
+    const accentChargeColor = new THREE.Color(0x92f3ff);
+    const accentChargeHotColor = new THREE.Color(0xe8feff);
+    const accentChargeFlowTexture = createAccentChargeFlowTexture();
 
     const createSpot = ({
         color,
@@ -295,8 +337,42 @@ function addLightsToCar(car, lightConfig = {}) {
             }
             car.add(glowMesh);
 
+            if (glowAxis === 'z') {
+                const flowMaterial = new THREE.MeshBasicMaterial({
+                    map: accentChargeFlowTexture,
+                    color: 0xbdf8ff,
+                    transparent: true,
+                    opacity: 0,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false,
+                    toneMapped: false,
+                    side: THREE.DoubleSide,
+                });
+                const flowMesh = new THREE.Mesh(
+                    new THREE.PlaneGeometry(size[2] * 0.34, size[1] * 6.2),
+                    flowMaterial
+                );
+                flowMesh.position.copy(stripMesh.position);
+                flowMesh.position.x += Math.sign(position[0]) * 0.015;
+                flowMesh.position.z = stripMesh.position.z - size[2] * 0.42;
+                flowMesh.rotation.y = Math.PI / 2;
+                flowMesh.visible = false;
+                car.add(flowMesh);
+
+                accentChargeFlowMeshes.push({
+                    mesh: flowMesh,
+                    baseZ: stripMesh.position.z,
+                    travelHalfRange: size[2] * 0.44,
+                    sideSign: Math.sign(position[0]) || 1,
+                });
+                accentChargeFlowMaterials.push(flowMaterial);
+                accentChargeFlowOffsets.push(pulseOffset * 1.38);
+            }
+
             accentStripMaterials.push(stripMaterial);
+            accentStripBaseColors.push(new THREE.Color(color));
             accentGlowMaterials.push(glowMaterial);
+            accentGlowBaseColors.push(new THREE.Color(color));
             accentPulseOffsets.push(pulseOffset);
         });
 
@@ -313,6 +389,7 @@ function addLightsToCar(car, lightConfig = {}) {
                     position,
                 });
                 accentPointLights.push(light);
+                accentPointBaseColors.push(new THREE.Color(color));
             });
         }
     }
@@ -322,29 +399,63 @@ function addLightsToCar(car, lightConfig = {}) {
         const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.throttle || 0), 0, 1);
         const steerRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.steerInput || 0), 0, 1);
         const burnoutRatio = THREE.MathUtils.clamp(vehicleState?.burnout || vehicleState?.launchSlip || 0, 0, 1);
+        const chargingRatio = THREE.MathUtils.clamp(vehicleState?.chargingLevelNormalized || 0, 0, 1);
+        const chargingBoost = chargingRatio * chargingRatio;
         const activity = THREE.MathUtils.clamp(
             speedRatio * 0.72 + throttleRatio * 0.24 + steerRatio * 0.12 + burnoutRatio * 0.35,
             0,
             1.5
         );
 
-        accentState.phase += dt * accentPulseSpeed * (1 + activity * 0.28);
+        accentState.phase += dt * accentPulseSpeed * (1 + activity * 0.28 + chargingBoost * 0.86);
 
         accentStripMaterials.forEach((material, index) => {
             const wave = 0.5 + 0.5 * Math.sin(accentState.phase + accentPulseOffsets[index]);
             const pulse = 1 + (wave - 0.5) * 2 * accentPulseDepth;
-            material.emissiveIntensity = accentBaseEmissive * pulse + activity * accentSpeedBoost;
+            const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.22 + accentPulseOffsets[index] * 1.64);
+            material.emissiveIntensity = accentBaseEmissive * pulse
+                + activity * accentSpeedBoost
+                + chargingBoost * (0.6 + chargeWave * 1.1);
+            material.emissive
+                .copy(accentStripBaseColors[index])
+                .lerp(accentChargeHotColor, chargingBoost * (0.34 + chargeWave * 0.56));
         });
 
         accentGlowMaterials.forEach((material, index) => {
             const wave = 0.5 + 0.5 * Math.sin(accentState.phase + accentPulseOffsets[index] + 0.3);
-            material.opacity = accentGlowOpacity * (0.84 + wave * 0.42) * (1 + activity * 0.38);
+            const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.7 + accentPulseOffsets[index] * 1.9);
+            material.opacity = accentGlowOpacity
+                * (0.84 + wave * 0.42)
+                * (1 + activity * 0.38 + chargingBoost * (0.84 + chargeWave * 0.84));
+            material.color
+                .copy(accentGlowBaseColors[index])
+                .lerp(accentChargeColor, chargingBoost * (0.52 + chargeWave * 0.36));
         });
 
         accentPointLights.forEach((light, index) => {
             const wave = 0.86 + 0.14 * Math.sin(accentState.phase * 1.14 + index * 1.8);
-            light.intensity = accentPointIntensity * wave * (0.82 + activity * 0.44);
-            light.distance = accentPointDistance * (0.92 + speedRatio * 0.12);
+            const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.4 + index * 1.26);
+            light.intensity = accentPointIntensity * wave * (0.82 + activity * 0.44 + chargingBoost * (0.88 + chargeWave * 0.52));
+            light.distance = accentPointDistance * (0.92 + speedRatio * 0.12 + chargingBoost * 0.24);
+            light.color
+                .copy(accentPointBaseColors[index])
+                .lerp(accentChargeColor, chargingBoost * (0.54 + chargeWave * 0.34));
+        });
+
+        accentChargeFlowMeshes.forEach((entry, index) => {
+            const material = accentChargeFlowMaterials[index];
+            const flowPhase = accentState.phase * (1.62 + chargingBoost * 2.1) + accentChargeFlowOffsets[index];
+            const flowTravel = Math.sin(flowPhase) * entry.travelHalfRange * -entry.sideSign;
+            const flowPulse = 0.5 + 0.5 * Math.sin(flowPhase * 1.82);
+
+            entry.mesh.visible = chargingBoost > 0.01;
+            entry.mesh.position.z = entry.baseZ + flowTravel;
+            entry.mesh.scale.x = 0.72 + chargingBoost * (0.24 + flowPulse * 0.52);
+            entry.mesh.scale.y = 0.9 + chargingBoost * (0.22 + flowPulse * 0.26);
+            material.opacity = chargingBoost * (0.12 + flowPulse * 0.5);
+            material.color
+                .copy(accentChargeColor)
+                .lerp(accentChargeHotColor, 0.38 + flowPulse * 0.62);
         });
     }
 }
@@ -357,6 +468,18 @@ function addLuxuryBody(car, bodyConfig = {}) {
         wheelPositions = DEFAULT_WHEEL_POSITIONS,
         displayName = 'MAREK',
     } = bodyConfig;
+
+    const bodyShellGroup = new THREE.Group();
+    bodyShellGroup.name = 'body_shell_group';
+    car.add(bodyShellGroup);
+
+    const roofAssemblyGroup = new THREE.Group();
+    roofAssemblyGroup.name = 'roof_assembly_group';
+    car.add(roofAssemblyGroup);
+
+    const nameplateAssemblyGroup = new THREE.Group();
+    nameplateAssemblyGroup.name = 'nameplate_assembly_group';
+    car.add(nameplateAssemblyGroup);
 
     const bodyPanels = [];
     const bodyPanelMaterials = [];
@@ -385,7 +508,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
         panel.position.set(position[0], position[1], position[2]);
         panel.castShadow = true;
         panel.receiveShadow = true;
-        car.add(panel);
+        bodyShellGroup.add(panel);
         bodyPanelMaterials.push(panelMaterial);
 
         bodyPanels.push({
@@ -410,22 +533,31 @@ function addLuxuryBody(car, bodyConfig = {}) {
         emissiveIntensity: 0.32,
         roughness: 0.17,
     });
+    const wirelessChargeMarker = addUnderbodyWirelessChargeMarker(bodyShellGroup, bodyDimensions);
     const roofBrandingController = addVoltlineRoofBranding(
-        car,
+        roofAssemblyGroup,
         bodyDimensions,
         ROOF_BRAND_NAME,
         displayName
     );
+    let nameplateGroup = null;
     if (displayName) {
-        addPlayerNameDisplay(car, displayName, bodyDimensions);
+        nameplateGroup = addPlayerNameDisplay(nameplateAssemblyGroup, displayName, bodyDimensions);
     }
 
     return {
         bodyDimensions,
         wheelPositions,
         detachablePanels: bodyPanels,
+        editGroups: {
+            bodyShellGroup,
+            roofAssemblyGroup,
+            nameplateAssemblyGroup,
+            nameplateGroup,
+        },
         update(vehicleState, dt) {
             roofBrandingController?.update?.(vehicleState, dt);
+            wirelessChargeMarker?.update?.(vehicleState, dt);
         },
         setBatteryLevel(levelNormalized) {
             roofBrandingController?.setBatteryLevel?.(levelNormalized);
@@ -451,8 +583,183 @@ function addLuxuryBody(car, bodyConfig = {}) {
     };
 }
 
+function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
+    const markerGroup = new THREE.Group();
+    markerGroup.name = 'wireless_charge_marker_group';
+    markerGroup.position.set(
+        0,
+        0.56 - bodyDimensions.height * 0.5 - 0.008,
+        0.06
+    );
+    markerGroup.rotation.x = Math.PI * 0.5;
+    parent.add(markerGroup);
+
+    const outerRadius = Math.min(Math.max(bodyDimensions.width * 0.45, 0.46), 0.56);
+    const innerRadius = outerRadius * 0.66;
+    const coreRadius = innerRadius * 0.72;
+
+    const haloMaterial = new THREE.MeshBasicMaterial({
+        color: WIRELESS_CHARGE_GLOW_COLOR,
+        transparent: true,
+        opacity: 0.12,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+    });
+    const halo = new THREE.Mesh(new THREE.CircleGeometry(outerRadius * 1.16, 64), haloMaterial);
+    halo.position.z = 0.001;
+    markerGroup.add(halo);
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+        color: WIRELESS_CHARGE_GLOW_COLOR,
+        transparent: true,
+        opacity: 0.68,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+    });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(innerRadius, outerRadius, 72), ringMaterial);
+    ring.position.z = 0.0016;
+    markerGroup.add(ring);
+    const chargeSweepMaterial = new THREE.MeshBasicMaterial({
+        color: WIRELESS_CHARGE_GLOW_COLOR,
+        transparent: true,
+        opacity: 0.18,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+    });
+    const chargeSweep = new THREE.Mesh(
+        new THREE.RingGeometry(innerRadius * 0.9, innerRadius * 1.02, 60),
+        chargeSweepMaterial
+    );
+    chargeSweep.position.z = 0.0026;
+    markerGroup.add(chargeSweep);
+
+    const coreDisk = new THREE.Mesh(
+        new THREE.CircleGeometry(coreRadius, 48),
+        new THREE.MeshStandardMaterial({
+            color: 0x0b1624,
+            emissive: 0x2bcdf7,
+            emissiveIntensity: 0.35,
+            metalness: 0.58,
+            roughness: 0.28,
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+        })
+    );
+    coreDisk.position.z = 0.0021;
+    markerGroup.add(coreDisk);
+
+    const symbolTexture = createWirelessChargeSymbolTexture();
+    const symbol = new THREE.Mesh(
+        new THREE.PlaneGeometry(coreRadius * 1.62, coreRadius * 1.62),
+        new THREE.MeshBasicMaterial({
+            map: symbolTexture,
+            transparent: true,
+            opacity: 0.96,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        })
+    );
+    symbol.position.z = 0.0032;
+    markerGroup.add(symbol);
+
+    const glowState = { phase: Math.random() * Math.PI * 2 };
+    let chargingBlend = 0;
+
+    applyGlow(0.5, 0);
+    return {
+        update(vehicleState = {}, deltaTime = 1 / 60) {
+            const dt = Math.min(deltaTime || 1 / 60, 0.05);
+            glowState.phase += dt * 2.2;
+            const chargingTarget = THREE.MathUtils.clamp(vehicleState?.chargingLevelNormalized || 0, 0, 1);
+            const chargingBlendRate = chargingTarget > chargingBlend ? 7.8 : 4.6;
+            chargingBlend = THREE.MathUtils.lerp(
+                chargingBlend,
+                chargingTarget,
+                1 - Math.exp(-chargingBlendRate * dt)
+            );
+            const pulse = 0.5 + 0.5 * Math.sin(glowState.phase);
+            applyGlow(pulse, chargingBlend);
+        },
+    };
+
+    function applyGlow(pulse, chargingLevel) {
+        const chargedPulse = 0.5 + 0.5 * Math.sin(glowState.phase * (1.7 + chargingLevel * 1.8));
+        haloMaterial.opacity = 0.06 + pulse * 0.08 + chargingLevel * 0.16;
+        ringMaterial.opacity = 0.5 + pulse * 0.34 + chargingLevel * 0.22;
+        chargeSweepMaterial.opacity = 0.08 + chargedPulse * 0.12 + chargingLevel * 0.44;
+        chargeSweep.rotation.z = glowState.phase * (0.4 + chargingLevel * 1.8);
+        coreDisk.material.emissiveIntensity = 0.24 + pulse * 0.3 + chargingLevel * 0.86;
+        symbol.material.opacity = 0.72 + pulse * 0.24 + chargingLevel * 0.2;
+        symbol.rotation.z = glowState.phase * 0.06 * (0.22 + chargingLevel * 0.78);
+    }
+}
+
+function createWirelessChargeSymbolTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const centerX = canvas.width * 0.5;
+    const centerY = canvas.height * 0.5;
+
+    const glowGradient = ctx.createRadialGradient(centerX, centerY, 18, centerX, centerY, 182);
+    glowGradient.addColorStop(0, 'rgba(178, 244, 255, 0.38)');
+    glowGradient.addColorStop(0.62, 'rgba(107, 210, 238, 0.12)');
+    glowGradient.addColorStop(1, 'rgba(107, 210, 238, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 182, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(171, 243, 255, 0.95)';
+    ctx.shadowColor = 'rgba(93, 221, 255, 0.95)';
+    ctx.shadowBlur = 16;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 16;
+
+    const arcGaps = [
+        { radius: 72, start: Math.PI * 1.14, end: Math.PI * 1.86 },
+        { radius: 116, start: Math.PI * 1.18, end: Math.PI * 1.82 },
+    ];
+    for (let i = 0; i < arcGaps.length; i += 1) {
+        const arc = arcGaps[i];
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, arc.radius, arc.start, arc.end);
+        ctx.stroke();
+    }
+
+    ctx.lineWidth = 18;
+    ctx.beginPath();
+    ctx.moveTo(centerX, centerY + 88);
+    ctx.lineTo(centerX, centerY + 10);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(196, 248, 255, 0.98)';
+    ctx.beginPath();
+    ctx.arc(centerX, centerY + 114, 14, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+}
+
 function addVoltlineRoofBranding(
-    car,
+    parent,
     bodyDimensions,
     brandName = ROOF_BRAND_NAME,
     playerName = 'MAREK'
@@ -500,7 +807,7 @@ function addVoltlineRoofBranding(
     badgeBase.position.set(0, roofCenterY + 0.012, roofCenterZ);
     badgeBase.castShadow = true;
     badgeBase.receiveShadow = true;
-    car.add(badgeBase);
+    parent.add(badgeBase);
 
     const trim = new THREE.Mesh(
         new THREE.BoxGeometry(badgeWidth + 0.04, 0.012, badgeDepth + 0.04),
@@ -517,7 +824,7 @@ function addVoltlineRoofBranding(
     trim.position.set(0, roofCenterY + 0.034, roofCenterZ);
     trim.castShadow = true;
     trim.receiveShadow = true;
-    car.add(trim);
+    parent.add(trim);
 
     const logoPlateMaterial = new THREE.MeshStandardMaterial({
         map: roofTexture,
@@ -537,7 +844,7 @@ function addVoltlineRoofBranding(
     logoPlate.userData.roofMenuSurface = true;
     logoPlate.rotation.x = -Math.PI / 2;
     logoPlate.position.set(0, roofCenterY + 0.041, roofCenterZ);
-    car.add(logoPlate);
+    parent.add(logoPlate);
 
     const gloss = new THREE.Mesh(
         new THREE.PlaneGeometry(screenWidth + 0.018, screenDepth + 0.02),
@@ -554,7 +861,7 @@ function addVoltlineRoofBranding(
     );
     gloss.rotation.x = -Math.PI / 2;
     gloss.position.set(0, roofCenterY + 0.0445, roofCenterZ);
-    car.add(gloss);
+    parent.add(gloss);
 
     const shimmerMaterial = new THREE.MeshBasicMaterial({
         map: shimmerTexture,
@@ -571,16 +878,16 @@ function addVoltlineRoofBranding(
     );
     shimmer.rotation.x = -Math.PI / 2;
     shimmer.position.set(0, roofCenterY + 0.0462, roofCenterZ);
-    car.add(shimmer);
+    parent.add(shimmer);
 
     const railGeometry = new THREE.BoxGeometry(0.022, 0.018, screenDepth + 0.04);
     const railX = screenWidth * 0.5 + 0.028;
     const leftRail = new THREE.Mesh(railGeometry, railMaterial);
     leftRail.position.set(-railX, roofCenterY + 0.04, roofCenterZ);
-    car.add(leftRail);
+    parent.add(leftRail);
     const rightRail = new THREE.Mesh(railGeometry, railMaterial);
     rightRail.position.set(railX, roofCenterY + 0.04, roofCenterZ);
-    car.add(rightRail);
+    parent.add(rightRail);
 
     const modeOrder = ['dashboard', 'battery', 'navigation', 'chassis'];
     const brandState = {
@@ -918,14 +1225,14 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
     };
 }
 
-function addPlayerNameDisplay(car, playerName, bodyDimensions) {
+function addPlayerNameDisplay(parent, playerName, bodyDimensions) {
     const plateTexture = createNameplateTexture(playerName);
-    const rearZ = bodyDimensions.depth * 0.5 + 0.16;
+    const rearZ = bodyDimensions.depth * 0.5 + 0.045;
     const plateY = 0.62;
 
     const badgeGroup = new THREE.Group();
     badgeGroup.position.set(0, 0, rearZ);
-    car.add(badgeGroup);
+    parent.add(badgeGroup);
 
     const holder = new THREE.Mesh(
         new THREE.BoxGeometry(bodyDimensions.width * 0.78, 0.24, 0.05),
@@ -998,6 +1305,8 @@ function addPlayerNameDisplay(car, playerName, bodyDimensions) {
     const sideAccentRight = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.12), sideAccentMaterial);
     sideAccentRight.position.set(bodyDimensions.width * 0.29, plateY, 0.013);
     badgeGroup.add(sideAccentRight);
+
+    return badgeGroup;
 }
 
 function createRoofShimmerTexture() {

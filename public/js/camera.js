@@ -10,6 +10,7 @@ const CINEMATIC_ORBIT_SPEED = 0.42;
 let smoothedHeading = 0;
 let smoothedTurnBias = 0;
 let hasCameraState = false;
+let cameraKeyboardControlsEnabled = true;
 
 const targetPosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
@@ -20,6 +21,10 @@ const roofCamWorldPosition = new THREE.Vector3();
 const roofLookWorldPosition = new THREE.Vector3();
 
 document.addEventListener('keydown', (event) => {
+    if (!cameraKeyboardControlsEnabled) {
+        return;
+    }
+
     if (event.key >= '1' && event.key <= '7') {
         cameraViewMode = parseInt(event.key, 10);
         cinematicMode = false;
@@ -182,6 +187,10 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
 }
 
 export { camera, updateCamera };
+
+export function setCameraKeyboardControlsEnabled(nextEnabled) {
+    cameraKeyboardControlsEnabled = Boolean(nextEnabled);
+}
 
 function lerpAngle(a, b, t) {
     const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a));

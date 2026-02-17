@@ -13,6 +13,7 @@ import {
     worldBoundary,
     getGroundHeightAt,
     updateGroundMotion,
+    jumpRampChargeZones,
 } from './environment.js';
 import {
     car,
@@ -28,8 +29,14 @@ import {
     setPlayerRoofMenuModeFromUv,
     getPlayerRoofMenuMode,
     setPlayerCarBodyColor,
+    getPlayerCarEditableParts,
+    setPlayerCarPartVisibility,
+    setAllPlayerCarPartsVisibility,
+    capturePlayerCarPartVisibility,
+    restorePlayerCarPartVisibility,
 } from './car.js';
-import { camera, updateCamera } from './camera.js';
+import { camera, updateCamera, setCameraKeyboardControlsEnabled } from './camera.js';
+import { createCarEditModeController } from './editmode.js';
 import {
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
@@ -108,6 +115,8 @@ const BATTERY_MAX = 100;
 const BATTERY_PICKUP_GAIN = 24;
 const BATTERY_IDLE_DRAIN_PER_SEC = 0;
 const BATTERY_SPEED_DRAIN_PER_SPEED = 0.055;
+const CHARGING_ZONE_ACTIVATION_DELAY_SEC = 2;
+const CHARGING_BATTERY_GAIN_PER_SEC = 16;
 const ROUND_TOTAL_PICKUPS = 10;
 const PLAYER_CAR_POOL_SIZE = 3;
 const PLAYER_RESPAWN_DELAY_MS = 850;
@@ -115,6 +124,7 @@ const REPLAY_EVENT_PICKUP = 'pickup';
 const REPLAY_EVENT_CRASH = 'crash';
 const WELCOME_CAR_SPIN_SPEED = 0.62;
 const WELCOME_PREVIEW_STATE_SPEED = 17;
+const WELCOME_PREVIEW_REAR_LIGHT_Z = 2.045;
 const debrisPieces = [];
 const replayEffects = [];
 const crashParts = getPlayerCarCrashParts();
@@ -173,6 +183,38 @@ initializeBodyPartBaselines();
 // Stseeni ja renderdamise algne seadistamine
 const scene = initializeScene();
 const renderer = initializeRenderer();
+const chargingZoneController = createChargingZoneController(scene, jumpRampChargeZones, {
+    activationDelaySec: CHARGING_ZONE_ACTIVATION_DELAY_SEC,
+});
+const chargingProgressHudController = createChargingProgressHudController(scene, camera, {
+    vehicle: car,
+    getBatteryPercent() {
+        return playerBattery;
+    },
+    getBatteryNormalized() {
+        return playerBattery / BATTERY_MAX;
+    },
+});
+const carEditModeController = createCarEditModeController({
+    camera,
+    car,
+    canvas: renderer.domElement,
+    getEditableParts: getPlayerCarEditableParts,
+    setEditablePartVisibility: setPlayerCarPartVisibility,
+    setAllEditablePartsVisibility: setAllPlayerCarPartsVisibility,
+    captureEditablePartVisibility: capturePlayerCarPartVisibility,
+    restoreEditablePartVisibility: restorePlayerCarPartVisibility,
+    onEditModeChanged(isActive) {
+        setCameraKeyboardControlsEnabled(!isActive);
+        clearDriveKeys();
+        if (isActive) {
+            setPauseState(false);
+        }
+    },
+    onStatus(messageText) {
+        objectiveUi.showInfo(messageText, 1800);
+    },
+});
 const starsController = addStars(scene);
 const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     onTargetColorChanged: ({ targetColorHex }) => {
@@ -291,6 +333,7 @@ function handleKey(event, isKeyDown) {
         key === 'k'
         || key === 'v'
         || key === 'f'
+        || key === 'e'
         || key === 'q'
         || key === 'enter'
         || key === 'escape'
@@ -301,6 +344,15 @@ function handleKey(event, isKeyDown) {
         || key === '3'
         || key === '4'
     )) {
+        return;
+    }
+
+    const canEnterEditMode = !isWelcomeModalVisible
+        && !isGamePaused
+        && !isCarDestroyed
+        && !finalScoreboardUi.isVisible();
+    const shouldRouteToEditMode = carEditModeController.isActive() || canEnterEditMode;
+    if (shouldRouteToEditMode && carEditModeController.handleKey(event, isKeyDown)) {
         return;
     }
 
@@ -503,7 +555,7 @@ function handleGameCanvasPointerDown(event) {
     if (event.button !== 0) {
         return;
     }
-    if (isWelcomeModalVisible || isGamePaused || isCarDestroyed) {
+    if (isWelcomeModalVisible || isGamePaused || isCarDestroyed || carEditModeController.isActive()) {
         return;
     }
 
@@ -635,12 +687,30 @@ function animate() {
     requestAnimationFrame(animate);
 
     const frameDelta = Math.min(clock.getDelta(), 0.05);
+    const isEditModeActive = carEditModeController.isActive();
+    let chargingHudEnabled = false;
+    let chargingHudActive = false;
+    let chargingHudLevel = 0;
     welcomeModalUi.update(frameDelta);
-    if (!isGamePaused) {
+    if (!isGamePaused && !isEditModeActive) {
         vehicleImpactStatusCooldown = Math.max(0, vehicleImpactStatusCooldown - frameDelta);
 
         const vehicleState = getVehicleState();
         const replayActive = replayController.isPlaybackActive();
+        const chargingContextEnabled = !replayActive && !isCarDestroyed && !pickupRoundFinished;
+        const chargingSnapshot = chargingZoneController.update(car.position, frameDelta, {
+            enabled: chargingContextEnabled,
+        });
+        chargingHudEnabled = chargingContextEnabled;
+        chargingHudActive = chargingSnapshot.isChargingActive && chargingContextEnabled;
+        chargingHudLevel = chargingSnapshot.visualLevel;
+        vehicleState.chargingLevelNormalized = chargingSnapshot.visualLevel;
+        if (chargingSnapshot.startedThisFrame) {
+            objectiveUi.showInfo('Laadimine käivitus. Aku täitub seni, kuni püsid ringi sees.', 2200);
+        }
+        if (chargingSnapshot.isChargingActive && chargingContextEnabled) {
+            addBattery(CHARGING_BATTERY_GAIN_PER_SEC * frameDelta);
+        }
         let visualState = vehicleState;
 
         if (replayActive) {
@@ -649,6 +719,7 @@ function animate() {
             if (replayFrame?.vehicleState) {
                 visualState = replayFrame.vehicleState;
             }
+            visualState.chargingLevelNormalized = chargingSnapshot.visualLevel;
             updateCarVisuals(visualState, frameDelta);
             processReplayEvents(replayFrame?.events);
 
@@ -696,6 +767,7 @@ function animate() {
             if (!isCarDestroyed) {
                 const interpolationAlpha = physicsAccumulator / physicsStep;
                 applyInterpolatedPlayerTransform(car, interpolationAlpha);
+                vehicleState.chargingLevelNormalized = chargingSnapshot.visualLevel;
                 updateCarVisuals(vehicleState, frameDelta);
                 updateBattery(vehicleState, frameDelta);
                 replayController.updateRecording(frameDelta, vehicleState);
@@ -744,7 +816,20 @@ function animate() {
         if ((replayActive || !isCarDestroyed) && (debrisPieces.length > 0 || explosionLight)) {
             updateDebris(frameDelta);
         }
+    } else if (isEditModeActive) {
+        chargingZoneController.update(car.position, frameDelta, { enabled: false });
+        carEditModeController.update(frameDelta);
+        starsController.update(frameDelta);
+        updateGroundMotion(car.position, 0);
+    } else {
+        chargingZoneController.update(car.position, frameDelta, { enabled: false });
     }
+
+    chargingProgressHudController.update(frameDelta, {
+        enabled: chargingHudEnabled,
+        isCharging: chargingHudActive,
+        chargingLevel: chargingHudLevel,
+    });
 
     updateSunLightPosition();
     renderer.render(scene, camera);
@@ -755,6 +840,833 @@ function updateSunLightPosition() {
     sunLight.position.set(car.position.x + 95, 180, car.position.z + 78);
     sunLight.target.position.set(car.position.x, car.position.y, car.position.z);
     sunLight.target.updateMatrixWorld();
+}
+
+function createChargingProgressHudController(scene, camera, options = {}) {
+    const vehicle = options.vehicle || null;
+    const getBatteryPercent = typeof options.getBatteryPercent === 'function'
+        ? options.getBatteryPercent
+        : (() => 0);
+    const getBatteryNormalized = typeof options.getBatteryNormalized === 'function'
+        ? options.getBatteryNormalized
+        : (() => 0);
+    const fallback = {
+        update() {},
+        reset() {},
+    };
+    if (!scene || !camera || !vehicle) {
+        return fallback;
+    }
+
+    const root = new THREE.Group();
+    root.name = 'charging_progress_hud';
+    root.visible = false;
+    scene.add(root);
+
+    const haloMaterial = new THREE.MeshBasicMaterial({
+        map: createChargingProgressHaloTexture(),
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+    });
+    const haloMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.95, 2.95), haloMaterial);
+    root.add(haloMesh);
+
+    const panelCanvas = document.createElement('canvas');
+    panelCanvas.width = 1024;
+    panelCanvas.height = 512;
+    const panelCtx = panelCanvas.getContext('2d');
+    const panelTexture = new THREE.CanvasTexture(panelCanvas);
+    panelTexture.colorSpace = THREE.SRGBColorSpace;
+    panelTexture.anisotropy = 2;
+    const panelMaterial = new THREE.MeshBasicMaterial({
+        map: panelTexture,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+    });
+    const panelMesh = new THREE.Mesh(new THREE.PlaneGeometry(2.56, 1.28), panelMaterial);
+    panelMesh.position.z = 0.01;
+    root.add(panelMesh);
+
+    const state = {
+        visibleBlend: 0,
+        displayPercent: THREE.MathUtils.clamp(getBatteryPercent(), 0, 100),
+        time: Math.random() * 11.7,
+        scanPhase: Math.random() * Math.PI * 2,
+    };
+
+    drawPanel(state.displayPercent, 0, 0, false);
+    return {
+        update(deltaTime = 1 / 60, {
+            enabled = true,
+            isCharging = false,
+            chargingLevel = 0,
+        } = {}) {
+            const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
+            const charging = THREE.MathUtils.clamp(chargingLevel || 0, 0, 1);
+            const targetVisible = enabled && isCharging ? 1 : 0;
+            const visibleRate = targetVisible > state.visibleBlend ? 8.8 : 7.2;
+            state.visibleBlend = THREE.MathUtils.lerp(
+                state.visibleBlend,
+                targetVisible,
+                1 - Math.exp(-visibleRate * dt)
+            );
+
+            if (state.visibleBlend <= 0.002 && targetVisible <= 0) {
+                root.visible = false;
+                return;
+            }
+
+            root.visible = true;
+            const targetPercent = THREE.MathUtils.clamp(getBatteryPercent(), 0, 100);
+            const numberRate = isCharging ? (5.6 + charging * 9.2) : 4.2;
+            state.displayPercent = THREE.MathUtils.lerp(
+                state.displayPercent,
+                targetPercent,
+                1 - Math.exp(-numberRate * dt)
+            );
+            state.time += dt * (1.2 + charging * 2.6);
+            state.scanPhase += dt * (1.6 + charging * 4.2);
+
+            const hoverPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 1.7);
+            const hudHeight = 1.56 + hoverPulse * (0.04 + charging * 0.08);
+            root.position.set(vehicle.position.x, vehicle.position.y + hudHeight, vehicle.position.z);
+            root.quaternion.copy(camera.quaternion);
+
+            const scalePulse = 1 + (0.012 + charging * 0.035) * Math.sin(state.scanPhase * 2.9);
+            const baseScale = 0.96 + state.visibleBlend * 0.2;
+            root.scale.setScalar(baseScale * scalePulse);
+
+            const haloPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 2.2);
+            haloMaterial.opacity = state.visibleBlend * (0.12 + charging * (0.28 + haloPulse * 0.24));
+            haloMesh.rotation.z += dt * (0.08 + charging * 0.42);
+            panelMaterial.opacity = state.visibleBlend * (0.52 + charging * 0.36);
+
+            drawPanel(state.displayPercent, charging, state.time, isCharging);
+            panelTexture.needsUpdate = true;
+        },
+        reset() {
+            state.visibleBlend = 0;
+            root.visible = false;
+        },
+    };
+
+    function drawPanel(displayPercent, charging, time, isCharging) {
+        const ctx = panelCtx;
+        const w = panelCanvas.width;
+        const h = panelCanvas.height;
+        ctx.clearRect(0, 0, w, h);
+
+        const px = 96;
+        const py = 58;
+        const pw = w - px * 2;
+        const ph = h - py * 2;
+        drawRoundedRect(ctx, px, py, pw, ph, 42);
+
+        const panelGradient = ctx.createLinearGradient(px, py, px + pw, py + ph);
+        panelGradient.addColorStop(0, 'rgba(7, 24, 46, 0.84)');
+        panelGradient.addColorStop(0.52, 'rgba(4, 18, 36, 0.78)');
+        panelGradient.addColorStop(1, 'rgba(3, 16, 30, 0.84)');
+        ctx.fillStyle = panelGradient;
+        ctx.fill();
+
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(152, 230, 255, 0.45)';
+        ctx.stroke();
+
+        const scanY = py + ((time * 120) % ph);
+        const scanGradient = ctx.createLinearGradient(px, scanY - 24, px, scanY + 24);
+        scanGradient.addColorStop(0, 'rgba(126, 231, 255, 0)');
+        scanGradient.addColorStop(0.5, `rgba(146, 239, 255, ${0.08 + charging * 0.16})`);
+        scanGradient.addColorStop(1, 'rgba(126, 231, 255, 0)');
+        ctx.fillStyle = scanGradient;
+        ctx.fillRect(px + 10, scanY - 24, pw - 20, 48);
+
+        const batteryLevel = THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
+        const bigPercentText = `${Math.round(displayPercent)}%`;
+        const subText = isCharging
+            ? `LAADIMINE +${CHARGING_BATTERY_GAIN_PER_SEC.toFixed(1)}%/s`
+            : 'LAADIMISE OOTEL';
+
+        ctx.textAlign = 'center';
+        ctx.shadowColor = 'rgba(132, 231, 255, 0.85)';
+        ctx.shadowBlur = 28 + charging * 16;
+        ctx.fillStyle = 'rgba(224, 252, 255, 0.98)';
+        ctx.font = '800 122px "Orbitron", "Trebuchet MS", sans-serif';
+        ctx.fillText(bigPercentText, w * 0.5, py + 168);
+
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = 'rgba(173, 239, 255, 0.95)';
+        ctx.font = '700 32px "Orbitron", "Trebuchet MS", sans-serif';
+        ctx.fillText(subText, w * 0.5, py + 216);
+
+        const barX = px + 92;
+        const barY = py + 250;
+        const barW = pw - 184;
+        const barH = 36;
+        drawRoundedRect(ctx, barX, barY, barW, barH, 18);
+        ctx.fillStyle = 'rgba(8, 32, 58, 0.92)';
+        ctx.fill();
+
+        const fillW = Math.max(0, Math.min(barW, barW * batteryLevel));
+        if (fillW > 0) {
+            drawRoundedRect(ctx, barX, barY, fillW, barH, 18);
+            const fillGradient = ctx.createLinearGradient(barX, barY, barX + fillW, barY + barH);
+            fillGradient.addColorStop(0, 'rgba(112, 228, 255, 0.82)');
+            fillGradient.addColorStop(0.5, 'rgba(186, 250, 255, 0.98)');
+            fillGradient.addColorStop(1, 'rgba(120, 232, 255, 0.88)');
+            ctx.fillStyle = fillGradient;
+            ctx.fill();
+        }
+
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(155, 233, 255, 0.7)';
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        const tickerValues = [];
+        for (let i = 0; i < 8; i += 1) {
+            const v = THREE.MathUtils.clamp(
+                displayPercent + (i - 3.5) * 0.9 + Math.sin(time * 2.6 + i * 0.86) * 1.35,
+                0,
+                100
+            );
+            tickerValues.push(`${v.toFixed(1)}%`);
+        }
+        const tickerText = tickerValues.join('    ');
+        ctx.save();
+        const tickerX = px + 92;
+        const tickerY = py + 332;
+        const tickerW = pw - 184;
+        const tickerH = 44;
+        drawRoundedRect(ctx, tickerX, tickerY - 30, tickerW, tickerH, 14);
+        ctx.clip();
+        ctx.font = '700 24px "Orbitron", "Trebuchet MS", sans-serif';
+        ctx.fillStyle = 'rgba(172, 240, 255, 0.9)';
+        const textW = ctx.measureText(tickerText).width + 80;
+        const offset = (time * (130 + charging * 150)) % textW;
+        const startX = tickerX + 14 - offset;
+        ctx.fillText(tickerText, startX, tickerY);
+        ctx.fillText(tickerText, startX + textW, tickerY);
+        ctx.restore();
+    }
+
+    function drawRoundedRect(ctx, x, y, width, height, radius) {
+        const r = Math.min(radius, width * 0.5, height * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.arcTo(x + width, y, x + width, y + height, r);
+        ctx.arcTo(x + width, y + height, x, y + height, r);
+        ctx.arcTo(x, y + height, x, y, r);
+        ctx.arcTo(x, y, x + width, y, r);
+        ctx.closePath();
+    }
+}
+
+function createChargingProgressHaloTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = 768;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const outer = ctx.createRadialGradient(cx, cy, 0, cx, cy, 340);
+    outer.addColorStop(0, 'rgba(178, 244, 255, 0.36)');
+    outer.addColorStop(0.56, 'rgba(118, 225, 255, 0.12)');
+    outer.addColorStop(1, 'rgba(118, 225, 255, 0)');
+    ctx.fillStyle = outer;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 340, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(200, 251, 255, 0.88)';
+    ctx.shadowColor = 'rgba(103, 220, 255, 0.9)';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 20;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 248, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    return texture;
+}
+
+function createChargingZoneController(scene, chargingZones = [], options = {}) {
+    const activationDelaySec = Math.max(0.2, Number(options.activationDelaySec) || 2);
+    const fxVisibilityRangeSq = 92 * 92;
+    const fallbackState = {
+        startedThisFrame: false,
+        isChargingActive: false,
+        visualLevel: 0,
+    };
+
+    if (!scene || !Array.isArray(chargingZones) || chargingZones.length === 0) {
+        return {
+            update() {
+                return fallbackState;
+            },
+            reset() {},
+            getVisualLevel() {
+                return 0;
+            },
+        };
+    }
+
+    const layer = new THREE.Group();
+    layer.name = 'charging_zone_fx_layer';
+    scene.add(layer);
+
+    const padTexture = createChargingPadTexture();
+    const sweepTexture = createChargingSweepTexture();
+    const pulseTexture = createChargingPulseTexture();
+    const sparkTexture = createChargingSparkTexture();
+    const symbolTexture = createChargingZoneSymbolTexture();
+    const zoneVisuals = chargingZones.map((zone, index) => {
+        const radius = Math.max(1.2, Number(zone.radius) || 2.45);
+        const coreRadius = radius * 0.86;
+        const anchorY = Number.isFinite(zone.y)
+            ? zone.y + 0.022
+            : (getGroundHeightAt(zone.x, zone.z) + 0.08);
+
+        const zoneGroup = new THREE.Group();
+        zoneGroup.position.set(zone.x, anchorY, zone.z);
+        layer.add(zoneGroup);
+
+        const padMaterial = new THREE.MeshBasicMaterial({
+            map: padTexture,
+            transparent: true,
+            opacity: 0.05,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const pad = new THREE.Mesh(
+            new THREE.PlaneGeometry(radius * 2.74, radius * 2.74),
+            padMaterial
+        );
+        pad.rotation.x = -Math.PI / 2;
+        zoneGroup.add(pad);
+
+        const innerMaterial = new THREE.MeshBasicMaterial({
+            map: pulseTexture,
+            transparent: true,
+            opacity: 0.06,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const inner = new THREE.Mesh(
+            new THREE.PlaneGeometry(coreRadius * 2.12, coreRadius * 2.12),
+            innerMaterial
+        );
+        inner.rotation.x = -Math.PI / 2;
+        inner.position.y = 0.0035;
+        zoneGroup.add(inner);
+
+        const sweepMaterial = new THREE.MeshBasicMaterial({
+            map: sweepTexture,
+            transparent: true,
+            opacity: 0.08,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const sweep = new THREE.Mesh(
+            new THREE.PlaneGeometry(radius * 2.7, radius * 2.7),
+            sweepMaterial
+        );
+        sweep.rotation.x = -Math.PI / 2;
+        sweep.position.y = 0.0062;
+        zoneGroup.add(sweep);
+
+        const counterSweepMaterial = new THREE.MeshBasicMaterial({
+            map: sweepTexture,
+            transparent: true,
+            opacity: 0.04,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const counterSweep = new THREE.Mesh(
+            new THREE.PlaneGeometry(radius * 2.45, radius * 2.45),
+            counterSweepMaterial
+        );
+        counterSweep.rotation.x = -Math.PI / 2;
+        counterSweep.position.y = 0.0067;
+        counterSweep.scale.set(0.98, 0.98, 1);
+        zoneGroup.add(counterSweep);
+
+        const pulseMaterial = new THREE.MeshBasicMaterial({
+            map: pulseTexture,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const pulse = new THREE.Mesh(
+            new THREE.PlaneGeometry(coreRadius * 1.7, coreRadius * 1.7),
+            pulseMaterial
+        );
+        pulse.rotation.x = -Math.PI / 2;
+        pulse.position.y = 0.007;
+        zoneGroup.add(pulse);
+
+        const sparkMaterial = new THREE.MeshBasicMaterial({
+            map: sparkTexture,
+            transparent: true,
+            opacity: 0.02,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const spark = new THREE.Mesh(
+            new THREE.PlaneGeometry(radius * 2.46, radius * 2.46),
+            sparkMaterial
+        );
+        spark.rotation.x = -Math.PI / 2;
+        spark.position.y = 0.0076;
+        zoneGroup.add(spark);
+
+        const symbolMaterial = new THREE.MeshBasicMaterial({
+            map: symbolTexture,
+            transparent: true,
+            opacity: 0.12,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+            toneMapped: false,
+        });
+        const symbol = new THREE.Mesh(
+            new THREE.PlaneGeometry(coreRadius * 1.26, coreRadius * 1.26),
+            symbolMaterial
+        );
+        symbol.rotation.x = -Math.PI / 2;
+        symbol.position.y = 0.008;
+        zoneGroup.add(symbol);
+
+        return {
+            index,
+            x: zone.x,
+            z: zone.z,
+            radius,
+            pad,
+            inner,
+            sweep,
+            counterSweep,
+            pulse,
+            spark,
+            zoneGroup,
+            symbol,
+            symbolYaw: Math.random() * Math.PI * 2,
+            sweepYaw: Math.random() * Math.PI * 2,
+            counterSweepYaw: Math.random() * Math.PI * 2,
+            sparkYaw: Math.random() * Math.PI * 2,
+        };
+    });
+
+    const state = {
+        insideZoneIndex: -1,
+        insideTimer: 0,
+        isCharging: false,
+        visualLevel: 0,
+        pulsePhase: Math.random() * Math.PI * 2,
+    };
+    const snapshot = {
+        startedThisFrame: false,
+        isChargingActive: false,
+        visualLevel: 0,
+    };
+
+    applyVisuals(0, 0, -1, 0);
+
+    return {
+        update(playerPosition, deltaTime = 1 / 60, { enabled = true } = {}) {
+            const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
+            snapshot.startedThisFrame = false;
+
+            if (!enabled || !playerPosition) {
+                state.insideZoneIndex = -1;
+                state.insideTimer = 0;
+                state.isCharging = false;
+                for (let i = 0; i < zoneVisuals.length; i += 1) {
+                    zoneVisuals[i].zoneGroup.visible = false;
+                }
+            } else {
+                const insideZoneIndex = findInsideZoneIndex(playerPosition.x, playerPosition.z);
+                for (let i = 0; i < zoneVisuals.length; i += 1) {
+                    const zone = zoneVisuals[i];
+                    const dx = playerPosition.x - zone.x;
+                    const dz = playerPosition.z - zone.z;
+                    zone.zoneGroup.visible = (dx * dx + dz * dz) <= fxVisibilityRangeSq || i === insideZoneIndex;
+                }
+                if (insideZoneIndex >= 0) {
+                    if (insideZoneIndex !== state.insideZoneIndex) {
+                        state.insideZoneIndex = insideZoneIndex;
+                        state.insideTimer = 0;
+                        state.isCharging = false;
+                    } else {
+                        state.insideTimer += dt;
+                    }
+                    if (!state.isCharging && state.insideTimer >= activationDelaySec) {
+                        state.isCharging = true;
+                        snapshot.startedThisFrame = true;
+                    }
+                } else {
+                    state.insideZoneIndex = -1;
+                    state.insideTimer = 0;
+                    state.isCharging = false;
+                }
+            }
+
+            const targetVisual = state.isCharging ? 1 : 0;
+            const visualRate = targetVisual > state.visualLevel ? 8.2 : 4.6;
+            state.visualLevel = THREE.MathUtils.lerp(
+                state.visualLevel,
+                targetVisual,
+                1 - Math.exp(-visualRate * dt)
+            );
+            state.pulsePhase += dt * (2 + state.visualLevel * 4.8);
+
+            const activationProgress = state.insideZoneIndex >= 0
+                ? THREE.MathUtils.clamp(state.insideTimer / activationDelaySec, 0, 1)
+                : 0;
+            applyVisuals(state.visualLevel, activationProgress, state.insideZoneIndex, dt);
+
+            snapshot.isChargingActive = state.isCharging && state.insideZoneIndex >= 0;
+            snapshot.visualLevel = state.visualLevel;
+            return snapshot;
+        },
+        reset() {
+            state.insideZoneIndex = -1;
+            state.insideTimer = 0;
+            state.isCharging = false;
+            state.visualLevel = 0;
+            applyVisuals(0, 0, -1, 0);
+            snapshot.startedThisFrame = false;
+            snapshot.isChargingActive = false;
+            snapshot.visualLevel = 0;
+        },
+        getVisualLevel() {
+            return state.visualLevel;
+        },
+    };
+
+    function findInsideZoneIndex(x, z) {
+        let insideIndex = -1;
+        let nearestDistanceSq = Number.POSITIVE_INFINITY;
+        for (let i = 0; i < zoneVisuals.length; i += 1) {
+            const zone = zoneVisuals[i];
+            const dx = x - zone.x;
+            const dz = z - zone.z;
+            const distanceSq = dx * dx + dz * dz;
+            if (distanceSq > zone.radius * zone.radius) {
+                continue;
+            }
+            if (distanceSq < nearestDistanceSq) {
+                nearestDistanceSq = distanceSq;
+                insideIndex = i;
+            }
+        }
+        return insideIndex;
+    }
+
+    function applyVisuals(activeLevel, activationProgress, insideZoneIndex, dt) {
+        for (let i = 0; i < zoneVisuals.length; i += 1) {
+            const zone = zoneVisuals[i];
+            if (!zone.zoneGroup.visible) {
+                continue;
+            }
+            const isInside = i === insideZoneIndex;
+            const prep = isInside ? activationProgress : 0;
+            const pulse = 0.5 + 0.5 * Math.sin(state.pulsePhase + zone.index * 0.82);
+            const fastPulse = 0.5 + 0.5 * Math.sin(state.pulsePhase * 1.72 + zone.index * 1.37);
+            const prepEase = prep * prep * (3 - 2 * prep);
+            const zoneActiveLevel = isInside ? activeLevel : 0;
+
+            zone.pad.material.opacity = 0.02 + prepEase * 0.14 + zoneActiveLevel * (0.18 + pulse * 0.24);
+            zone.pad.scale.setScalar(1 + zoneActiveLevel * (0.02 + fastPulse * 0.04));
+
+            zone.inner.material.opacity = 0.03 + prepEase * 0.2 + zoneActiveLevel * (0.2 + pulse * 0.3);
+            zone.inner.scale.setScalar(1 + zoneActiveLevel * (0.04 + fastPulse * 0.07));
+
+            zone.sweep.material.opacity = 0.03 + prepEase * 0.17 + zoneActiveLevel * (0.16 + pulse * 0.26);
+            zone.counterSweep.material.opacity = 0.01 + prepEase * 0.09 + zoneActiveLevel * (0.1 + fastPulse * 0.2);
+            zone.spark.material.opacity = prepEase * 0.06 + zoneActiveLevel * (0.08 + fastPulse * 0.3);
+
+            const rippleTravel = (state.pulsePhase * (0.11 + zoneActiveLevel * 0.16) + zone.index * 0.07) % 1;
+            zone.pulse.material.opacity = zoneActiveLevel * (0.16 + (1 - rippleTravel) * 0.38 + pulse * 0.12);
+            zone.pulse.scale.setScalar(0.84 + rippleTravel * (0.64 + zoneActiveLevel * 0.82));
+
+            zone.symbolYaw += (0.12 + zoneActiveLevel * 1.55) * dt;
+            zone.sweepYaw += (0.26 + zoneActiveLevel * 2.5) * dt;
+            zone.counterSweepYaw -= (0.14 + zoneActiveLevel * 1.6) * dt;
+            zone.sparkYaw -= (0.22 + zoneActiveLevel * 3.2) * dt;
+            zone.sweep.rotation.z = zone.sweepYaw;
+            zone.counterSweep.rotation.z = zone.counterSweepYaw;
+            zone.spark.rotation.z = zone.sparkYaw;
+            zone.symbol.material.opacity = 0.1 + prepEase * 0.26 + zoneActiveLevel * (0.26 + pulse * 0.26);
+            zone.symbol.rotation.z = zone.symbolYaw;
+        }
+    }
+}
+
+function createChargingZoneSymbolTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    const haloGradient = ctx.createRadialGradient(cx, cy, 12, cx, cy, 190);
+    haloGradient.addColorStop(0, 'rgba(201, 248, 255, 0.3)');
+    haloGradient.addColorStop(0.6, 'rgba(133, 224, 250, 0.1)');
+    haloGradient.addColorStop(1, 'rgba(133, 224, 250, 0)');
+    ctx.fillStyle = haloGradient;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 190, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(180, 246, 255, 0.95)';
+    ctx.shadowColor = 'rgba(90, 220, 255, 0.9)';
+    ctx.shadowBlur = 18;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 14;
+
+    const arcs = [
+        { radius: 74, start: Math.PI * 1.14, end: Math.PI * 1.86 },
+        { radius: 116, start: Math.PI * 1.2, end: Math.PI * 1.8 },
+    ];
+    for (let i = 0; i < arcs.length; i += 1) {
+        const arc = arcs[i];
+        ctx.beginPath();
+        ctx.arc(cx, cy, arc.radius, arc.start, arc.end);
+        ctx.stroke();
+    }
+
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + 88);
+    ctx.lineTo(cx, cy + 6);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(217, 253, 255, 0.98)';
+    ctx.beginPath();
+    ctx.arc(cx, cy + 114, 13, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+}
+
+function createChargingPadTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const softHalo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 492);
+    softHalo.addColorStop(0, 'rgba(188, 248, 255, 0.36)');
+    softHalo.addColorStop(0.45, 'rgba(126, 226, 255, 0.15)');
+    softHalo.addColorStop(0.78, 'rgba(126, 226, 255, 0.06)');
+    softHalo.addColorStop(1, 'rgba(126, 226, 255, 0)');
+    ctx.fillStyle = softHalo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 492, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(199, 251, 255, 0.9)';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(109, 228, 255, 0.9)';
+    ctx.shadowBlur = 30;
+    ctx.lineWidth = 28;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 334, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = 'rgba(166, 236, 255, 0.78)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 252, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    for (let i = 0; i < 52; i += 1) {
+        const angle = (i / 52) * Math.PI * 2;
+        const radius = 392;
+        const dotX = cx + Math.cos(angle) * radius;
+        const dotY = cy + Math.sin(angle) * radius;
+        const alpha = 0.05 + (i % 4 === 0 ? 0.1 : 0.02);
+        ctx.fillStyle = `rgba(173, 236, 255, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, i % 4 === 0 ? 2.4 : 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    for (let i = 0; i < 34; i += 1) {
+        const angle = (i / 34) * Math.PI * 2;
+        const innerRadius = 280;
+        const outerRadius = 310;
+        const x1 = cx + Math.cos(angle) * innerRadius;
+        const y1 = cy + Math.sin(angle) * innerRadius;
+        const x2 = cx + Math.cos(angle) * outerRadius;
+        const y2 = cy + Math.sin(angle) * outerRadius;
+        ctx.strokeStyle = i % 2 === 0 ? 'rgba(195, 250, 255, 0.12)' : 'rgba(168, 237, 255, 0.06)';
+        ctx.lineWidth = i % 2 === 0 ? 2 : 1;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+}
+
+function createChargingSweepTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = 'rgba(194, 250, 255, 0.98)';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(111, 225, 255, 0.96)';
+    ctx.shadowBlur = 24;
+    ctx.lineWidth = 24;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 326, THREE.MathUtils.degToRad(-34), THREE.MathUtils.degToRad(38));
+    ctx.stroke();
+
+    ctx.lineWidth = 12;
+    ctx.strokeStyle = 'rgba(160, 238, 255, 0.88)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 262, THREE.MathUtils.degToRad(-46), THREE.MathUtils.degToRad(52));
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    const beamGradient = ctx.createLinearGradient(cx - 250, cy - 34, cx + 250, cy + 34);
+    beamGradient.addColorStop(0, 'rgba(175, 246, 255, 0)');
+    beamGradient.addColorStop(0.3, 'rgba(175, 246, 255, 0.24)');
+    beamGradient.addColorStop(0.5, 'rgba(213, 253, 255, 0.88)');
+    beamGradient.addColorStop(0.7, 'rgba(175, 246, 255, 0.24)');
+    beamGradient.addColorStop(1, 'rgba(175, 246, 255, 0)');
+    ctx.fillStyle = beamGradient;
+    ctx.fillRect(cx - 250, cy - 28, 500, 56);
+
+    for (let i = 0; i < 8; i += 1) {
+        const t = i / 7;
+        const angle = THREE.MathUtils.degToRad(-24 + t * 46);
+        const x1 = cx + Math.cos(angle) * 242;
+        const y1 = cy + Math.sin(angle) * 242;
+        const x2 = cx + Math.cos(angle) * 350;
+        const y2 = cy + Math.sin(angle) * 350;
+        ctx.strokeStyle = `rgba(196, 251, 255, ${0.2 + (1 - Math.abs(t - 0.5) * 2) * 0.16})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+}
+
+function createChargingPulseTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 768;
+    canvas.height = 768;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const ringGlow = ctx.createRadialGradient(cx, cy, 96, cx, cy, 312);
+    ringGlow.addColorStop(0, 'rgba(154, 234, 255, 0)');
+    ringGlow.addColorStop(0.48, 'rgba(178, 245, 255, 0.28)');
+    ringGlow.addColorStop(0.65, 'rgba(208, 252, 255, 0.58)');
+    ringGlow.addColorStop(0.78, 'rgba(154, 234, 255, 0.2)');
+    ringGlow.addColorStop(1, 'rgba(154, 234, 255, 0)');
+    ctx.fillStyle = ringGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 312, 0, Math.PI * 2);
+    ctx.fill();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
+}
+
+function createChargingSparkTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 74; i += 1) {
+        const angle = (i / 74) * Math.PI * 2;
+        const radius = 238 + ((i * 53) % 104);
+        const sparkRadius = i % 6 === 0 ? 4.6 : 2.2;
+        const x = cx + Math.cos(angle) * radius;
+        const y = cy + Math.sin(angle) * radius;
+        const alpha = i % 6 === 0 ? 0.32 : 0.16;
+        ctx.fillStyle = `rgba(201, 251, 255, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, sparkRadius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.strokeStyle = 'rgba(195, 250, 255, 0.34)';
+    ctx.shadowColor = 'rgba(110, 229, 255, 0.6)';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 292, THREE.MathUtils.degToRad(-22), THREE.MathUtils.degToRad(36));
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    return texture;
 }
 
 function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, options = {}) {
@@ -783,6 +1695,8 @@ function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, option
     replayController.stopRecording();
     replayController.stopPlayback();
     isCarDestroyed = true;
+    chargingZoneController.reset();
+    chargingProgressHudController.reset();
     collectibleSystem.setEnabled(false);
     car.visible = false;
     clearDriveKeys();
@@ -1708,11 +2622,13 @@ function dismissWelcomeModal() {
         return;
     }
     isWelcomeModalVisible = false;
+    carEditModeController.setActive(false);
     welcomeModalUi.hide();
     startNewGame();
 }
 
 function showWelcomeModal() {
+    carEditModeController.setActive(false);
     isWelcomeModalVisible = true;
     isGamePaused = true;
     clearDriveKeys();
@@ -1744,6 +2660,8 @@ function respawnPlayerCar() {
     car.rotation.set(0, playerSpawnState.rotationY, 0);
     collectibleSystem.setEnabled(true);
     clearDriveKeys();
+    chargingZoneController.reset();
+    chargingProgressHudController.reset();
     resetPlayerDamageState();
     playerBattery = BATTERY_MAX;
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
@@ -1862,6 +2780,8 @@ function resetRunStateForReplay() {
     playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
     playerBattery = BATTERY_MAX;
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    chargingZoneController.reset();
+    chargingProgressHudController.reset();
     resetPlayerDamageState();
     clearDriveKeys();
     clearReplayEffects();
@@ -1869,6 +2789,7 @@ function resetRunStateForReplay() {
 }
 
 function startNewGame() {
+    carEditModeController.setActive(false);
     setPauseState(false);
     replayController.stopRecording();
     replayController.stopPlayback();
@@ -1887,6 +2808,8 @@ function startNewGame() {
     playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
     playerBattery = BATTERY_MAX;
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    chargingZoneController.reset();
+    chargingProgressHudController.reset();
 
     car.visible = true;
     car.position.copy(playerSpawnState.position);
@@ -2132,8 +3055,8 @@ function createWelcomeModalController({ onStart, onColorChange, initialColorHex 
             taillightDistance: 8.2,
             taillightDecay: 3,
             taillightPositions: [
-                { position: [-0.52, 0.54, 2.14] },
-                { position: [0.52, 0.54, 2.14] },
+                { position: [-0.52, 0.54, WELCOME_PREVIEW_REAR_LIGHT_Z] },
+                { position: [0.52, 0.54, WELCOME_PREVIEW_REAR_LIGHT_Z] },
             ],
         },
     });

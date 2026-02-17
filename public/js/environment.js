@@ -157,6 +157,14 @@ const JUMP_RAMPS = [
         sideFade: 1.4,
     }),
 ];
+const JUMP_RAMP_CHARGE_ZONE_RADIUS = 2.45;
+const jumpRampChargeZones = JUMP_RAMPS.map((ramp, index) => ({
+    id: `ramp_charge_zone_${index}`,
+    x: ramp.x,
+    z: ramp.z,
+    y: JUMP_RAMP_SURFACE_Y + ramp.height + 0.03,
+    radius: JUMP_RAMP_CHARGE_ZONE_RADIUS,
+}));
 const worldBounds = {
     minX: -WORLD_HALF_SIZE,
     maxX: WORLD_HALF_SIZE,
@@ -201,6 +209,7 @@ export {
     worldBoundary,
     getGroundHeightAt,
     updateGroundMotion,
+    jumpRampChargeZones,
 };
 
 function createLight(type, { color, intensity, position, shadow }) {
@@ -380,14 +389,16 @@ function createJumpRampLayer() {
         roughness: 0.7,
         metalness: 0.16,
     });
-    const markerGeometry = new THREE.RingGeometry(2.6, 3.6, 24);
+    const markerTexture = createJumpRampMarkerTexture();
+    const markerGeometry = new THREE.PlaneGeometry(8, 8);
     const markerMaterial = new THREE.MeshBasicMaterial({
-        color: 0x8fdbff,
+        map: markerTexture,
         transparent: true,
-        opacity: 0.32,
+        opacity: 0.46,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
+        toneMapped: false,
     });
 
     for (let i = 0; i < JUMP_RAMPS.length; i += 1) {
@@ -420,6 +431,45 @@ function createJumpRampLayer() {
     }
 
     return layer;
+}
+
+function createJumpRampMarkerTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 468);
+    halo.addColorStop(0, 'rgba(158, 223, 255, 0.26)');
+    halo.addColorStop(0.48, 'rgba(144, 213, 255, 0.14)');
+    halo.addColorStop(1, 'rgba(144, 213, 255, 0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 468, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(190, 242, 255, 0.9)';
+    ctx.shadowColor = 'rgba(127, 220, 255, 0.9)';
+    ctx.shadowBlur = 24;
+    ctx.lineWidth = 36;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 360, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = 'rgba(163, 232, 255, 0.82)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 284, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    return texture;
 }
 
 function createRoadLayer() {

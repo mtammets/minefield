@@ -105,10 +105,11 @@ function createBrakeDisk() {
     );
 }
 
-function createWheelWellLight(x, z, car) {
+function createWheelWellLight(x, z, parent) {
     const light = new THREE.PointLight(0xffffff, 1.1, 8);
     light.position.set(x, 1.5, z);
-    car.add(light);
+    parent.add(light);
+    return light;
 }
 
 function createWheel(x, z, parent, mirror = false) {
@@ -150,10 +151,10 @@ function createWheel(x, z, parent, mirror = false) {
     return wheel;
 }
 
-function createSteerableWheel(x, z, car, mirror = false) {
+function createSteerableWheel(x, z, parent, mirror = false) {
     const steeringPivot = new THREE.Group();
     steeringPivot.position.set(x, 0, z);
-    car.add(steeringPivot);
+    parent.add(steeringPivot);
 
     const wheel = createWheel(0, 0, steeringPivot, mirror);
     return { steeringPivot, wheel };
@@ -163,16 +164,34 @@ function initializeWheels(car, options = {}) {
     const {
         addWheelWellLights = true,
     } = options;
-    const frontLeft = createSteerableWheel(-1.2, -1.8, car, wheelMirrorConfig.frontLeft);
-    const frontRight = createSteerableWheel(1.2, -1.8, car, wheelMirrorConfig.frontRight);
-    const backLeft = createWheel(-1.2, 1.8, car, wheelMirrorConfig.backLeft);
-    const backRight = createWheel(1.2, 1.8, car, wheelMirrorConfig.backRight);
+    const frontAxleGroup = new THREE.Group();
+    frontAxleGroup.name = 'front_axle_group';
+    car.add(frontAxleGroup);
+
+    const rearAxleGroup = new THREE.Group();
+    rearAxleGroup.name = 'rear_axle_group';
+    car.add(rearAxleGroup);
+
+    const wheelLightGroup = new THREE.Group();
+    wheelLightGroup.name = 'wheel_well_light_group';
+    car.add(wheelLightGroup);
+
+    const frontLeft = createSteerableWheel(-1.2, -1.8, frontAxleGroup, wheelMirrorConfig.frontLeft);
+    const frontRight = createSteerableWheel(1.2, -1.8, frontAxleGroup, wheelMirrorConfig.frontRight);
+    const backLeft = createWheel(-1.2, 1.8, rearAxleGroup, wheelMirrorConfig.backLeft);
+    const backRight = createWheel(1.2, 1.8, rearAxleGroup, wheelMirrorConfig.backRight);
+    frontLeft.steeringPivot.name = 'steering_pivot_front_left';
+    frontRight.steeringPivot.name = 'steering_pivot_front_right';
+    frontLeft.wheel.name = 'wheel_front_left';
+    frontRight.wheel.name = 'wheel_front_right';
+    backLeft.name = 'wheel_rear_left';
+    backRight.name = 'wheel_rear_right';
 
     if (addWheelWellLights) {
-        createWheelWellLight(-1.2, -1.8, car);
-        createWheelWellLight(1.2, -1.8, car);
-        createWheelWellLight(-1.2, 1.8, car);
-        createWheelWellLight(1.2, 1.8, car);
+        createWheelWellLight(-1.2, -1.8, wheelLightGroup);
+        createWheelWellLight(1.2, -1.8, wheelLightGroup);
+        createWheelWellLight(-1.2, 1.8, wheelLightGroup);
+        createWheelWellLight(1.2, 1.8, wheelLightGroup);
     }
 
     const frontWheelMeshes = [frontLeft.wheel, frontRight.wheel];
@@ -256,6 +275,14 @@ function initializeWheels(car, options = {}) {
         },
         getDetachableWheels() {
             return detachableWheels;
+        },
+        getEditGroups() {
+            return {
+                frontAxleGroup,
+                rearAxleGroup,
+                wheelLightGroup,
+                frontSteeringPivots: steerPivots,
+            };
         },
     };
 }
