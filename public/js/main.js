@@ -64,20 +64,20 @@ const MAX_PHYSICS_STEPS_PER_FRAME = 6;
 const MINIMAP_UPDATE_INTERVAL = 1 / 12;
 let minimapAccumulator = 0;
 const COLOR_NAMES = {
-    [0x7cf9ff]: 'Neo türkiis',
-    [0xff85f8]: 'Neoon roosa',
-    [0x8dff9a]: 'Heleroheline',
-    [0xffd86b]: 'Merevaik',
+    [0x7cf9ff]: 'Neo Turquoise',
+    [0xff85f8]: 'Neon Pink',
+    [0x8dff9a]: 'Light Green',
+    [0xffd86b]: 'Amber',
 };
 const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
 const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
 const CAR_COLOR_PRESETS = [
-    { hex: 0x2d67a6, name: 'Kobalt sinine' },
-    { hex: 0xd34545, name: 'Võidusõidu punane' },
-    { hex: 0xff9f3f, name: 'Päikese oranž' },
-    { hex: 0x3ca86f, name: 'Neoon roheline' },
-    { hex: 0x8c9bb0, name: 'Titaan hall' },
-    { hex: 0xe4edf6, name: 'Arktiline valge' },
+    { hex: 0x2d67a6, name: 'Cobalt Blue' },
+    { hex: 0xd34545, name: 'Racing Red' },
+    { hex: 0xff9f3f, name: 'Sunset Orange' },
+    { hex: 0x3ca86f, name: 'Neon Green' },
+    { hex: 0x8c9bb0, name: 'Titanium Gray' },
+    { hex: 0xe4edf6, name: 'Arctic White' },
 ];
 const DEFAULT_PLAYER_CAR_COLOR_HEX = CAR_COLOR_PRESETS[0].hex;
 const DEBRIS_GRAVITY = 26;
@@ -107,7 +107,7 @@ const VEHICLE_DAMAGE_COLLISION_HIGH = 22;
 const VEHICLE_WHEEL_DETACH_SPEED = 28;
 const VEHICLE_SECOND_WHEEL_DETACH_SPEED = 36;
 const VEHICLE_DENT_MAX = 1.7;
-const STATUS_DEFAULT_TEXT = 'Tagaveoline ja võimas: juhitav nii edasi kui tagurdades. Kogu energiasfääre.';
+const STATUS_DEFAULT_TEXT = 'Rear-wheel drive and powerful: controllable both forward and reverse. Collect energy spheres.';
 const ROOF_MENU_MODE_LABELS = {
     dashboard: 'Dashboard',
     battery: 'Energy',
@@ -314,7 +314,7 @@ if (welcomeModalUi.isAvailable()) {
 // Klaviatuurikontrollide ja akna suuruse muutuste kuulamine
 initializeControls();
 
-// Animatsiooni käivitamine
+// Start animation
 animate();
 
 /** Funktsioonid **/
@@ -354,7 +354,7 @@ function initializeControls() {
     renderer.domElement.addEventListener('pointerdown', handleGameCanvasPointerDown);
 }
 
-// Klahvide vajutamise töötlemine
+// Handle key presses
 function handleKey(event, isKeyDown) {
     const rawKey = event.key.toLowerCase();
     const key = rawKey === ' ' || rawKey === 'spacebar' ? 'space' : rawKey;
@@ -480,14 +480,14 @@ function handleKey(event, isKeyDown) {
                 initializePlayerPhysics(car);
                 resetPlayerDamageState();
                 physicsAccumulator = 0;
-                objectiveUi.showInfo('Taasesitus peatatud.');
+                objectiveUi.showInfo('Playback stopped.');
             }
 
             if (isCarDestroyed) {
                 objectiveUi.showInfo(
                     playerCarsRemaining > 0
-                        ? 'Avarii pooleli. Oota uue auto ilmumist.'
-                        : 'Kõik autod on otsas. Vajuta Q restart.'
+                        ? 'A crash is in progress. Wait for the next car to spawn.'
+                        : 'No cars left. Press Q to restart.'
                 );
                 return;
             }
@@ -496,15 +496,15 @@ function handleKey(event, isKeyDown) {
                 replayController.stopRecording();
                 const duration = replayController.getDuration();
                 if (duration > 0.2) {
-                    objectiveUi.showInfo(`Salvestus valmis (${duration.toFixed(1)}s). Vajuta V taasesituseks.`);
+                    objectiveUi.showInfo(`Recording saved (${duration.toFixed(1)}s). Press V to play it back.`);
                 } else {
-                    objectiveUi.showInfo('Salvestus liiga lühike. Tee pikem sõit ja proovi uuesti.');
+                    objectiveUi.showInfo('Recording too short. Drive longer and try again.');
                 }
                 return;
             }
 
             replayController.startRecording(getVehicleState());
-            objectiveUi.showInfo('Salvestus käib. Vajuta K lõpetamiseks.');
+            objectiveUi.showInfo('Recording in progress. Press K to stop.');
         },
         v: () => {
             if (!isKeyDown || isRaceIntroDriveLocked) {
@@ -523,12 +523,12 @@ function handleKey(event, isKeyDown) {
                 initializePlayerPhysics(car);
                 resetPlayerDamageState();
                 physicsAccumulator = 0;
-                objectiveUi.showInfo('Taasesitus peatatud.');
+                objectiveUi.showInfo('Playback stopped.');
                 return;
             }
 
             if (!replayController.hasReplay()) {
-                objectiveUi.showInfo('Replay puudub. Vajuta K ja salvesta sõit.');
+                objectiveUi.showInfo('No replay available. Press K to record a drive.');
                 return;
             }
 
@@ -536,7 +536,7 @@ function handleKey(event, isKeyDown) {
             clearDriveKeys();
             if (replayController.startPlayback()) {
                 clearReplayEffects();
-                objectiveUi.showInfo('Tele-replay käivitus. V peatab, K alustab uut salvestust.');
+                objectiveUi.showInfo('TV replay started. V stops it, K starts a new recording.');
             }
         },
         tab: () => {
@@ -593,9 +593,9 @@ function showRoofMenuStatus(modeKey = getPlayerRoofMenuMode()) {
     }
     const modeLabel = ROOF_MENU_MODE_LABELS[modeKey] || String(modeKey);
     const chassisHint = modeKey === 'chassis'
-        ? ' Chassis-vaates saad vedrustust ja tippkiirust +/- nuppudega muuta.'
+        ? ' In Chassis view you can adjust suspension and top speed with +/- buttons.'
         : '';
-    objectiveUi.showInfo(`Katuse menüü: ${modeLabel}. Tab edasi, Shift+Tab tagasi, 1-4 otse.${chassisHint}`);
+    objectiveUi.showInfo(`Roof menu: ${modeLabel}. Tab next, Shift+Tab previous, 1-4 direct.${chassisHint}`);
 }
 
 function handleGameCanvasPointerDown(event) {
@@ -656,7 +656,7 @@ function showSuspensionTuneStatus(tune = getPlayerSuspensionTune()) {
     }
     const heightMm = Math.round(tune.suspensionHeightMm || 0);
     const stiffnessPct = Math.round(tune.suspensionStiffnessPercent || 0);
-    objectiveUi.showInfo(`Vedrustus: kõrgus ${heightMm >= 0 ? '+' : ''}${heightMm} mm, jäikus ${stiffnessPct}%.`);
+    objectiveUi.showInfo(`Suspension: height ${heightMm >= 0 ? '+' : ''}${heightMm} mm, stiffness ${stiffnessPct}%.`);
 }
 
 function showTopSpeedTuneStatus(tune = getPlayerTopSpeedLimit()) {
@@ -664,7 +664,7 @@ function showTopSpeedTuneStatus(tune = getPlayerTopSpeedLimit()) {
         return;
     }
     const speedKph = Math.round(tune.topSpeedKph || 0);
-    objectiveUi.showInfo(`Tippkiirus: ${speedKph} km/h.`);
+    objectiveUi.showInfo(`Top speed: ${speedKph} km/h.`);
 }
 
 // Akna suuruse muutmisel rendereri ja kaamera uuendamine
@@ -677,7 +677,7 @@ function onWindowResize() {
     welcomeModalUi.resize();
 }
 
-// Täisekraani režiimi lülitamine
+// Toggle fullscreen mode
 function toggleFullscreen() {
     const fullscreenRoot = document.documentElement;
     if (!document.fullscreenElement) {
@@ -748,7 +748,7 @@ function unlockKeyboardLock() {
     }
 }
 
-// Animatsioonitsükkel
+// Animation loop
 function animate() {
     requestAnimationFrame(animate);
 
@@ -773,7 +773,7 @@ function animate() {
             if (introFinished) {
                 resetCameraTrackingState();
                 setCameraKeyboardControlsEnabled(!carEditModeController.isActive());
-                objectiveUi.showInfo('GO! Rajale!', 950);
+                objectiveUi.showInfo('GO! Hit the track!', 950);
             }
         } else {
             vehicleImpactStatusCooldown = Math.max(0, vehicleImpactStatusCooldown - frameDelta);
@@ -789,7 +789,7 @@ function animate() {
             chargingHudLevel = chargingSnapshot.visualLevel;
             vehicleState.chargingLevelNormalized = chargingSnapshot.visualLevel;
             if (chargingSnapshot.startedThisFrame) {
-                objectiveUi.showInfo('Laadimine käivitus. Aku täitub seni, kuni püsid ringi sees.', 2200);
+                objectiveUi.showInfo('Charging started. Battery fills while you stay inside the ring.', 2200);
             }
             if (chargingSnapshot.isChargingActive && chargingContextEnabled) {
                 addBattery(CHARGING_BATTERY_GAIN_PER_SEC * frameDelta);
@@ -815,7 +815,7 @@ function animate() {
                     initializePlayerPhysics(car);
                     resetPlayerDamageState();
                     physicsAccumulator = 0;
-                    objectiveUi.showInfo('Tele-replay lõppes.');
+                    objectiveUi.showInfo('TV replay ended.');
                 }
             } else if (!isCarDestroyed && !pickupRoundFinished) {
                 physicsAccumulator += frameDelta;
@@ -929,7 +929,7 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Päikese valguse positsiooni uuendamine auto suhtes
+// Update sunlight position relative to the car
 function updateSunLightPosition() {
     sunLight.position.set(car.position.x + 95, 180, car.position.z + 78);
     sunLight.target.position.set(car.position.x, car.position.y, car.position.z);
@@ -2236,13 +2236,13 @@ function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, option
     playerCarsRemaining = Math.max(0, playerCarsRemaining - 1);
 
     const crashReason = options.statusText
-        || `Vale (${colorNameFromHex(pickupColorHex)})! Õige oli ${colorNameFromHex(targetColorHex)}.`;
+        || `Wrong (${colorNameFromHex(pickupColorHex)})! Correct was ${colorNameFromHex(targetColorHex)}.`;
     spawnCarDebris(hitPosition, options.collision || null);
 
     if (playerCarsRemaining > 0) {
         objectiveUi.showCrash(
-            `${crashReason} Uus auto saabub ${Math.round(PLAYER_RESPAWN_DELAY_MS / 100) / 10}s pärast. `
-            + `Autosid järel: ${playerCarsRemaining}/${PLAYER_CAR_POOL_SIZE}.`
+            `${crashReason} New car arrives in ${Math.round(PLAYER_RESPAWN_DELAY_MS / 100) / 10}s. `
+            + `Cars left: ${playerCarsRemaining}/${PLAYER_CAR_POOL_SIZE}.`
         );
         pendingRespawnTimeout = window.setTimeout(() => {
             pendingRespawnTimeout = null;
@@ -2251,16 +2251,16 @@ function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, option
         return;
     }
 
-    objectiveUi.showCrash(`${crashReason} Kõik autod on otsas. Vajuta Q restart.`);
+    objectiveUi.showCrash(`${crashReason} No cars left. Press Q to restart.`);
 }
 
 function triggerObstacleCrash(collision) {
     const obstacleLabel = collision.obstacleCategory === 'building'
-        ? 'majja'
-        : (collision.obstacleCategory === 'tree' ? 'puusse' : 'lambiposti');
+        ? 'a building'
+        : (collision.obstacleCategory === 'tree' ? 'a tree' : 'a lamp post');
     const speedLabel = Math.round(collision.impactSpeed);
     triggerCarExplosion(collision.position, 0xffa66b, 0xff4b4b, {
-        statusText: `Sõitsid suure hooga ${obstacleLabel} (${speedLabel}).`,
+        statusText: `You hit ${obstacleLabel} at high speed (${speedLabel}).`,
         collision,
     });
 }
@@ -2281,7 +2281,7 @@ function updateBattery(vehicleState, dt) {
 
     if (playerBattery <= 0.001) {
         triggerCarExplosion(car.position.clone(), 0xffb07d, 0xff4b4b, {
-            statusText: 'Aku sai tühjaks.',
+            statusText: 'Battery depleted.',
         });
     }
 }
@@ -2303,7 +2303,7 @@ function finalizePickupRound(totalPickups, collectedPickups) {
     botStatusUi.render(botTrafficSystem?.getHudState?.() || []);
 
     const scoreboard = [
-        { name: 'Sina', collectedCount: playerCollectedCount },
+        { name: 'You', collectedCount: playerCollectedCount },
         ...(botTrafficSystem?.getHudState?.() || []).map((bot) => ({
             name: bot.name,
             collectedCount: bot.collectedCount || 0,
@@ -2320,13 +2320,13 @@ function finalizePickupRound(totalPickups, collectedPickups) {
     const resolvedTotal = Number.isFinite(totalPickups) ? totalPickups : ROUND_TOTAL_PICKUPS;
     const resolvedCollectedRaw = Number.isFinite(collectedPickups) ? collectedPickups : totalCollectedCount;
     const resolvedCollected = THREE.MathUtils.clamp(Math.round(resolvedCollectedRaw), 0, resolvedTotal);
-    const tiePrefix = winners.length > 1 ? 'Viik' : 'Võitja';
+    const tiePrefix = winners.length > 1 ? 'Tie' : 'Winner';
 
     objectiveUi.showResult(
-        `Objektid otsas (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore}).`
+        `No objects left (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore}).`
     );
     finalScoreboardUi.show({
-        summaryText: `Korjatud ${resolvedCollected}/${resolvedTotal} objekti.`,
+        summaryText: `Collected ${resolvedCollected}/${resolvedTotal} objects.`,
         entries: scoreboard,
         topScore,
     });
@@ -2368,8 +2368,8 @@ function processVehicleCollisionContacts(contacts) {
     if (strongestImpact >= VEHICLE_DAMAGE_COLLISION_MIN && vehicleImpactStatusCooldown <= 0) {
         objectiveUi.showInfo(
             strongestImpact >= VEHICLE_WHEEL_DETACH_SPEED
-                ? `Tugev kokkupõrge (${Math.round(strongestImpact)}): võimalik rattakahjustus.`
-                : `Kontakt teise autoga (${Math.round(strongestImpact)}).`,
+                ? `Heavy collision (${Math.round(strongestImpact)}): possible wheel damage.`
+                : `Contact with another car (${Math.round(strongestImpact)}).`,
             strongestImpact >= VEHICLE_DAMAGE_COLLISION_HIGH ? 1400 : 900
         );
         vehicleImpactStatusCooldown = 0.85;
@@ -3067,10 +3067,10 @@ function createRaceIntroController({ camera, vehicle, durationSec = 4.2 } = {}) 
     }
 
     const timedSteps = [
-        { at: 0, label: '3', caption: 'Valmistu stardiks', mode: 'pulse' },
-        { at: 1, label: '2', caption: 'Sihista ideaalne joon', mode: 'pulse' },
-        { at: 2, label: '1', caption: 'Täisgaas kohe', mode: 'pulse' },
-        { at: 3, label: 'GO!', caption: 'Lase minna!', mode: 'go' },
+        { at: 0, label: '3', caption: 'Prepare for launch', mode: 'pulse' },
+        { at: 1, label: '2', caption: 'Aim for the ideal line', mode: 'pulse' },
+        { at: 2, label: '1', caption: 'Full throttle now', mode: 'pulse' },
+        { at: 3, label: 'GO!', caption: 'Let it rip!', mode: 'go' },
     ];
     const orbitTarget = new THREE.Vector3();
     const lookTarget = new THREE.Vector3();
@@ -3186,7 +3186,7 @@ function createRaceIntroController({ camera, vehicle, durationSec = 4.2 } = {}) 
         rootEl.classList.remove('active', 'pulse', 'go');
         rootEl.hidden = true;
         countEl.textContent = '3';
-        captionEl.textContent = 'Valmistu stardiks';
+        captionEl.textContent = 'Prepare for launch';
         document.body.classList.remove('race-intro-active');
     }
 
@@ -3314,15 +3314,15 @@ function createObjectiveUiController() {
         },
         flashCorrect(colorHex, batteryPercent = null) {
             const batteryLabel = Number.isFinite(batteryPercent)
-                ? ` | Aku ${Math.round(batteryPercent)}%`
+                ? ` | Battery ${Math.round(batteryPercent)}%`
                 : '';
-            setStatus(`Õige: ${colorNameFromHex(colorHex)}${batteryLabel}`, '#8dff9a');
+            setStatus(`Correct: ${colorNameFromHex(colorHex)}${batteryLabel}`, '#8dff9a');
         },
         showFailure(wrongColorHex, targetColorHex) {
             const wrongName = colorNameFromHex(wrongColorHex);
             const targetName = colorNameFromHex(targetColorHex);
             setStatus(
-                `Vale (${wrongName})! Õige oli ${targetName}. Vajuta Q restart.`,
+                `Wrong (${wrongName})! Correct was ${targetName}. Press Q to restart.`,
                 '#ff8e8e',
                 5000
             );
@@ -3423,7 +3423,7 @@ function startRaceIntroSequence() {
     resetCameraTrackingState();
     setCameraKeyboardControlsEnabled(false);
     raceIntroController.start();
-    objectiveUi.showInfo('Stardiloendus...', 1100);
+    objectiveUi.showInfo('Starting countdown...', 1100);
 }
 
 function restartGameWithCountdown() {
@@ -3464,7 +3464,7 @@ function respawnPlayerCar() {
     physicsAccumulator = 0;
 
     objectiveUi.showInfo(
-        `Uus auto rajal. Autosid järel: ${playerCarsRemaining}/${PLAYER_CAR_POOL_SIZE}.`,
+        `New car on track. Cars left: ${playerCarsRemaining}/${PLAYER_CAR_POOL_SIZE}.`,
         2300
     );
 }
@@ -4052,7 +4052,7 @@ function createBotStatusController() {
     return {
         render(botStateList = []) {
             if (!botStateList.length) {
-                listEl.textContent = 'Botid puuduvad';
+                listEl.textContent = 'No bots available';
                 return;
             }
 

@@ -130,7 +130,7 @@ export function createCarEditModeController({
             if (key === 'r') {
                 event.preventDefault();
                 focusOnCar(true);
-                onStatus?.('Edit mode: vaade resetiti.');
+                onStatus?.('Edit mode: view reset.');
                 return true;
             }
 
@@ -159,14 +159,14 @@ export function createCarEditModeController({
             applyViewPreset('iso', false);
             targetFov = DEFAULT_CAMERA_FOV;
             renderPartList();
-            onStatus?.('Edit mode aktiivne. Hiir: vasak pööra, parem liiguta, ratas zoom.');
+            onStatus?.('Edit mode active. Mouse: left rotate, right pan, wheel zoom.');
         } else {
             restoreEditablePartVisibility?.(savedPartVisibility);
             savedPartVisibility = null;
             pointerState.active = false;
             pointerState.id = null;
             ui.setSearchValue('');
-            onStatus?.('Edit mode väljas.');
+            onStatus?.('Edit mode off.');
         }
 
         onEditModeChanged?.(active);
@@ -422,16 +422,16 @@ function createEditModeUi({
             if (!parts.length) {
                 const empty = document.createElement('div');
                 empty.className = 'editModeEmpty';
-                empty.textContent = 'Detaili ei leitud.';
+                empty.textContent = 'No part found.';
                 partList.appendChild(empty);
                 return;
             }
 
-            const categoryOrder = ['Moodulid', 'Kere', 'Rattad', 'Vedrustus', 'Detailid'];
+            const categoryOrder = ['Modules', 'Body', 'Wheels', 'Suspension', 'Details'];
             const categoryGroups = new Map();
             for (let i = 0; i < parts.length; i += 1) {
                 const part = parts[i];
-                const category = part.category || 'Detailid';
+                const category = part.category || 'Details';
                 if (!categoryGroups.has(category)) {
                     categoryGroups.set(category, []);
                 }

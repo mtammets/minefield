@@ -10,13 +10,13 @@
 </head>
 
 <body>
-    <!-- Mängu kanvas -->
+    <!-- Game canvas -->
     <canvas id="gameCanvas"></canvas>
     <div id="raceIntroOverlay" aria-live="assertive" hidden>
         <div id="raceIntroCount">3</div>
-        <div id="raceIntroCaption">Valmistu stardiks</div>
+        <div id="raceIntroCaption">Prepare for launch</div>
     </div>
-    <div id="welcomeModal" aria-label="Tervitusvaade" aria-live="polite">
+    <div id="welcomeModal" aria-label="Welcome screen" aria-live="polite">
         <div class="welcomeFxGrid" aria-hidden="true"></div>
         <div class="welcomeFxGlow" aria-hidden="true"></div>
         <div class="welcomeCard">
@@ -24,65 +24,65 @@
             <h1 id="welcomeGameName">SILENT DRIFT</h1>
             <div id="welcomeTagline">Your ultimate race game</div>
             <div class="welcomeMetaRow" aria-hidden="true">
-                <span class="welcomePill">3D LINN</span>
-                <span class="welcomePill">360° AUTO</span>
-                <span class="welcomePill">AI VASTASED</span>
+                <span class="welcomePill">3D CITY</span>
+                <span class="welcomePill">360° CAR</span>
+                <span class="welcomePill">AI OPPONENTS</span>
             </div>
             <div id="welcomePreviewShell">
-                <div class="welcomePreviewLabel">SÕIDUKI EELVAADE</div>
+                <div class="welcomePreviewLabel">VEHICLE PREVIEW</div>
                 <canvas
                     id="welcomeCarCanvas"
                     width="560"
                     height="300"
-                    aria-label="Sinu auto 360 kraadi eelvaates"
+                    aria-label="Your car in 360-degree preview"
                 ></canvas>
                 <div class="welcomePreviewSweep" aria-hidden="true"></div>
             </div>
-            <div id="welcomeColorPicker" aria-label="Auto värvivalik">
+            <div id="welcomeColorPicker" aria-label="Car color picker">
                 <div class="welcomeColorPickerHeader">
-                    <span class="welcomeColorPickerLabel">AUTO VÄRV</span>
+                    <span class="welcomeColorPickerLabel">CAR COLOR</span>
                     <span id="welcomeSelectedColorName">-</span>
                 </div>
                 <div
                     id="welcomeColorOptions"
                     class="welcomeColorOptions"
                     role="radiogroup"
-                    aria-label="Vali auto värv"
+                    aria-label="Select car color"
                 ></div>
             </div>
-            <button id="welcomeStartBtn" type="button">ALUSTA MÄNGU <span aria-hidden="true">→</span></button>
-            <div id="welcomeHint">Enter alustab • Värvi vaheta hiirega või ← → / A D • Kaamera 1-7 (7 = katuseekraan) • E = Edit mode</div>
+            <button id="welcomeStartBtn" type="button">START GAME <span aria-hidden="true">→</span></button>
+            <div id="welcomeHint">Press Enter to start • Change color with mouse or ← → / A D • Camera 1-7 (7 = roof display) • E = Edit mode</div>
         </div>
     </div>
-    <div id="objectivePanel" aria-label="Korje eesmärk">
-        <div id="objectiveTitle">KORJE EESMÄRK</div>
+    <div id="objectivePanel" aria-label="Collect objective">
+        <div id="objectiveTitle">COLLECT OBJECTIVE</div>
         <div id="objectiveRow">
-            <span id="objectiveLabel">Kogu:</span>
+            <span id="objectiveLabel">Collect:</span>
             <span id="targetColorSwatch" aria-hidden="true"></span>
             <span id="targetColorName">-</span>
         </div>
-        <div id="objectiveStatus">Kogu energiasfääre enne kui need kaovad</div>
+        <div id="objectiveStatus">Collect energy spheres before they disappear</div>
     </div>
-    <div id="botPanel" aria-label="AI botid">
-        <div id="botTitle">AI KORJE</div>
+    <div id="botPanel" aria-label="AI bots">
+        <div id="botTitle">AI COLLECT</div>
         <div id="botList"></div>
     </div>
-    <div id="minimap" aria-label="Minikaart">
-        <div id="minimapTitle">KAART</div>
+    <div id="minimap" aria-label="Minimap">
+        <div id="minimapTitle">MAP</div>
         <canvas id="minimapCanvas" width="190" height="190"></canvas>
         <div id="minimapInfo">X 0 | Z 0</div>
     </div>
-    <div id="finalLeaderboard" aria-label="Lõpp-edetabel" aria-live="polite" hidden>
+    <div id="finalLeaderboard" aria-label="Final leaderboard" aria-live="polite" hidden>
         <div class="leaderboardCard">
-            <div id="leaderboardTitle">MÄNG LÕPPES</div>
+            <div id="leaderboardTitle">GAME OVER</div>
             <div id="leaderboardSummary"></div>
             <div id="leaderboardList"></div>
-            <button id="leaderboardRestartBtn" type="button">UUS MÄNG</button>
+            <button id="leaderboardRestartBtn" type="button">NEW GAME</button>
         </div>
     </div>
-    <div id="pauseModal" aria-label="Pausimenüü" aria-live="polite" hidden>
+    <div id="pauseModal" aria-label="Pause menu" aria-live="polite" hidden>
         <div class="pauseCard">
-            <div id="pauseTitle">PAUS</div>
+            <div id="pauseTitle">PAUSE</div>
             <div class="pauseActions">
                 <button id="pauseExitBtn" class="pauseBtn exit" type="button">EXIT</button>
                 <button id="pauseResumeBtn" class="pauseBtn resume" type="button">RESUME</button>
@@ -90,7 +90,7 @@
         </div>
     </div>
 
-    <!-- Põhiloogika -->
+    <!-- Main logic -->
     <script type="module" src="js/main.js"></script>
 </body>
 

@@ -433,56 +433,56 @@ function buildEditablePartDescriptors({
 
     register({
         id: 'module_body_shell',
-        label: 'Kere kest',
-        category: 'Moodulid',
+        label: 'Body shell',
+        category: 'Modules',
         sources: bodyMeta?.editGroups?.bodyShellGroup,
     });
     register({
         id: 'module_roof',
-        label: 'Katuse moodul',
-        category: 'Moodulid',
+        label: 'Roof module',
+        category: 'Modules',
         sources: bodyMeta?.editGroups?.roofAssemblyGroup,
     });
     register({
         id: 'module_nameplate',
-        label: 'Nimeplaat',
-        category: 'Moodulid',
+        label: 'Nameplate',
+        category: 'Modules',
         sources: bodyMeta?.editGroups?.nameplateAssemblyGroup,
     });
     register({
         id: 'module_front_axle',
-        label: 'Eesmine telg',
-        category: 'Moodulid',
+        label: 'Front axle',
+        category: 'Modules',
         sources: wheelEditGroups?.frontAxleGroup,
     });
     register({
         id: 'module_rear_axle',
-        label: 'Tagumine telg',
-        category: 'Moodulid',
+        label: 'Rear axle',
+        category: 'Modules',
         sources: wheelEditGroups?.rearAxleGroup,
     });
     register({
         id: 'module_suspension',
-        label: 'Vedrustus',
-        category: 'Moodulid',
+        label: 'Suspension',
+        category: 'Modules',
         sources: (suspensionLinkage?.detachableLinks || []).map((link) => link?.source),
     });
     register({
         id: 'module_lights',
-        label: 'Tuled',
-        category: 'Moodulid',
+        label: 'Lights',
+        category: 'Modules',
         sources: lightRig,
     });
     register({
         id: 'module_wheel_well_lights',
-        label: 'Koopa valgustid',
-        category: 'Moodulid',
+        label: 'Wheel well lights',
+        category: 'Modules',
         sources: wheelEditGroups?.wheelLightGroup,
     });
     register({
         id: 'module_battery',
-        label: 'Aku indikaator',
-        category: 'Moodulid',
+        label: 'Battery indicator',
+        category: 'Modules',
         sources: batteryIndicator?.group,
     });
 
@@ -504,35 +504,35 @@ function buildEditablePartDescriptors({
 
 function getEditablePartCategory(part) {
     if (part?.type === 'wheel') {
-        return 'Rattad';
+        return 'Wheels';
     }
     if (part?.type === 'suspension_link') {
-        return 'Vedrustus';
+        return 'Suspension';
     }
     if (part?.type === 'body_panel') {
-        return 'Kere';
+        return 'Body';
     }
-    return 'Detailid';
+    return 'Details';
 }
 
 function getEditablePartLabel(part) {
     const sideLabel = part?.side === 'left'
-        ? 'vasak'
-        : (part?.side === 'right' ? 'parem' : 'kesk');
+        ? 'left'
+        : (part?.side === 'right' ? 'right' : 'center');
     const zoneLabel = part?.zone === 'front'
-        ? 'ees'
-        : (part?.zone === 'rear' ? 'taga' : 'kesk');
+        ? 'front'
+        : (part?.zone === 'rear' ? 'rear' : 'center');
 
     if (part?.type === 'wheel') {
-        return `Ratas: ${zoneLabel} ${sideLabel}`;
+        return `Wheel: ${zoneLabel} ${sideLabel}`;
     }
     if (part?.type === 'suspension_link') {
-        return `Vedrustus: ${zoneLabel} ${sideLabel}`;
+        return `Suspension: ${zoneLabel} ${sideLabel}`;
     }
     if (part?.type === 'body_panel') {
-        return 'Kerepaneel';
+        return 'Body panel';
     }
-    return part?.id || 'Detail';
+    return part?.id || 'Part';
 }
 
 function springToTarget(state, valueKey, velocityKey, target, spring, damping, dt) {
