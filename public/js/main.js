@@ -14,7 +14,13 @@ import {
     getGroundHeightAt,
     updateGroundMotion,
 } from './environment.js';
-import { car, updateCarVisuals, setPlayerBatteryLevel, getPlayerCarCrashParts } from './car.js';
+import {
+    car,
+    createCarRig,
+    updateCarVisuals,
+    setPlayerBatteryLevel,
+    getPlayerCarCrashParts,
+} from './car.js';
 import { camera, updateCamera } from './camera.js';
 import {
     updatePlayerPhysics,
@@ -83,6 +89,8 @@ const PLAYER_CAR_POOL_SIZE = 3;
 const PLAYER_RESPAWN_DELAY_MS = 850;
 const REPLAY_EVENT_PICKUP = 'pickup';
 const REPLAY_EVENT_CRASH = 'crash';
+const WELCOME_CAR_SPIN_SPEED = 0.62;
+const WELCOME_PREVIEW_STATE_SPEED = 17;
 const debrisPieces = [];
 const replayEffects = [];
 const crashParts = getPlayerCarCrashParts();
@@ -96,10 +104,15 @@ const botStatusUi = createBotStatusController();
 const finalScoreboardUi = createFinalScoreboardController();
 const pauseMenuUi = createPauseMenuController({
     onExit() {
-        exitFullscreenFromPauseMenu();
+        returnToWelcomeFromPauseMenu();
     },
     onResume() {
         setPauseState(false);
+    },
+});
+const welcomeModalUi = createWelcomeModalController({
+    onStart() {
+        dismissWelcomeModal();
     },
 });
 car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
@@ -119,6 +132,7 @@ let pendingRespawnTimeout = null;
 let pickupRoundFinished = false;
 let vehicleImpactStatusCooldown = 0;
 let isGamePaused = false;
+let isWelcomeModalVisible = false;
 const ESC_FULLSCREEN_FALLBACK_WINDOW_MS = 460;
 let lastEscapeKeyDownAtMs = -10_000;
 
@@ -190,6 +204,9 @@ botStatusUi.render(botTrafficSystem.getHudState());
 initializePlayerPhysics(car);
 resetPlayerDamageState();
 setPlayerBatteryLevel(1);
+if (welcomeModalUi.isAvailable()) {
+    showWelcomeModal();
+}
 
 // Klaviatuurikontrollide ja akna suuruse muutuste kuulamine
 initializeControls();
@@ -235,7 +252,8 @@ function initializeControls() {
 
 // Klahvide vajutamise töötlemine
 function handleKey(event, isKeyDown) {
-    const key = event.key.toLowerCase();
+    const rawKey = event.key.toLowerCase();
+    const key = rawKey === ' ' || rawKey === 'spacebar' ? 'space' : rawKey;
     if (isKeyDown && event.repeat && (
         key === 'k'
         || key === 'v'
@@ -244,6 +262,14 @@ function handleKey(event, isKeyDown) {
         || key === 'enter'
         || key === 'escape'
     )) {
+        return;
+    }
+
+    if (isWelcomeModalVisible) {
+        if (key === 'enter' && isKeyDown) {
+            event.preventDefault();
+            dismissWelcomeModal();
+        }
         return;
     }
 
@@ -263,8 +289,20 @@ function handleKey(event, isKeyDown) {
         return;
     }
 
-    const isArrowKey = key === 'arrowup' || key === 'arrowdown' || key === 'arrowleft' || key === 'arrowright';
-    if (isArrowKey && replayController.isPlaybackActive()) {
+    if (key === 'space') {
+        event.preventDefault();
+    }
+
+    const isDriveKey = key === 'arrowup'
+        || key === 'arrowdown'
+        || key === 'arrowleft'
+        || key === 'arrowright'
+        || key === 'w'
+        || key === 'a'
+        || key === 's'
+        || key === 'd'
+        || key === 'space';
+    if (isDriveKey && replayController.isPlaybackActive()) {
         return;
     }
 
@@ -273,6 +311,11 @@ function handleKey(event, isKeyDown) {
         arrowdown: () => (keys.backward = isKeyDown),
         arrowleft: () => (keys.left = isKeyDown),
         arrowright: () => (keys.right = isKeyDown),
+        w: () => (keys.forward = isKeyDown),
+        s: () => (keys.backward = isKeyDown),
+        a: () => (keys.left = isKeyDown),
+        d: () => (keys.right = isKeyDown),
+        space: () => (keys.handbrake = isKeyDown),
         f: () => isKeyDown && toggleFullscreen(),
         q: () => isKeyDown && startNewGame(),
         enter: () => {
@@ -364,6 +407,7 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     miniMapController.resize();
+    welcomeModalUi.resize();
 }
 
 // Täisekraani režiimi lülitamine
@@ -380,21 +424,18 @@ function toggleFullscreen() {
     }
 }
 
-function exitFullscreenFromPauseMenu() {
+function returnToWelcomeFromPauseMenu() {
+    startNewGame();
+    showWelcomeModal();
+
     if (!document.fullscreenElement) {
-        setPauseState(false);
         return;
     }
 
     unlockKeyboardLock();
-    document
-        .exitFullscreen()
-        .then(() => {
-            setPauseState(false);
-        })
-        .catch(() => {
-            // Keep modal visible if fullscreen exit fails.
-        });
+    document.exitFullscreen().catch(() => {
+        // Welcome view is already visible even if fullscreen exit fails.
+    });
 }
 
 function onFullscreenChange() {
@@ -445,6 +486,7 @@ function animate() {
     requestAnimationFrame(animate);
 
     const frameDelta = Math.min(clock.getDelta(), 0.05);
+    welcomeModalUi.update(frameDelta);
     if (!isGamePaused) {
         vehicleImpactStatusCooldown = Math.max(0, vehicleImpactStatusCooldown - frameDelta);
 
@@ -1490,6 +1532,7 @@ function clearDriveKeys() {
     keys.backward = false;
     keys.left = false;
     keys.right = false;
+    keys.handbrake = false;
 }
 
 function setPauseState(nextPaused) {
@@ -1501,10 +1544,31 @@ function setPauseState(nextPaused) {
     isGamePaused = shouldPause;
     if (isGamePaused) {
         clearDriveKeys();
+        if (isWelcomeModalVisible) {
+            pauseMenuUi.hide();
+            return;
+        }
         pauseMenuUi.show();
         return;
     }
     pauseMenuUi.hide();
+}
+
+function dismissWelcomeModal() {
+    if (!isWelcomeModalVisible) {
+        return;
+    }
+    isWelcomeModalVisible = false;
+    welcomeModalUi.hide();
+    startNewGame();
+}
+
+function showWelcomeModal() {
+    isWelcomeModalVisible = true;
+    isGamePaused = true;
+    clearDriveKeys();
+    pauseMenuUi.hide();
+    welcomeModalUi.show();
 }
 
 function clearPendingRespawn() {
@@ -1840,6 +1904,178 @@ function clearReplayEffects() {
         });
     }
     replayEffects.length = 0;
+}
+
+function createWelcomeModalController({ onStart } = {}) {
+    const rootEl = document.getElementById('welcomeModal');
+    const startBtnEl = document.getElementById('welcomeStartBtn');
+    const previewCanvasEl = document.getElementById('welcomeCarCanvas');
+    if (!rootEl || !startBtnEl || !previewCanvasEl) {
+        return {
+            show() {},
+            hide() {},
+            resize() {},
+            update() {},
+            isVisible() {
+                return false;
+            },
+            isAvailable() {
+                return false;
+            },
+        };
+    }
+
+    const previewScene = new THREE.Scene();
+    const previewCamera = new THREE.PerspectiveCamera(31, 16 / 9, 0.1, 100);
+    const previewRenderer = new THREE.WebGLRenderer({
+        canvas: previewCanvasEl,
+        alpha: true,
+        antialias: true,
+        powerPreference: 'high-performance',
+    });
+    previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    previewRenderer.toneMappingExposure = 1.18;
+
+    const skyFillLight = new THREE.HemisphereLight(0xaed8ff, 0x0f1b2d, 1.04);
+    previewScene.add(skyFillLight);
+
+    const keyLight = new THREE.DirectionalLight(0xffffff, 0.92);
+    keyLight.position.set(4.4, 5.8, 6.1);
+    previewScene.add(keyLight);
+
+    const rimLight = new THREE.DirectionalLight(0x9cc5ff, 0.7);
+    rimLight.position.set(-5.4, 3.2, -4.7);
+    previewScene.add(rimLight);
+
+    const underGlow = new THREE.Mesh(
+        new THREE.CircleGeometry(2.45, 48),
+        new THREE.MeshBasicMaterial({
+            color: 0x7fc0ff,
+            transparent: true,
+            opacity: 0.16,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        })
+    );
+    underGlow.rotation.x = -Math.PI * 0.5;
+    underGlow.position.y = 0.02;
+    previewScene.add(underGlow);
+
+    const previewRig = createCarRig({
+        bodyColor: 0x2d67a6,
+        displayName: 'MAREK',
+        addLights: true,
+        addWheelWellLights: false,
+        lightConfig: {
+            enablePrimaryHeadlightProjectors: false,
+            enableNearFillProjectors: false,
+            enableFacadeFillProjectors: false,
+            taillightIntensity: 1.3,
+            taillightDistance: 8.2,
+            taillightDecay: 3,
+            taillightPositions: [
+                { position: [-0.52, 0.54, 2.14] },
+                { position: [0.52, 0.54, 2.14] },
+            ],
+        },
+    });
+    const previewCar = previewRig.car;
+    previewCar.rotation.y = Math.PI * 0.32;
+    previewScene.add(previewCar);
+    const previewState = {
+        speed: WELCOME_PREVIEW_STATE_SPEED,
+        acceleration: 0,
+        steerInput: 0,
+        throttle: 0.62,
+        brake: 0.18,
+        burnout: 0,
+        launchSlip: 0.14,
+        yawRate: 0.06,
+        velocity: new THREE.Vector2(0, -WELCOME_PREVIEW_STATE_SPEED),
+        terrainCompression: 0,
+        terrainGrounded: 1,
+        verticalSpeed: 0,
+    };
+    let previewPulseTime = Math.random() * Math.PI * 2;
+
+    const previewBounds = new THREE.Box3().setFromObject(previewCar);
+    const previewSize = previewBounds.getSize(new THREE.Vector3());
+    const previewRadius = Math.max(previewSize.x, previewSize.y, previewSize.z);
+    const previewLookAt = new THREE.Vector3(0, previewSize.y * 0.28, 0);
+    previewCamera.position.set(previewRadius * 1.48, previewRadius * 0.76, previewRadius * 1.85);
+    previewCamera.lookAt(previewLookAt);
+
+    startBtnEl.addEventListener('click', () => {
+        onStart?.();
+    });
+
+    return {
+        show() {
+            rootEl.hidden = false;
+            syncPreviewSize();
+            updatePreviewVisualState(1 / 60);
+            renderPreview();
+        },
+        hide() {
+            rootEl.hidden = true;
+        },
+        resize() {
+            syncPreviewSize();
+            if (!rootEl.hidden) {
+                renderPreview();
+            }
+        },
+        update(dt) {
+            if (rootEl.hidden) {
+                return;
+            }
+            previewCar.rotation.y += dt * WELCOME_CAR_SPIN_SPEED;
+            updatePreviewVisualState(dt);
+            renderPreview();
+        },
+        isVisible() {
+            return !rootEl.hidden;
+        },
+        isAvailable() {
+            return true;
+        },
+    };
+
+    function syncPreviewSize() {
+        const width = Math.max(1, Math.round(previewCanvasEl.clientWidth || previewCanvasEl.width || 560));
+        const height = Math.max(1, Math.round(previewCanvasEl.clientHeight || previewCanvasEl.height || 300));
+        previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        previewRenderer.setSize(width, height, false);
+        previewCamera.aspect = width / height;
+        previewCamera.updateProjectionMatrix();
+    }
+
+    function renderPreview() {
+        previewRenderer.render(previewScene, previewCamera);
+    }
+
+    function updatePreviewVisualState(dt) {
+        previewPulseTime += Math.min(Math.max(dt || 0, 0), 0.05);
+        const throttleWave = 0.5 + 0.5 * Math.sin(previewPulseTime * 1.2);
+        const brakeWave = 0.5 + 0.5 * Math.sin(previewPulseTime * 2.6 + 0.4);
+        const steerWave = Math.sin(previewPulseTime * 0.92);
+        const launchWave = 0.5 + 0.5 * Math.sin(previewPulseTime * 1.8 + 0.9);
+        const batteryWave = 0.5 + 0.5 * Math.sin(previewPulseTime * 0.22 + 0.7);
+
+        previewState.throttle = 0.46 + throttleWave * 0.46;
+        previewState.brake = 0.14 + brakeWave * 0.56;
+        previewState.steerInput = steerWave * 0.38;
+        previewState.launchSlip = 0.12 + launchWave * 0.26;
+        previewState.burnout = launchWave * 0.12;
+        previewState.speed = WELCOME_PREVIEW_STATE_SPEED + throttleWave * 6;
+        previewState.velocity.set(0, -previewState.speed);
+        previewState.acceleration = 3.4 * Math.sin(previewPulseTime * 1.42 + 0.15);
+        previewState.yawRate = steerWave * 0.22;
+
+        previewRig.setBatteryLevel(0.34 + batteryWave * 0.62);
+        previewRig.updateVisuals(previewState, dt || 1 / 60);
+    }
 }
 
 function createBotStatusController() {

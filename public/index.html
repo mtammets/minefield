@@ -4,7 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Rallimäng</title>
+    <title>Silent Drift</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800&family=Sora:wght@400;600;700;800&display=swap" rel="stylesheet">
     <!-- Stiilide viide -->
     <link rel="stylesheet" href="css/styles.css">
 </head>
@@ -12,6 +15,32 @@
 <body>
     <!-- Mängu kanvas -->
     <canvas id="gameCanvas"></canvas>
+    <div id="welcomeModal" aria-label="Tervitusvaade" aria-live="polite">
+        <div class="welcomeFxGrid" aria-hidden="true"></div>
+        <div class="welcomeFxGlow" aria-hidden="true"></div>
+        <div class="welcomeCard">
+            <div class="welcomeKicker">WELCOME TO</div>
+            <h1 id="welcomeGameName">SILENT DRIFT</h1>
+            <div id="welcomeTagline">Your ultimate race game</div>
+            <div class="welcomeMetaRow" aria-hidden="true">
+                <span class="welcomePill">3D LINN</span>
+                <span class="welcomePill">360° AUTO</span>
+                <span class="welcomePill">AI VASTASED</span>
+            </div>
+            <div id="welcomePreviewShell">
+                <div class="welcomePreviewLabel">SÕIDUKI EELVAADE</div>
+                <canvas
+                    id="welcomeCarCanvas"
+                    width="560"
+                    height="300"
+                    aria-label="Sinu auto 360 kraadi eelvaates"
+                ></canvas>
+                <div class="welcomePreviewSweep" aria-hidden="true"></div>
+            </div>
+            <button id="welcomeStartBtn" type="button">ALUSTA MÄNGU <span aria-hidden="true">→</span></button>
+            <div id="welcomeHint">Võid alustada ka Enter klahviga</div>
+        </div>
+    </div>
     <div id="objectivePanel" aria-label="Korje eesmärk">
         <div id="objectiveTitle">KORJE EESMÄRK</div>
         <div id="objectiveRow">

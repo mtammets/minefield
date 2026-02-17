@@ -222,7 +222,7 @@ function initializeWheels(car, options = {}) {
     ];
 
     return {
-        update(vehicleState, deltaTime = 1 / 60) {
+        update(vehicleState = {}, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
             const targetSteer = getVisualSteerAngle(vehicleState);
             const steerLerp = 1 - Math.exp(-STEER_RESPONSE * dt);
@@ -231,9 +231,12 @@ function initializeWheels(car, options = {}) {
                 pivot.rotation.y = THREE.MathUtils.lerp(pivot.rotation.y, targetSteer, steerLerp);
             });
 
-            const longitudinalSpeed = vehicleState.velocity.length() < 0.01
+            const velocityLength = typeof vehicleState.velocity?.length === 'function'
+                ? vehicleState.velocity.length()
+                : Math.abs(vehicleState.speed || 0);
+            const longitudinalSpeed = velocityLength < 0.01
                 ? 0
-                : vehicleState.speed;
+                : (vehicleState.speed || 0);
             const baseRollAmount = (longitudinalSpeed / WHEEL_RADIUS) * dt;
             const speedAbs = Math.abs(vehicleState.speed || 0);
             const throttle = vehicleState.throttle || 0;
@@ -257,7 +260,7 @@ function initializeWheels(car, options = {}) {
     };
 }
 
-function getVisualSteerAngle(vehicleState) {
+function getVisualSteerAngle(vehicleState = {}) {
     const physicalSteer = vehicleState.steerAngle || 0;
     return THREE.MathUtils.clamp(physicalSteer, -VISUAL_MAX_STEER, VISUAL_MAX_STEER);
 }

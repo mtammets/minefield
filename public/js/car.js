@@ -8,6 +8,11 @@ const SUSPENSION = {
     maxPitch: THREE.MathUtils.degToRad(4.8),
     maxRoll: THREE.MathUtils.degToRad(5.7),
     pitchAccelNorm: 42,
+    brakeStoppiePitch: THREE.MathUtils.degToRad(5.8),
+    brakeStoppieBrakeThreshold: 0.58,
+    brakeStoppieDecelNorm: 70,
+    brakeStoppieSpeedNorm: 38,
+    brakeRearLiftHeave: 0.052,
     bodySpring: 36,
     bodyDamping: 8.4,
     heaveSpring: 22,
@@ -111,7 +116,22 @@ export function createCarRig(options = {}) {
             -1,
             1
         );
-        const targetPitch = accelNorm * SUSPENSION.maxPitch;
+        const brakeInput = THREE.MathUtils.clamp(vehicleState.brake || 0, 0, 1);
+        const brakePressure = THREE.MathUtils.clamp(
+            (brakeInput - SUSPENSION.brakeStoppieBrakeThreshold)
+            / (1 - SUSPENSION.brakeStoppieBrakeThreshold),
+            0,
+            1
+        );
+        const brakeDecel = THREE.MathUtils.clamp(
+            -(vehicleState.acceleration || 0) / SUSPENSION.brakeStoppieDecelNorm,
+            0,
+            1
+        );
+        const brakeSpeed = THREE.MathUtils.clamp(speedAbs / SUSPENSION.brakeStoppieSpeedNorm, 0, 1);
+        const brakeStoppie = brakePressure * brakeDecel * brakeSpeed;
+        const targetPitch = accelNorm * SUSPENSION.maxPitch
+            - brakeStoppie * SUSPENSION.brakeStoppiePitch;
 
         const steerInput = THREE.MathUtils.clamp(vehicleState.steerInput || 0, -1, 1);
         const steerRoll = -steerInput * speedRatio * SUSPENSION.maxRoll * SUSPENSION.rollFromSteer;
@@ -145,7 +165,8 @@ export function createCarRig(options = {}) {
         );
         const dynamicSink = -Math.abs(targetRoll) * 0.15 - Math.abs(targetPitchWithDamage) * 0.12;
         const wheelLossSink = -missingWheels.total * SUSPENSION.damageHeaveSinkPerWheel;
-        const targetHeave = roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave;
+        const brakeRearLiftHeave = brakeStoppie * SUSPENSION.brakeRearLiftHeave;
+        const targetHeave = roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave + brakeRearLiftHeave;
         const targetLateralOffset = -sideWheelDelta * SUSPENSION.damageLateralShiftPerWheel;
 
         springToTarget(
@@ -552,6 +573,14 @@ const playerCarRig = createCarRig({
     lightConfig: {
         enableNearFillProjectors: false,
         enableFacadeFillProjectors: false,
+        enableTaillightPointLights: true,
+        taillightIntensity: 1.2,
+        taillightDistance: 7,
+        taillightDecay: 3.4,
+        taillightPositions: [
+            { position: [-0.52, 0.54, 2.14] },
+            { position: [0.52, 0.54, 2.14] },
+        ],
     },
     showBatteryIndicator: false,
 });

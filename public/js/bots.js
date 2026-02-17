@@ -18,6 +18,7 @@ const BOT_DAMAGE_COLLISION_MIN = 8;
 const BOT_DAMAGE_COLLISION_HIGH = 21;
 const BOT_WHEEL_DETACH_SPEED = 28;
 const BOT_SECOND_WHEEL_DETACH_SPEED = 36;
+const BOT_DAMAGE_OBSTACLE_CATEGORIES = new Set(['lamp_post']);
 const BOT_DENT_MAX = 1.6;
 const BOT_TOTAL_BREAK_SCORE = 5.6;
 const BOT_TARGET_HEADING_FULL_STEER = THREE.MathUtils.degToRad(44);
@@ -388,7 +389,7 @@ function updateBot(
     bot.car.position.z += bot.state.velocity.y * dt;
 
     constrainToWorld(bot.car.position, bot.state, worldBounds);
-    constrainToObstacles(bot.car.position, bot.state, staticObstacles);
+    constrainToObstacles(bot, bot.car.position, bot.state, staticObstacles);
     bot.car.position.y = resolveBotGroundHeight(
         bot.car.position.x,
         bot.car.position.z,
@@ -1036,12 +1037,13 @@ function constrainToWorld(position, state, worldBounds) {
     }
 }
 
-function constrainToObstacles(position, state, staticObstacles) {
+function constrainToObstacles(bot, position, state, staticObstacles) {
     if (!staticObstacles || staticObstacles.length === 0) {
         return;
     }
 
     let collided = false;
+    let strongestDamageContact = null;
     for (let pass = 0; pass < OBSTACLE_PASSES; pass += 1) {
         let moved = false;
 
@@ -1074,6 +1076,20 @@ function constrainToObstacles(position, state, staticObstacles) {
                 position.z += normalZ * push;
                 moved = true;
                 collided = true;
+                if (
+                    bot
+                    && BOT_DAMAGE_OBSTACLE_CATEGORIES.has(obstacle.category)
+                ) {
+                    const impactSpeed = getObstacleImpactSpeed(state, normalX, normalZ);
+                    if (!strongestDamageContact || impactSpeed > strongestDamageContact.impactSpeed) {
+                        strongestDamageContact = {
+                            normalX: -normalX,
+                            normalZ: -normalZ,
+                            impactSpeed,
+                            penetration: push,
+                        };
+                    }
+                }
                 continue;
             }
 
@@ -1125,6 +1141,20 @@ function constrainToObstacles(position, state, staticObstacles) {
             position.z += normalZ * push;
             moved = true;
             collided = true;
+            if (
+                bot
+                && BOT_DAMAGE_OBSTACLE_CATEGORIES.has(obstacle.category)
+            ) {
+                const impactSpeed = getObstacleImpactSpeed(state, normalX, normalZ);
+                if (!strongestDamageContact || impactSpeed > strongestDamageContact.impactSpeed) {
+                    strongestDamageContact = {
+                        normalX: -normalX,
+                        normalZ: -normalZ,
+                        impactSpeed,
+                        penetration: push,
+                    };
+                }
+            }
         }
 
         if (!moved) {
@@ -1135,7 +1165,15 @@ function constrainToObstacles(position, state, staticObstacles) {
     if (collided) {
         state.speed *= 0.9;
         state.velocity.multiplyScalar(0.9);
+        if (strongestDamageContact) {
+            applyBotCollisionDamage(bot, strongestDamageContact);
+        }
     }
+}
+
+function getObstacleImpactSpeed(state, normalX, normalZ) {
+    // Obstacle normal points from obstacle to bot, so inbound impact is the opposite sign.
+    return Math.max(0, -(state.velocity.x * normalX + state.velocity.y * normalZ));
 }
 
 function isInsideObstacle(x, z, staticObstacles, padding) {
