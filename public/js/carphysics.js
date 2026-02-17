@@ -9,6 +9,9 @@ const TUNING = {
     launchBoost: 34,
     reverseAcceleration: 56,
     brakeDeceleration: 98,
+    brakeLowSpeedEffectiveness: 1.08,
+    brakeHighSpeedEffectiveness: 0.62,
+    brakeEffectivenessCurve: 1.25,
     coastBrake: 0,
     rollingResistance: 1.25,
     aerodynamicDrag: 0.012,
@@ -101,6 +104,11 @@ const TUNING = {
     vehicleImpactResponse: 0.74,
     crashSpeedThreshold: 38,
 };
+const TOP_SPEED_LIMIT_TUNING = {
+    stepKph: 5,
+    minKph: 50,
+    maxKph: 220,
+};
 
 const VEHICLE_COLLISION_RADIUS = 1.15;
 const OBSTACLE_COLLISION_ITERATIONS = 4;
@@ -150,6 +158,8 @@ const vehicleState = {
     verticalSpeed: 0,
     terrainCompression: 0,
     terrainGrounded: 1,
+    topSpeedLimitKph: TOP_SPEED_LIMIT_TUNING.maxKph,
+    topSpeedLimitPercent: 100,
 };
 
 const forward = new THREE.Vector2();
@@ -184,6 +194,33 @@ const vehicleDamageState = {
 
 export function getVehicleState() {
     return vehicleState;
+}
+
+export function getPlayerTopSpeedLimit() {
+    return createTopSpeedLimitSnapshot();
+}
+
+export function getPlayerTopSpeedLimitBounds() {
+    return {
+        minKph: TOP_SPEED_LIMIT_TUNING.minKph,
+        maxKph: TOP_SPEED_LIMIT_TUNING.maxKph,
+        stepKph: TOP_SPEED_LIMIT_TUNING.stepKph,
+    };
+}
+
+export function setPlayerTopSpeedLimitKph(speedKph) {
+    const nextTopSpeed = clampTopSpeedLimitKph(speedKph);
+    vehicleState.topSpeedLimitKph = nextTopSpeed;
+    vehicleState.topSpeedLimitPercent = getTopSpeedLimitPercent(nextTopSpeed);
+    return createTopSpeedLimitSnapshot();
+}
+
+export function adjustPlayerTopSpeedLimit(direction = 0) {
+    const delta = Number.isFinite(direction) ? Math.sign(direction) * TOP_SPEED_LIMIT_TUNING.stepKph : 0;
+    if (delta === 0) {
+        return createTopSpeedLimitSnapshot();
+    }
+    return setPlayerTopSpeedLimitKph(vehicleState.topSpeedLimitKph + delta);
 }
 
 export function consumeCrashCollision() {
@@ -231,6 +268,8 @@ export function initializePlayerPhysics(player) {
     vehicleState.verticalSpeed = 0;
     vehicleState.terrainCompression = 0;
     vehicleState.terrainGrounded = 1;
+    vehicleState.topSpeedLimitKph = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph);
+    vehicleState.topSpeedLimitPercent = getTopSpeedLimitPercent(vehicleState.topSpeedLimitKph);
 
     physicsPosition.copy(player.position);
     previousPhysicsPosition.copy(player.position);
@@ -262,6 +301,8 @@ export function updatePlayerPhysics(
     }
 
     const dt = Math.min(deltaTime, 0.05);
+    vehicleState.topSpeedLimitKph = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph);
+    vehicleState.topSpeedLimitPercent = getTopSpeedLimitPercent(vehicleState.topSpeedLimitKph);
 
     previousPhysicsPosition.copy(physicsPosition);
     previousPhysicsRotationY = physicsRotationY;
@@ -354,7 +395,7 @@ export function updatePlayerPhysics(
     lateralSpeed += lateralAccel * dt;
     vehicleState.yawRate += yawAccel * dt;
 
-    const maxForwardSpeed = TUNING.maxForwardSpeed * damageDynamics.maxSpeedScale;
+    const maxForwardSpeed = getEffectiveForwardSpeedLimit(damageDynamics.maxSpeedScale);
     const maxReverseSpeed = TUNING.maxReverseSpeed * damageDynamics.maxReverseScale;
     longitudinalSpeed = THREE.MathUtils.clamp(longitudinalSpeed, -maxReverseSpeed, maxForwardSpeed);
     if (burnoutFactor > 0) {
@@ -584,10 +625,11 @@ function constrainToObstacles(position, staticObstacles, impactSpeed = 0) {
     vehicleState.velocity.multiplyScalar(TUNING.obstacleImpactSpeedDamping);
     vehicleState.yawRate *= 0.58;
 
+    const maxForwardSpeed = getEffectiveForwardSpeedLimit(1);
     vehicleState.speed = THREE.MathUtils.clamp(
         vehicleState.velocity.dot(forward),
         -TUNING.maxReverseSpeed,
-        TUNING.maxForwardSpeed
+        maxForwardSpeed
     );
 
     if (Math.abs(vehicleState.speed) < 0.1) {
@@ -835,7 +877,7 @@ function updateDriverInputs(dt) {
 function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
     let force = 0;
     const isCoasting = Math.abs(vehicleState.throttle) < 0.02 && vehicleState.brake < 0.02;
-    const maxForwardSpeed = TUNING.maxForwardSpeed * damageDynamics.maxSpeedScale;
+    const maxForwardSpeed = getEffectiveForwardSpeedLimit(damageDynamics.maxSpeedScale);
     const maxReverseSpeed = TUNING.maxReverseSpeed * damageDynamics.maxReverseScale;
     const powerScale = damageDynamics.powerScale;
 
@@ -857,7 +899,18 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
     }
 
     if (vehicleState.brake > 0 && Math.abs(longitudinalSpeed) > 0.01) {
-        force -= Math.sign(longitudinalSpeed) * TUNING.brakeDeceleration * vehicleState.brake;
+        const speedAbs = Math.abs(longitudinalSpeed);
+        const maxDirectionalSpeed = longitudinalSpeed >= 0 ? maxForwardSpeed : maxReverseSpeed;
+        const speedNorm = THREE.MathUtils.clamp(speedAbs / Math.max(1, maxDirectionalSpeed), 0, 1);
+        const brakeSpeedFactor = THREE.MathUtils.lerp(
+            TUNING.brakeLowSpeedEffectiveness,
+            TUNING.brakeHighSpeedEffectiveness,
+            Math.pow(speedNorm, TUNING.brakeEffectivenessCurve)
+        );
+        force -= Math.sign(longitudinalSpeed)
+            * TUNING.brakeDeceleration
+            * vehicleState.brake
+            * brakeSpeedFactor;
     } else if (isCoasting && Math.abs(longitudinalSpeed) > 0.02) {
         force -= Math.sign(longitudinalSpeed) * TUNING.coastBrake;
     }
@@ -1201,6 +1254,41 @@ function getBrakeSlideFactor(longitudinalSpeed, lateralSpeed) {
     );
     const handbrakeFactor = handbrakeSpeedFactor * steerFactor;
     return Math.max(brakeSlideFactor, handbrakeFactor);
+}
+
+function getEffectiveForwardSpeedLimit(maxSpeedScale = 1) {
+    const tuningLimit = TOP_SPEED_LIMIT_TUNING.maxKph / 3.6;
+    const playerLimit = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph) / 3.6;
+    const cappedForwardLimit = Math.min(tuningLimit, playerLimit);
+    return Math.max(1, cappedForwardLimit * Math.max(0, maxSpeedScale));
+}
+
+function clampTopSpeedLimitKph(speedKph) {
+    const fallback = TOP_SPEED_LIMIT_TUNING.maxKph;
+    const numeric = Number.isFinite(speedKph) ? speedKph : fallback;
+    return THREE.MathUtils.clamp(
+        Math.round(numeric),
+        TOP_SPEED_LIMIT_TUNING.minKph,
+        TOP_SPEED_LIMIT_TUNING.maxKph
+    );
+}
+
+function getTopSpeedLimitPercent(speedKph) {
+    const min = TOP_SPEED_LIMIT_TUNING.minKph;
+    const max = TOP_SPEED_LIMIT_TUNING.maxKph;
+    if (max <= min) {
+        return 100;
+    }
+    return Math.round(THREE.MathUtils.clamp((speedKph - min) / (max - min), 0, 1) * 100);
+}
+
+function createTopSpeedLimitSnapshot() {
+    const topSpeedKph = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph);
+    return {
+        topSpeedKph,
+        topSpeedMps: topSpeedKph / 3.6,
+        topSpeedPercent: getTopSpeedLimitPercent(topSpeedKph),
+    };
 }
 
 function clampDamageCounter(value, max) {

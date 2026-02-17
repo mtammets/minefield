@@ -1433,6 +1433,10 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             suspensionStiffnessPercent: THREE.MathUtils.clamp(vehicleState.suspensionStiffnessPercent ?? 50, 0, 100),
             suspensionHeightMm: Math.round(vehicleState.suspensionHeightMm ?? 0),
             suspensionStiffnessScale: vehicleState.suspensionStiffnessScale ?? 1,
+            topSpeedLimitKph: Math.round(
+                THREE.MathUtils.clamp(vehicleState.topSpeedLimitKph ?? 220, 50, 220)
+            ),
+            topSpeedLimitPercent: THREE.MathUtils.clamp(vehicleState.topSpeedLimitPercent ?? 100, 0, 100),
         };
         ctx.clearRect(0, 0, width, height);
 
@@ -1778,6 +1782,7 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
                 percent: telemetry.suspensionHeightPercent / 100,
                 color: '#95eeff',
                 frame: layout.heightCard,
+                valueFont: "800 44px 'Orbitron', 'Segoe UI', sans-serif",
             },
             {
                 key: 'stiffness',
@@ -1787,6 +1792,17 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
                 percent: telemetry.suspensionStiffnessPercent / 100,
                 color: '#ffe39a',
                 frame: layout.stiffnessCard,
+                valueFont: "800 44px 'Orbitron', 'Segoe UI', sans-serif",
+            },
+            {
+                key: 'top_speed',
+                title: 'TOP SPEED',
+                value: `${telemetry.topSpeedLimitKph} KM/H`,
+                detail: `LIMIT ${Math.round(telemetry.topSpeedLimitPercent)}%`,
+                percent: telemetry.topSpeedLimitPercent / 100,
+                color: '#ffbf9a',
+                frame: layout.topSpeedCard,
+                valueFont: "800 42px 'Orbitron', 'Segoe UI', sans-serif",
             },
         ];
 
@@ -1804,7 +1820,7 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
             ctx.fillStyle = 'rgba(168, 194, 214, 0.9)';
             ctx.fillText(card.title, card.frame.x + 22, card.frame.y + 28);
-            ctx.font = "800 54px 'Orbitron', 'Segoe UI', sans-serif";
+            ctx.font = card.valueFont || "800 44px 'Orbitron', 'Segoe UI', sans-serif";
             ctx.fillStyle = '#edf7ff';
             ctx.fillText(card.value, card.frame.x + 22, card.frame.y + 88);
             ctx.font = "600 18px 'Sora', 'Segoe UI', sans-serif";
@@ -1918,7 +1934,7 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
 
     function getChassisLayout(contentX, contentY, contentW, contentH) {
         const gap = 16;
-        const cardW = (contentW - gap) * 0.5;
+        const cardW = (contentW - gap * 2) / 3;
         return {
             heightCard: {
                 x: contentX,
@@ -1928,6 +1944,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             },
             stiffnessCard: {
                 x: contentX + cardW + gap,
+                y: contentY,
+                w: cardW,
+                h: contentH,
+            },
+            topSpeedCard: {
+                x: contentX + (cardW + gap) * 2,
                 y: contentY,
                 w: cardW,
                 h: contentH,
@@ -2002,6 +2024,7 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const chassisLayout = getChassisLayout(ui.contentX, ui.contentY, ui.contentW, ui.contentH);
         const heightButtons = getChassisButtonRects(chassisLayout.heightCard);
         const stiffnessButtons = getChassisButtonRects(chassisLayout.stiffnessCard);
+        const topSpeedButtons = getChassisButtonRects(chassisLayout.topSpeedCard);
         if (isPointInsideRect(pointerX, pointerY, heightButtons.minus)) {
             return { type: 'suspension_height', delta: -1 };
         }
@@ -2013,6 +2036,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         }
         if (isPointInsideRect(pointerX, pointerY, stiffnessButtons.plus)) {
             return { type: 'suspension_stiffness', delta: 1 };
+        }
+        if (isPointInsideRect(pointerX, pointerY, topSpeedButtons.minus)) {
+            return { type: 'top_speed_limit', delta: -1 };
+        }
+        if (isPointInsideRect(pointerX, pointerY, topSpeedButtons.plus)) {
+            return { type: 'top_speed_limit', delta: 1 };
         }
         return null;
     }

@@ -56,6 +56,82 @@ canvas#gameCanvas {
     box-shadow: inset 0 0 38px rgba(0, 0, 0, 0.62);
 }
 
+#raceIntroOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 7;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 220ms ease;
+}
+
+#raceIntroOverlay[hidden] {
+    display: none;
+}
+
+#raceIntroOverlay.active {
+    opacity: 1;
+}
+
+#raceIntroOverlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(4, 8, 15, 0.62), rgba(4, 8, 15, 0.2) 28%, rgba(4, 8, 15, 0.16) 72%, rgba(4, 8, 15, 0.62)),
+        radial-gradient(circle at 50% 48%, rgba(102, 182, 255, 0.18), rgba(8, 14, 23, 0) 48%);
+}
+
+#raceIntroCount,
+#raceIntroCaption {
+    position: relative;
+    z-index: 1;
+    text-transform: uppercase;
+    text-align: center;
+}
+
+#raceIntroCount {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 900;
+    letter-spacing: clamp(2px, 1.2vw, 7px);
+    line-height: 0.9;
+    font-size: clamp(72px, 19vw, 240px);
+    color: #e8f8ff;
+    text-shadow:
+        0 0 16px rgba(191, 241, 255, 0.75),
+        0 0 52px rgba(80, 174, 255, 0.54);
+}
+
+#raceIntroCaption {
+    margin-top: 3px;
+    font-family: 'Sora', sans-serif;
+    font-weight: 700;
+    letter-spacing: clamp(1.6px, 0.4vw, 3.4px);
+    font-size: clamp(11px, 1.6vw, 20px);
+    color: rgba(216, 238, 255, 0.95);
+}
+
+#raceIntroOverlay.pulse #raceIntroCount {
+    animation: raceIntroPulse 760ms cubic-bezier(0.17, 0.89, 0.32, 1.18) both;
+}
+
+#raceIntroOverlay.go #raceIntroCount {
+    background: linear-gradient(108deg, #ffffff 0%, #d2fbff 38%, #9dfca8 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: raceIntroGo 920ms cubic-bezier(0.16, 0.88, 0.26, 1.15) both;
+}
+
+#raceIntroOverlay.go #raceIntroCaption {
+    color: rgba(194, 255, 214, 0.98);
+}
+
 #welcomeModal {
     position: fixed;
     inset: 0;
@@ -449,6 +525,48 @@ canvas#gameCanvas {
     }
 }
 
+@keyframes raceIntroPulse {
+    0% {
+        opacity: 0;
+        transform: translateY(24px) scale(0.5);
+        filter: blur(9px);
+    }
+    22% {
+        opacity: 1;
+        transform: translateY(0) scale(1.16);
+        filter: blur(0);
+    }
+    68% {
+        opacity: 1;
+        transform: translateY(0) scale(0.98);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-18px) scale(0.82);
+    }
+}
+
+@keyframes raceIntroGo {
+    0% {
+        opacity: 0;
+        transform: translateY(26px) scale(0.6);
+        filter: blur(11px);
+    }
+    30% {
+        opacity: 1;
+        transform: translateY(0) scale(1.22);
+        filter: blur(0);
+    }
+    72% {
+        opacity: 1;
+        transform: translateY(0) scale(1.02);
+    }
+    100% {
+        opacity: 0;
+        transform: translateY(-12px) scale(0.94);
+    }
+}
+
 #minimap {
     position: fixed;
     right: 18px;
@@ -806,6 +924,15 @@ body.edit-mode-active #botPanel,
 body.edit-mode-active #minimap {
     opacity: 0;
     pointer-events: none;
+}
+
+body.race-intro-active #objectivePanel,
+body.race-intro-active #botPanel,
+body.race-intro-active #minimap {
+    opacity: 0;
+    transform: translateY(-12px);
+    pointer-events: none;
+    transition: opacity 220ms ease, transform 220ms ease;
 }
 
 #editModePanel {

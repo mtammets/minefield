@@ -3,6 +3,8 @@ import { createCarRig } from './car.js';
 
 const DEFAULT_BOT_COUNT = 3;
 const BOT_RADIUS = 1.12;
+const BOT_VEHICLE_COLLISION_RADIUS = 1.34;
+const PLAYER_VEHICLE_COLLISION_RADIUS = 1.34;
 const BOT_WHEEL_BASE = 2.6;
 const BOT_MAX_STEER = THREE.MathUtils.degToRad(24);
 const BOT_STEER_RESPONSE = 3.4;
@@ -31,11 +33,24 @@ const BOT_INDICATOR_BOB_AMPLITUDE = 0.1;
 const BOT_INDICATOR_BOB_SPEED = 1.9;
 const BOT_INDICATOR_PULSE_SPEED = 4.2;
 const BOT_RIDE_HEIGHT = 0.06;
+const BOT_DRIFT_MIN_SPEED = 12.5;
+const BOT_DRIFT_ENTRY_HEADING = THREE.MathUtils.degToRad(18);
+const BOT_DRIFT_EXIT_HEADING = THREE.MathUtils.degToRad(10);
+const BOT_DRIFT_CHANCE_PER_SECOND = 0.34;
+const BOT_DRIFT_DURATION_MIN = 0.65;
+const BOT_DRIFT_DURATION_MAX = 1.35;
+const BOT_DRIFT_COOLDOWN_MIN = 2.4;
+const BOT_DRIFT_COOLDOWN_MAX = 5.2;
+const BOT_DRIFT_STEER_BIAS = 0.42;
+const BOT_DRIFT_YAW_BOOST = 1.45;
+const BOT_DRIFT_LATERAL_SLIP = 5.2;
+const BOT_DRIFT_SPEED_SCALE = 0.8;
 
 const BOT_BODY_COLORS = [0x6cb3ff, 0xff8f7d, 0x9cf89c, 0xe9a3ff, 0xffd86b];
 const BOT_NAMES = ['NOVA-1', 'AXIS-2', 'RIFT-3', 'PULSE-4', 'ORBIT-5'];
 
 const forward2 = new THREE.Vector2();
+const right2 = new THREE.Vector2();
 const targetDir2 = new THREE.Vector2();
 const avoidance2 = new THREE.Vector2();
 const scratch2 = new THREE.Vector2();
@@ -45,7 +60,11 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         botCount = DEFAULT_BOT_COUNT,
         sharedTargetColorHex = 0x7cf9ff,
         getGroundHeightAt = null,
+        onPartDetached = null,
     } = options;
+    const handlePartDetached = typeof onPartDetached === 'function'
+        ? onPartDetached
+        : null;
     let resolvedSharedTargetColorHex = sharedTargetColorHex;
 
     const bots = [];
@@ -58,7 +77,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             bots,
             i,
             resolvedSharedTargetColorHex,
-            getGroundHeightAt
+            getGroundHeightAt,
+            handlePartDetached
         );
         bots.push(bot);
         botsByCollectorId.set(bot.collectorId, bot);
@@ -90,7 +110,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 id: bot.collectorId,
                 x: bot.car.position.x,
                 z: bot.car.position.z,
-                radius: BOT_RADIUS,
+                radius: BOT_VEHICLE_COLLISION_RADIUS,
+                collisionRadius: BOT_VEHICLE_COLLISION_RADIUS,
                 mass: BOT_MASS,
                 velocityX: bot.state.velocity.x,
                 velocityZ: bot.state.velocity.y,
@@ -198,7 +219,16 @@ function resetBot(
     bot.state.acceleration = 0;
     bot.state.steerInput = 0;
     bot.state.steerAngle = 0;
+    bot.state.throttle = 0;
+    bot.state.brake = 0;
+    bot.state.yawRate = 0;
+    bot.state.burnout = 0;
     bot.state.velocity.set(0, 0);
+    bot.drift.active = false;
+    bot.drift.timer = 0;
+    bot.drift.direction = 0;
+    bot.drift.intensity = 0;
+    bot.drift.cooldown = randomRange(BOT_DRIFT_COOLDOWN_MIN * 0.5, BOT_DRIFT_COOLDOWN_MAX * 0.9);
     bot.wanderTarget = pickWanderTarget(worldBounds);
     bot.collectedCount = 0;
     bot.targetColorHex = sharedTargetColorHex;
@@ -242,7 +272,8 @@ function createBot(
     existingBots,
     index,
     sharedTargetColorHex,
-    getGroundHeightAt
+    getGroundHeightAt,
+    onPartDetached
 ) {
     const name = BOT_NAMES[index] || `BOT-${index + 1}`;
     const bodyColor = BOT_BODY_COLORS[index % BOT_BODY_COLORS.length];
@@ -274,6 +305,10 @@ function createBot(
         acceleration: 0,
         steerInput: 0,
         steerAngle: 0,
+        throttle: 0,
+        brake: 0,
+        yawRate: 0,
+        burnout: 0,
         velocity: new THREE.Vector2(0, 0),
     };
     const bot = {
@@ -288,9 +323,17 @@ function createBot(
         damageState: createEmptyBotDamageState(),
         bodyDamageVisual: { left: 0, right: 0, front: 0, rear: 0 },
         bodyPartBaselines: new Map(),
+        onPartDetached,
         lastDamageAtMs: 0,
         destroyed: false,
         state,
+        drift: {
+            active: false,
+            timer: 0,
+            direction: 0,
+            intensity: 0,
+            cooldown: randomRange(BOT_DRIFT_COOLDOWN_MIN * 0.5, BOT_DRIFT_COOLDOWN_MAX),
+        },
         wanderTarget: pickWanderTarget(worldBounds),
         collectedCount: 0,
         targetColorHex: sharedTargetColorHex,
@@ -349,11 +392,69 @@ function updateBot(
 
     const desiredYaw = Math.atan2(-targetDir2.x, -targetDir2.y);
     const headingError = shortestAngle(bot.car.rotation.y, desiredYaw);
-    const steerTarget = THREE.MathUtils.clamp(
+    const headingAbs = Math.abs(headingError);
+    const driftState = bot.drift;
+    if (driftState.cooldown > 0) {
+        driftState.cooldown = Math.max(0, driftState.cooldown - dt);
+    }
+    if (driftState.active) {
+        driftState.timer -= dt;
+        const headingContinue = headingAbs > BOT_DRIFT_EXIT_HEADING;
+        if ((driftState.timer <= 0 && !headingContinue) || driftState.timer <= -0.35) {
+            driftState.active = false;
+            driftState.timer = 0;
+            driftState.direction = 0;
+            driftState.intensity = 0;
+            driftState.cooldown = randomRange(BOT_DRIFT_COOLDOWN_MIN, BOT_DRIFT_COOLDOWN_MAX);
+        } else {
+            const headingIntensity = THREE.MathUtils.clamp(headingAbs / BOT_TARGET_HEADING_FULL_STEER, 0.35, 1);
+            driftState.intensity = THREE.MathUtils.lerp(
+                driftState.intensity,
+                headingIntensity,
+                1 - Math.exp(-4.4 * dt)
+            );
+        }
+    } else if (
+        driftState.cooldown <= 0
+        && bot.state.speed > BOT_DRIFT_MIN_SPEED
+        && headingAbs > BOT_DRIFT_ENTRY_HEADING
+    ) {
+        const headingFactor = THREE.MathUtils.clamp(
+            (headingAbs - BOT_DRIFT_ENTRY_HEADING)
+            / Math.max(0.001, BOT_TARGET_HEADING_FULL_STEER - BOT_DRIFT_ENTRY_HEADING),
+            0,
+            1
+        );
+        const speedFactor = THREE.MathUtils.clamp(
+            (bot.state.speed - BOT_DRIFT_MIN_SPEED)
+            / Math.max(0.001, BOT_MAX_SPEED - BOT_DRIFT_MIN_SPEED),
+            0,
+            1
+        );
+        const driftChance = BOT_DRIFT_CHANCE_PER_SECOND
+            * dt
+            * (0.35 + headingFactor * 0.95)
+            * (0.45 + speedFactor * 0.75);
+        if (Math.random() < driftChance) {
+            driftState.active = true;
+            driftState.timer = randomRange(BOT_DRIFT_DURATION_MIN, BOT_DRIFT_DURATION_MAX);
+            driftState.direction = Math.sign(headingError) || (Math.random() < 0.5 ? -1 : 1);
+            driftState.intensity = THREE.MathUtils.clamp(0.42 + headingFactor * 0.5, 0.35, 1);
+        }
+    }
+
+    let steerTarget = THREE.MathUtils.clamp(
         headingError / BOT_TARGET_HEADING_FULL_STEER,
         -1,
         1
     );
+    if (driftState.active) {
+        steerTarget = THREE.MathUtils.clamp(
+            steerTarget + driftState.direction * BOT_DRIFT_STEER_BIAS * driftState.intensity,
+            -1,
+            1
+        );
+    }
     bot.state.steerInput = moveToward(
         bot.state.steerInput,
         steerTarget,
@@ -364,6 +465,10 @@ function updateBot(
     let desiredSpeed = BOT_MAX_SPEED * (1 - Math.min(Math.abs(headingError) / Math.PI, 0.55));
     desiredSpeed = Math.max(BOT_MIN_SPEED, desiredSpeed);
     desiredSpeed *= damageDynamics.speedScale;
+    if (driftState.active) {
+        const driftSpeedScale = THREE.MathUtils.lerp(1, BOT_DRIFT_SPEED_SCALE, driftState.intensity);
+        desiredSpeed *= driftSpeedScale;
+    }
     if (targetPickup) {
         const targetDistance = Math.sqrt(distanceSqXZ(bot.car.position, targetPickup));
         if (targetDistance < 16) {
@@ -377,19 +482,40 @@ function updateBot(
     bot.state.speed = moveToward(bot.state.speed, desiredSpeed, maxSpeedDelta);
     bot.state.speed *= Math.exp(-(BOT_DRAG + damageDynamics.dragPenalty) * dt);
     bot.state.acceleration = (bot.state.speed - previousSpeed) / Math.max(dt, 0.0001);
+    bot.state.throttle = speedError > 0
+        ? THREE.MathUtils.clamp(speedError / (BOT_MAX_SPEED * 0.36), 0, 1)
+        : 0;
+    bot.state.brake = speedError < 0
+        ? THREE.MathUtils.clamp(-speedError / (BOT_MAX_SPEED * 0.24), 0, 1)
+        : 0;
+    const burnoutTarget = driftState.active
+        ? THREE.MathUtils.clamp(0.46 + driftState.intensity * 0.42, 0, 1)
+        : 0;
+    bot.state.burnout = moveToward(bot.state.burnout || 0, burnoutTarget, (driftState.active ? 2.8 : 3.6) * dt);
 
-    const yawRate = calculateYawRate(bot.state.speed, bot.state.steerAngle);
+    let yawRate = calculateYawRate(bot.state.speed, bot.state.steerAngle);
+    if (driftState.active) {
+        yawRate += driftState.direction * BOT_DRIFT_YAW_BOOST * driftState.intensity;
+    }
     const yawBias = damageDynamics.yawBias * THREE.MathUtils.clamp(Math.abs(bot.state.speed) / 9, 0, 1);
-    bot.car.rotation.y += (yawRate + yawBias) * dt;
+    const totalYawRate = yawRate + yawBias;
+    bot.state.yawRate = totalYawRate;
+    bot.car.rotation.y += totalYawRate * dt;
 
     forward2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
     bot.state.velocity.copy(forward2).multiplyScalar(bot.state.speed);
+    if (driftState.active) {
+        right2.set(Math.cos(bot.car.rotation.y), -Math.sin(bot.car.rotation.y));
+        const driftSlip = BOT_DRIFT_LATERAL_SLIP * driftState.intensity * Math.sign(bot.state.speed || 1);
+        bot.state.velocity.addScaledVector(right2, driftSlip);
+    }
 
     bot.car.position.x += bot.state.velocity.x * dt;
     bot.car.position.z += bot.state.velocity.y * dt;
 
     constrainToWorld(bot.car.position, bot.state, worldBounds);
     constrainToObstacles(bot, bot.car.position, bot.state, staticObstacles);
+    constrainToPlayerVehicle(bot, playerPosition);
     bot.car.position.y = resolveBotGroundHeight(
         bot.car.position.x,
         bot.car.position.z,
@@ -497,6 +623,7 @@ function applyBotCollisionDamage(bot, contact) {
     bot.lastDamageAtMs = nowMs;
 
     const hitInfo = resolveBotHitInfo(bot, contact);
+    const crashContext = buildBotCrashContext(bot, contact, hitInfo);
     applyBotPersistentHandlingDamage(bot, hitInfo, impactSpeed);
     addBotDentFromImpact(bot, hitInfo, impactSpeed);
 
@@ -505,12 +632,12 @@ function applyBotCollisionDamage(bot, contact) {
             part.type === 'wheel'
             && part.side === hitInfo.hitSide
             && part.zone === hitInfo.hitZone
-        ));
+        ), crashContext);
         tryDetachBotPart(bot, (part) => (
             part.type === 'suspension_link'
             && part.side === hitInfo.hitSide
             && part.zone === hitInfo.hitZone
-        ));
+        ), crashContext);
     }
 
     if (impactSpeed >= BOT_SECOND_WHEEL_DETACH_SPEED) {
@@ -519,7 +646,7 @@ function applyBotCollisionDamage(bot, contact) {
             part.type === 'wheel'
             && part.side === hitInfo.hitSide
             && part.zone === oppositeZone
-        ));
+        ), crashContext);
     }
 
     if (isBotTotaled(bot)) {
@@ -553,6 +680,52 @@ function resolveBotHitInfo(bot, contact) {
         : zoneFallback;
 
     return { hitSide, hitZone };
+}
+
+function buildBotCrashContext(bot, contact, hitInfo) {
+    const carForward = new THREE.Vector3(0, 0, -1).applyQuaternion(bot.car.quaternion).setY(0).normalize();
+    const carRight = new THREE.Vector3(1, 0, 0).applyQuaternion(bot.car.quaternion).setY(0).normalize();
+    const hitDirection = new THREE.Vector3(contact?.normalX || 0, 0, contact?.normalZ || 0);
+    if (hitDirection.lengthSq() < 0.0001) {
+        hitDirection.copy(carForward);
+    } else {
+        hitDirection.normalize();
+    }
+    const impactNormal = hitDirection.clone().multiplyScalar(-1);
+
+    const impactSpeed = Math.max(0, contact?.impactSpeed || 0);
+    const impactNorm = THREE.MathUtils.clamp(
+        (impactSpeed - BOT_DAMAGE_COLLISION_MIN) / (BOT_DAMAGE_COLLISION_HIGH - BOT_DAMAGE_COLLISION_MIN),
+        0,
+        1
+    );
+    const frontalImpact = THREE.MathUtils.clamp(-impactNormal.dot(carForward), 0, 1);
+
+    const impactVelocity = new THREE.Vector3(bot.state.velocity.x || 0, 0, bot.state.velocity.y || 0);
+    if (impactVelocity.lengthSq() < 0.04) {
+        impactVelocity.copy(carForward).multiplyScalar(impactSpeed * 0.62);
+    }
+    const impactTravelDirection = impactVelocity.lengthSq() > 0.0001
+        ? impactVelocity.clone().normalize()
+        : carForward.clone();
+    const impactTravelSpeed = Math.max(impactVelocity.length(), impactSpeed * 0.58);
+
+    return {
+        origin: bot.car.position.clone(),
+        hitDirection,
+        impactNormal,
+        carForward,
+        carRight,
+        hitSide: hitInfo.hitSide,
+        hitZone: hitInfo.hitZone,
+        crashIntensity: 0.35 + impactNorm * 0.65,
+        frontalImpact,
+        impactSpeed,
+        impactTravelDirection,
+        impactTravelSpeed,
+        obstacleCategory: contact?.obstacleCategory || 'vehicle',
+        isObstacleCollision: true,
+    };
 }
 
 function applyBotPersistentHandlingDamage(bot, hitInfo, impactSpeed) {
@@ -655,7 +828,7 @@ function applyBotDentVisuals(bot) {
     }
 }
 
-function tryDetachBotPart(bot, predicate) {
+function tryDetachBotPart(bot, predicate, crashContext = null) {
     const part = bot.crashParts.find((candidate) => (
         candidate?.source
         && !bot.detachedPartIds.has(candidate.id)
@@ -664,15 +837,23 @@ function tryDetachBotPart(bot, predicate) {
     if (!part) {
         return false;
     }
-    detachBotPart(bot, part);
+    detachBotPart(bot, part, crashContext);
     return true;
 }
 
-function detachBotPart(bot, part) {
+function detachBotPart(bot, part, crashContext = null) {
     if (!part?.source || bot.detachedPartIds.has(part.id)) {
         return false;
     }
     bot.detachedPartIds.add(part.id);
+    if (bot.onPartDetached) {
+        try {
+            bot.onPartDetached({ bot, part, crashContext });
+        } catch (error) {
+            // Keep bot damage flow alive even if optional visual callback fails.
+            console.error('Bot part detached callback failed:', error);
+        }
+    }
     part.source.visible = false;
     registerDetachedBotPartDamage(bot, part);
     return true;
@@ -729,7 +910,15 @@ function destroyBot(bot) {
     bot.destroyed = true;
     bot.state.speed = 0;
     bot.state.acceleration = 0;
+    bot.state.throttle = 0;
+    bot.state.brake = 0;
+    bot.state.yawRate = 0;
+    bot.state.burnout = 0;
     bot.state.velocity.set(0, 0);
+    bot.drift.active = false;
+    bot.drift.timer = 0;
+    bot.drift.direction = 0;
+    bot.drift.intensity = 0;
     bot.car.visible = false;
     if (bot.indicator?.root) {
         bot.indicator.root.visible = false;
@@ -1087,6 +1276,7 @@ function constrainToObstacles(bot, position, state, staticObstacles) {
                             normalZ: -normalZ,
                             impactSpeed,
                             penetration: push,
+                            obstacleCategory: obstacle.category || 'obstacle',
                         };
                     }
                 }
@@ -1152,6 +1342,7 @@ function constrainToObstacles(bot, position, state, staticObstacles) {
                         normalZ: -normalZ,
                         impactSpeed,
                         penetration: push,
+                        obstacleCategory: obstacle.category || 'obstacle',
                     };
                 }
             }
@@ -1169,6 +1360,44 @@ function constrainToObstacles(bot, position, state, staticObstacles) {
             applyBotCollisionDamage(bot, strongestDamageContact);
         }
     }
+}
+
+function constrainToPlayerVehicle(bot, playerPosition) {
+    if (!bot || !playerPosition) {
+        return;
+    }
+
+    const dx = bot.car.position.x - playerPosition.x;
+    const dz = bot.car.position.z - playerPosition.z;
+    const combinedRadius = BOT_VEHICLE_COLLISION_RADIUS + PLAYER_VEHICLE_COLLISION_RADIUS;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq >= combinedRadius * combinedRadius) {
+        return;
+    }
+
+    let normalX = dx;
+    let normalZ = dz;
+    let distance = Math.sqrt(distanceSq);
+    if (distance < 0.0001) {
+        normalX = -Math.sin(bot.car.rotation.y);
+        normalZ = -Math.cos(bot.car.rotation.y);
+        distance = 1;
+    } else {
+        normalX /= distance;
+        normalZ /= distance;
+    }
+
+    const penetration = combinedRadius - distance;
+    bot.car.position.x += normalX * (penetration + 0.002);
+    bot.car.position.z += normalZ * (penetration + 0.002);
+
+    const inwardSpeed = bot.state.velocity.x * normalX + bot.state.velocity.y * normalZ;
+    if (inwardSpeed < 0) {
+        bot.state.velocity.x -= normalX * inwardSpeed;
+        bot.state.velocity.y -= normalZ * inwardSpeed;
+    }
+    bot.state.velocity.multiplyScalar(0.92);
+    bot.state.speed = Math.min(bot.state.speed, bot.state.velocity.length());
 }
 
 function getObstacleImpactSpeed(state, normalX, normalZ) {
@@ -1222,6 +1451,10 @@ function moveToward(current, target, maxDelta) {
 
 function shortestAngle(from, to) {
     return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+function randomRange(min, max) {
+    return min + Math.random() * Math.max(0, max - min);
 }
 
 function randomUnit(seed) {

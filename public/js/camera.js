@@ -192,6 +192,11 @@ export function setCameraKeyboardControlsEnabled(nextEnabled) {
     cameraKeyboardControlsEnabled = Boolean(nextEnabled);
 }
 
+export function resetCameraTrackingState() {
+    hasCameraState = false;
+    smoothedTurnBias = 0;
+}
+
 function lerpAngle(a, b, t) {
     const delta = Math.atan2(Math.sin(b - a), Math.cos(b - a));
     return a + delta * t;
