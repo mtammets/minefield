@@ -31,6 +31,17 @@ const SUSPENSION = {
     maxDamageExtraRoll: THREE.MathUtils.degToRad(8),
     maxDamageExtraPitch: THREE.MathUtils.degToRad(5.5),
 };
+const SUSPENSION_TUNING = {
+    heightStep: 0.2,
+    stiffnessStep: 0.2,
+    minLevel: -1,
+    maxLevel: 1,
+    maxHeightOffset: 0.048,
+    minStiffnessScale: 0.72,
+    maxStiffnessScale: 1.48,
+    minMotionScale: 0.08,
+    maxMotionScale: 1.48,
+};
 const DAMAGE_SCRAPE = {
     sparkMaxCount: 72,
     sparkGravity: 19,
@@ -91,12 +102,61 @@ export function createCarRig(options = {}) {
         lateralVelocity: 0,
         roadPhase: Math.random() * Math.PI * 2,
     };
+    const suspensionTune = {
+        heightLevel: 0,
+        stiffnessLevel: 0,
+    };
+
+    function clampSuspensionTuneLevel(level) {
+        return THREE.MathUtils.clamp(level, SUSPENSION_TUNING.minLevel, SUSPENSION_TUNING.maxLevel);
+    }
+
+    function getSuspensionStiffnessScale() {
+        const normalized = (suspensionTune.stiffnessLevel - SUSPENSION_TUNING.minLevel)
+            / (SUSPENSION_TUNING.maxLevel - SUSPENSION_TUNING.minLevel);
+        return THREE.MathUtils.lerp(
+            SUSPENSION_TUNING.minStiffnessScale,
+            SUSPENSION_TUNING.maxStiffnessScale,
+            THREE.MathUtils.clamp(normalized, 0, 1)
+        );
+    }
+
+    function getSuspensionHeightOffset() {
+        return suspensionTune.heightLevel * SUSPENSION_TUNING.maxHeightOffset;
+    }
+
+    function getSuspensionMotionScale() {
+        const normalized = (suspensionTune.stiffnessLevel - SUSPENSION_TUNING.minLevel)
+            / (SUSPENSION_TUNING.maxLevel - SUSPENSION_TUNING.minLevel);
+        return THREE.MathUtils.lerp(
+            SUSPENSION_TUNING.maxMotionScale,
+            SUSPENSION_TUNING.minMotionScale,
+            THREE.MathUtils.clamp(normalized, 0, 1)
+        );
+    }
+
+    function getSuspensionTuneSnapshot() {
+        const heightNormalized = (suspensionTune.heightLevel - SUSPENSION_TUNING.minLevel)
+            / (SUSPENSION_TUNING.maxLevel - SUSPENSION_TUNING.minLevel);
+        const stiffnessNormalized = (suspensionTune.stiffnessLevel - SUSPENSION_TUNING.minLevel)
+            / (SUSPENSION_TUNING.maxLevel - SUSPENSION_TUNING.minLevel);
+        return {
+            suspensionHeightLevel: suspensionTune.heightLevel,
+            suspensionStiffnessLevel: suspensionTune.stiffnessLevel,
+            suspensionHeightPercent: Math.round(THREE.MathUtils.clamp(heightNormalized, 0, 1) * 100),
+            suspensionStiffnessPercent: Math.round(THREE.MathUtils.clamp(stiffnessNormalized, 0, 1) * 100),
+            suspensionHeightMm: Math.round(getSuspensionHeightOffset() * 1000),
+            suspensionStiffnessScale: getSuspensionStiffnessScale(),
+        };
+    }
 
     function updateVisuals(vehicleState, deltaTime) {
         const dt = Math.min(deltaTime || 1 / 60, 0.05);
+        const suspensionSnapshot = getSuspensionTuneSnapshot();
         bodyMeta?.update?.({
             ...(vehicleState || {}),
             batteryLevelNormalized,
+            ...suspensionSnapshot,
         }, dt);
         wheelController.update(vehicleState, dt);
         lightController?.update(vehicleState, dt);
@@ -110,6 +170,9 @@ export function createCarRig(options = {}) {
     function updateBodySuspension(vehicleState, missingWheels, dt) {
         const speedAbs = Math.abs(vehicleState.speed || 0);
         const speedRatio = THREE.MathUtils.clamp(speedAbs / 75, 0, 1);
+        const stiffnessScale = getSuspensionStiffnessScale();
+        const dampingScale = Math.sqrt(stiffnessScale);
+        const motionScale = getSuspensionMotionScale();
 
         const accelNorm = THREE.MathUtils.clamp(
             (vehicleState.acceleration || 0) / SUSPENSION.pitchAccelNorm,
@@ -145,8 +208,16 @@ export function createCarRig(options = {}) {
 
         const maxRoll = SUSPENSION.maxRoll + SUSPENSION.maxDamageExtraRoll;
         const maxPitch = SUSPENSION.maxPitch + SUSPENSION.maxDamageExtraPitch;
-        const targetRoll = THREE.MathUtils.clamp(steerRoll + wheelDamageRoll + wheelTurnRoll, -maxRoll, maxRoll);
-        const targetPitchWithDamage = THREE.MathUtils.clamp(targetPitch + wheelDamagePitch, -maxPitch, maxPitch);
+        const targetRoll = THREE.MathUtils.clamp(
+            (steerRoll + wheelDamageRoll + wheelTurnRoll) * motionScale,
+            -maxRoll,
+            maxRoll
+        );
+        const targetPitchWithDamage = THREE.MathUtils.clamp(
+            (targetPitch + wheelDamagePitch) * motionScale,
+            -maxPitch,
+            maxPitch
+        );
 
         suspensionState.roadPhase += dt * (1.8 + speedRatio * 9.5);
         const roadShake = Math.sin(suspensionState.roadPhase) * 0.65
@@ -166,16 +237,17 @@ export function createCarRig(options = {}) {
         const dynamicSink = -Math.abs(targetRoll) * 0.15 - Math.abs(targetPitchWithDamage) * 0.12;
         const wheelLossSink = -missingWheels.total * SUSPENSION.damageHeaveSinkPerWheel;
         const brakeRearLiftHeave = brakeStoppie * SUSPENSION.brakeRearLiftHeave;
-        const targetHeave = roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave + brakeRearLiftHeave;
-        const targetLateralOffset = -sideWheelDelta * SUSPENSION.damageLateralShiftPerWheel;
+        const targetHeave = (roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave + brakeRearLiftHeave)
+            * motionScale;
+        const targetLateralOffset = -sideWheelDelta * SUSPENSION.damageLateralShiftPerWheel * motionScale;
 
         springToTarget(
             suspensionState,
             'pitch',
             'pitchVelocity',
             targetPitchWithDamage,
-            SUSPENSION.bodySpring,
-            SUSPENSION.bodyDamping,
+            SUSPENSION.bodySpring * stiffnessScale,
+            SUSPENSION.bodyDamping * dampingScale,
             dt
         );
         springToTarget(
@@ -183,8 +255,8 @@ export function createCarRig(options = {}) {
             'roll',
             'rollVelocity',
             targetRoll,
-            SUSPENSION.bodySpring,
-            SUSPENSION.bodyDamping,
+            SUSPENSION.bodySpring * stiffnessScale,
+            SUSPENSION.bodyDamping * dampingScale,
             dt
         );
         springToTarget(
@@ -192,8 +264,8 @@ export function createCarRig(options = {}) {
             'heave',
             'heaveVelocity',
             targetHeave,
-            SUSPENSION.heaveSpring,
-            SUSPENSION.heaveDamping,
+            SUSPENSION.heaveSpring * stiffnessScale,
+            SUSPENSION.heaveDamping * dampingScale,
             dt
         );
         springToTarget(
@@ -201,15 +273,15 @@ export function createCarRig(options = {}) {
             'lateralOffset',
             'lateralVelocity',
             targetLateralOffset,
-            SUSPENSION.heaveSpring * 0.86,
-            SUSPENSION.heaveDamping,
+            SUSPENSION.heaveSpring * 0.86 * stiffnessScale,
+            SUSPENSION.heaveDamping * dampingScale,
             dt
         );
 
         bodyRig.rotation.x = suspensionState.pitch;
         bodyRig.rotation.z = suspensionState.roll;
         bodyRig.position.x = suspensionState.lateralOffset;
-        bodyRig.position.y = suspensionState.heave;
+        bodyRig.position.y = suspensionState.heave + getSuspensionHeightOffset();
     }
 
     return {
@@ -222,6 +294,37 @@ export function createCarRig(options = {}) {
             batteryLevelNormalized = THREE.MathUtils.clamp(levelNormalized, 0, 1);
             batteryIndicator?.setLevel(batteryLevelNormalized);
             bodyMeta?.setBatteryLevel?.(batteryLevelNormalized);
+        },
+        adjustSuspensionHeight(direction = 0) {
+            const delta = Number.isFinite(direction) ? Math.sign(direction) * SUSPENSION_TUNING.heightStep : 0;
+            if (delta === 0) {
+                return getSuspensionTuneSnapshot();
+            }
+            suspensionTune.heightLevel = clampSuspensionTuneLevel(suspensionTune.heightLevel + delta);
+            return getSuspensionTuneSnapshot();
+        },
+        adjustSuspensionStiffness(direction = 0) {
+            const delta = Number.isFinite(direction) ? Math.sign(direction) * SUSPENSION_TUNING.stiffnessStep : 0;
+            if (delta === 0) {
+                return getSuspensionTuneSnapshot();
+            }
+            suspensionTune.stiffnessLevel = clampSuspensionTuneLevel(suspensionTune.stiffnessLevel + delta);
+            return getSuspensionTuneSnapshot();
+        },
+        getSuspensionTune() {
+            return getSuspensionTuneSnapshot();
+        },
+        cycleRoofMenu(step = 1) {
+            return bodyMeta?.cycleRoofMenu?.(step) || null;
+        },
+        setRoofMenuMode(modeKey) {
+            return bodyMeta?.setRoofMenuMode?.(modeKey) || null;
+        },
+        setRoofMenuModeFromUv(uv) {
+            return bodyMeta?.setRoofMenuModeFromUv?.(uv) || null;
+        },
+        getRoofMenuMode() {
+            return bodyMeta?.getRoofMenuMode?.() || null;
         },
         setBodyColor(colorHex) {
             bodyMeta?.setBodyColor?.(colorHex);
@@ -592,6 +695,13 @@ const car = playerCarRig.car;
 const updateCarVisuals = playerCarRig.updateVisuals;
 const setPlayerBatteryLevel = playerCarRig.setBatteryLevel;
 const getPlayerCarCrashParts = playerCarRig.getCrashParts;
+const adjustPlayerSuspensionHeight = playerCarRig.adjustSuspensionHeight;
+const adjustPlayerSuspensionStiffness = playerCarRig.adjustSuspensionStiffness;
+const getPlayerSuspensionTune = playerCarRig.getSuspensionTune;
+const cyclePlayerRoofMenu = playerCarRig.cycleRoofMenu;
+const setPlayerRoofMenuMode = playerCarRig.setRoofMenuMode;
+const setPlayerRoofMenuModeFromUv = playerCarRig.setRoofMenuModeFromUv;
+const getPlayerRoofMenuMode = playerCarRig.getRoofMenuMode;
 const setPlayerCarBodyColor = playerCarRig.setBodyColor;
 
 export {
@@ -599,5 +709,12 @@ export {
     updateCarVisuals,
     setPlayerBatteryLevel,
     getPlayerCarCrashParts,
+    adjustPlayerSuspensionHeight,
+    adjustPlayerSuspensionStiffness,
+    getPlayerSuspensionTune,
+    cyclePlayerRoofMenu,
+    setPlayerRoofMenuMode,
+    setPlayerRoofMenuModeFromUv,
+    getPlayerRoofMenuMode,
     setPlayerCarBodyColor,
 };

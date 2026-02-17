@@ -20,6 +20,13 @@ import {
     updateCarVisuals,
     setPlayerBatteryLevel,
     getPlayerCarCrashParts,
+    adjustPlayerSuspensionHeight,
+    adjustPlayerSuspensionStiffness,
+    getPlayerSuspensionTune,
+    cyclePlayerRoofMenu,
+    setPlayerRoofMenuMode,
+    setPlayerRoofMenuModeFromUv,
+    getPlayerRoofMenuMode,
     setPlayerCarBodyColor,
 } from './car.js';
 import { camera, updateCamera } from './camera.js';
@@ -89,6 +96,12 @@ const VEHICLE_WHEEL_DETACH_SPEED = 28;
 const VEHICLE_SECOND_WHEEL_DETACH_SPEED = 36;
 const VEHICLE_DENT_MAX = 1.7;
 const STATUS_DEFAULT_TEXT = 'Tagaveoline ja võimas: juhitav nii edasi kui tagurdades. Kogu energiasfääre.';
+const ROOF_MENU_MODE_LABELS = {
+    dashboard: 'Dashboard',
+    battery: 'Energy',
+    navigation: 'Nav',
+    chassis: 'Chassis',
+};
 const SHARED_PICKUP_COLOR_INDEX = 0;
 const SHARED_PICKUP_COLOR_HEX = 0x7cf9ff;
 const BATTERY_MAX = 100;
@@ -152,6 +165,8 @@ let isGamePaused = false;
 let isWelcomeModalVisible = false;
 const ESC_FULLSCREEN_FALLBACK_WINDOW_MS = 460;
 let lastEscapeKeyDownAtMs = -10_000;
+const roofMenuRaycaster = new THREE.Raycaster();
+const roofMenuPointerNdc = new THREE.Vector2();
 
 initializeBodyPartBaselines();
 
@@ -265,6 +280,7 @@ function initializeControls() {
     document.addEventListener('keyup', (e) => handleKey(e, false));
     document.addEventListener('fullscreenchange', onFullscreenChange);
     window.addEventListener('resize', onWindowResize);
+    renderer.domElement.addEventListener('pointerdown', handleGameCanvasPointerDown);
 }
 
 // Klahvide vajutamise töötlemine
@@ -278,6 +294,12 @@ function handleKey(event, isKeyDown) {
         || key === 'q'
         || key === 'enter'
         || key === 'escape'
+        || key === 'tab'
+        || key === 'm'
+        || key === '1'
+        || key === '2'
+        || key === '3'
+        || key === '4'
     )) {
         return;
     }
@@ -421,8 +443,110 @@ function handleKey(event, isKeyDown) {
                 objectiveUi.showInfo('Tele-replay käivitus. V peatab, K alustab uut salvestust.');
             }
         },
+        tab: () => {
+            if (!isKeyDown) {
+                return;
+            }
+            event.preventDefault();
+            const step = event.shiftKey ? -1 : 1;
+            const modeKey = cyclePlayerRoofMenu(step);
+            showRoofMenuStatus(modeKey);
+        },
+        m: () => {
+            if (!isKeyDown) {
+                return;
+            }
+            const modeKey = cyclePlayerRoofMenu(1);
+            showRoofMenuStatus(modeKey);
+        },
+        1: () => {
+            if (!isKeyDown) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('dashboard');
+            showRoofMenuStatus(modeKey);
+        },
+        2: () => {
+            if (!isKeyDown) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('battery');
+            showRoofMenuStatus(modeKey);
+        },
+        3: () => {
+            if (!isKeyDown) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('navigation');
+            showRoofMenuStatus(modeKey);
+        },
+        4: () => {
+            if (!isKeyDown) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('chassis');
+            showRoofMenuStatus(modeKey);
+        },
     };
     if (actions[key]) actions[key]();
+}
+
+function showRoofMenuStatus(modeKey = getPlayerRoofMenuMode()) {
+    if (!modeKey) {
+        return;
+    }
+    const modeLabel = ROOF_MENU_MODE_LABELS[modeKey] || String(modeKey);
+    objectiveUi.showInfo(`Katuse menüü: ${modeLabel}. Tab edasi, Shift+Tab tagasi, 1-4 otse.`);
+}
+
+function handleGameCanvasPointerDown(event) {
+    if (event.button !== 0) {
+        return;
+    }
+    if (isWelcomeModalVisible || isGamePaused || isCarDestroyed) {
+        return;
+    }
+
+    const canvas = renderer.domElement;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+        return;
+    }
+
+    roofMenuPointerNdc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+    roofMenuPointerNdc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    roofMenuRaycaster.setFromCamera(roofMenuPointerNdc, camera);
+
+    const intersections = roofMenuRaycaster.intersectObject(car, true);
+    for (let i = 0; i < intersections.length; i += 1) {
+        const hit = intersections[i];
+        if (!hit?.uv || !hit.object?.userData?.roofMenuSurface) {
+            continue;
+        }
+        const interaction = setPlayerRoofMenuModeFromUv(hit.uv);
+        if (interaction?.type === 'mode' && interaction.modeKey) {
+            showRoofMenuStatus(interaction.modeKey);
+            event.preventDefault();
+        } else if (interaction?.type === 'suspension_height') {
+            const tune = adjustPlayerSuspensionHeight(interaction.delta);
+            showSuspensionTuneStatus(tune);
+            event.preventDefault();
+        } else if (interaction?.type === 'suspension_stiffness') {
+            const tune = adjustPlayerSuspensionStiffness(interaction.delta);
+            showSuspensionTuneStatus(tune);
+            event.preventDefault();
+        }
+        return;
+    }
+}
+
+function showSuspensionTuneStatus(tune = getPlayerSuspensionTune()) {
+    if (!tune) {
+        return;
+    }
+    const heightMm = Math.round(tune.suspensionHeightMm || 0);
+    const stiffnessPct = Math.round(tune.suspensionStiffnessPercent || 0);
+    objectiveUi.showInfo(`Vedrustus: kõrgus ${heightMm >= 0 ? '+' : ''}${heightMm} mm, jäikus ${stiffnessPct}%.`);
 }
 
 // Akna suuruse muutmisel rendereri ja kaamera uuendamine

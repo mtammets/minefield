@@ -430,6 +430,18 @@ function addLuxuryBody(car, bodyConfig = {}) {
         setBatteryLevel(levelNormalized) {
             roofBrandingController?.setBatteryLevel?.(levelNormalized);
         },
+        cycleRoofMenu(step = 1) {
+            return roofBrandingController?.cycleMode?.(step) || null;
+        },
+        setRoofMenuMode(modeKey) {
+            return roofBrandingController?.setMode?.(modeKey) || null;
+        },
+        setRoofMenuModeFromUv(uv) {
+            return roofBrandingController?.setModeFromUv?.(uv) || null;
+        },
+        getRoofMenuMode() {
+            return roofBrandingController?.getMode?.() || null;
+        },
         setBodyColor(colorHex) {
             const color = new THREE.Color(colorHex);
             for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
@@ -459,14 +471,19 @@ function addVoltlineRoofBranding(
     const badgeWidth = screenWidth + badgePadding * 2;
     const badgeDepth = screenDepth + badgePadding * 2;
     const railMaterial = createMaterial({
-        color: 0x0b1722,
-        emissive: 0x58dcff,
+        color: 0x2b4a36,
+        emissive: 0x96ffbe,
         emissiveIntensity: 0.58,
         metalness: 0.62,
         roughness: 0.2,
         clearcoat: 1,
         clearcoatRoughness: 0.03,
     });
+    const railLowBatteryColor = new THREE.Color(0xff6e7a);
+    const railMidBatteryColor = new THREE.Color(0xffd77a);
+    const railHighBatteryColor = new THREE.Color(0x96ffbe);
+    const railBatteryColor = railHighBatteryColor.clone();
+    const railBatteryTargetColor = railHighBatteryColor.clone();
 
     const badgeBase = new THREE.Mesh(
         new THREE.BoxGeometry(badgeWidth, 0.03, badgeDepth),
@@ -517,6 +534,7 @@ function addVoltlineRoofBranding(
         new THREE.PlaneGeometry(screenWidth, screenDepth),
         logoPlateMaterial
     );
+    logoPlate.userData.roofMenuSurface = true;
     logoPlate.rotation.x = -Math.PI / 2;
     logoPlate.position.set(0, roofCenterY + 0.041, roofCenterZ);
     car.add(logoPlate);
@@ -564,19 +582,64 @@ function addVoltlineRoofBranding(
     rightRail.position.set(railX, roofCenterY + 0.04, roofCenterZ);
     car.add(rightRail);
 
-    const modeOrder = ['dashboard', 'battery', 'navigation'];
+    const modeOrder = ['dashboard', 'battery', 'navigation', 'chassis'];
     const brandState = {
         phase: Math.random() * Math.PI * 2,
         modeTimer: 0,
         refreshTimer: 0,
+        manualControlEnabled: false,
         activeModeIndex: 0,
         activeMode: modeOrder[0],
         batteryLevel: 1,
         batteryPercent: 100,
+        lastVehicleState: {},
     };
+
+    function setActiveModeByIndex(nextIndex) {
+        const modeCount = modeOrder.length;
+        const wrappedIndex = ((nextIndex % modeCount) + modeCount) % modeCount;
+        brandState.activeModeIndex = wrappedIndex;
+        brandState.activeMode = modeOrder[wrappedIndex];
+    }
+
+    function setActiveMode(modeKey) {
+        const nextIndex = modeOrder.indexOf(modeKey);
+        if (nextIndex === -1) {
+            return brandState.activeMode;
+        }
+        setActiveModeByIndex(nextIndex);
+        brandState.modeTimer = 0;
+        brandState.refreshTimer = 0;
+        brandState.manualControlEnabled = true;
+        roofScreen.render(brandState.activeMode, brandState.batteryLevel, brandState.lastVehicleState);
+        return brandState.activeMode;
+    }
+
+    function cycleActiveMode(step = 1) {
+        const direction = step >= 0 ? 1 : -1;
+        setActiveModeByIndex(brandState.activeModeIndex + direction);
+        brandState.modeTimer = 0;
+        brandState.refreshTimer = 0;
+        brandState.manualControlEnabled = true;
+        roofScreen.render(brandState.activeMode, brandState.batteryLevel, brandState.lastVehicleState);
+        return brandState.activeMode;
+    }
+
+    function sampleRailBatteryColor(level, outColor) {
+        if (level <= 0.22) {
+            return outColor.copy(railLowBatteryColor);
+        }
+        if (level <= 0.6) {
+            const t = (level - 0.22) / (0.6 - 0.22);
+            return outColor.copy(railLowBatteryColor).lerp(railMidBatteryColor, t);
+        }
+        const t = (level - 0.6) / (1 - 0.6);
+        return outColor.copy(railMidBatteryColor).lerp(railHighBatteryColor, t);
+    }
 
     return {
         update(vehicleState = {}, dt = 1 / 60) {
+            brandState.lastVehicleState = vehicleState;
             const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.speed || 0) / 62, 0, 1);
             const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.throttle || 0), 0, 1);
             const burnoutRatio = THREE.MathUtils.clamp(vehicleState.burnout || vehicleState.launchSlip || 0, 0, 1);
@@ -601,18 +664,21 @@ function addVoltlineRoofBranding(
                 brandState.batteryPercent = nextBatteryPercent;
             }
 
-            brandState.modeTimer += dt;
             brandState.refreshTimer += dt;
-            const switchInterval = brandState.activeMode === 'dashboard'
-                ? 4.4
-                : brandState.activeMode === 'battery'
-                    ? 2.8
-                    : 3.4;
-            if (brandState.modeTimer >= switchInterval) {
+            if (brandState.manualControlEnabled) {
                 brandState.modeTimer = 0;
-                brandState.activeModeIndex = (brandState.activeModeIndex + 1) % modeOrder.length;
-                brandState.activeMode = modeOrder[brandState.activeModeIndex];
-                needsScreenRefresh = true;
+            } else {
+                brandState.modeTimer += dt;
+                const switchInterval = brandState.activeMode === 'dashboard'
+                    ? 4.4
+                    : brandState.activeMode === 'battery'
+                        ? 2.8
+                        : 3.4;
+                if (brandState.modeTimer >= switchInterval) {
+                    brandState.modeTimer = 0;
+                    setActiveModeByIndex(brandState.activeModeIndex + 1);
+                    needsScreenRefresh = true;
+                }
             }
             const refreshInterval = brandState.activeMode === 'battery' ? 0.3 : 0.16;
             if (brandState.refreshTimer >= refreshInterval) {
@@ -624,6 +690,11 @@ function addVoltlineRoofBranding(
                 roofScreen.render(brandState.activeMode, brandState.batteryLevel, vehicleState);
             }
 
+            sampleRailBatteryColor(brandState.batteryLevel, railBatteryTargetColor);
+            const railColorBlend = 1 - Math.exp(-7.5 * dt);
+            railBatteryColor.lerp(railBatteryTargetColor, railColorBlend);
+            railMaterial.emissive.copy(railBatteryColor);
+            railMaterial.color.copy(railBatteryColor).multiplyScalar(0.34);
             logoPlateMaterial.emissiveIntensity = 0.58 + pulse * 0.26 + activity * 0.32;
             railMaterial.emissiveIntensity = 0.42 + highPulse * 0.3 + activity * 0.34;
             shimmerMaterial.opacity = 0.08 + highPulse * 0.08 + activity * 0.08;
@@ -634,8 +705,30 @@ function addVoltlineRoofBranding(
             brandState.batteryLevel = level;
             brandState.batteryPercent = Math.round(level * 100);
             if (brandState.activeMode === 'battery') {
-                roofScreen.render(brandState.activeMode, level, {});
+                roofScreen.render(brandState.activeMode, level, brandState.lastVehicleState);
             }
+        },
+        cycleMode(step = 1) {
+            return cycleActiveMode(step);
+        },
+        setMode(modeKey) {
+            return setActiveMode(modeKey);
+        },
+        setModeFromUv(uv) {
+            const interaction = roofScreen.resolveInteractionFromUv(uv, brandState.activeMode);
+            if (!interaction) {
+                return null;
+            }
+            if (interaction.type === 'mode') {
+                return {
+                    type: 'mode',
+                    modeKey: setActiveMode(interaction.modeKey),
+                };
+            }
+            return interaction;
+        },
+        getMode() {
+            return brandState.activeMode;
         },
     };
 }
@@ -952,6 +1045,7 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
     return {
         texture,
         render,
+        resolveInteractionFromUv,
     };
 
     function render(mode = 'dashboard', batteryLevel = 1, vehicleState = {}) {
@@ -965,6 +1059,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             yawRate: THREE.MathUtils.clamp(Math.abs(vehicleState.yawRate || 0), 0, 2),
             batteryPercent: Math.round(clampedBattery * 100),
             rangeKm: Math.round(520 * clampedBattery),
+            suspensionHeightLevel: THREE.MathUtils.clamp(vehicleState.suspensionHeightLevel ?? 0, -1, 1),
+            suspensionStiffnessLevel: THREE.MathUtils.clamp(vehicleState.suspensionStiffnessLevel ?? 0, -1, 1),
+            suspensionHeightPercent: THREE.MathUtils.clamp(vehicleState.suspensionHeightPercent ?? 50, 0, 100),
+            suspensionStiffnessPercent: THREE.MathUtils.clamp(vehicleState.suspensionStiffnessPercent ?? 50, 0, 100),
+            suspensionHeightMm: Math.round(vehicleState.suspensionHeightMm ?? 0),
+            suspensionStiffnessScale: vehicleState.suspensionStiffnessScale ?? 1,
         };
         ctx.clearRect(0, 0, width, height);
 
@@ -1024,6 +1124,8 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             drawBatteryMode(clampedBattery, contentX, contentY, contentW, contentH, telemetry);
         } else if (mode === 'navigation') {
             drawNavigationMode(contentX, contentY, contentW, contentH, telemetry);
+        } else if (mode === 'chassis') {
+            drawChassisMode(contentX, contentY, contentW, contentH, telemetry);
         } else {
             drawDashboardMode(contentX, contentY, contentW, contentH, telemetry, clampedBattery);
         }
@@ -1037,6 +1139,7 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             { key: 'dashboard', label: 'DASH' },
             { key: 'battery', label: 'ENERGY' },
             { key: 'navigation', label: 'NAV' },
+            { key: 'chassis', label: 'CHASSIS' },
         ];
         const barY = panelY + 18;
         const tabW = 152;
@@ -1296,6 +1399,84 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         });
     }
 
+    function drawChassisMode(contentX, contentY, contentW, contentH, telemetry) {
+        const layout = getChassisLayout(contentX, contentY, contentW, contentH);
+        const cards = [
+            {
+                key: 'height',
+                title: 'RIDE HEIGHT',
+                value: `${telemetry.suspensionHeightMm >= 0 ? '+' : ''}${telemetry.suspensionHeightMm} MM`,
+                detail: `LEVEL ${Math.round(telemetry.suspensionHeightLevel * 10) / 10}`,
+                percent: telemetry.suspensionHeightPercent / 100,
+                color: '#95eeff',
+                frame: layout.heightCard,
+            },
+            {
+                key: 'stiffness',
+                title: 'SPRING STIFFNESS',
+                value: `${telemetry.suspensionStiffnessPercent}%`,
+                detail: `SCALE ${telemetry.suspensionStiffnessScale.toFixed(2)}x`,
+                percent: telemetry.suspensionStiffnessPercent / 100,
+                color: '#ffe39a',
+                frame: layout.stiffnessCard,
+            },
+        ];
+
+        cards.forEach((card) => {
+            ctx.fillStyle = 'rgba(12, 24, 39, 0.94)';
+            drawRoundedRect(ctx, card.frame.x, card.frame.y, card.frame.w, card.frame.h, 24);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(124, 179, 212, 0.34)';
+            ctx.lineWidth = 1;
+            drawRoundedRect(ctx, card.frame.x, card.frame.y, card.frame.w, card.frame.h, 24);
+            ctx.stroke();
+
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
+            ctx.fillStyle = 'rgba(168, 194, 214, 0.9)';
+            ctx.fillText(card.title, card.frame.x + 22, card.frame.y + 28);
+            ctx.font = "800 54px 'Orbitron', 'Segoe UI', sans-serif";
+            ctx.fillStyle = '#edf7ff';
+            ctx.fillText(card.value, card.frame.x + 22, card.frame.y + 88);
+            ctx.font = "600 18px 'Sora', 'Segoe UI', sans-serif";
+            ctx.fillStyle = 'rgba(155, 186, 208, 0.88)';
+            ctx.fillText(card.detail, card.frame.x + 22, card.frame.y + 124);
+
+            drawMetricBar(
+                card.frame.x + 22,
+                card.frame.y + 156,
+                card.frame.w - 44,
+                14,
+                'ADJUSTMENT',
+                card.percent,
+                card.color
+            );
+
+            const buttons = getChassisButtonRects(card.frame);
+            drawChassisAdjustButton(buttons.minus, '-', card.color);
+            drawChassisAdjustButton(buttons.plus, '+', card.color);
+        });
+    }
+
+    function drawChassisAdjustButton(buttonRect, label, color) {
+        const gradient = ctx.createLinearGradient(buttonRect.x, buttonRect.y, buttonRect.x + buttonRect.w, buttonRect.y);
+        gradient.addColorStop(0, 'rgba(32, 57, 80, 0.96)');
+        gradient.addColorStop(1, 'rgba(20, 40, 60, 0.96)');
+        ctx.fillStyle = gradient;
+        drawRoundedRect(ctx, buttonRect.x, buttonRect.y, buttonRect.w, buttonRect.h, 16);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(138, 188, 218, 0.48)';
+        ctx.lineWidth = 1;
+        drawRoundedRect(ctx, buttonRect.x, buttonRect.y, buttonRect.w, buttonRect.h, 16);
+        ctx.stroke();
+        ctx.font = "800 34px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, buttonRect.x + buttonRect.w * 0.5, buttonRect.y + buttonRect.h * 0.54);
+    }
+
     function drawMetricBar(x, y, width, height, label, value, color) {
         const clamped = THREE.MathUtils.clamp(value, 0, 1);
         ctx.font = "600 16px 'Sora', 'Segoe UI', sans-serif";
@@ -1344,6 +1525,128 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         ctx.font = "700 16px 'Orbitron', 'Segoe UI', sans-serif";
         ctx.fillStyle = 'rgba(164, 205, 232, 0.94)';
         ctx.fillText(clock, timeX, footerY + 16);
+    }
+
+    function getUiShellLayout() {
+        const shellX = 38;
+        const shellY = 40;
+        const shellW = canvas.width - 76;
+        const shellH = canvas.height - 80;
+        const panelX = shellX + 18;
+        const panelY = shellY + 18;
+        const panelW = shellW - 36;
+        const panelH = shellH - 36;
+        return {
+            panelX,
+            panelY,
+            panelW,
+            panelH,
+            contentX: panelX + 36,
+            contentY: panelY + 110,
+            contentW: panelW - 72,
+            contentH: panelH - 178,
+        };
+    }
+
+    function getChassisLayout(contentX, contentY, contentW, contentH) {
+        const gap = 16;
+        const cardW = (contentW - gap) * 0.5;
+        return {
+            heightCard: {
+                x: contentX,
+                y: contentY,
+                w: cardW,
+                h: contentH,
+            },
+            stiffnessCard: {
+                x: contentX + cardW + gap,
+                y: contentY,
+                w: cardW,
+                h: contentH,
+            },
+        };
+    }
+
+    function getChassisButtonRects(cardFrame) {
+        const buttonW = 76;
+        const buttonH = 56;
+        const buttonY = cardFrame.y + cardFrame.h - 84;
+        return {
+            minus: {
+                x: cardFrame.x + 22,
+                y: buttonY,
+                w: buttonW,
+                h: buttonH,
+            },
+            plus: {
+                x: cardFrame.x + cardFrame.w - 22 - buttonW,
+                y: buttonY,
+                w: buttonW,
+                h: buttonH,
+            },
+        };
+    }
+
+    function isPointInsideRect(x, y, rect) {
+        return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+    }
+
+    function resolveInteractionFromUv(uv, activeMode = 'dashboard') {
+        if (!uv || !Number.isFinite(uv.x) || !Number.isFinite(uv.y)) {
+            return null;
+        }
+
+        const ui = getUiShellLayout();
+        const barY = ui.panelY + 18;
+        const tabW = 152;
+        const tabH = 54;
+        const tabGap = 14;
+        const tabStartX = ui.panelX + 38;
+        const pointerX = THREE.MathUtils.clamp(uv.x, 0, 1) * canvas.width;
+        const pointerY = (1 - THREE.MathUtils.clamp(uv.y, 0, 1)) * canvas.height;
+
+        if (
+            pointerX < ui.panelX
+            || pointerX > ui.panelX + ui.panelW
+            || pointerY < ui.panelY
+            || pointerY > ui.panelY + ui.panelH
+        ) {
+            return null;
+        }
+
+        const modeOrder = ['dashboard', 'battery', 'navigation', 'chassis'];
+        for (let i = 0; i < modeOrder.length; i += 1) {
+            const x = tabStartX + i * (tabW + tabGap);
+            if (
+                pointerX >= x
+                && pointerX <= x + tabW
+                && pointerY >= barY
+                && pointerY <= barY + tabH
+            ) {
+                return { type: 'mode', modeKey: modeOrder[i] };
+            }
+        }
+
+        if (activeMode !== 'chassis') {
+            return null;
+        }
+
+        const chassisLayout = getChassisLayout(ui.contentX, ui.contentY, ui.contentW, ui.contentH);
+        const heightButtons = getChassisButtonRects(chassisLayout.heightCard);
+        const stiffnessButtons = getChassisButtonRects(chassisLayout.stiffnessCard);
+        if (isPointInsideRect(pointerX, pointerY, heightButtons.minus)) {
+            return { type: 'suspension_height', delta: -1 };
+        }
+        if (isPointInsideRect(pointerX, pointerY, heightButtons.plus)) {
+            return { type: 'suspension_height', delta: 1 };
+        }
+        if (isPointInsideRect(pointerX, pointerY, stiffnessButtons.minus)) {
+            return { type: 'suspension_stiffness', delta: -1 };
+        }
+        if (isPointInsideRect(pointerX, pointerY, stiffnessButtons.plus)) {
+            return { type: 'suspension_stiffness', delta: 1 };
+        }
+        return null;
     }
 }
 
