@@ -1,19 +1,19 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 
-const sceneBackgroundColor = new THREE.Color(0x0c1524);
-const sceneFog = new THREE.FogExp2(0x142238, 0.00062);
+const sceneBackgroundColor = new THREE.Color(0x060d18);
+const sceneFog = new THREE.FogExp2(0x13243a, 0.00056);
 const renderSettings = {
-    maxPixelRatio: 1,
+    maxPixelRatio: 0.75,
     shadowsEnabled: false,
 };
 const CITY_GRID_SPACING = 42;
 const CITY_GRID_RANGE = 6;
 const CITY_ROAD_OFFSET = 10;
 const SPEED_GLOW_MAX = 30;
-const LAMP_REAL_LIGHT_GRID_RADIUS = 3;
+const LAMP_REAL_LIGHT_GRID_RADIUS = 1;
 const BUILDING_DISTRICT_RADIUS = 3;
 const WORLD_HALF_SIZE = CITY_GRID_SPACING * (CITY_GRID_RANGE + 0.5);
-const TERRAIN_SEGMENTS = 220;
+const TERRAIN_SEGMENTS = 120;
 const JUMP_RAMP_SURFACE_Y = 0.046;
 const JUMP_RAMPS = [
     createJumpRampConfig({
@@ -174,12 +174,12 @@ const worldBounds = {
 };
 const staticObstacles = [];
 
-const ambientLight = new THREE.AmbientLight(0x3d4f72, 0.48);
-const skyLight = new THREE.HemisphereLight(0x9ec2ff, 0x24354b, 0.54);
+const ambientLight = new THREE.AmbientLight(0x3d5378, 0.5);
+const skyLight = new THREE.HemisphereLight(0xa8cfff, 0x1f3146, 0.58);
 const sunLight = createLight('directional', {
-    color: 0xe7eeff,
-    intensity: 1.08,
-    position: [110, 165, 82],
+    color: 0xf0f5ff,
+    intensity: 1.14,
+    position: [126, 176, 88],
     shadow: {
         mapSize: 1024,
         cameraBounds: [-260, 260],
@@ -235,11 +235,11 @@ function createGround({ texture, size, positionY }) {
     const material = new THREE.MeshStandardMaterial({
         map: texture,
         color: 0xffffff,
-        roughness: 0.94,
-        metalness: 0.03,
+        roughness: 0.92,
+        metalness: 0.04,
     });
-    material.userData.baseEmissive = 0.052;
-    material.emissive = new THREE.Color(0x233852);
+    material.userData.baseEmissive = 0.058;
+    material.emissive = new THREE.Color(0x1f3752);
     material.emissiveIntensity = material.userData.baseEmissive;
 
     const geometry = new THREE.PlaneGeometry(size[0], size[1], TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
@@ -276,9 +276,11 @@ function updateGroundMotion(_playerPosition, playerSpeed = 0) {
     ground.material.emissiveIntensity = ground.material.userData.baseEmissive + intensityBoost;
 
     if (cityScenery.userData.lampLights.length > 0) {
+        const time = performance.now() * 0.0022;
         const lampBoost = 1.12 + speedRatio * 0.26;
-        const lampFlicker = 0.992 + Math.sin(Date.now() * 0.002) * 0.008;
         cityScenery.userData.lampLights.forEach((light) => {
+            const phase = light.userData.flickerPhase || 0;
+            const lampFlicker = 0.988 + Math.sin(time + phase) * 0.012;
             light.intensity = light.userData.baseIntensity * lampBoost * lampFlicker;
         });
     }
@@ -290,12 +292,15 @@ function createWorldBoundary() {
 
     const wallHeight = 4.2;
     const wallThickness = 5;
+    const boundaryTexture = createBoundaryTexture();
     const wallMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2c3a50,
-        emissive: 0x1b2235,
-        emissiveIntensity: 0.38,
-        roughness: 0.86,
-        metalness: 0.12,
+        color: 0xb6c4d4,
+        map: boundaryTexture,
+        emissive: 0x172433,
+        emissiveMap: boundaryTexture,
+        emissiveIntensity: 0.26,
+        roughness: 0.84,
+        metalness: 0.2,
     });
     const horizontalLength = worldBounds.size + wallThickness * 2;
     const verticalLength = worldBounds.size + wallThickness * 2;
@@ -328,30 +333,50 @@ function createGroundTexture() {
     canvas.height = 1024;
     const ctx = canvas.getContext('2d');
 
-    ctx.fillStyle = '#24354a';
+    const verticalGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    verticalGradient.addColorStop(0, '#2a3f58');
+    verticalGradient.addColorStop(0.45, '#24384e');
+    verticalGradient.addColorStop(1, '#1f3248');
+    ctx.fillStyle = verticalGradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Neutral base noise so roads come from geometry, not random texture bands.
-    for (let i = 0; i < 4800; i += 1) {
+    for (let i = 0; i < 6200; i += 1) {
         const x = Math.random() * canvas.width;
         const y = Math.random() * canvas.height;
-        const value = 48 + Math.random() * 34;
-        ctx.fillStyle = `rgba(${value}, ${value + 6}, ${value + 14}, 0.11)`;
-        ctx.fillRect(x, y, 2.2, 2.2);
+        const value = 46 + Math.random() * 40;
+        ctx.fillStyle = `rgba(${value}, ${value + 8}, ${value + 18}, 0.1)`;
+        ctx.fillRect(x, y, 2.3, 2.3);
     }
 
-    // Soft large-area variation to avoid a flat look.
-    for (let i = 0; i < 18; i += 1) {
-        const radius = 90 + Math.random() * 180;
+    for (let i = 0; i < 24; i += 1) {
+        const radius = 86 + Math.random() * 184;
         const x = Math.random() * canvas.width;
         const y = Math.random() * canvas.height;
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
-        gradient.addColorStop(0, 'rgba(210, 226, 255, 0.055)');
-        gradient.addColorStop(1, 'rgba(210, 226, 255, 0)');
+        gradient.addColorStop(0, 'rgba(186, 215, 255, 0.07)');
+        gradient.addColorStop(1, 'rgba(186, 215, 255, 0)');
         ctx.fillStyle = gradient;
         ctx.beginPath();
         ctx.arc(x, y, radius, 0, Math.PI * 2);
         ctx.fill();
+    }
+
+    // Large faded tracks break up flat patches and improve speed perception.
+    ctx.strokeStyle = 'rgba(12, 20, 30, 0.08)';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 120; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const length = 34 + Math.random() * 140;
+        const heading = Math.random() * Math.PI * 2;
+        ctx.lineWidth = 0.9 + Math.random() * 1.3;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(
+            x + Math.cos(heading) * length,
+            y + Math.sin(heading) * length
+        );
+        ctx.stroke();
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -359,6 +384,235 @@ function createGroundTexture() {
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(10, 10);
+    texture.anisotropy = 2;
+    return texture;
+}
+
+function createRoadSurfaceTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#1f2c3a');
+    baseGradient.addColorStop(1, '#182431');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 3000; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 62 + Math.random() * 26;
+        ctx.fillStyle = `rgba(${value}, ${value + 2}, ${value + 7}, 0.14)`;
+        ctx.fillRect(x, y, 1.8, 1.8);
+    }
+
+    // Side lane lines.
+    ctx.strokeStyle = 'rgba(224, 236, 250, 0.4)';
+    ctx.lineWidth = 6;
+    [canvas.width * 0.18, canvas.width * 0.82].forEach((lineX) => {
+        ctx.beginPath();
+        ctx.moveTo(lineX, 0);
+        ctx.lineTo(lineX, canvas.height);
+        ctx.stroke();
+    });
+
+    // Center dashed line.
+    ctx.strokeStyle = 'rgba(222, 232, 245, 0.58)';
+    ctx.lineWidth = 5;
+    const centerX = canvas.width * 0.5;
+    const dashHeight = 32;
+    const dashGap = 24;
+    for (let y = -dashHeight; y < canvas.height + dashHeight; y += dashHeight + dashGap) {
+        ctx.beginPath();
+        ctx.moveTo(centerX, y);
+        ctx.lineTo(centerX, y + dashHeight);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 14);
+    texture.anisotropy = 2;
+    return texture;
+}
+
+function createIntersectionTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#223140';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 2400; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 60 + Math.random() * 30;
+        ctx.fillStyle = `rgba(${value}, ${value + 4}, ${value + 8}, 0.12)`;
+        ctx.fillRect(x, y, 2, 2);
+    }
+
+    ctx.strokeStyle = 'rgba(214, 231, 251, 0.36)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(84, 84, canvas.width - 168, canvas.height - 168);
+
+    ctx.strokeStyle = 'rgba(184, 214, 247, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.5, 0);
+    ctx.lineTo(canvas.width * 0.5, canvas.height);
+    ctx.moveTo(0, canvas.height * 0.5);
+    ctx.lineTo(canvas.width, canvas.height * 0.5);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 2;
+    return texture;
+}
+
+function createSidewalkTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#4a5f78');
+    gradient.addColorStop(1, '#41556d');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const tile = 32;
+    ctx.strokeStyle = 'rgba(198, 220, 246, 0.2)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= canvas.width; x += tile) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= canvas.height; y += tile) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(canvas.width, y + 0.5);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2, 12);
+    texture.anisotropy = 1;
+    return texture;
+}
+
+function createBoundaryTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#314256');
+    gradient.addColorStop(1, '#253448');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'rgba(255, 201, 94, 0.28)';
+    const chevronWidth = 52;
+    for (let x = -chevronWidth; x < canvas.width + chevronWidth; x += chevronWidth * 2) {
+        ctx.beginPath();
+        ctx.moveTo(x, canvas.height);
+        ctx.lineTo(x + chevronWidth * 0.5, canvas.height * 0.56);
+        ctx.lineTo(x + chevronWidth, canvas.height);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    ctx.strokeStyle = 'rgba(222, 239, 255, 0.23)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, canvas.height * 0.18);
+    ctx.lineTo(canvas.width, canvas.height * 0.18);
+    ctx.moveTo(0, canvas.height * 0.82);
+    ctx.lineTo(canvas.width, canvas.height * 0.82);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(3, 1);
+    texture.anisotropy = 1;
+    return texture;
+}
+
+function createSkyDome() {
+    const texture = createSkyDomeTexture();
+    const geometry = new THREE.SphereGeometry(worldBounds.size * 3.1, 32, 18);
+    const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        side: THREE.BackSide,
+        fog: false,
+        toneMapped: false,
+        depthWrite: false,
+    });
+    const dome = new THREE.Mesh(geometry, material);
+    dome.position.y = worldBounds.size * 0.45;
+    dome.frustumCulled = false;
+    return dome;
+}
+
+function createSkyDomeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#3567a6');
+    gradient.addColorStop(0.34, '#1c3554');
+    gradient.addColorStop(0.7, '#0b1524');
+    gradient.addColorStop(1, '#060c17');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const horizonGlow = ctx.createRadialGradient(
+        canvas.width * 0.5,
+        canvas.height * 0.62,
+        18,
+        canvas.width * 0.5,
+        canvas.height * 0.62,
+        canvas.width * 0.68
+    );
+    horizonGlow.addColorStop(0, 'rgba(120, 186, 255, 0.25)');
+    horizonGlow.addColorStop(1, 'rgba(120, 186, 255, 0)');
+    ctx.fillStyle = horizonGlow;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 170; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * (canvas.height * 0.48);
+        const size = 0.7 + Math.random() * 1.6;
+        const alpha = 0.18 + Math.random() * 0.35;
+        ctx.fillStyle = `rgba(198, 225, 255, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 2;
     return texture;
 }
@@ -376,6 +630,59 @@ function createCityScenery() {
     group.add(createStreetLampLayer(group.userData.lampLights));
 
     return group;
+}
+
+function createHorizonBackdropLayer() {
+    const layer = new THREE.Group();
+    layer.name = 'horizonBackdropLayer';
+
+    const blockCount = 32;
+    const radiusBase = worldBounds.size * 0.62;
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const windowTexture = createBuildingWindowTexture();
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x25354b,
+        map: windowTexture,
+        emissive: 0x6a88af,
+        emissiveMap: windowTexture,
+        emissiveIntensity: 0.32,
+        roughness: 0.88,
+        metalness: 0.08,
+        vertexColors: true,
+    });
+    const skylineMesh = new THREE.InstancedMesh(geometry, material, blockCount);
+    skylineMesh.castShadow = false;
+    skylineMesh.receiveShadow = false;
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+    for (let i = 0; i < blockCount; i += 1) {
+        const angle = (i / blockCount) * Math.PI * 2;
+        const radius = radiusBase + 46 + randomFromGrid(i, blockCount, 329) * 46;
+        const x = Math.cos(angle) * radius;
+        const z = Math.sin(angle) * radius;
+        const width = 15 + randomFromGrid(i, blockCount, 330) * 20;
+        const depth = 14 + randomFromGrid(i, blockCount, 331) * 20;
+        const height = 28 + Math.pow(randomFromGrid(i, blockCount, 332), 1.45) * 88;
+
+        dummy.position.set(x, height * 0.5, z);
+        dummy.scale.set(width, height, depth);
+        dummy.rotation.y = angle + Math.PI * 0.5;
+        dummy.updateMatrix();
+        skylineMesh.setMatrixAt(i, dummy.matrix);
+
+        color.setHSL(
+            0.58 + randomFromGrid(i, blockCount, 333) * 0.04,
+            0.18,
+            0.17 + randomFromGrid(i, blockCount, 334) * 0.08
+        );
+        skylineMesh.setColorAt(i, color);
+    }
+
+    skylineMesh.instanceMatrix.needsUpdate = true;
+    skylineMesh.instanceColor.needsUpdate = true;
+    layer.add(skylineMesh);
+    return layer;
 }
 
 function createJumpRampLayer() {
@@ -481,36 +788,54 @@ function createRoadLayer() {
     const roadLength = worldBounds.size + CITY_GRID_SPACING * 2;
     const roadY = 0.028;
     const sidewalkY = 0.034;
+    const verticalRoadTexture = createRoadSurfaceTexture();
+    const horizontalRoadTexture = verticalRoadTexture.clone();
+    horizontalRoadTexture.center.set(0.5, 0.5);
+    horizontalRoadTexture.rotation = Math.PI * 0.5;
+    horizontalRoadTexture.needsUpdate = true;
+    const intersectionSurfaceTexture = createIntersectionTexture();
+    const sidewalkSurfaceTexture = createSidewalkTexture();
 
     const roadMaterial = new THREE.MeshStandardMaterial({
-        color: 0x1b2736,
-        emissive: 0x101722,
-        emissiveIntensity: 0.42,
+        color: 0xffffff,
+        map: verticalRoadTexture,
+        emissive: 0x1a2a3b,
+        emissiveMap: verticalRoadTexture,
+        emissiveIntensity: 0.24,
         roughness: 0.9,
-        metalness: 0.04,
+        metalness: 0.05,
         polygonOffset: true,
-        polygonOffsetFactor: 1,
-        polygonOffsetUnits: 1,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
     });
     const roadMaterialOverlay = roadMaterial.clone();
-    roadMaterialOverlay.polygonOffsetFactor = 2;
-    roadMaterialOverlay.polygonOffsetUnits = 2;
+    roadMaterialOverlay.map = horizontalRoadTexture;
+    roadMaterialOverlay.emissiveMap = horizontalRoadTexture;
+    roadMaterialOverlay.polygonOffsetFactor = -3;
+    roadMaterialOverlay.polygonOffsetUnits = -3;
     const intersectionMaterial = new THREE.MeshStandardMaterial({
-        color: 0x202e3f,
-        emissive: 0x141c2a,
-        emissiveIntensity: 0.5,
-        roughness: 0.86,
+        color: 0xffffff,
+        map: intersectionSurfaceTexture,
+        emissive: 0x152536,
+        emissiveMap: intersectionSurfaceTexture,
+        emissiveIntensity: 0.3,
+        roughness: 0.88,
         metalness: 0.06,
         polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
     });
     const sidewalkMaterial = new THREE.MeshStandardMaterial({
-        color: 0x42556e,
-        emissive: 0x243449,
-        emissiveIntensity: 0.3,
+        color: 0xffffff,
+        map: sidewalkSurfaceTexture,
+        emissive: 0x2a3b52,
+        emissiveMap: sidewalkSurfaceTexture,
+        emissiveIntensity: 0.18,
         roughness: 0.9,
         metalness: 0.08,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
     });
     const verticalRoadGeometry = new THREE.PlaneGeometry(roadWidth, roadLength);
     const horizontalRoadGeometry = new THREE.PlaneGeometry(roadLength, roadWidth);
@@ -645,7 +970,9 @@ function createBuildingLayer() {
 
         color.setHSL(0.58 + building.tint * 0.04, 0.2, 0.28 + building.tint * 0.08);
         buildings.setColorAt(index, color);
-        addObstacleAabb(building.x, building.z, building.width, building.depth, -0.5, 'building');
+        // Keep the collision shell slightly larger than the rendered facade
+        // so the player car cannot visually clip into buildings.
+        addObstacleAabb(building.x, building.z, building.width, building.depth, 0.2, 'building');
     });
     buildings.instanceMatrix.needsUpdate = true;
     buildings.instanceColor.needsUpdate = true;
@@ -660,8 +987,20 @@ function createBuildingWindowTexture() {
     canvas.height = 384;
     const ctx = canvas.getContext('2d');
 
-    ctx.fillStyle = '#1a2537';
+    const facadeGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    facadeGradient.addColorStop(0, '#233046');
+    facadeGradient.addColorStop(1, '#172235');
+    ctx.fillStyle = facadeGradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = 'rgba(122, 162, 210, 0.16)';
+    ctx.lineWidth = 2;
+    for (let x = 0; x <= canvas.width; x += 32) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, canvas.height);
+        ctx.stroke();
+    }
 
     const cols = 6;
     const rows = 12;
@@ -678,8 +1017,13 @@ function createBuildingWindowTexture() {
             const py = marginY + y * (cellH + gapY);
             const lit = Math.random() < 0.62;
 
-            ctx.fillStyle = lit ? 'rgba(255, 216, 150, 0.94)' : 'rgba(74, 103, 148, 0.2)';
+            ctx.fillStyle = lit ? 'rgba(255, 222, 157, 0.92)' : 'rgba(83, 113, 162, 0.21)';
             ctx.fillRect(px, py, cellW, cellH);
+
+            if (lit && Math.random() < 0.2) {
+                ctx.fillStyle = 'rgba(176, 226, 255, 0.42)';
+                ctx.fillRect(px + 1, py + 1, cellW - 2, Math.max(1, cellH * 0.22));
+            }
         }
     }
 
@@ -781,19 +1125,19 @@ function createParkLayer() {
 function createStreetLampLayer(lampLights) {
     const layer = new THREE.Group();
     const poleMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2a3240,
+        color: 0x2f3948,
         roughness: 0.78,
-        metalness: 0.25,
+        metalness: 0.28,
     });
     const glowMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffd793,
+        color: 0xffda9c,
         transparent: true,
-        opacity: 0.92,
+        opacity: 0.9,
     });
     const poolMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffcf8f,
+        color: 0xffd39a,
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.24,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -836,11 +1180,12 @@ function createStreetLampLayer(lampLights) {
             const canHaveLight =
                 Math.abs(gridX) <= LAMP_REAL_LIGHT_GRID_RADIUS &&
                 Math.abs(gridZ) <= LAMP_REAL_LIGHT_GRID_RADIUS;
-            const isAlternatingSlot = Math.abs(gridX + gridZ) % 4 === 1;
+            const isAlternatingSlot = Math.abs(gridX + gridZ) % 6 === 1;
             if (canHaveLight && isAlternatingSlot) {
-                const light = new THREE.PointLight(0xffcf8d, 1.35, 42, 2);
+                const light = new THREE.PointLight(0xffd6a1, 1.12, 34, 2);
                 light.position.set(positionX, baseY + 8.2, positionZ);
                 light.userData.baseIntensity = 1.08 + randomFromGrid(gridX, gridZ, 21) * 0.34;
+                light.userData.flickerPhase = randomFromGrid(gridX, gridZ, 211) * Math.PI * 2;
                 light.castShadow = false;
                 lampLights.push(light);
                 layer.add(light);

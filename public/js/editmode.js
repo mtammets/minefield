@@ -58,11 +58,11 @@ export function createCarEditModeController({
     const ui = createEditModeUi({
         onClose: () => setActive(false),
         onShowAll: () => {
-            setAllEditablePartVisibility?.(true);
+            setAllEditablePartsVisibility?.(true);
             renderPartList();
         },
         onHideAll: () => {
-            setAllEditablePartVisibility?.(false);
+            setAllEditablePartsVisibility?.(false);
             renderPartList();
         },
         onSelectPreset: (presetId) => applyViewPreset(presetId, true),
@@ -154,7 +154,7 @@ export function createCarEditModeController({
 
         if (active) {
             savedPartVisibility = captureEditablePartVisibility?.() || null;
-            setAllEditablePartVisibility?.(true);
+            setAllEditablePartsVisibility?.(true);
             synchronizeOrbitFromCamera();
             applyViewPreset('iso', false);
             targetFov = DEFAULT_CAMERA_FOV;

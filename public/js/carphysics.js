@@ -103,22 +103,31 @@ const TUNING = {
 };
 
 const VEHICLE_COLLISION_RADIUS = 1.15;
-const OBSTACLE_COLLISION_ITERATIONS = 2;
+const OBSTACLE_COLLISION_ITERATIONS = 4;
+const HORIZONTAL_COLLISION_STEP_FACTOR = 0.42;
+const MAX_HORIZONTAL_COLLISION_SUBSTEPS = 7;
 const VEHICLE_COLLISION_MASS = 1.35;
 const VEHICLE_COLLISION_PENETRATION_SHARE = 0.7;
-const VEHICLE_RIDE_HEIGHT = 0.06;
-const TERRAIN_TRACK_HALF_WIDTH = 0.9;
-const TERRAIN_TILT_RESPONSE = 10.5;
+// Roads/intersections are rendered slightly above the base terrain (around y=0.028),
+// so add extra ride height to prevent visual tire clipping into road meshes.
+const VEHICLE_RIDE_HEIGHT = 0.088;
+// Wheel centers are around +/-1.28 in local X, so terrain sampling must match that width.
+const TERRAIN_TRACK_HALF_WIDTH = 1.26;
+// Small visual safety gap to avoid tire-ground clipping from camera angle/terrain interpolation.
+const TERRAIN_WHEEL_CLEARANCE = 0.014;
+const TERRAIN_TILT_RESPONSE = 8.6;
+const TERRAIN_SUPPORT_HEIGHT_RESPONSE = 9.2;
 const TERRAIN_MAX_PITCH = THREE.MathUtils.degToRad(12);
 const TERRAIN_MAX_ROLL = THREE.MathUtils.degToRad(14);
-const TERRAIN_SUSPENSION_STIFFNESS = 150;
-const TERRAIN_SUSPENSION_COMPRESSION_DAMPING = 15;
-const TERRAIN_SUSPENSION_REBOUND_DAMPING = 11;
+const TERRAIN_SUSPENSION_STIFFNESS = 122;
+const TERRAIN_SUSPENSION_COMPRESSION_DAMPING = 18;
+const TERRAIN_SUSPENSION_REBOUND_DAMPING = 14;
 const TERRAIN_GRAVITY = 34;
 const TERRAIN_MAX_COMPRESSION = 0.042;
 const TERRAIN_MAX_AIR_CLEARANCE = 1.8;
 const TERRAIN_LANDING_IMPACT_SPEED = 2.4;
 const TERRAIN_LANDING_BOUNCE = 0.16;
+const TERRAIN_HARD_FLOOR_MARGIN = 0.004;
 
 const vehicleState = {
     speed: 0,
@@ -158,6 +167,9 @@ let previousPhysicsPitch = 0;
 let physicsRoll = 0;
 let previousPhysicsRoll = 0;
 let physicsVerticalVelocity = 0;
+let smoothedSupportedGroundHeight = 0;
+let smoothedCenterGroundHeight = 0;
+let terrainSupportFilterInitialized = false;
 let isPhysicsInitialized = false;
 let pendingCrashCollision = null;
 const pendingVehicleCollisionContacts = [];
@@ -229,6 +241,9 @@ export function initializePlayerPhysics(player) {
     physicsRoll = player.rotation.z;
     previousPhysicsRoll = player.rotation.z;
     physicsVerticalVelocity = 0;
+    smoothedSupportedGroundHeight = player.position.y - VEHICLE_RIDE_HEIGHT;
+    smoothedCenterGroundHeight = smoothedSupportedGroundHeight;
+    terrainSupportFilterInitialized = false;
     isPhysicsInitialized = true;
     pendingCrashCollision = null;
     pendingVehicleCollisionContacts.length = 0;
@@ -384,10 +399,14 @@ export function updatePlayerPhysics(
     updateLaunchTractionState(dt, burnoutFactor);
 
     movement.set(vehicleState.velocity.x, 0, vehicleState.velocity.y).multiplyScalar(dt);
-    physicsPosition.add(movement);
-    constrainToWorld(physicsPosition, worldBounds);
-    constrainToObstacles(physicsPosition, staticObstacles, Math.abs(vehicleState.speed));
-    constrainToVehicles(physicsPosition, dynamicVehicles);
+    integrateHorizontalMovement(
+        physicsPosition,
+        movement,
+        worldBounds,
+        staticObstacles,
+        dynamicVehicles,
+        Math.abs(vehicleState.speed)
+    );
     if (typeof sampleGroundHeight === 'function') {
         applyTerrainSupport(sampleGroundHeight, dt);
     } else {
@@ -402,6 +421,37 @@ export function updatePlayerPhysics(
     player.rotation.set(physicsPitch, physicsRotationY, physicsRoll);
 
     return vehicleState;
+}
+
+function integrateHorizontalMovement(
+    position,
+    movementDelta,
+    worldBounds,
+    staticObstacles,
+    dynamicVehicles,
+    impactSpeed = 0
+) {
+    const moveX = movementDelta.x;
+    const moveZ = movementDelta.z;
+    const distance = Math.hypot(moveX, moveZ);
+    const maxStepDistance = Math.max(
+        0.01,
+        VEHICLE_COLLISION_RADIUS * HORIZONTAL_COLLISION_STEP_FACTOR
+    );
+    const stepCount = THREE.MathUtils.clamp(
+        Math.ceil(distance / maxStepDistance),
+        1,
+        MAX_HORIZONTAL_COLLISION_SUBSTEPS
+    );
+    const stepScale = 1 / stepCount;
+
+    for (let step = 0; step < stepCount; step += 1) {
+        position.x += moveX * stepScale;
+        position.z += moveZ * stepScale;
+        constrainToWorld(position, worldBounds);
+        constrainToObstacles(position, staticObstacles, impactSpeed);
+        constrainToVehicles(position, dynamicVehicles);
+    }
 }
 
 function constrainToObstacles(position, staticObstacles, impactSpeed = 0) {
@@ -964,21 +1014,35 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     const rearOffset = TUNING.rearAxleDistance;
     const trackOffset = TERRAIN_TRACK_HALF_WIDTH;
 
-    const frontLeftHeight = sampleGroundHeight(
-        physicsPosition.x + forwardX * frontOffset + rightX * trackOffset,
-        physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset
+    const fallbackGroundHeight = previousY - VEHICLE_RIDE_HEIGHT;
+
+    const frontLeftHeight = finiteNumberOr(
+        sampleGroundHeight(
+            physicsPosition.x + forwardX * frontOffset + rightX * trackOffset,
+            physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset
+        ),
+        fallbackGroundHeight
     );
-    const frontRightHeight = sampleGroundHeight(
-        physicsPosition.x + forwardX * frontOffset - rightX * trackOffset,
-        physicsPosition.z + forwardZ * frontOffset - rightZ * trackOffset
+    const frontRightHeight = finiteNumberOr(
+        sampleGroundHeight(
+            physicsPosition.x + forwardX * frontOffset - rightX * trackOffset,
+            physicsPosition.z + forwardZ * frontOffset - rightZ * trackOffset
+        ),
+        fallbackGroundHeight
     );
-    const rearLeftHeight = sampleGroundHeight(
-        physicsPosition.x - forwardX * rearOffset + rightX * trackOffset,
-        physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset
+    const rearLeftHeight = finiteNumberOr(
+        sampleGroundHeight(
+            physicsPosition.x - forwardX * rearOffset + rightX * trackOffset,
+            physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset
+        ),
+        fallbackGroundHeight
     );
-    const rearRightHeight = sampleGroundHeight(
-        physicsPosition.x - forwardX * rearOffset - rightX * trackOffset,
-        physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset
+    const rearRightHeight = finiteNumberOr(
+        sampleGroundHeight(
+            physicsPosition.x - forwardX * rearOffset - rightX * trackOffset,
+            physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset
+        ),
+        fallbackGroundHeight
     );
 
     const frontAverage = (frontLeftHeight + frontRightHeight) * 0.5;
@@ -1004,12 +1068,34 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     physicsPitch = THREE.MathUtils.lerp(physicsPitch, targetPitch, tiltBlend);
     physicsRoll = THREE.MathUtils.lerp(physicsRoll, targetRoll, tiltBlend);
 
-    const centerHeight = sampleGroundHeight(physicsPosition.x, physicsPosition.z);
+    const centerHeight = finiteNumberOr(
+        sampleGroundHeight(physicsPosition.x, physicsPosition.z),
+        (frontAverage + rearAverage) * 0.5
+    );
     const averageHeight = (frontAverage + rearAverage) * 0.5;
     const maxWheelHeight = Math.max(frontLeftHeight, frontRightHeight, rearLeftHeight, rearRightHeight);
     const supportedGroundHeight = Math.max(centerHeight, averageHeight);
-    const targetRideHeight = supportedGroundHeight + VEHICLE_RIDE_HEIGHT;
-    const minRideOffset = Math.max(0.01, VEHICLE_RIDE_HEIGHT - TERRAIN_MAX_COMPRESSION);
+    if (!terrainSupportFilterInitialized) {
+        smoothedSupportedGroundHeight = supportedGroundHeight;
+        smoothedCenterGroundHeight = centerHeight;
+        terrainSupportFilterInitialized = true;
+    }
+    const supportBlend = 1 - Math.exp(-TERRAIN_SUPPORT_HEIGHT_RESPONSE * dt);
+    smoothedSupportedGroundHeight = THREE.MathUtils.lerp(
+        smoothedSupportedGroundHeight,
+        supportedGroundHeight,
+        supportBlend
+    );
+    smoothedCenterGroundHeight = THREE.MathUtils.lerp(
+        smoothedCenterGroundHeight,
+        centerHeight,
+        supportBlend
+    );
+    const targetRideHeight = smoothedSupportedGroundHeight + VEHICLE_RIDE_HEIGHT;
+    const minRideOffset = Math.max(
+        0.01 + TERRAIN_WHEEL_CLEARANCE,
+        VEHICLE_RIDE_HEIGHT - TERRAIN_MAX_COMPRESSION + TERRAIN_WHEEL_CLEARANCE
+    );
     const compressionFloor = maxWheelHeight + minRideOffset;
 
     const springDamping = physicsVerticalVelocity < 0
@@ -1020,6 +1106,11 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     physicsVerticalVelocity += (springAcceleration + dampingAcceleration - TERRAIN_GRAVITY) * dt;
     physicsPosition.y += physicsVerticalVelocity * dt;
 
+    if (!Number.isFinite(physicsPosition.y) || !Number.isFinite(physicsVerticalVelocity)) {
+        physicsPosition.y = targetRideHeight;
+        physicsVerticalVelocity = 0;
+    }
+
     if (physicsPosition.y < compressionFloor) {
         if (physicsVerticalVelocity < -TERRAIN_LANDING_IMPACT_SPEED) {
             physicsVerticalVelocity = -physicsVerticalVelocity * TERRAIN_LANDING_BOUNCE;
@@ -1027,6 +1118,15 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
             physicsVerticalVelocity = 0;
         }
         physicsPosition.y = compressionFloor;
+    }
+
+    const centerHardFloor = Math.max(centerHeight, smoothedCenterGroundHeight)
+        + minRideOffset + TERRAIN_HARD_FLOOR_MARGIN;
+    if (physicsPosition.y < centerHardFloor) {
+        physicsPosition.y = centerHardFloor;
+        if (physicsVerticalVelocity < 0) {
+            physicsVerticalVelocity = 0;
+        }
     }
 
     const maxRideHeight = targetRideHeight + TERRAIN_MAX_AIR_CLEARANCE;
@@ -1040,7 +1140,8 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     vehicleState.verticalSpeed = (physicsPosition.y - previousY) / Math.max(0.0001, dt);
     const normalizedCompression = (targetRideHeight - physicsPosition.y) / Math.max(0.001, TERRAIN_MAX_COMPRESSION);
     vehicleState.terrainCompression = THREE.MathUtils.clamp(normalizedCompression, -1.2, 1.2);
-    vehicleState.terrainGrounded = physicsPosition.y <= compressionFloor + 0.006 ? 1 : 0;
+    const groundedFloor = Math.max(compressionFloor, centerHardFloor);
+    vehicleState.terrainGrounded = physicsPosition.y <= groundedFloor + 0.006 ? 1 : 0;
 }
 
 function getBurnoutFactor(totalSpeed) {
@@ -1105,4 +1206,8 @@ function getBrakeSlideFactor(longitudinalSpeed, lateralSpeed) {
 function clampDamageCounter(value, max) {
     const numeric = Number.isFinite(value) ? value : 0;
     return THREE.MathUtils.clamp(numeric, 0, max);
+}
+
+function finiteNumberOr(value, fallback = 0) {
+    return Number.isFinite(value) ? value : fallback;
 }

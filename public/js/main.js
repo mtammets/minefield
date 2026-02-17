@@ -79,7 +79,7 @@ const DEBRIS_GRAVITY = 26;
 const DEBRIS_DRAG = 2.2;
 const DEBRIS_BOUNCE_DAMPING = 0.32;
 const DEBRIS_GROUND_CLEARANCE = 0.028;
-const PLAYER_RIDE_HEIGHT = 0.06;
+const PLAYER_RIDE_HEIGHT = 0.088;
 const DEBRIS_BASE_VERTICAL_BOOST = 2.2;
 const DEBRIS_SETTLE_VERTICAL_SPEED = 0.45;
 const DEBRIS_SETTLE_HORIZONTAL_SPEED = 0.5;
@@ -310,7 +310,7 @@ function initializeRenderer() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.22;
+    renderer.toneMappingExposure = 1.18;
     renderer.shadowMap.enabled = renderSettings.shadowsEnabled;
     renderer.shadowMap.type = THREE.BasicShadowMap;
     return renderer;

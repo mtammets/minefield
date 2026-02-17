@@ -6,13 +6,14 @@ const HEADLIGHT_COLOR = 0xffffff; // Valge esituli
 const TAILLIGHT_COLOR = 0xff0000; // Punane tagatuli
 const DEFAULT_BODY_DIMENSIONS = { width: 1.2, height: 0.4, depth: 4 };
 const DEFAULT_WHEEL_POSITIONS = [
-    { x: -1.2, z: -1.8 },
-    { x: 1.2, z: -1.8 },
-    { x: -1.2, z: 1.8 },
-    { x: 1.2, z: 1.8 },
+    { x: -1.28, z: -1.8 },
+    { x: 1.28, z: -1.8 },
+    { x: -1.28, z: 1.8 },
+    { x: 1.28, z: 1.8 },
 ];
 const ROOF_BRAND_NAME = 'Voltline';
 const SUSPENSION_LINK_Y = 0.5;
+const ROOF_MODULE_LIFT = 0.03;
 const TAILLIGHT_RUNNING_LIGHT_FACTOR = 0.28;
 const TAILLIGHT_BRAKE_LIGHT_FACTOR = 1.65;
 const TAILLIGHT_RUNNING_DISTANCE_FACTOR = 0.64;
@@ -32,6 +33,46 @@ function createMaterial({ color, emissive = 0x000000, emissiveIntensity = 0, met
         clearcoat,
         clearcoatRoughness,
     });
+}
+
+function createRoundedBoxGeometry(width, height, depth, cornerRadius = 0, cornerSegments = 4) {
+    const maxRadius = Math.max(0, Math.min(width, height, depth) * 0.5 - 0.0001);
+    const radius = THREE.MathUtils.clamp(cornerRadius, 0, maxRadius);
+    if (radius <= 0) {
+        return new THREE.BoxGeometry(width, height, depth);
+    }
+
+    const segments = Math.max(1, Math.floor(cornerSegments));
+    const curveSegments = Math.max(4, segments * 2);
+    // Build the 2D profile inset by radius, because bevel expands outward.
+    // This keeps final outer width/height equal to requested dimensions.
+    const halfWidth = width * 0.5 - radius;
+    const halfHeight = height * 0.5 - radius;
+
+    const shape = new THREE.Shape();
+    shape.moveTo(-halfWidth, -halfHeight - radius);
+    shape.lineTo(halfWidth, -halfHeight - radius);
+    shape.absarc(halfWidth, -halfHeight, radius, -Math.PI * 0.5, 0, false);
+    shape.lineTo(halfWidth + radius, halfHeight);
+    shape.absarc(halfWidth, halfHeight, radius, 0, Math.PI * 0.5, false);
+    shape.lineTo(-halfWidth, halfHeight + radius);
+    shape.absarc(-halfWidth, halfHeight, radius, Math.PI * 0.5, Math.PI, false);
+    shape.lineTo(-halfWidth - radius, -halfHeight);
+    shape.absarc(-halfWidth, -halfHeight, radius, Math.PI, Math.PI * 1.5, false);
+
+    const coreDepth = Math.max(0.0001, depth - radius * 2);
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+        depth: coreDepth,
+        steps: 1,
+        bevelEnabled: true,
+        bevelThickness: radius,
+        bevelSize: radius,
+        bevelSegments: segments,
+        curveSegments,
+    });
+    geometry.center();
+    geometry.computeVertexNormals();
+    return geometry;
 }
 
 function createAccentChargeFlowTexture() {
@@ -489,6 +530,8 @@ function addLuxuryBody(car, bodyConfig = {}) {
         position,
         side = 'center',
         zone = 'mid',
+        cornerRadius = 0,
+        cornerSegments = 4,
         emissiveIntensity = 0.3,
         roughness = 0.18,
     }) => {
@@ -501,10 +544,14 @@ function addLuxuryBody(car, bodyConfig = {}) {
             clearcoat: 1,
             clearcoatRoughness: 0.05,
         });
-        const panel = new THREE.Mesh(
-            new THREE.BoxGeometry(size[0], size[1], size[2]),
-            panelMaterial
+        const geometry = createRoundedBoxGeometry(
+            size[0],
+            size[1],
+            size[2],
+            cornerRadius,
+            cornerSegments
         );
+        const panel = new THREE.Mesh(geometry, panelMaterial);
         panel.position.set(position[0], position[1], position[2]);
         panel.castShadow = true;
         panel.receiveShadow = true;
@@ -530,6 +577,8 @@ function addLuxuryBody(car, bodyConfig = {}) {
         position: [0, 0.56, 0.06],
         side: 'center',
         zone: 'mid',
+        cornerRadius: 0.045,
+        cornerSegments: 5,
         emissiveIntensity: 0.32,
         roughness: 0.17,
     });
@@ -767,7 +816,7 @@ function addVoltlineRoofBranding(
     const roofScreen = createVoltlineRoofScreenController(brandName, playerName);
     const roofTexture = roofScreen.texture;
     const shimmerTexture = createRoofShimmerTexture();
-    const roofCenterY = 0.56 + bodyDimensions.height * 0.5;
+    const roofCenterY = 0.56 + bodyDimensions.height * 0.5 + ROOF_MODULE_LIFT;
     const roofCenterZ = 0.1;
     const screenAspect = roofTexture.image?.width && roofTexture.image?.height
         ? roofTexture.image.width / roofTexture.image.height
@@ -1065,17 +1114,22 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
         clearcoatRoughness: 0.04,
     });
 
+    const JOINT_RADIUS = 0.06;
+    const BODY_SIDE_OUTBOARD_OFFSET = 0.08;
+    const WHEEL_SIDE_ROD_INSET = 0.21;
+    const MAX_WHEEL_SIDE_INSET_RATIO = 0.54;
     const rodGeometry = new THREE.CylinderGeometry(0.04, 0.04, 1, 24);
-    const jointGeometry = new THREE.SphereGeometry(0.06, 16, 16);
+    const jointGeometry = new THREE.SphereGeometry(JOINT_RADIUS, 16, 16);
     const yAxis = new THREE.Vector3(0, 1, 0);
     const bodyHalfWidth = bodyDimensions.width / 2;
     const links = [];
     const scrapeContacts = [];
     const scratchWorld = new THREE.Vector3();
+    const rodEndLocal = new THREE.Vector3();
 
     wheelPositions.forEach(({ x, z }) => {
         const direction = Math.sign(x) || 1;
-        const bodyEdgeX = direction * bodyHalfWidth;
+        const bodyEdgeX = direction * (bodyHalfWidth + BODY_SIDE_OUTBOARD_OFFSET);
         const side = direction < 0 ? 'left' : 'right';
         const zone = z < 0 ? 'front' : 'rear';
         const assembly = new THREE.Group();
@@ -1188,16 +1242,21 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
             }
 
             link.direction.subVectors(link.endLocal, link.startLocal);
-            const length = Math.max(link.direction.length(), 0.0001);
+            const fullLength = Math.max(link.direction.length(), 0.0001);
+            const wheelSideInset = Math.min(WHEEL_SIDE_ROD_INSET, fullLength * MAX_WHEEL_SIDE_INSET_RATIO);
+            const rodLength = Math.max(fullLength - wheelSideInset, 0.0001);
+            link.direction.multiplyScalar(1 / fullLength);
 
-            link.center.copy(link.startLocal).add(link.endLocal).multiplyScalar(0.5);
+            // Shorten only the wheel-side end so the outer joint stays visible beyond the rod.
+            rodEndLocal.copy(link.endLocal).addScaledVector(link.direction, -wheelSideInset);
+            link.center.copy(link.startLocal).add(rodEndLocal).multiplyScalar(0.5);
             link.rod.position.copy(link.center);
-            link.rod.scale.set(1, length, 1);
-            link.quaternion.setFromUnitVectors(yAxis, link.direction.multiplyScalar(1 / length));
+            link.rod.scale.set(1, rodLength, 1);
+            link.quaternion.setFromUnitVectors(yAxis, link.direction);
             link.rod.quaternion.copy(link.quaternion);
 
             link.innerJoint.position.copy(link.startLocal);
-            link.outerJoint.position.copy(link.endLocal);
+            link.outerJoint.position.copy(rodEndLocal);
         });
     }
 

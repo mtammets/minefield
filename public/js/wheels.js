@@ -48,6 +48,9 @@ const wheelMirrorConfig = {
 
 const WHEEL_RADIUS = 0.5;
 const TIRE_WIDTH = 0.3;
+const WHEEL_CENTER_X = 1.28;
+const FRONT_WHEEL_Z = -1.8;
+const REAR_WHEEL_Z = 1.8;
 const STEER_RESPONSE = 14;
 const VISUAL_MAX_STEER = THREE.MathUtils.degToRad(26);
 const REAR_DRIVE_VISUAL_SLIP = 5.8;
@@ -176,10 +179,10 @@ function initializeWheels(car, options = {}) {
     wheelLightGroup.name = 'wheel_well_light_group';
     car.add(wheelLightGroup);
 
-    const frontLeft = createSteerableWheel(-1.2, -1.8, frontAxleGroup, wheelMirrorConfig.frontLeft);
-    const frontRight = createSteerableWheel(1.2, -1.8, frontAxleGroup, wheelMirrorConfig.frontRight);
-    const backLeft = createWheel(-1.2, 1.8, rearAxleGroup, wheelMirrorConfig.backLeft);
-    const backRight = createWheel(1.2, 1.8, rearAxleGroup, wheelMirrorConfig.backRight);
+    const frontLeft = createSteerableWheel(-WHEEL_CENTER_X, FRONT_WHEEL_Z, frontAxleGroup, wheelMirrorConfig.frontLeft);
+    const frontRight = createSteerableWheel(WHEEL_CENTER_X, FRONT_WHEEL_Z, frontAxleGroup, wheelMirrorConfig.frontRight);
+    const backLeft = createWheel(-WHEEL_CENTER_X, REAR_WHEEL_Z, rearAxleGroup, wheelMirrorConfig.backLeft);
+    const backRight = createWheel(WHEEL_CENTER_X, REAR_WHEEL_Z, rearAxleGroup, wheelMirrorConfig.backRight);
     frontLeft.steeringPivot.name = 'steering_pivot_front_left';
     frontRight.steeringPivot.name = 'steering_pivot_front_right';
     frontLeft.wheel.name = 'wheel_front_left';
@@ -188,10 +191,10 @@ function initializeWheels(car, options = {}) {
     backRight.name = 'wheel_rear_right';
 
     if (addWheelWellLights) {
-        createWheelWellLight(-1.2, -1.8, wheelLightGroup);
-        createWheelWellLight(1.2, -1.8, wheelLightGroup);
-        createWheelWellLight(-1.2, 1.8, wheelLightGroup);
-        createWheelWellLight(1.2, 1.8, wheelLightGroup);
+        createWheelWellLight(-WHEEL_CENTER_X, FRONT_WHEEL_Z, wheelLightGroup);
+        createWheelWellLight(WHEEL_CENTER_X, FRONT_WHEEL_Z, wheelLightGroup);
+        createWheelWellLight(-WHEEL_CENTER_X, REAR_WHEEL_Z, wheelLightGroup);
+        createWheelWellLight(WHEEL_CENTER_X, REAR_WHEEL_Z, wheelLightGroup);
     }
 
     const frontWheelMeshes = [frontLeft.wheel, frontRight.wheel];

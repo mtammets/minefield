@@ -1,10 +1,46 @@
+:root {
+    --hud-border: rgba(150, 205, 255, 0.54);
+    --hud-border-soft: rgba(150, 205, 255, 0.32);
+    --hud-bg-top: rgba(10, 19, 34, 0.9);
+    --hud-bg-bottom: rgba(7, 13, 24, 0.9);
+    --hud-text: rgba(226, 242, 255, 0.98);
+    --hud-text-dim: rgba(183, 214, 241, 0.9);
+    --hud-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
+    --hud-radius: 13px;
+}
+
+* {
+    box-sizing: border-box;
+}
+
 /* Keha üldised stiilid */
 body {
+    position: relative;
     margin: 0;
     overflow: hidden;
     font-family: 'Sora', sans-serif;
-    background: linear-gradient(180deg, #0f2027, #203a43, #2c5364);
+    background: linear-gradient(180deg, #09111f 0%, #0d1a2e 55%, #12253f 100%);
     color: white;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 50% 78%, rgba(121, 189, 255, 0.18), rgba(121, 189, 255, 0) 44%),
+        radial-gradient(circle at 18% 16%, rgba(88, 161, 255, 0.11), rgba(88, 161, 255, 0) 36%);
+}
+
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0), rgba(1, 3, 6, 0.5) 78%);
 }
 
 /* Canvas stiilid */
@@ -16,9 +52,8 @@ canvas#gameCanvas {
     width: 100vw;
     height: 100vh;
     z-index: 1;
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.5), rgba(20, 20, 60, 0.7));
-    backdrop-filter: blur(2px);
-    box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.9);
+    background: linear-gradient(180deg, rgba(6, 12, 22, 0.48), rgba(9, 14, 24, 0.66));
+    box-shadow: inset 0 0 38px rgba(0, 0, 0, 0.62);
 }
 
 #welcomeModal {
@@ -418,58 +453,49 @@ canvas#gameCanvas {
     position: fixed;
     right: 18px;
     top: 18px;
-    z-index: 4;
     width: 220px;
-    padding: 10px 10px 8px;
-    border: 1px solid rgba(140, 196, 255, 0.6);
-    border-radius: 10px;
-    background: rgba(7, 12, 22, 0.72);
-    backdrop-filter: blur(3px);
-    color: #d7ecff;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
-    letter-spacing: 0.6px;
 }
 
 #minimapTitle {
-    font-size: 12px;
-    font-weight: 700;
-    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    color: rgba(205, 231, 255, 0.94);
 }
 
 #minimapCanvas {
     display: block;
     width: 190px;
     height: 190px;
-    border-radius: 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(146, 196, 246, 0.34);
     background: rgba(5, 9, 17, 0.75);
+    box-shadow: inset 0 0 0 1px rgba(122, 173, 227, 0.16);
 }
 
 #minimapInfo {
-    margin-top: 6px;
-    font-size: 12px;
-    color: rgba(190, 224, 255, 0.95);
+    margin-top: 7px;
+    font-size: 11px;
+    letter-spacing: 0.45px;
+    color: rgba(184, 220, 251, 0.92);
 }
 
 #objectivePanel {
     position: fixed;
     left: 18px;
     top: 18px;
-    z-index: 4;
     width: 240px;
-    padding: 10px 12px 9px;
-    border: 1px solid rgba(132, 184, 255, 0.55);
-    border-radius: 10px;
-    background: rgba(7, 12, 22, 0.74);
-    backdrop-filter: blur(3px);
-    color: #d9eeff;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
 }
 
 #objectiveTitle {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.7px;
-    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    margin-bottom: 7px;
+    text-transform: uppercase;
+    color: rgba(207, 233, 255, 0.94);
 }
 
 #objectiveRow {
@@ -480,15 +506,15 @@ canvas#gameCanvas {
 }
 
 #objectiveLabel {
-    color: rgba(190, 224, 255, 0.95);
+    color: rgba(194, 225, 252, 0.94);
 }
 
 #targetColorSwatch {
-    width: 16px;
-    height: 16px;
+    width: 17px;
+    height: 17px;
     border-radius: 50%;
-    border: 1px solid rgba(230, 242, 255, 0.75);
-    box-shadow: 0 0 12px rgba(255, 255, 255, 0.24);
+    border: 1px solid rgba(234, 245, 255, 0.82);
+    box-shadow: 0 0 12px rgba(180, 228, 255, 0.34);
     background: #6b84a5;
     flex: 0 0 auto;
 }
@@ -499,37 +525,32 @@ canvas#gameCanvas {
 }
 
 #objectiveStatus {
-    margin-top: 6px;
+    margin-top: 7px;
     font-size: 12px;
-    color: rgba(195, 228, 255, 0.9);
+    line-height: 1.35;
+    color: var(--hud-text-dim);
 }
 
 #botPanel {
     position: fixed;
     left: 18px;
     top: 132px;
-    z-index: 4;
     width: 260px;
-    padding: 10px 12px 9px;
-    border: 1px solid rgba(132, 184, 255, 0.44);
-    border-radius: 10px;
-    background: rgba(7, 12, 22, 0.7);
-    backdrop-filter: blur(3px);
-    color: #d9eeff;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
 }
 
 #botTitle {
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.7px;
-    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    color: rgba(207, 233, 255, 0.94);
 }
 
 #botList {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 6px;
     font-size: 12px;
 }
 
@@ -538,11 +559,14 @@ canvas#gameCanvas {
     grid-template-columns: 1fr auto auto;
     align-items: center;
     gap: 10px;
-    padding: 2px 0;
+    padding: 4px 6px;
+    border-radius: 8px;
+    background: rgba(19, 35, 58, 0.5);
+    border: 1px solid rgba(137, 186, 238, 0.16);
 }
 
 .botName {
-    color: rgba(210, 235, 255, 0.95);
+    color: rgba(221, 240, 255, 0.96);
     font-weight: 700;
     letter-spacing: 0.4px;
 }
@@ -570,6 +594,31 @@ canvas#gameCanvas {
     text-align: right;
 }
 
+#minimap,
+#objectivePanel,
+#botPanel {
+    z-index: 4;
+    padding: 11px 12px 10px;
+    border: 1px solid var(--hud-border);
+    border-radius: var(--hud-radius);
+    background: linear-gradient(170deg, var(--hud-bg-top), var(--hud-bg-bottom));
+    color: var(--hud-text);
+    font-family: 'Sora', sans-serif;
+    letter-spacing: 0.4px;
+    box-shadow: var(--hud-shadow), inset 0 0 0 1px rgba(218, 240, 255, 0.05);
+}
+
+#minimap::before,
+#objectivePanel::before,
+#botPanel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    border: 1px solid var(--hud-border-soft);
+}
+
 #finalLeaderboard {
     position: fixed;
     inset: 0;
@@ -593,7 +642,7 @@ canvas#gameCanvas {
     background: linear-gradient(170deg, rgba(18, 26, 46, 0.95), rgba(7, 13, 26, 0.95));
     box-shadow: 0 16px 56px rgba(0, 0, 0, 0.45);
     color: #e8f3ff;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
+    font-family: 'Sora', sans-serif;
 }
 
 #leaderboardTitle {
@@ -658,7 +707,7 @@ canvas#gameCanvas {
     padding: 10px 12px;
     background: linear-gradient(180deg, rgba(255, 214, 110, 0.25), rgba(255, 186, 76, 0.15));
     color: #fff4d2;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
+    font-family: 'Sora', sans-serif;
     font-size: 13px;
     font-weight: 800;
     letter-spacing: 0.8px;
@@ -699,7 +748,7 @@ canvas#gameCanvas {
     background: linear-gradient(170deg, rgba(18, 28, 47, 0.95), rgba(9, 15, 29, 0.95));
     box-shadow: 0 16px 54px rgba(0, 0, 0, 0.48);
     color: #e9f5ff;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
+    font-family: 'Sora', sans-serif;
 }
 
 #pauseTitle {
@@ -722,7 +771,7 @@ canvas#gameCanvas {
     padding: 10px 12px;
     background: rgba(25, 47, 79, 0.74);
     color: #f4fbff;
-    font-family: 'Trebuchet MS', Arial, sans-serif;
+    font-family: 'Sora', sans-serif;
     font-size: 13px;
     font-weight: 800;
     letter-spacing: 0.8px;

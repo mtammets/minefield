@@ -2,7 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 
 export function addStars(scene) {
     const starGeometry = new THREE.BufferGeometry();
-    const starCount = window.innerWidth < 900 ? 1200 : 2400;
+    const starCount = window.innerWidth < 900 ? 420 : 900;
     const positions = new Float32Array(starCount * 3);
     const colors = new Float32Array(starCount * 3);
 
