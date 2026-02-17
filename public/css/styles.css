@@ -231,6 +231,92 @@ canvas#gameCanvas {
     pointer-events: none;
 }
 
+#welcomeColorPicker {
+    position: relative;
+    margin-top: 12px;
+    border: 1px solid rgba(145, 204, 255, 0.35);
+    border-radius: 12px;
+    padding: 10px;
+    background: linear-gradient(170deg, rgba(12, 21, 39, 0.84), rgba(8, 15, 28, 0.88));
+}
+
+.welcomeColorPickerHeader {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.welcomeColorPickerLabel {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+    color: rgba(191, 223, 255, 0.9);
+}
+
+#welcomeSelectedColorName {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(236, 246, 255, 0.97);
+}
+
+.welcomeColorOptions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.welcomeColorBtn {
+    border: 1px solid rgba(159, 205, 255, 0.32);
+    border-radius: 9px;
+    padding: 7px 6px 8px;
+    background: rgba(17, 34, 58, 0.7);
+    color: rgba(222, 239, 255, 0.95);
+    font-family: 'Sora', sans-serif;
+    cursor: pointer;
+    transition: border-color 120ms ease, transform 120ms ease, filter 120ms ease, box-shadow 120ms ease;
+}
+
+.welcomeColorBtn:hover {
+    transform: translateY(-1px);
+    border-color: rgba(175, 223, 255, 0.58);
+    filter: brightness(1.06);
+}
+
+.welcomeColorBtn:focus-visible {
+    outline: none;
+    border-color: rgba(214, 242, 255, 0.92);
+    box-shadow: 0 0 0 2px rgba(110, 210, 255, 0.28);
+}
+
+.welcomeColorBtn.active {
+    border-color: rgba(203, 238, 255, 0.9);
+    box-shadow: 0 0 0 1px rgba(201, 239, 255, 0.65), 0 6px 16px rgba(84, 154, 255, 0.2);
+}
+
+.welcomeColorBtn .welcomeColorSwatch {
+    display: block;
+    width: 28px;
+    height: 28px;
+    margin: 0 auto 6px;
+    border-radius: 50%;
+    border: 2px solid rgba(238, 247, 255, 0.84);
+    box-shadow: 0 0 13px rgba(167, 215, 255, 0.35);
+}
+
+.welcomeColorBtn .welcomeColorName {
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.15;
+    text-align: center;
+    letter-spacing: 0.3px;
+}
+
 #welcomeStartBtn {
     position: relative;
     margin-top: 16px;
@@ -712,6 +798,19 @@ canvas#gameCanvas {
         margin-top: 12px;
         padding: 11px 12px;
         border-radius: 10px;
+    }
+
+    #welcomeColorPicker {
+        margin-top: 10px;
+        padding: 8px;
+    }
+
+    .welcomeColorOptions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .welcomeColorBtn .welcomeColorName {
+        font-size: 9px;
     }
 
     #welcomeHint {

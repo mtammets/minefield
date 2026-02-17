@@ -20,6 +20,7 @@ import {
     updateCarVisuals,
     setPlayerBatteryLevel,
     getPlayerCarCrashParts,
+    setPlayerCarBodyColor,
 } from './car.js';
 import { camera, updateCamera } from './camera.js';
 import {
@@ -50,6 +51,16 @@ const COLOR_NAMES = {
     [0x8dff9a]: 'Heleroheline',
     [0xffd86b]: 'Merevaik',
 };
+const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
+const CAR_COLOR_PRESETS = [
+    { hex: 0x2d67a6, name: 'Kobalt sinine' },
+    { hex: 0xd34545, name: 'Võidusõidu punane' },
+    { hex: 0xff9f3f, name: 'Päikese oranž' },
+    { hex: 0x3ca86f, name: 'Neoon roheline' },
+    { hex: 0x8c9bb0, name: 'Titaan hall' },
+    { hex: 0xe4edf6, name: 'Arktiline valge' },
+];
+const DEFAULT_PLAYER_CAR_COLOR_HEX = CAR_COLOR_PRESETS[0].hex;
 const DEBRIS_GRAVITY = 26;
 const DEBRIS_DRAG = 2.2;
 const DEBRIS_BOUNCE_DAMPING = 0.32;
@@ -99,6 +110,8 @@ const playerDamageState = createEmptyDamageState();
 const bodyDamageVisual = { left: 0, right: 0, front: 0, rear: 0 };
 const bodyPartBaselines = new Map();
 const debrisBottomProbeBox = new THREE.Box3();
+let selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
+setPlayerCarBodyColor(selectedCarColorHex);
 const objectiveUi = createObjectiveUiController();
 const botStatusUi = createBotStatusController();
 const finalScoreboardUi = createFinalScoreboardController();
@@ -111,6 +124,10 @@ const pauseMenuUi = createPauseMenuController({
     },
 });
 const welcomeModalUi = createWelcomeModalController({
+    initialColorHex: selectedCarColorHex,
+    onColorChange(colorHex) {
+        setSelectedPlayerCarColor(colorHex);
+    },
     onStart() {
         dismissWelcomeModal();
     },
@@ -266,6 +283,14 @@ function handleKey(event, isKeyDown) {
     }
 
     if (isWelcomeModalVisible) {
+        if (isKeyDown && (key === 'arrowleft' || key === 'a')) {
+            event.preventDefault();
+            welcomeModalUi.selectNeighborColor(-1);
+        }
+        if (isKeyDown && (key === 'arrowright' || key === 'd')) {
+            event.preventDefault();
+            welcomeModalUi.selectNeighborColor(1);
+        }
         if (key === 'enter' && isKeyDown) {
             event.preventDefault();
             dismissWelcomeModal();
@@ -1906,11 +1931,14 @@ function clearReplayEffects() {
     replayEffects.length = 0;
 }
 
-function createWelcomeModalController({ onStart } = {}) {
+function createWelcomeModalController({ onStart, onColorChange, initialColorHex } = {}) {
     const rootEl = document.getElementById('welcomeModal');
     const startBtnEl = document.getElementById('welcomeStartBtn');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
+    const selectedColorNameEl = document.getElementById('welcomeSelectedColorName');
+    const colorOptionsEl = document.getElementById('welcomeColorOptions');
     if (!rootEl || !startBtnEl || !previewCanvasEl) {
+        const fallbackColorHex = resolvePlayerCarColorHex(initialColorHex);
         return {
             show() {},
             hide() {},
@@ -1922,6 +1950,11 @@ function createWelcomeModalController({ onStart } = {}) {
             isAvailable() {
                 return false;
             },
+            getSelectedColorHex() {
+                return fallbackColorHex;
+            },
+            setSelectedColorHex() {},
+            selectNeighborColor() {},
         };
     }
 
@@ -1998,6 +2031,8 @@ function createWelcomeModalController({ onStart } = {}) {
         verticalSpeed: 0,
     };
     let previewPulseTime = Math.random() * Math.PI * 2;
+    const colorButtons = [];
+    let selectedColorIndex = getCarColorPresetIndex(initialColorHex);
 
     const previewBounds = new THREE.Box3().setFromObject(previewCar);
     const previewSize = previewBounds.getSize(new THREE.Vector3());
@@ -2005,6 +2040,8 @@ function createWelcomeModalController({ onStart } = {}) {
     const previewLookAt = new THREE.Vector3(0, previewSize.y * 0.28, 0);
     previewCamera.position.set(previewRadius * 1.48, previewRadius * 0.76, previewRadius * 1.85);
     previewCamera.lookAt(previewLookAt);
+    buildColorOptions();
+    setSelectedColorByIndex(selectedColorIndex, false);
 
     startBtnEl.addEventListener('click', () => {
         onStart?.();
@@ -2013,6 +2050,7 @@ function createWelcomeModalController({ onStart } = {}) {
     return {
         show() {
             rootEl.hidden = false;
+            setSelectedColorByIndex(getCarColorPresetIndex(selectedCarColorHex), false);
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
             renderPreview();
@@ -2039,6 +2077,17 @@ function createWelcomeModalController({ onStart } = {}) {
         },
         isAvailable() {
             return true;
+        },
+        getSelectedColorHex() {
+            return CAR_COLOR_PRESETS[selectedColorIndex]?.hex ?? DEFAULT_PLAYER_CAR_COLOR_HEX;
+        },
+        setSelectedColorHex(colorHex, options = {}) {
+            const { emitChange = true } = options;
+            const colorIndex = getCarColorPresetIndex(colorHex);
+            setSelectedColorByIndex(colorIndex, emitChange);
+        },
+        selectNeighborColor(step = 1) {
+            setSelectedColorByIndex(selectedColorIndex + Math.sign(step || 1), true);
         },
     };
 
@@ -2075,6 +2124,72 @@ function createWelcomeModalController({ onStart } = {}) {
 
         previewRig.setBatteryLevel(0.34 + batteryWave * 0.62);
         previewRig.updateVisuals(previewState, dt || 1 / 60);
+    }
+
+    function buildColorOptions() {
+        if (!colorOptionsEl) {
+            return;
+        }
+
+        colorOptionsEl.innerHTML = '';
+        for (let i = 0; i < CAR_COLOR_PRESETS.length; i += 1) {
+            const preset = CAR_COLOR_PRESETS[i];
+            const buttonEl = document.createElement('button');
+            buttonEl.type = 'button';
+            buttonEl.className = 'welcomeColorBtn';
+            buttonEl.setAttribute('role', 'radio');
+            buttonEl.setAttribute('aria-checked', 'false');
+            buttonEl.setAttribute('aria-label', `${preset.name} (${toCssHex(preset.hex).toUpperCase()})`);
+
+            const swatchEl = document.createElement('span');
+            swatchEl.className = 'welcomeColorSwatch';
+            swatchEl.style.background = toCssHex(preset.hex);
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'welcomeColorName';
+            nameEl.textContent = preset.name;
+
+            buttonEl.append(swatchEl, nameEl);
+            buttonEl.addEventListener('click', () => {
+                setSelectedColorByIndex(i, true);
+            });
+
+            colorOptionsEl.appendChild(buttonEl);
+            colorButtons.push(buttonEl);
+        }
+    }
+
+    function setSelectedColorByIndex(nextIndex, emitChange = true) {
+        if (!CAR_COLOR_PRESETS.length) {
+            return;
+        }
+
+        const colorCount = CAR_COLOR_PRESETS.length;
+        const normalizedIndex = Number.isFinite(nextIndex) ? Math.round(nextIndex) : 0;
+        selectedColorIndex = ((normalizedIndex % colorCount) + colorCount) % colorCount;
+
+        const selectedPreset = CAR_COLOR_PRESETS[selectedColorIndex];
+        previewRig.setBodyColor(selectedPreset.hex);
+        if (selectedColorNameEl) {
+            selectedColorNameEl.textContent = selectedPreset.name;
+        }
+        syncColorOptionUi();
+        if (emitChange) {
+            onColorChange?.(selectedPreset.hex, selectedPreset);
+        }
+    }
+
+    function syncColorOptionUi() {
+        if (!colorButtons.length) {
+            return;
+        }
+
+        for (let i = 0; i < colorButtons.length; i += 1) {
+            const buttonEl = colorButtons[i];
+            const isActive = i === selectedColorIndex;
+            buttonEl.classList.toggle('active', isActive);
+            buttonEl.setAttribute('aria-checked', isActive ? 'true' : 'false');
+        }
     }
 }
 
@@ -2195,6 +2310,91 @@ function createPauseMenuController({ onExit, onResume } = {}) {
             return !rootEl.hidden;
         },
     };
+}
+
+function setSelectedPlayerCarColor(colorHex, options = {}) {
+    const { persist = true } = options;
+    const normalized = resolvePlayerCarColorHex(colorHex);
+    selectedCarColorHex = normalized;
+    setPlayerCarBodyColor(normalized);
+    if (persist) {
+        persistPlayerCarColorHex(normalized);
+    }
+}
+
+function resolvePlayerCarColorHex(colorHex) {
+    if (!CAR_COLOR_PRESETS.length) {
+        return DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0;
+    }
+
+    const parsedColor = parseColorHexInput(colorHex);
+    const presetIndex = getCarColorPresetIndex(parsedColor);
+    return CAR_COLOR_PRESETS[presetIndex].hex;
+}
+
+function getCarColorPresetIndex(colorHex) {
+    const normalized = parseColorHexInput(colorHex);
+    for (let i = 0; i < CAR_COLOR_PRESETS.length; i += 1) {
+        if ((CAR_COLOR_PRESETS[i].hex >>> 0) === normalized) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+function readPersistedPlayerCarColorHex() {
+    try {
+        const storedValue = window.localStorage.getItem(CAR_COLOR_STORAGE_KEY);
+        if (!storedValue) {
+            return DEFAULT_PLAYER_CAR_COLOR_HEX;
+        }
+        return parseColorHexInput(storedValue);
+    } catch {
+        return DEFAULT_PLAYER_CAR_COLOR_HEX;
+    }
+}
+
+function persistPlayerCarColorHex(colorHex) {
+    try {
+        window.localStorage.setItem(CAR_COLOR_STORAGE_KEY, String(resolvePlayerCarColorHex(colorHex)));
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+function parseColorHexInput(input) {
+    if (typeof input === 'number' && Number.isFinite(input)) {
+        return input >>> 0;
+    }
+
+    if (typeof input !== 'string') {
+        return DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0;
+    }
+
+    const value = input.trim();
+    if (!value) {
+        return DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0;
+    }
+
+    if (value.startsWith('#')) {
+        const parsedHex = Number.parseInt(value.slice(1), 16);
+        return Number.isFinite(parsedHex) ? (parsedHex >>> 0) : (DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0);
+    }
+
+    if (/^\d+$/u.test(value)) {
+        const decimal = Number.parseInt(value, 10);
+        return decimal >>> 0;
+    }
+
+    const normalizedHex = value.startsWith('0x') || value.startsWith('0X')
+        ? value.slice(2)
+        : value;
+    if (!/^[\da-fA-F]+$/u.test(normalizedHex)) {
+        return DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0;
+    }
+
+    const parsedHex = Number.parseInt(normalizedHex, 16);
+    return Number.isFinite(parsedHex) ? (parsedHex >>> 0) : (DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0);
 }
 
 function toCssHex(colorHex) {

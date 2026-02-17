@@ -14,9 +14,13 @@ let hasCameraState = false;
 const targetPosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
 const smoothedLookTarget = new THREE.Vector3();
+const roofCamLocalPosition = new THREE.Vector3(0.24, 1.92, 1.42);
+const roofScreenLookLocal = new THREE.Vector3(0, 0.72, 0.14);
+const roofCamWorldPosition = new THREE.Vector3();
+const roofLookWorldPosition = new THREE.Vector3();
 
 document.addEventListener('keydown', (event) => {
-    if (event.key >= '1' && event.key <= '6') {
+    if (event.key >= '1' && event.key <= '7') {
         cameraViewMode = parseInt(event.key, 10);
         cinematicMode = false;
     }
@@ -146,6 +150,19 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
             followBlend = 1 - Math.exp(-THREE.MathUtils.lerp(5.8, 10.6, dynamicSpeedRatio) * dt);
             lookBlend = 1 - Math.exp(-THREE.MathUtils.lerp(6.2, 11.2, dynamicSpeedRatio) * dt);
             targetFov = THREE.MathUtils.lerp(76, 88, dynamicSpeedRatio);
+            break;
+        }
+        case 7: {
+            roofCamWorldPosition.copy(roofCamLocalPosition);
+            roofLookWorldPosition.copy(roofScreenLookLocal);
+            car.localToWorld(roofCamWorldPosition);
+            car.localToWorld(roofLookWorldPosition);
+
+            targetPosition.copy(roofCamWorldPosition);
+            lookTarget.copy(roofLookWorldPosition);
+            followBlend = 1 - Math.exp(-14 * dt);
+            lookBlend = 1 - Math.exp(-16 * dt);
+            targetFov = 36;
             break;
         }
         default:

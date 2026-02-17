@@ -223,6 +223,9 @@ export function createCarRig(options = {}) {
             batteryIndicator?.setLevel(batteryLevelNormalized);
             bodyMeta?.setBatteryLevel?.(batteryLevelNormalized);
         },
+        setBodyColor(colorHex) {
+            bodyMeta?.setBodyColor?.(colorHex);
+        },
     };
 }
 
@@ -589,5 +592,12 @@ const car = playerCarRig.car;
 const updateCarVisuals = playerCarRig.updateVisuals;
 const setPlayerBatteryLevel = playerCarRig.setBatteryLevel;
 const getPlayerCarCrashParts = playerCarRig.getCrashParts;
+const setPlayerCarBodyColor = playerCarRig.setBodyColor;
 
-export { car, updateCarVisuals, setPlayerBatteryLevel, getPlayerCarCrashParts };
+export {
+    car,
+    updateCarVisuals,
+    setPlayerBatteryLevel,
+    getPlayerCarCrashParts,
+    setPlayerCarBodyColor,
+};

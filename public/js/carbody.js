@@ -359,6 +359,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
     } = bodyConfig;
 
     const bodyPanels = [];
+    const bodyPanelMaterials = [];
     const createBodyPanel = ({
         id,
         size,
@@ -368,22 +369,24 @@ function addLuxuryBody(car, bodyConfig = {}) {
         emissiveIntensity = 0.3,
         roughness = 0.18,
     }) => {
+        const panelMaterial = createMaterial({
+            color: bodyColor,
+            emissive: 0x10233d,
+            emissiveIntensity,
+            metalness: 1,
+            roughness,
+            clearcoat: 1,
+            clearcoatRoughness: 0.05,
+        });
         const panel = new THREE.Mesh(
             new THREE.BoxGeometry(size[0], size[1], size[2]),
-            createMaterial({
-                color: bodyColor,
-                emissive: 0x10233d,
-                emissiveIntensity,
-                metalness: 1,
-                roughness,
-                clearcoat: 1,
-                clearcoatRoughness: 0.05,
-            })
+            panelMaterial
         );
         panel.position.set(position[0], position[1], position[2]);
         panel.castShadow = true;
         panel.receiveShadow = true;
         car.add(panel);
+        bodyPanelMaterials.push(panelMaterial);
 
         bodyPanels.push({
             id,
@@ -427,6 +430,12 @@ function addLuxuryBody(car, bodyConfig = {}) {
         setBatteryLevel(levelNormalized) {
             roofBrandingController?.setBatteryLevel?.(levelNormalized);
         },
+        setBodyColor(colorHex) {
+            const color = new THREE.Color(colorHex);
+            for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
+                bodyPanelMaterials[i].color.copy(color);
+            }
+        },
     };
 }
 
@@ -441,10 +450,18 @@ function addVoltlineRoofBranding(
     const shimmerTexture = createRoofShimmerTexture();
     const roofCenterY = 0.56 + bodyDimensions.height * 0.5;
     const roofCenterZ = 0.1;
+    const screenAspect = roofTexture.image?.width && roofTexture.image?.height
+        ? roofTexture.image.width / roofTexture.image.height
+        : 2.2;
+    const screenWidth = bodyDimensions.width * 0.72;
+    const screenDepth = screenWidth / screenAspect;
+    const badgePadding = 0.075;
+    const badgeWidth = screenWidth + badgePadding * 2;
+    const badgeDepth = screenDepth + badgePadding * 2;
     const railMaterial = createMaterial({
         color: 0x0b1722,
         emissive: 0x58dcff,
-        emissiveIntensity: 0.88,
+        emissiveIntensity: 0.58,
         metalness: 0.62,
         roughness: 0.2,
         clearcoat: 1,
@@ -452,7 +469,7 @@ function addVoltlineRoofBranding(
     });
 
     const badgeBase = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyDimensions.width * 0.64, 0.03, 0.94),
+        new THREE.BoxGeometry(badgeWidth, 0.03, badgeDepth),
         createMaterial({
             color: 0x141c29,
             emissive: 0x0b1420,
@@ -469,7 +486,7 @@ function addVoltlineRoofBranding(
     car.add(badgeBase);
 
     const trim = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyDimensions.width * 0.67, 0.012, 0.97),
+        new THREE.BoxGeometry(badgeWidth + 0.04, 0.012, badgeDepth + 0.04),
         createMaterial({
             color: 0xbac7d9,
             emissive: 0x314258,
@@ -497,7 +514,7 @@ function addVoltlineRoofBranding(
         depthWrite: false,
     });
     const logoPlate = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.58, 0.84),
+        new THREE.PlaneGeometry(screenWidth, screenDepth),
         logoPlateMaterial
     );
     logoPlate.rotation.x = -Math.PI / 2;
@@ -505,7 +522,7 @@ function addVoltlineRoofBranding(
     car.add(logoPlate);
 
     const gloss = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.6, 0.86),
+        new THREE.PlaneGeometry(screenWidth + 0.018, screenDepth + 0.02),
         new THREE.MeshPhysicalMaterial({
             color: 0xf7fbff,
             transparent: true,
@@ -531,77 +548,29 @@ function addVoltlineRoofBranding(
         toneMapped: false,
     });
     const shimmer = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.57, 0.8),
+        new THREE.PlaneGeometry(screenWidth * 0.96, screenDepth * 0.9),
         shimmerMaterial
     );
     shimmer.rotation.x = -Math.PI / 2;
     shimmer.position.set(0, roofCenterY + 0.0462, roofCenterZ);
     car.add(shimmer);
 
-    const railGeometry = new THREE.BoxGeometry(0.032, 0.022, 0.82);
+    const railGeometry = new THREE.BoxGeometry(0.022, 0.018, screenDepth + 0.04);
+    const railX = screenWidth * 0.5 + 0.028;
     const leftRail = new THREE.Mesh(railGeometry, railMaterial);
-    leftRail.position.set(-bodyDimensions.width * 0.27, roofCenterY + 0.04, roofCenterZ);
+    leftRail.position.set(-railX, roofCenterY + 0.04, roofCenterZ);
     car.add(leftRail);
     const rightRail = new THREE.Mesh(railGeometry, railMaterial);
-    rightRail.position.set(bodyDimensions.width * 0.27, roofCenterY + 0.04, roofCenterZ);
+    rightRail.position.set(railX, roofCenterY + 0.04, roofCenterZ);
     car.add(rightRail);
 
-    const emblemX = -bodyDimensions.width * 0.2;
-    const emblemZ = roofCenterZ - 0.25;
-    const emblemRing = new THREE.Mesh(
-        new THREE.TorusGeometry(0.092, 0.015, 20, 42),
-        createMaterial({
-            color: 0xeef5ff,
-            emissive: 0x4eb8ff,
-            emissiveIntensity: 0.46,
-            metalness: 1,
-            roughness: 0.08,
-            clearcoat: 1,
-            clearcoatRoughness: 0.02,
-        })
-    );
-    emblemRing.rotation.x = Math.PI / 2;
-    emblemRing.position.set(emblemX, roofCenterY + 0.048, emblemZ);
-    car.add(emblemRing);
-
-    const boltShape = new THREE.Shape();
-    boltShape.moveTo(-0.12, -0.52);
-    boltShape.lineTo(0.06, -0.52);
-    boltShape.lineTo(-0.02, -0.08);
-    boltShape.lineTo(0.16, -0.08);
-    boltShape.lineTo(-0.04, 0.52);
-    boltShape.lineTo(0.02, 0.12);
-    boltShape.lineTo(-0.16, 0.12);
-    boltShape.closePath();
-
-    const boltMaterial = createMaterial({
-        color: 0xfeffff,
-        emissive: 0x76e5ff,
-        emissiveIntensity: 0.72,
-        metalness: 0.84,
-        roughness: 0.16,
-        clearcoat: 1,
-        clearcoatRoughness: 0.04,
-    });
-    const emblemBolt = new THREE.Mesh(
-        new THREE.ExtrudeGeometry(boltShape, {
-            depth: 0.012,
-            bevelEnabled: true,
-            bevelSegments: 2,
-            bevelSize: 0.01,
-            bevelThickness: 0.005,
-        }),
-        boltMaterial
-    );
-    emblemBolt.rotation.x = -Math.PI / 2;
-    emblemBolt.position.set(emblemX, roofCenterY + 0.053, emblemZ);
-    emblemBolt.scale.set(0.42, 0.42, 0.42);
-    car.add(emblemBolt);
-
+    const modeOrder = ['dashboard', 'battery', 'navigation'];
     const brandState = {
         phase: Math.random() * Math.PI * 2,
         modeTimer: 0,
-        activeMode: 'brand',
+        refreshTimer: 0,
+        activeModeIndex: 0,
+        activeMode: modeOrder[0],
         batteryLevel: 1,
         batteryPercent: 100,
     };
@@ -633,30 +602,39 @@ function addVoltlineRoofBranding(
             }
 
             brandState.modeTimer += dt;
-            const switchInterval = brandState.activeMode === 'brand' ? 3.3 : 2.4;
+            brandState.refreshTimer += dt;
+            const switchInterval = brandState.activeMode === 'dashboard'
+                ? 4.4
+                : brandState.activeMode === 'battery'
+                    ? 2.8
+                    : 3.4;
             if (brandState.modeTimer >= switchInterval) {
                 brandState.modeTimer = 0;
-                brandState.activeMode = brandState.activeMode === 'brand' ? 'battery' : 'brand';
+                brandState.activeModeIndex = (brandState.activeModeIndex + 1) % modeOrder.length;
+                brandState.activeMode = modeOrder[brandState.activeModeIndex];
+                needsScreenRefresh = true;
+            }
+            const refreshInterval = brandState.activeMode === 'battery' ? 0.3 : 0.16;
+            if (brandState.refreshTimer >= refreshInterval) {
+                brandState.refreshTimer = 0;
                 needsScreenRefresh = true;
             }
 
             if (needsScreenRefresh) {
-                roofScreen.render(brandState.activeMode, brandState.batteryLevel);
+                roofScreen.render(brandState.activeMode, brandState.batteryLevel, vehicleState);
             }
 
-            logoPlateMaterial.emissiveIntensity = 0.72 + pulse * 0.36 + activity * 0.45;
-            railMaterial.emissiveIntensity = 0.62 + highPulse * 0.52 + activity * 0.58;
-            boltMaterial.emissiveIntensity = 0.56 + pulse * 0.48 + activity * 0.62;
-            shimmerMaterial.opacity = 0.14 + highPulse * 0.12 + activity * 0.12;
-            shimmerTexture.offset.x = (shimmerTexture.offset.x + dt * (0.18 + speedRatio * 1.1 + burnoutRatio * 1.3)) % 1;
-            emblemRing.material.emissiveIntensity = 0.32 + highPulse * 0.26 + activity * 0.42;
+            logoPlateMaterial.emissiveIntensity = 0.58 + pulse * 0.26 + activity * 0.32;
+            railMaterial.emissiveIntensity = 0.42 + highPulse * 0.3 + activity * 0.34;
+            shimmerMaterial.opacity = 0.08 + highPulse * 0.08 + activity * 0.08;
+            shimmerTexture.offset.x = (shimmerTexture.offset.x + dt * (0.13 + speedRatio * 0.9 + burnoutRatio * 1.1)) % 1;
         },
         setBatteryLevel(levelNormalized) {
             const level = THREE.MathUtils.clamp(levelNormalized, 0, 1);
             brandState.batteryLevel = level;
             brandState.batteryPercent = Math.round(level * 100);
             if (brandState.activeMode === 'battery') {
-                roofScreen.render(brandState.activeMode, level);
+                roofScreen.render(brandState.activeMode, level, {});
             }
         },
     };
@@ -969,169 +947,404 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;
 
-    const nameLabel = (playerName || 'SIGNATURE').toUpperCase();
-    render('brand', 1);
+    render('dashboard', 1, {});
 
     return {
         texture,
         render,
     };
 
-    function render(mode = 'brand', batteryLevel = 1) {
+    function render(mode = 'dashboard', batteryLevel = 1, vehicleState = {}) {
         const width = canvas.width;
         const height = canvas.height;
         const clampedBattery = THREE.MathUtils.clamp(batteryLevel, 0, 1);
+        const telemetry = {
+            speedKph: Math.round(Math.abs((vehicleState.speed || 0) * 3.6)),
+            throttle: THREE.MathUtils.clamp(Math.abs(vehicleState.throttle || 0), 0, 1),
+            steer: THREE.MathUtils.clamp(vehicleState.steerInput || 0, -1, 1),
+            yawRate: THREE.MathUtils.clamp(Math.abs(vehicleState.yawRate || 0), 0, 2),
+            batteryPercent: Math.round(clampedBattery * 100),
+            rangeKm: Math.round(520 * clampedBattery),
+        };
         ctx.clearRect(0, 0, width, height);
 
-        const panelGradient = ctx.createLinearGradient(0, 0, width, height);
-        panelGradient.addColorStop(0, '#091018');
-        panelGradient.addColorStop(0.45, '#17273b');
-        panelGradient.addColorStop(1, '#090f18');
-        ctx.fillStyle = panelGradient;
-        drawRoundedRect(ctx, 64, 72, width - 128, height - 144, 74);
+        const shellX = 38;
+        const shellY = 40;
+        const shellW = width - 76;
+        const shellH = height - 80;
+        const shellRadius = 62;
+        const shellGradient = ctx.createLinearGradient(shellX, shellY, shellX + shellW, shellY + shellH);
+        shellGradient.addColorStop(0, '#060b12');
+        shellGradient.addColorStop(0.52, '#0a1220');
+        shellGradient.addColorStop(1, '#060b12');
+        ctx.fillStyle = shellGradient;
+        drawRoundedRect(ctx, shellX, shellY, shellW, shellH, shellRadius);
         ctx.fill();
 
-        const frameGradient = ctx.createLinearGradient(64, 72, width - 64, height - 72);
-        frameGradient.addColorStop(0, '#6cf3ff');
-        frameGradient.addColorStop(0.38, '#f5f8ff');
-        frameGradient.addColorStop(0.7, '#7dc9ff');
-        frameGradient.addColorStop(1, '#d5ad64');
-        ctx.lineWidth = 16;
-        ctx.strokeStyle = frameGradient;
-        drawRoundedRect(ctx, 64, 72, width - 128, height - 144, 74);
+        const shellStroke = ctx.createLinearGradient(shellX, shellY, shellX + shellW, shellY);
+        shellStroke.addColorStop(0, 'rgba(116, 210, 238, 0.38)');
+        shellStroke.addColorStop(1, 'rgba(210, 238, 255, 0.2)');
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = shellStroke;
+        drawRoundedRect(ctx, shellX, shellY, shellW, shellH, shellRadius);
         ctx.stroke();
 
-        if (mode === 'battery') {
-            drawBatteryMode(clampedBattery, width, height);
-        } else {
-            drawBrandMode(width, height);
-        }
+        const panelX = shellX + 18;
+        const panelY = shellY + 18;
+        const panelW = shellW - 36;
+        const panelH = shellH - 36;
+        const panelRadius = shellRadius - 14;
+        const panelGradient = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY + panelH);
+        panelGradient.addColorStop(0, '#08111d');
+        panelGradient.addColorStop(0.5, '#0d1928');
+        panelGradient.addColorStop(1, '#09121c');
+        ctx.fillStyle = panelGradient;
+        drawRoundedRect(ctx, panelX, panelY, panelW, panelH, panelRadius);
+        ctx.fill();
 
-        ctx.globalCompositeOperation = 'screen';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.13)';
-        for (let i = 0; i < 15; i += 1) {
-            const y = 114 + i * 27;
-            ctx.fillRect(88, y, width - 176, 4);
+        ctx.save();
+        drawRoundedRect(ctx, panelX + 2, panelY + 2, panelW - 4, panelH - 4, panelRadius - 2);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(148, 214, 244, 0.045)';
+        for (let x = panelX - 220; x <= panelX + panelW + 220; x += 44) {
+            ctx.fillRect(x, panelY + 92, 1, panelH - 142);
         }
-        ctx.globalCompositeOperation = 'source-over';
+        for (let y = panelY + 104; y <= panelY + panelH - 62; y += 34) {
+            ctx.fillRect(panelX + 38, y, panelW - 76, 1);
+        }
+        ctx.restore();
+
+        drawTopBar(mode, panelX, panelY, panelW, telemetry, clampedBattery);
+
+        const contentX = panelX + 36;
+        const contentY = panelY + 110;
+        const contentW = panelW - 72;
+        const contentH = panelH - 178;
+        if (mode === 'battery') {
+            drawBatteryMode(clampedBattery, contentX, contentY, contentW, contentH, telemetry);
+        } else if (mode === 'navigation') {
+            drawNavigationMode(contentX, contentY, contentW, contentH, telemetry);
+        } else {
+            drawDashboardMode(contentX, contentY, contentW, contentH, telemetry, clampedBattery);
+        }
+        drawFooter(panelX, panelY, panelW, panelH, telemetry);
+
         texture.needsUpdate = true;
     }
 
-    function drawBrandMode(width, height) {
-        const emblemX = 328;
-        const emblemY = height * 0.5;
-        drawVoltlineBoltIcon(ctx, emblemX, emblemY, 1);
+    function drawTopBar(mode, panelX, panelY, panelW, telemetry, batteryLevel) {
+        const tabs = [
+            { key: 'dashboard', label: 'DASH' },
+            { key: 'battery', label: 'ENERGY' },
+            { key: 'navigation', label: 'NAV' },
+        ];
+        const barY = panelY + 18;
+        const tabW = 152;
+        const tabH = 54;
+        const tabGap = 14;
+        const tabStartX = panelX + 38;
+        tabs.forEach((tab, index) => {
+            const x = tabStartX + index * (tabW + tabGap);
+            const isActive = tab.key === mode;
+            if (isActive) {
+                const activeGradient = ctx.createLinearGradient(x, barY, x + tabW, barY);
+                activeGradient.addColorStop(0, 'rgba(72, 201, 242, 0.34)');
+                activeGradient.addColorStop(1, 'rgba(118, 243, 255, 0.22)');
+                ctx.fillStyle = activeGradient;
+                drawRoundedRect(ctx, x, barY, tabW, tabH, 18);
+                ctx.fill();
+            }
+            ctx.strokeStyle = isActive ? 'rgba(142, 229, 255, 0.82)' : 'rgba(112, 148, 176, 0.45)';
+            ctx.lineWidth = isActive ? 2 : 1;
+            drawRoundedRect(ctx, x, barY, tabW, tabH, 18);
+            ctx.stroke();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = "700 26px 'Orbitron', 'Segoe UI', sans-serif";
+            ctx.fillStyle = isActive ? 'rgba(230, 248, 255, 0.98)' : 'rgba(168, 196, 218, 0.84)';
+            ctx.fillText(tab.label, x + tabW * 0.5, barY + tabH * 0.54);
+        });
 
+        const chipX = panelX + panelW - 274;
+        const chipY = barY;
+        const chipW = 236;
+        const chipH = tabH;
+        const levelColor = getRoofBatteryColor(batteryLevel);
+        ctx.fillStyle = 'rgba(8, 17, 28, 0.95)';
+        drawRoundedRect(ctx, chipX, chipY, chipW, chipH, 18);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(142, 178, 208, 0.46)';
+        ctx.lineWidth = 1;
+        drawRoundedRect(ctx, chipX, chipY, chipW, chipH, 18);
+        ctx.stroke();
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.font = "italic 900 170px 'Trebuchet MS', 'Arial Black', sans-serif";
-        ctx.shadowColor = 'rgba(136, 228, 255, 0.8)';
-        ctx.shadowBlur = 26;
-        const textGradient = ctx.createLinearGradient(520, 0, 1200, 0);
-        textGradient.addColorStop(0, '#f8feff');
-        textGradient.addColorStop(0.5, '#9de6ff');
-        textGradient.addColorStop(1, '#fff0ba');
-        ctx.fillStyle = textGradient;
-        ctx.fillText(brandName, 520, emblemY - 34);
-
-        ctx.font = "700 54px 'Trebuchet MS', 'Arial', sans-serif";
-        ctx.fillStyle = 'rgba(187, 227, 255, 0.95)';
-        ctx.shadowBlur = 12;
-        ctx.fillText(nameLabel, 528, emblemY + 84);
-        ctx.font = "600 34px 'Trebuchet MS', 'Arial', sans-serif";
-        ctx.fillStyle = 'rgba(138, 210, 255, 0.86)';
-        ctx.fillText('VOLTLINE SIGNATURE EDITION', 528, emblemY + 142);
-        ctx.shadowBlur = 0;
+        ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(170, 194, 214, 0.95)';
+        ctx.fillText('BAT', chipX + 18, chipY + chipH * 0.52);
+        ctx.font = "700 26px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = levelColor;
+        ctx.fillText(`${telemetry.batteryPercent}%`, chipX + 74, chipY + chipH * 0.52);
+        ctx.font = "600 18px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(168, 196, 219, 0.9)';
+        ctx.fillText(`${telemetry.rangeKm} KM`, chipX + 148, chipY + chipH * 0.52);
     }
 
-    function drawBatteryMode(batteryLevel, width, height) {
-        const emblemX = 270;
-        const emblemY = height * 0.5;
-        drawVoltlineBoltIcon(ctx, emblemX, emblemY, 0.9);
+    function drawDashboardMode(contentX, contentY, contentW, contentH, telemetry, batteryLevel) {
+        const cardRadius = 24;
+        const leftW = Math.round(contentW * 0.53);
+        const rightW = contentW - leftW - 16;
+        const speedCardX = contentX;
+        const speedCardY = contentY;
+        const speedCardH = contentH;
+        const rightX = contentX + leftW + 16;
 
-        const levelColor = getRoofBatteryColor(batteryLevel);
-        const percent = Math.round(batteryLevel * 100);
+        const speedGradient = ctx.createLinearGradient(speedCardX, speedCardY, speedCardX + leftW, speedCardY + speedCardH);
+        speedGradient.addColorStop(0, 'rgba(18, 36, 58, 0.86)');
+        speedGradient.addColorStop(1, 'rgba(14, 24, 40, 0.86)');
+        ctx.fillStyle = speedGradient;
+        drawRoundedRect(ctx, speedCardX, speedCardY, leftW, speedCardH, cardRadius);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(122, 177, 212, 0.32)';
+        ctx.lineWidth = 1.5;
+        drawRoundedRect(ctx, speedCardX, speedCardY, leftW, speedCardH, cardRadius);
+        ctx.stroke();
 
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.font = "900 66px 'Trebuchet MS', 'Arial Black', sans-serif";
-        ctx.fillStyle = '#c6e9ff';
-        ctx.fillText('BATTERY', 460, emblemY - 128);
+        ctx.font = "600 22px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(173, 201, 224, 0.84)';
+        ctx.fillText('CURRENT SPEED', speedCardX + 30, speedCardY + 38);
 
-        ctx.font = "italic 900 182px 'Trebuchet MS', 'Arial Black', sans-serif";
-        ctx.shadowColor = levelColor;
-        ctx.shadowBlur = 22;
-        ctx.fillStyle = '#f8feff';
-        ctx.fillText(`${percent}%`, 460, emblemY + 12);
-        ctx.shadowBlur = 0;
+        ctx.font = "800 158px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = '#ecf7ff';
+        ctx.fillText(`${telemetry.speedKph}`, speedCardX + 26, speedCardY + speedCardH * 0.58);
 
-        const barX = 460;
-        const barY = emblemY + 88;
-        const barW = 760;
-        const barH = 86;
-        ctx.fillStyle = 'rgba(9, 18, 30, 0.85)';
-        drawRoundedRect(ctx, barX, barY, barW, barH, 28);
+        ctx.font = "700 28px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(168, 203, 232, 0.9)';
+        ctx.fillText('KM/H', speedCardX + 38, speedCardY + speedCardH - 38);
+
+        const modeCardY = contentY;
+        const modeCardH = Math.floor(contentH * 0.48);
+        ctx.fillStyle = 'rgba(12, 24, 39, 0.92)';
+        drawRoundedRect(ctx, rightX, modeCardY, rightW, modeCardH, cardRadius);
         ctx.fill();
+        ctx.strokeStyle = 'rgba(124, 179, 212, 0.3)';
+        ctx.lineWidth = 1;
+        drawRoundedRect(ctx, rightX, modeCardY, rightW, modeCardH, cardRadius);
+        ctx.stroke();
 
-        const chargeWidth = Math.max(20, Math.round((barW - 16) * batteryLevel));
+        const activity = THREE.MathUtils.clamp(telemetry.throttle * 0.74 + telemetry.yawRate * 0.26, 0, 1);
+        const driveLabel = activity >= 0.7 ? 'SPORT' : activity >= 0.38 ? 'DYNAMIC' : 'ECO';
+        ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(165, 193, 218, 0.86)';
+        ctx.fillText('DRIVE MODE', rightX + 24, modeCardY + 34);
+        ctx.font = "800 56px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = activity >= 0.7 ? '#a4f4ff' : '#d5e9fb';
+        ctx.fillText(driveLabel, rightX + 22, modeCardY + 94);
+
+        const steerStability = 1 - THREE.MathUtils.clamp(Math.abs(telemetry.steer) * 0.6 + telemetry.yawRate * 0.3, 0, 1);
+        drawMetricBar(rightX + 24, modeCardY + 120, rightW - 48, 12, 'TRACTION', steerStability, '#8fe8ff');
+        drawMetricBar(rightX + 24, modeCardY + 162, rightW - 48, 12, 'TORQUE', telemetry.throttle, '#b3f8d0');
+
+        const energyCardY = modeCardY + modeCardH + 14;
+        const energyCardH = contentH - modeCardH - 14;
+        ctx.fillStyle = 'rgba(12, 24, 39, 0.92)';
+        drawRoundedRect(ctx, rightX, energyCardY, rightW, energyCardH, cardRadius);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(124, 179, 212, 0.3)';
+        ctx.lineWidth = 1;
+        drawRoundedRect(ctx, rightX, energyCardY, rightW, energyCardH, cardRadius);
+        ctx.stroke();
+        ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(165, 193, 218, 0.86)';
+        ctx.fillText('ENERGY FLOW', rightX + 24, energyCardY + 30);
+        drawMetricBar(rightX + 24, energyCardY + 60, rightW - 48, 14, 'BATTERY', batteryLevel, getRoofBatteryColor(batteryLevel));
+        drawMetricBar(rightX + 24, energyCardY + 104, rightW - 48, 14, 'REGEN', 1 - telemetry.throttle * 0.72, '#8dd9ff');
+    }
+
+    function drawBatteryMode(batteryLevel, contentX, contentY, contentW, contentH, telemetry) {
+        const levelColor = getRoofBatteryColor(batteryLevel);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.font = "600 24px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(172, 200, 224, 0.88)';
+        ctx.fillText('BATTERY SYSTEM', contentX + 10, contentY + 20);
+
+        ctx.font = "800 184px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = '#f2f8ff';
+        ctx.fillText(`${telemetry.batteryPercent}%`, contentX + 2, contentY + contentH * 0.56);
+
+        ctx.font = "600 30px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(178, 201, 223, 0.9)';
+        ctx.fillText(`EST RANGE ${telemetry.rangeKm} KM`, contentX + 12, contentY + contentH - 40);
+
+        const barX = contentX + 6;
+        const barY = contentY + contentH - 106;
+        const barW = contentW - 300;
+        const barH = 54;
+        ctx.fillStyle = 'rgba(15, 27, 42, 0.94)';
+        drawRoundedRect(ctx, barX, barY, barW, barH, 24);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(115, 170, 205, 0.44)';
+        ctx.lineWidth = 1;
+        drawRoundedRect(ctx, barX, barY, barW, barH, 24);
+        ctx.stroke();
+
+        const chargeWidth = Math.max(20, Math.round((barW - 8) * batteryLevel));
         const chargeGradient = ctx.createLinearGradient(barX, barY, barX + barW, barY);
         chargeGradient.addColorStop(0, levelColor);
-        chargeGradient.addColorStop(0.55, '#d9f6ff');
-        chargeGradient.addColorStop(1, '#84dfff');
+        chargeGradient.addColorStop(1, '#dff8ff');
         ctx.fillStyle = chargeGradient;
-        drawRoundedRect(ctx, barX + 8, barY + 8, chargeWidth, barH - 16, 22);
+        drawRoundedRect(ctx, barX + 4, barY + 4, chargeWidth, barH - 8, 20);
         ctx.fill();
 
-        ctx.font = "700 40px 'Trebuchet MS', 'Arial', sans-serif";
-        ctx.fillStyle = 'rgba(178, 228, 255, 0.9)';
-        ctx.fillText(nameLabel, 460, emblemY + 166);
+        const statX = barX + barW + 28;
+        const statW = 258;
+        const statH = 76;
+        const statRows = [
+            ['TEMP', `${Math.round(22 + telemetry.throttle * 16)}C`],
+            ['POWER', `${Math.round(60 + telemetry.throttle * 220)} kW`],
+            ['CELLS', 'OPTIMAL'],
+        ];
+        statRows.forEach((row, index) => {
+            const y = contentY + index * (statH + 12);
+            ctx.fillStyle = 'rgba(12, 24, 39, 0.92)';
+            drawRoundedRect(ctx, statX, y, statW, statH, 18);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(124, 179, 212, 0.32)';
+            ctx.lineWidth = 1;
+            drawRoundedRect(ctx, statX, y, statW, statH, 18);
+            ctx.stroke();
+            ctx.font = "600 18px 'Sora', 'Segoe UI', sans-serif";
+            ctx.fillStyle = 'rgba(163, 190, 212, 0.9)';
+            ctx.fillText(row[0], statX + 18, y + 26);
+            ctx.font = "700 26px 'Orbitron', 'Segoe UI', sans-serif";
+            ctx.fillStyle = row[0] === 'CELLS' ? '#9af4c7' : '#e8f4ff';
+            ctx.fillText(row[1], statX + 18, y + 56);
+        });
     }
-}
 
-function drawVoltlineBoltIcon(ctx, centerX, centerY, scale = 1) {
-    const outerRadius = 110 * scale;
-    const innerRadius = 84 * scale;
-    const emblemOuter = ctx.createRadialGradient(
-        centerX - 18 * scale,
-        centerY - 14 * scale,
-        20 * scale,
-        centerX,
-        centerY,
-        122 * scale
-    );
-    emblemOuter.addColorStop(0, '#ecf8ff');
-    emblemOuter.addColorStop(0.4, '#96daff');
-    emblemOuter.addColorStop(1, '#577a96');
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
-    ctx.fillStyle = emblemOuter;
-    ctx.fill();
+    function drawNavigationMode(contentX, contentY, contentW, contentH, telemetry) {
+        const mapW = Math.round(contentW * 0.58);
+        const mapH = contentH;
+        const mapX = contentX;
+        const mapY = contentY;
+        const sideX = mapX + mapW + 16;
+        const sideW = contentW - mapW - 16;
 
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, innerRadius, 0, Math.PI * 2);
-    ctx.fillStyle = '#0d1723';
-    ctx.fill();
+        ctx.fillStyle = 'rgba(12, 24, 39, 0.92)';
+        drawRoundedRect(ctx, mapX, mapY, mapW, mapH, 24);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(124, 179, 212, 0.32)';
+        ctx.lineWidth = 1;
+        drawRoundedRect(ctx, mapX, mapY, mapW, mapH, 24);
+        ctx.stroke();
 
-    const boltGradient = ctx.createLinearGradient(
-        centerX - 58 * scale,
-        centerY - 58 * scale,
-        centerX + 58 * scale,
-        centerY + 58 * scale
-    );
-    boltGradient.addColorStop(0, '#f8ffff');
-    boltGradient.addColorStop(0.55, '#7fe9ff');
-    boltGradient.addColorStop(1, '#ffd888');
-    ctx.fillStyle = boltGradient;
-    ctx.beginPath();
-    ctx.moveTo(centerX - 24 * scale, centerY - 54 * scale);
-    ctx.lineTo(centerX + 6 * scale, centerY - 54 * scale);
-    ctx.lineTo(centerX - 8 * scale, centerY - 8 * scale);
-    ctx.lineTo(centerX + 26 * scale, centerY - 8 * scale);
-    ctx.lineTo(centerX - 8 * scale, centerY + 54 * scale);
-    ctx.lineTo(centerX + 2 * scale, centerY + 8 * scale);
-    ctx.lineTo(centerX - 30 * scale, centerY + 8 * scale);
-    ctx.closePath();
-    ctx.fill();
+        ctx.save();
+        drawRoundedRect(ctx, mapX + 2, mapY + 2, mapW - 4, mapH - 4, 22);
+        ctx.clip();
+        ctx.fillStyle = 'rgba(137, 194, 228, 0.08)';
+        for (let x = mapX + 26; x < mapX + mapW; x += 38) {
+            ctx.fillRect(x, mapY + 14, 1, mapH - 24);
+        }
+        for (let y = mapY + 20; y < mapY + mapH; y += 36) {
+            ctx.fillRect(mapX + 14, y, mapW - 24, 1);
+        }
+        const routeStartX = mapX + 60;
+        const routeStartY = mapY + mapH - 64;
+        const routeMidX = mapX + mapW * 0.42;
+        const routeMidY = mapY + mapH * 0.55;
+        const routeEndX = mapX + mapW * 0.78;
+        const routeEndY = mapY + 66;
+        ctx.strokeStyle = 'rgba(141, 238, 255, 0.95)';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(routeStartX, routeStartY);
+        ctx.lineTo(routeMidX, routeMidY);
+        ctx.lineTo(routeEndX, routeEndY);
+        ctx.stroke();
+        ctx.fillStyle = '#edfbff';
+        ctx.beginPath();
+        ctx.arc(routeMidX, routeMidY, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        const cardH = (contentH - 24) / 3;
+        const navRows = [
+            ['NEXT', 'LEFT IN 180 M'],
+            ['ETA', `${Math.max(4, Math.round(telemetry.speedKph / 9 + 6))} MIN`],
+            ['TARGET', `${Math.max(12, Math.round(telemetry.speedKph * 0.75 + 24))} KM/H`],
+        ];
+        navRows.forEach((row, index) => {
+            const y = contentY + index * (cardH + 12);
+            ctx.fillStyle = 'rgba(12, 24, 39, 0.92)';
+            drawRoundedRect(ctx, sideX, y, sideW, cardH, 22);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(124, 179, 212, 0.32)';
+            ctx.lineWidth = 1;
+            drawRoundedRect(ctx, sideX, y, sideW, cardH, 22);
+            ctx.stroke();
+            ctx.font = "600 18px 'Sora', 'Segoe UI', sans-serif";
+            ctx.fillStyle = 'rgba(163, 190, 212, 0.9)';
+            ctx.fillText(row[0], sideX + 18, y + 28);
+            ctx.font = "700 30px 'Orbitron', 'Segoe UI', sans-serif";
+            ctx.fillStyle = '#ecf8ff';
+            ctx.fillText(row[1], sideX + 18, y + cardH - 24);
+        });
+    }
+
+    function drawMetricBar(x, y, width, height, label, value, color) {
+        const clamped = THREE.MathUtils.clamp(value, 0, 1);
+        ctx.font = "600 16px 'Sora', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(166, 191, 210, 0.86)';
+        ctx.fillText(label, x, y - 10);
+        ctx.fillStyle = 'rgba(26, 40, 58, 0.98)';
+        drawRoundedRect(ctx, x, y, width, height, Math.max(6, Math.floor(height * 0.5)));
+        ctx.fill();
+        const fillW = Math.max(8, Math.round((width - 4) * clamped));
+        const gradient = ctx.createLinearGradient(x, y, x + width, y);
+        gradient.addColorStop(0, color);
+        gradient.addColorStop(1, '#e9f9ff');
+        ctx.fillStyle = gradient;
+        drawRoundedRect(ctx, x + 2, y + 2, fillW, height - 4, Math.max(4, Math.floor((height - 4) * 0.5)));
+        ctx.fill();
+    }
+
+    function drawFooter(panelX, panelY, panelW, panelH, telemetry) {
+        const footerY = panelY + panelH - 42;
+        const labels = [
+            `PILOT ${String(playerName || 'DRIVER').toUpperCase()}`,
+            `UNIT ${String(brandName || 'VOLTLINE').toUpperCase()}`,
+            `YAW ${telemetry.yawRate.toFixed(2)}`,
+        ];
+        const chipW = 220;
+        labels.forEach((label, index) => {
+            const x = panelX + 36 + index * (chipW + 12);
+            ctx.fillStyle = 'rgba(9, 18, 30, 0.92)';
+            drawRoundedRect(ctx, x, footerY, chipW, 28, 12);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(107, 150, 183, 0.32)';
+            ctx.lineWidth = 1;
+            drawRoundedRect(ctx, x, footerY, chipW, 28, 12);
+            ctx.stroke();
+            ctx.font = "600 14px 'Sora', 'Segoe UI', sans-serif";
+            ctx.fillStyle = 'rgba(164, 193, 215, 0.9)';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, x + 12, footerY + 15);
+        });
+
+        const timeX = panelX + panelW - 180;
+        const minutes = Math.floor((telemetry.speedKph * 1.3 + 18) % 60);
+        const seconds = Math.floor((telemetry.speedKph * 2.6 + 12) % 60);
+        const clock = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        ctx.font = "700 16px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = 'rgba(164, 205, 232, 0.94)';
+        ctx.fillText(clock, timeX, footerY + 16);
+    }
 }
 
 function getRoofBatteryColor(level) {
