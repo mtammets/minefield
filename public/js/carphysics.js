@@ -116,12 +116,14 @@ const TOP_SPEED_LIMIT_TUNING = {
     maxKph: 220,
 };
 
-const VEHICLE_COLLISION_RADIUS = 1.15;
+const VEHICLE_COLLISION_RADIUS = 1.34;
+const VEHICLE_COLLISION_HALF_WIDTH = 1.45;
+const VEHICLE_COLLISION_HALF_LENGTH = 2.3;
 const OBSTACLE_COLLISION_ITERATIONS = 4;
 const HORIZONTAL_COLLISION_STEP_FACTOR = 0.42;
 const MAX_HORIZONTAL_COLLISION_SUBSTEPS = 7;
 const VEHICLE_COLLISION_MASS = 1.35;
-const VEHICLE_COLLISION_PENETRATION_SHARE = 0.7;
+const VEHICLE_COLLISION_PENETRATION_SHARE = 0.94;
 // Roads/intersections are rendered slightly above the base terrain (around y=0.028),
 // so add extra ride height to prevent visual tire clipping into road meshes.
 const VEHICLE_RIDE_HEIGHT = 0.088;
@@ -244,6 +246,82 @@ export function consumeVehicleCollisionContacts() {
     const contacts = pendingVehicleCollisionContacts.slice();
     pendingVehicleCollisionContacts.length = 0;
     return contacts;
+}
+
+export function applyNetworkVehicleCollisionImpulse(payload = {}) {
+    if (!isPhysicsInitialized) {
+        return false;
+    }
+
+    let normalX = Number(payload.normalX);
+    let normalZ = Number(payload.normalZ);
+    if (!Number.isFinite(normalX) || !Number.isFinite(normalZ)) {
+        return false;
+    }
+
+    const normalLength = Math.hypot(normalX, normalZ);
+    if (normalLength < 0.0001) {
+        return false;
+    }
+    normalX /= normalLength;
+    normalZ /= normalLength;
+
+    const impactSpeed = THREE.MathUtils.clamp(Number(payload.impactSpeed) || 0, 0, 90);
+    if (impactSpeed <= 0.01) {
+        return false;
+    }
+
+    const penetration = THREE.MathUtils.clamp(Number(payload.penetration) || 0.04, 0, 1.8);
+    const otherMass = THREE.MathUtils.clamp(Number(payload.mass) || VEHICLE_COLLISION_MASS, 0.4, 4);
+    const otherVelocityX = THREE.MathUtils.clamp(Number(payload.otherVelocityX) || 0, -400, 400);
+    const otherVelocityZ = THREE.MathUtils.clamp(Number(payload.otherVelocityZ) || 0, -400, 400);
+
+    previousPhysicsPosition.copy(physicsPosition);
+    const penetrationCorrection =
+        penetration * VEHICLE_COLLISION_PENETRATION_SHARE * (0.65 + otherMass * 0.24);
+    physicsPosition.x += normalX * penetrationCorrection;
+    physicsPosition.z += normalZ * penetrationCorrection;
+
+    const relativeAlongNormal =
+        (vehicleState.velocity.x - otherVelocityX) * normalX +
+        (vehicleState.velocity.y - otherVelocityZ) * normalZ;
+    const resolvedImpactSpeed = Math.max(impactSpeed, -relativeAlongNormal);
+    const normalResponse = resolvedImpactSpeed * TUNING.vehicleImpactResponse;
+    vehicleState.velocity.x += normalX * normalResponse;
+    vehicleState.velocity.y += normalZ * normalResponse;
+
+    const forwardX = -Math.sin(physicsRotationY);
+    const forwardZ = -Math.cos(physicsRotationY);
+    const sideFactor = forwardX * normalZ - forwardZ * normalX;
+    const yawKick = THREE.MathUtils.clamp(resolvedImpactSpeed / 20, 0, 1);
+    vehicleState.yawRate += sideFactor * yawKick * (1.3 + otherMass * 0.22);
+
+    vehicleState.velocity.multiplyScalar(TUNING.vehicleImpactSpeedDamping);
+    vehicleState.yawRate *= TUNING.vehicleImpactYawDamping;
+    forward.set(-Math.sin(physicsRotationY), -Math.cos(physicsRotationY));
+    vehicleState.speed = vehicleState.velocity.dot(forward);
+
+    const contactPosition = new THREE.Vector3(
+        physicsPosition.x - normalX * VEHICLE_COLLISION_RADIUS * 0.35,
+        physicsPosition.y,
+        physicsPosition.z - normalZ * VEHICLE_COLLISION_RADIUS * 0.35
+    );
+    const sourcePlayerId =
+        typeof payload.sourcePlayerId === 'string' && payload.sourcePlayerId.trim()
+            ? payload.sourcePlayerId.trim()
+            : '';
+    pendingVehicleCollisionContacts.push({
+        vehicleId: sourcePlayerId ? `player:${sourcePlayerId}` : 'player:network',
+        sourceType: 'player',
+        playerId: sourcePlayerId || 'network',
+        normalX,
+        normalZ,
+        penetration,
+        impactSpeed: resolvedImpactSpeed,
+        position: contactPosition,
+    });
+
+    return true;
 }
 
 export function setVehicleDamageState(nextDamageState = {}) {
@@ -695,37 +773,107 @@ function constrainToVehicles(position, dynamicVehicles = null) {
     let collisionCount = 0;
     const forwardX = -Math.sin(physicsRotationY);
     const forwardZ = -Math.cos(physicsRotationY);
+    const closestPoints = { ax: 0, az: 0, bx: 0, bz: 0 };
 
     for (let i = 0; i < dynamicVehicles.length; i += 1) {
         const vehicle = dynamicVehicles[i];
         if (!vehicle) {
             continue;
         }
-
-        const otherRadius = Math.max(0.5, vehicle.radius || VEHICLE_COLLISION_RADIUS);
-        const nx = position.x - vehicle.x;
-        const nz = position.z - vehicle.z;
-        const combinedRadius = otherRadius + VEHICLE_COLLISION_RADIUS;
-        const distanceSq = nx * nx + nz * nz;
-        if (distanceSq >= combinedRadius * combinedRadius) {
+        const vehicleX = Number(vehicle.x);
+        const vehicleZ = Number(vehicle.z);
+        if (!Number.isFinite(vehicleX) || !Number.isFinite(vehicleZ)) {
             continue;
         }
 
-        let normalX = nx;
-        let normalZ = nz;
-        let distance = Math.sqrt(distanceSq);
-        if (distance < 0.0001) {
-            normalX = forwardX;
-            normalZ = forwardZ;
-            distance = 1;
+        const useCapsule =
+            Number.isFinite(vehicle.halfWidth) &&
+            Number.isFinite(vehicle.halfLength) &&
+            Math.abs(vehicle.halfWidth) > 0.001 &&
+            Math.abs(vehicle.halfLength) > 0.001;
+        let normalX = 0;
+        let normalZ = 0;
+        let penetration = 0;
+        let selfContactRadius = VEHICLE_COLLISION_RADIUS;
+
+        if (useCapsule) {
+            const otherHeading = resolveDynamicVehicleHeading(vehicle);
+            const selfCapsule = buildCapsule2D(
+                position.x,
+                position.z,
+                physicsRotationY,
+                VEHICLE_COLLISION_HALF_WIDTH,
+                VEHICLE_COLLISION_HALF_LENGTH
+            );
+            const otherCapsule = buildCapsule2D(
+                vehicleX,
+                vehicleZ,
+                otherHeading,
+                vehicle.halfWidth,
+                vehicle.halfLength
+            );
+            selfContactRadius = selfCapsule.radius;
+            const distanceSq = segmentSegmentDistanceSq2D(
+                selfCapsule.ax,
+                selfCapsule.az,
+                selfCapsule.bx,
+                selfCapsule.bz,
+                otherCapsule.ax,
+                otherCapsule.az,
+                otherCapsule.bx,
+                otherCapsule.bz,
+                closestPoints
+            );
+            const combinedRadius = selfCapsule.radius + otherCapsule.radius;
+            if (distanceSq >= combinedRadius * combinedRadius) {
+                continue;
+            }
+
+            const distance = Math.sqrt(Math.max(0, distanceSq));
+            if (distance < 0.0001) {
+                const centerDx = position.x - vehicleX;
+                const centerDz = position.z - vehicleZ;
+                const centerLen = Math.hypot(centerDx, centerDz);
+                if (centerLen < 0.0001) {
+                    normalX = forwardX;
+                    normalZ = forwardZ;
+                } else {
+                    normalX = centerDx / centerLen;
+                    normalZ = centerDz / centerLen;
+                }
+                penetration = combinedRadius;
+            } else {
+                normalX = (closestPoints.ax - closestPoints.bx) / distance;
+                normalZ = (closestPoints.az - closestPoints.bz) / distance;
+                penetration = combinedRadius - distance;
+            }
         } else {
-            normalX /= distance;
-            normalZ /= distance;
+            const otherRadius = Math.max(
+                0.5,
+                vehicle.collisionRadius || vehicle.radius || VEHICLE_COLLISION_RADIUS
+            );
+            const nx = position.x - vehicleX;
+            const nz = position.z - vehicleZ;
+            const combinedRadius = otherRadius + VEHICLE_COLLISION_RADIUS;
+            const distanceSq = nx * nx + nz * nz;
+            if (distanceSq >= combinedRadius * combinedRadius) {
+                continue;
+            }
+
+            const distance = Math.sqrt(distanceSq);
+            if (distance < 0.0001) {
+                normalX = forwardX;
+                normalZ = forwardZ;
+                penetration = combinedRadius;
+            } else {
+                normalX = nx / distance;
+                normalZ = nz / distance;
+                penetration = combinedRadius - distance;
+            }
         }
 
         collisionCount += 1;
         const otherMass = Math.max(0.4, vehicle.mass || VEHICLE_COLLISION_MASS);
-        const penetration = combinedRadius - distance;
         const penetrationCorrection =
             penetration * VEHICLE_COLLISION_PENETRATION_SHARE * (0.7 + otherMass * 0.22);
         position.x += normalX * penetrationCorrection;
@@ -750,18 +898,38 @@ function constrainToVehicles(position, dynamicVehicles = null) {
         vehicleState.yawRate += sideFactor * yawKick * (1.4 + otherMass * 0.2);
 
         const contactPosition = new THREE.Vector3(
-            position.x - normalX * VEHICLE_COLLISION_RADIUS * 0.35,
+            position.x - normalX * selfContactRadius * 0.35,
             position.y,
-            position.z - normalZ * VEHICLE_COLLISION_RADIUS * 0.35
+            position.z - normalZ * selfContactRadius * 0.35
         );
-        pendingVehicleCollisionContacts.push({
-            botId: vehicle.id,
+        const contact = {
+            vehicleId:
+                typeof vehicle.id === 'string' && vehicle.id.trim()
+                    ? vehicle.id
+                    : `vehicle-${i + 1}`,
+            sourceType:
+                vehicle.sourceType === 'bot'
+                    ? 'bot'
+                    : vehicle.sourceType === 'player'
+                      ? 'player'
+                      : 'vehicle',
             normalX,
             normalZ,
             penetration,
             impactSpeed,
             position: contactPosition,
-        });
+        };
+        if (typeof vehicle.botId === 'string' && vehicle.botId.trim()) {
+            contact.botId = vehicle.botId;
+        } else if (contact.sourceType === 'bot') {
+            contact.botId = contact.vehicleId;
+        }
+        if (typeof vehicle.playerId === 'string' && vehicle.playerId.trim()) {
+            contact.playerId = vehicle.playerId;
+        } else if (contact.sourceType === 'player') {
+            contact.playerId = contact.vehicleId;
+        }
+        pendingVehicleCollisionContacts.push(contact);
     }
 
     if (collisionCount > 0) {
@@ -770,6 +938,165 @@ function constrainToVehicles(position, dynamicVehicles = null) {
         vehicleState.yawRate *= Math.pow(TUNING.vehicleImpactYawDamping, collisionCount);
         vehicleState.speed = vehicleState.velocity.dot(forward);
     }
+}
+
+function resolveDynamicVehicleHeading(vehicle = null) {
+    if (!vehicle) {
+        return physicsRotationY;
+    }
+
+    if (Number.isFinite(vehicle.heading)) {
+        return normalizeSignedAngle(vehicle.heading);
+    }
+    if (Number.isFinite(vehicle.rotationY)) {
+        return normalizeSignedAngle(vehicle.rotationY);
+    }
+
+    const velocityX = Number(vehicle.velocityX);
+    const velocityZ = Number(vehicle.velocityZ);
+    if (Number.isFinite(velocityX) && Number.isFinite(velocityZ)) {
+        const speedSq = velocityX * velocityX + velocityZ * velocityZ;
+        if (speedSq > 0.05 * 0.05) {
+            return Math.atan2(-velocityX, -velocityZ);
+        }
+    }
+
+    return physicsRotationY;
+}
+
+function normalizeSignedAngle(angle) {
+    const numeric = Number(angle);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+    const fullTurn = Math.PI * 2;
+    return ((((numeric + Math.PI) % fullTurn) + fullTurn) % fullTurn) - Math.PI;
+}
+
+function buildCapsule2D(x, z, heading, halfWidth, halfLength) {
+    const radius = THREE.MathUtils.clamp(
+        Math.abs(Number(halfWidth) || VEHICLE_COLLISION_HALF_WIDTH),
+        0.25,
+        4
+    );
+    const resolvedHalfLength = THREE.MathUtils.clamp(
+        Math.max(radius, Math.abs(Number(halfLength) || VEHICLE_COLLISION_HALF_LENGTH)),
+        radius,
+        8
+    );
+    const spineHalfLength = Math.max(0, resolvedHalfLength - radius);
+    const forwardX = -Math.sin(heading);
+    const forwardZ = -Math.cos(heading);
+
+    return {
+        ax: x - forwardX * spineHalfLength,
+        az: z - forwardZ * spineHalfLength,
+        bx: x + forwardX * spineHalfLength,
+        bz: z + forwardZ * spineHalfLength,
+        radius,
+    };
+}
+
+function segmentSegmentDistanceSq2D(ax, az, bx, bz, cx, cz, dx, dz, outClosestPoints = null) {
+    const EPSILON = 1e-8;
+
+    const ux = bx - ax;
+    const uz = bz - az;
+    const vx = dx - cx;
+    const vz = dz - cz;
+    const wx = ax - cx;
+    const wz = az - cz;
+
+    const a = ux * ux + uz * uz;
+    const b = ux * vx + uz * vz;
+    const c = vx * vx + vz * vz;
+    const d = ux * wx + uz * wz;
+    const e = vx * wx + vz * wz;
+    const denominator = a * c - b * b;
+
+    let sN;
+    let sD = denominator;
+    let tN;
+    let tD = denominator;
+
+    if (a <= EPSILON && c <= EPSILON) {
+        sN = 0;
+        sD = 1;
+        tN = 0;
+        tD = 1;
+    } else if (a <= EPSILON) {
+        sN = 0;
+        sD = 1;
+        tN = e;
+        tD = c;
+    } else if (c <= EPSILON) {
+        tN = 0;
+        tD = 1;
+        sN = -d;
+        sD = a;
+    } else {
+        sN = b * e - c * d;
+        tN = a * e - b * d;
+        if (denominator < EPSILON) {
+            sN = 0;
+            sD = 1;
+            tN = e;
+            tD = c;
+        } else {
+            if (sN < 0) {
+                sN = 0;
+                tN = e;
+                tD = c;
+            } else if (sN > sD) {
+                sN = sD;
+                tN = e + b;
+                tD = c;
+            }
+        }
+    }
+
+    if (tN < 0) {
+        tN = 0;
+        if (-d < 0) {
+            sN = 0;
+            sD = 1;
+        } else if (-d > a) {
+            sN = sD;
+        } else {
+            sN = -d;
+            sD = a;
+        }
+    } else if (tN > tD) {
+        tN = tD;
+        if (-d + b < 0) {
+            sN = 0;
+            sD = 1;
+        } else if (-d + b > a) {
+            sN = sD;
+        } else {
+            sN = -d + b;
+            sD = a;
+        }
+    }
+
+    const sc = Math.abs(sN) <= EPSILON || Math.abs(sD) <= EPSILON ? 0 : sN / sD;
+    const tc = Math.abs(tN) <= EPSILON || Math.abs(tD) <= EPSILON ? 0 : tN / tD;
+
+    const closestAx = ax + sc * ux;
+    const closestAz = az + sc * uz;
+    const closestBx = cx + tc * vx;
+    const closestBz = cz + tc * vz;
+
+    if (outClosestPoints) {
+        outClosestPoints.ax = closestAx;
+        outClosestPoints.az = closestAz;
+        outClosestPoints.bx = closestBx;
+        outClosestPoints.bz = closestBz;
+    }
+
+    const deltaX = closestAx - closestBx;
+    const deltaZ = closestAz - closestBz;
+    return deltaX * deltaX + deltaZ * deltaZ;
 }
 
 export function applyInterpolatedPlayerTransform(player, alpha) {

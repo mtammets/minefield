@@ -221,23 +221,33 @@ export function createCrashDebrisController({
             return;
         }
 
-        const strongestByBot = new Map();
+        const strongestByVehicle = new Map();
+        const botImpulseContacts = [];
         for (let i = 0; i < contacts.length; i += 1) {
             const contact = contacts[i];
-            if (!contact?.botId) {
+            if (!contact) {
                 continue;
             }
-            const previous = strongestByBot.get(contact.botId);
+
+            const contactVehicleId = resolveVehicleContactId(contact, i);
+            const previous = strongestByVehicle.get(contactVehicleId);
             if (!previous || (contact.impactSpeed || 0) > (previous.impactSpeed || 0)) {
-                strongestByBot.set(contact.botId, contact);
+                strongestByVehicle.set(contactVehicleId, contact);
+            }
+
+            if (contact.botId) {
+                botImpulseContacts.push(contact);
             }
         }
-        const condensedContacts = Array.from(strongestByBot.values());
+
+        const condensedContacts = Array.from(strongestByVehicle.values());
         if (condensedContacts.length === 0) {
             return;
         }
 
-        getBotSystem()?.applyCollisionImpulses?.(condensedContacts);
+        if (botImpulseContacts.length > 0) {
+            getBotSystem()?.applyCollisionImpulses?.(botImpulseContacts);
+        }
 
         let strongestImpact = 0;
         for (let i = 0; i < condensedContacts.length; i += 1) {
@@ -258,6 +268,19 @@ export function createCrashDebrisController({
             );
             vehicleImpactStatusCooldown = 0.85;
         }
+    }
+
+    function resolveVehicleContactId(contact, index = 0) {
+        if (typeof contact?.vehicleId === 'string' && contact.vehicleId.trim()) {
+            return contact.vehicleId.trim();
+        }
+        if (typeof contact?.botId === 'string' && contact.botId.trim()) {
+            return `bot:${contact.botId.trim()}`;
+        }
+        if (typeof contact?.playerId === 'string' && contact.playerId.trim()) {
+            return `player:${contact.playerId.trim()}`;
+        }
+        return `vehicle-contact-${index + 1}`;
     }
 
     function applyLocalizedVehicleDamage(contact) {
@@ -491,8 +514,6 @@ export function createCrashDebrisController({
         setDetachedPartIds(Array.isArray(snapshot.detachedPartIds) ? snapshot.detachedPartIds : []);
 
         const incomingPieces = Array.isArray(snapshot.debrisPieces) ? snapshot.debrisPieces : [];
-        const incomingIds = new Set();
-
         for (let i = 0; i < incomingPieces.length; i += 1) {
             const serializedPiece = incomingPieces[i];
             if (!serializedPiece || typeof serializedPiece !== 'object') {
@@ -506,7 +527,6 @@ export function createCrashDebrisController({
                 continue;
             }
 
-            incomingIds.add(id);
             let piece = debrisPieceById.get(id);
             if (!piece) {
                 const source = part.source;
@@ -562,13 +582,6 @@ export function createCrashDebrisController({
             piece.settled = Boolean(serializedPiece.settled);
             piece.wheelRoll = deserializeWheelRollState(serializedPiece.wheelRoll);
             piece.bodyRest = deserializeBodyRestState(serializedPiece.bodyRest);
-        }
-
-        for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
-            const piece = debrisPieces[i];
-            if (!incomingIds.has(piece.id)) {
-                removeDebrisPieceAtIndex(i);
-            }
         }
 
         applyExplosionSnapshot(snapshot.explosion);
@@ -859,7 +872,9 @@ export function createCrashDebrisController({
 
     function cloneCrashPartSource(source) {
         const clone = source.clone(true);
+        clone.visible = true;
         clone.traverse((node) => {
+            node.visible = true;
             if (!node.isMesh) {
                 return;
             }
@@ -1002,6 +1017,8 @@ export function createCrashDebrisController({
             settled: false,
             wheelRoll,
             bodyRest,
+            networkMissCount: 0,
+            networkSeenThisSync: false,
         };
         debrisPieces.push(piece);
         debrisPieceById.set(piece.id, piece);

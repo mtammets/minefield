@@ -18,6 +18,7 @@ const MAX_PLAYERS_PER_ROOM = 8;
 const MAX_ACTIVE_ROOMS = 500;
 const PLAYER_NAME_MAX_LENGTH = 18;
 const STATE_UPDATE_MIN_INTERVAL_MS = 35;
+const COLLISION_RELAY_MIN_INTERVAL_MS = 60;
 const MAX_DETACHED_PART_IDS = 32;
 const MAX_DEBRIS_PIECES = 64;
 
@@ -35,6 +36,7 @@ app.get('/api/ping', (req, res) => {
 io.on('connection', (socket) => {
     socket.data.profile = createDefaultProfile(socket.id);
     socket.data.roomCode = null;
+    socket.data.lastCollisionRelays = new Map();
 
     socket.on('mp:createRoom', (payload, ack) => {
         try {
@@ -207,6 +209,53 @@ io.on('connection', (socket) => {
         socket.to(roomCode).emit('mp:playerState', {
             id: socket.id,
             state: sanitizedState,
+            serverTime: now,
+        });
+    });
+
+    socket.on('mp:collision', (payload) => {
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+
+        const sourcePlayer = room.players.get(socket.id);
+        if (!sourcePlayer) {
+            return;
+        }
+
+        const relay = sanitizeCollisionRelay(payload);
+        if (!relay) {
+            return;
+        }
+        if (relay.targetId === socket.id || !room.players.has(relay.targetId)) {
+            return;
+        }
+
+        const now = Date.now();
+        const key = relay.targetId;
+        const lastByTarget = socket.data.lastCollisionRelays;
+        const lastAt = lastByTarget.get(key) || 0;
+        if (now - lastAt < COLLISION_RELAY_MIN_INTERVAL_MS) {
+            return;
+        }
+        lastByTarget.set(key, now);
+
+        io.to(relay.targetId).emit('mp:collision', {
+            sourcePlayerId: socket.id,
+            normalX: relay.normalX,
+            normalZ: relay.normalZ,
+            penetration: relay.penetration,
+            impactSpeed: relay.impactSpeed,
+            otherVelocityX: relay.otherVelocityX,
+            otherVelocityZ: relay.otherVelocityZ,
+            mass: relay.mass,
             serverTime: now,
         });
     });
@@ -417,6 +466,51 @@ function sanitizePlayerState(payload, fallback) {
         crashReplication,
         collectedCount: Math.round(collectedCount),
         isDestroyed,
+    };
+}
+
+function sanitizeCollisionRelay(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const targetId =
+        typeof payload.targetId === 'string'
+            ? payload.targetId
+                  .trim()
+                  .replace(/[^\w\-]/g, '')
+                  .slice(0, 128)
+            : '';
+    if (!targetId) {
+        return null;
+    }
+
+    let normalX = Number(payload.normalX);
+    let normalZ = Number(payload.normalZ);
+    if (!Number.isFinite(normalX) || !Number.isFinite(normalZ)) {
+        return null;
+    }
+    const normalLength = Math.hypot(normalX, normalZ);
+    if (normalLength < 0.0001) {
+        return null;
+    }
+    normalX /= normalLength;
+    normalZ /= normalLength;
+
+    const impactSpeed = clampFinite(payload.impactSpeed, 0, 90, 0);
+    if (impactSpeed <= 0.01) {
+        return null;
+    }
+
+    return {
+        targetId,
+        normalX: roundTo(normalX, 5),
+        normalZ: roundTo(normalZ, 5),
+        penetration: roundTo(clampFinite(payload.penetration, 0, 1.8, 0.04), 4),
+        impactSpeed: roundTo(impactSpeed, 4),
+        otherVelocityX: roundTo(clampFinite(payload.otherVelocityX, -400, 400, 0), 4),
+        otherVelocityZ: roundTo(clampFinite(payload.otherVelocityZ, -400, 400, 0), 4),
+        mass: roundTo(clampFinite(payload.mass, 0.4, 4, 1.6), 4),
     };
 }
 

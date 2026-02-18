@@ -1,4 +1,4 @@
-export function createMiniMapController(worldBounds) {
+export function createMiniMapController(worldBounds, options = {}) {
     const canvas = document.getElementById('minimapCanvas');
     const info = document.getElementById('minimapInfo');
 
@@ -15,6 +15,12 @@ export function createMiniMapController(worldBounds) {
     const innerSize = baseSize - padding * 2;
     const rangeX = worldBounds.maxX - worldBounds.minX;
     const rangeZ = worldBounds.maxZ - worldBounds.minZ;
+    const staticObstacles = Array.isArray(options.staticObstacles) ? options.staticObstacles : [];
+    const cityMapLayout = options.cityMapLayout || {};
+    const gridSpacing = Number(cityMapLayout.gridSpacing) || 42;
+    const gridRange = Number(cityMapLayout.gridRange) || 6;
+    const roadWidth = Number(cityMapLayout.roadWidth) || 20;
+    const sidewalkWidth = Number(cityMapLayout.sidewalkWidth) || 4.4;
     const baseLayerCanvas = document.createElement('canvas');
     baseLayerCanvas.width = baseSize;
     baseLayerCanvas.height = baseSize;
@@ -53,33 +59,109 @@ export function createMiniMapController(worldBounds) {
     function drawStaticLayer() {
         baseLayerCtx.clearRect(0, 0, baseSize, baseSize);
         const background = baseLayerCtx.createLinearGradient(0, 0, 0, baseSize);
-        background.addColorStop(0, 'rgba(8, 18, 31, 0.98)');
-        background.addColorStop(1, 'rgba(5, 10, 19, 0.98)');
+        background.addColorStop(0, 'rgba(18, 31, 48, 0.98)');
+        background.addColorStop(1, 'rgba(10, 20, 32, 0.98)');
         baseLayerCtx.fillStyle = background;
         baseLayerCtx.fillRect(0, 0, baseSize, baseSize);
 
-        const center = baseSize * 0.5;
-        const maxRadius = innerSize * 0.5;
-        baseLayerCtx.strokeStyle = 'rgba(134, 189, 255, 0.18)';
-        baseLayerCtx.lineWidth = 1;
-        for (let i = 1; i <= 4; i += 1) {
-            baseLayerCtx.beginPath();
-            baseLayerCtx.arc(center, center, (maxRadius / 4) * i, 0, Math.PI * 2);
-            baseLayerCtx.stroke();
-        }
-
-        baseLayerCtx.strokeStyle = 'rgba(132, 184, 255, 0.24)';
-        baseLayerCtx.lineWidth = 1;
-        baseLayerCtx.beginPath();
-        baseLayerCtx.moveTo(center, padding);
-        baseLayerCtx.lineTo(center, baseSize - padding);
-        baseLayerCtx.moveTo(padding, center);
-        baseLayerCtx.lineTo(baseSize - padding, center);
-        baseLayerCtx.stroke();
+        drawRoadBands();
+        drawBuildingFootprints();
+        drawLampPosts();
 
         baseLayerCtx.strokeStyle = 'rgba(150, 206, 255, 0.86)';
         baseLayerCtx.lineWidth = 2;
         baseLayerCtx.strokeRect(padding, padding, innerSize, innerSize);
+    }
+
+    function drawRoadBands() {
+        for (let grid = -gridRange; grid <= gridRange; grid += 1) {
+            if (Math.abs(grid) % 2 !== 0) {
+                continue;
+            }
+            const lineCoord = grid * gridSpacing;
+            drawVerticalBand(lineCoord, roadWidth + sidewalkWidth * 2, 'rgba(86, 116, 148, 0.88)');
+            drawHorizontalBand(
+                lineCoord,
+                roadWidth + sidewalkWidth * 2,
+                'rgba(86, 116, 148, 0.88)'
+            );
+            drawVerticalBand(lineCoord, roadWidth, 'rgba(47, 65, 88, 0.96)');
+            drawHorizontalBand(lineCoord, roadWidth, 'rgba(47, 65, 88, 0.96)');
+        }
+    }
+
+    function drawBuildingFootprints() {
+        baseLayerCtx.fillStyle = 'rgba(29, 40, 58, 0.95)';
+        baseLayerCtx.strokeStyle = 'rgba(132, 173, 214, 0.34)';
+        baseLayerCtx.lineWidth = 0.8;
+        for (let i = 0; i < staticObstacles.length; i += 1) {
+            const obstacle = staticObstacles[i];
+            if (!obstacle || obstacle.type !== 'aabb' || obstacle.category !== 'building') {
+                continue;
+            }
+            const rect = worldRectToMinimap(
+                obstacle.minX,
+                obstacle.maxX,
+                obstacle.minZ,
+                obstacle.maxZ
+            );
+            if (!rect) {
+                continue;
+            }
+            baseLayerCtx.fillRect(rect.x, rect.y, rect.w, rect.h);
+            baseLayerCtx.strokeRect(rect.x + 0.4, rect.y + 0.4, rect.w - 0.8, rect.h - 0.8);
+        }
+    }
+
+    function drawLampPosts() {
+        baseLayerCtx.fillStyle = 'rgba(235, 205, 134, 0.6)';
+        for (let i = 0; i < staticObstacles.length; i += 1) {
+            const obstacle = staticObstacles[i];
+            if (!obstacle || obstacle.type !== 'circle' || obstacle.category !== 'lamp_post') {
+                continue;
+            }
+            const mapped = worldToMinimap(obstacle.x, obstacle.z);
+            baseLayerCtx.beginPath();
+            baseLayerCtx.arc(mapped.x, mapped.y, 0.9, 0, Math.PI * 2);
+            baseLayerCtx.fill();
+        }
+    }
+
+    function drawVerticalBand(centerX, width, color) {
+        const halfWidth = width * 0.5;
+        const start = worldToMinimap(centerX - halfWidth, worldBounds.minZ);
+        const end = worldToMinimap(centerX + halfWidth, worldBounds.maxZ);
+        const rectX = Math.min(start.x, end.x);
+        const rectY = Math.min(start.y, end.y);
+        const rectW = Math.max(0.8, Math.abs(end.x - start.x));
+        const rectH = Math.max(0.8, Math.abs(end.y - start.y));
+        baseLayerCtx.fillStyle = color;
+        baseLayerCtx.fillRect(rectX, rectY, rectW, rectH);
+    }
+
+    function drawHorizontalBand(centerZ, width, color) {
+        const halfWidth = width * 0.5;
+        const start = worldToMinimap(worldBounds.minX, centerZ - halfWidth);
+        const end = worldToMinimap(worldBounds.maxX, centerZ + halfWidth);
+        const rectX = Math.min(start.x, end.x);
+        const rectY = Math.min(start.y, end.y);
+        const rectW = Math.max(0.8, Math.abs(end.x - start.x));
+        const rectH = Math.max(0.8, Math.abs(end.y - start.y));
+        baseLayerCtx.fillStyle = color;
+        baseLayerCtx.fillRect(rectX, rectY, rectW, rectH);
+    }
+
+    function worldRectToMinimap(minX, maxX, minZ, maxZ) {
+        const topLeft = worldToMinimap(minX, minZ);
+        const bottomRight = worldToMinimap(maxX, maxZ);
+        const x = Math.min(topLeft.x, bottomRight.x);
+        const y = Math.min(topLeft.y, bottomRight.y);
+        const w = Math.abs(bottomRight.x - topLeft.x);
+        const h = Math.abs(bottomRight.y - topLeft.y);
+        if (w <= 0.3 || h <= 0.3) {
+            return null;
+        }
+        return { x, y, w, h };
     }
 
     function renderPickups(pickups) {

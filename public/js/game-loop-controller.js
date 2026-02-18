@@ -25,6 +25,7 @@ export function createGameLoopController(options = {}) {
         gameSessionController,
         getBotTrafficSystem,
         getMultiplayerMiniMapMarkers,
+        getMultiplayerCollisionSnapshots,
         getVehicleState,
         getGroundHeightAt,
         updateGroundMotion,
@@ -53,6 +54,7 @@ export function createGameLoopController(options = {}) {
         getIsBatteryDepleted,
         getPickupRoundFinished,
         getTotalCollectedCount,
+        getBotsEnabled,
     } = options;
 
     if (!clock || !renderer || !scene || !camera || !car) {
@@ -82,6 +84,7 @@ export function createGameLoopController(options = {}) {
         typeof getPickupRoundFinished === 'function' ? getPickupRoundFinished : () => false;
     const readTotalCollectedCount =
         typeof getTotalCollectedCount === 'function' ? getTotalCollectedCount : () => 0;
+    const readBotsEnabled = typeof getBotsEnabled === 'function' ? getBotsEnabled : () => true;
 
     let running = false;
     let animationFrameId = null;
@@ -194,8 +197,18 @@ export function createGameLoopController(options = {}) {
                     }
                 } else if (!isCarDestroyed && !pickupRoundFinished) {
                     let physicsAccumulator = readPhysicsAccumulator() + frameDelta;
-                    const vehicleCollisionSnapshots =
-                        getBotTrafficSystem()?.getCollisionSnapshots?.() || [];
+                    const botTrafficSystem = getBotTrafficSystem();
+                    const botsEnabled = readBotsEnabled();
+                    const botCollisionSnapshots = botsEnabled
+                        ? botTrafficSystem?.getCollisionSnapshots?.() || []
+                        : [];
+                    const multiplayerCollisionSnapshots =
+                        typeof getMultiplayerCollisionSnapshots === 'function'
+                            ? getMultiplayerCollisionSnapshots() || []
+                            : [];
+                    const vehicleCollisionSnapshots = botCollisionSnapshots.concat(
+                        multiplayerCollisionSnapshots
+                    );
                     if (isBatteryDepleted) {
                         gameSessionController.clearDriveKeys();
                     }
@@ -228,6 +241,10 @@ export function createGameLoopController(options = {}) {
                     const vehicleContacts = consumeVehicleCollisionContacts();
                     if (vehicleContacts.length > 0) {
                         crashDebrisController.processVehicleCollisionContacts(vehicleContacts);
+                        multiplayerController?.reportLocalVehicleContacts?.(
+                            vehicleContacts,
+                            vehicleState
+                        );
                     }
 
                     const crashCollision = consumeCrashCollision();
@@ -262,15 +279,18 @@ export function createGameLoopController(options = {}) {
                 starsController.update(frameDelta);
                 if (!replayActive && !readPickupRoundFinished()) {
                     const botTrafficSystem = getBotTrafficSystem();
+                    const botsEnabled = readBotsEnabled();
                     const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
-                    botTrafficSystem?.update?.(car.position, visiblePickupsForBots, frameDelta);
-                    collectibleSystem.updateForCollectors(
-                        [
-                            { id: 'player', position: car.position },
-                            ...(botTrafficSystem?.getCollectorDescriptors?.() || []),
-                        ],
-                        frameDelta
-                    );
+                    if (botsEnabled) {
+                        botTrafficSystem?.update?.(car.position, visiblePickupsForBots, frameDelta);
+                    }
+                    const collectors = botsEnabled
+                        ? [
+                              { id: 'player', position: car.position },
+                              ...(botTrafficSystem?.getCollectorDescriptors?.() || []),
+                          ]
+                        : [{ id: 'player', position: car.position }];
+                    collectibleSystem.updateForCollectors(collectors, frameDelta);
                     if (
                         !readPickupRoundFinished() &&
                         readTotalCollectedCount() >= roundTotalPickups
@@ -283,7 +303,9 @@ export function createGameLoopController(options = {}) {
                     let minimapAccumulator = readMinimapAccumulator() + frameDelta;
                     if (minimapAccumulator >= minimapUpdateInterval) {
                         const visiblePickups = collectibleSystem.getVisiblePickups();
-                        const botMarkers = botTrafficSystem?.getMiniMapMarkers?.() || [];
+                        const botMarkers = botsEnabled
+                            ? botTrafficSystem?.getMiniMapMarkers?.() || []
+                            : [];
                         const multiplayerMarkers =
                             typeof getMultiplayerMiniMapMarkers === 'function'
                                 ? getMultiplayerMiniMapMarkers()
@@ -295,7 +317,9 @@ export function createGameLoopController(options = {}) {
                             botMarkers.concat(multiplayerMarkers),
                             { hidePlayer: readCarDestroyed() }
                         );
-                        botStatusUi.render(botTrafficSystem?.getHudState?.() || []);
+                        botStatusUi.render(
+                            botsEnabled ? botTrafficSystem?.getHudState?.() || [] : []
+                        );
                         minimapAccumulator = 0;
                     }
                     writeMinimapAccumulator(minimapAccumulator);

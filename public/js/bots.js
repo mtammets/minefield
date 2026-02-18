@@ -5,6 +5,8 @@ const DEFAULT_BOT_COUNT = 3;
 const BOT_RADIUS = 1.12;
 const BOT_VEHICLE_COLLISION_RADIUS = 1.34;
 const PLAYER_VEHICLE_COLLISION_RADIUS = 1.34;
+const BOT_COLLISION_HALF_WIDTH = 1.45;
+const BOT_COLLISION_HALF_LENGTH = 2.3;
 const BOT_WHEEL_BASE = 2.6;
 const BOT_MAX_STEER = THREE.MathUtils.degToRad(24);
 const BOT_STEER_RESPONSE = 3.4;
@@ -64,6 +66,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     } = options;
     const handlePartDetached = typeof onPartDetached === 'function' ? onPartDetached : null;
     let resolvedSharedTargetColorHex = sharedTargetColorHex;
+    let enabled = true;
 
     const bots = [];
     const botsByCollectorId = new Map();
@@ -84,6 +87,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
 
     return {
         update(playerPosition, visiblePickups = [], deltaTime = 1 / 60) {
+            if (!enabled) {
+                return;
+            }
             const dt = Math.min(deltaTime, 0.05);
             for (let i = 0; i < bots.length; i += 1) {
                 if (bots[i].destroyed) {
@@ -102,12 +108,19 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             }
         },
         getCollisionSnapshots() {
+            if (!enabled) {
+                return [];
+            }
             return bots
                 .filter((bot) => !bot.destroyed)
                 .map((bot) => ({
                     id: bot.collectorId,
+                    sourceType: 'bot',
                     x: bot.car.position.x,
                     z: bot.car.position.z,
+                    heading: bot.car.rotation.y,
+                    halfWidth: BOT_COLLISION_HALF_WIDTH,
+                    halfLength: BOT_COLLISION_HALF_LENGTH,
                     radius: BOT_VEHICLE_COLLISION_RADIUS,
                     collisionRadius: BOT_VEHICLE_COLLISION_RADIUS,
                     mass: BOT_MASS,
@@ -116,6 +129,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 }));
         },
         applyCollisionImpulses(contacts = []) {
+            if (!enabled) {
+                return;
+            }
             if (!contacts || contacts.length === 0) {
                 return;
             }
@@ -129,6 +145,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             }
         },
         getCollectorDescriptors() {
+            if (!enabled) {
+                return [];
+            }
             return bots
                 .filter((bot) => !bot.destroyed)
                 .map((bot) => ({
@@ -137,6 +156,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 }));
         },
         registerCollected(collectorId) {
+            if (!enabled) {
+                return;
+            }
             const bot = botsByCollectorId.get(collectorId);
             if (bot && !bot.destroyed) {
                 bot.collectedCount += 1;
@@ -164,8 +186,12 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 );
                 placedBots.push(bot);
             }
+            applyEnabledVisibility();
         },
         getMiniMapMarkers() {
+            if (!enabled) {
+                return [];
+            }
             return bots
                 .filter((bot) => !bot.destroyed)
                 .map((bot) => ({
@@ -176,13 +202,34 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 }));
         },
         getHudState() {
+            if (!enabled) {
+                return [];
+            }
             return bots.map((bot) => ({
                 name: bot.name,
                 collectedCount: bot.collectedCount,
                 targetColorHex: bot.targetColorHex,
             }));
         },
+        setEnabled(nextEnabled = true) {
+            enabled = Boolean(nextEnabled);
+            applyEnabledVisibility();
+        },
+        isEnabled() {
+            return enabled;
+        },
     };
+
+    function applyEnabledVisibility() {
+        for (let i = 0; i < bots.length; i += 1) {
+            const bot = bots[i];
+            const botVisible = enabled && !bot.destroyed;
+            bot.car.visible = botVisible;
+            if (bot.indicator?.root) {
+                bot.indicator.root.visible = botVisible;
+            }
+        }
+    }
 }
 
 function resolveBotGroundHeight(x, z, getGroundHeightAt) {

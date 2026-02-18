@@ -36,6 +36,7 @@ export function createWelcomeModalController({
     const rootEl = document.getElementById('welcomeModal');
     const previewShellEl = document.getElementById('welcomePreviewShell');
     const startBtnEl = document.getElementById('welcomeStartBtn');
+    const startOnlineBtnEl = document.getElementById('welcomeStartOnlineBtn');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
@@ -59,6 +60,9 @@ export function createWelcomeModalController({
             },
             setSelectedColorHex() {},
             selectNeighborColor() {},
+            getPreferredStartMode() {
+                return 'bots';
+            },
         };
     }
 
@@ -104,6 +108,7 @@ export function createWelcomeModalController({
     let previewSpinYaw = Math.PI * 0.32;
     let selectedColorIndex = resolvePresetIndex(initialColorHex);
     let previewPulseTime = Math.random() * Math.PI * 2;
+    let preferredStartMode = 'bots';
 
     const previewState = {
         speed: WELCOME_PREVIEW_STATE_SPEED,
@@ -151,12 +156,18 @@ export function createWelcomeModalController({
     bindVehicleButtons();
 
     startBtnEl.addEventListener('click', () => {
-        onStart?.();
+        preferredStartMode = 'bots';
+        onStart?.('bots');
+    });
+    startOnlineBtnEl?.addEventListener('click', () => {
+        preferredStartMode = 'online';
+        onStart?.('online');
     });
 
     return {
         show() {
             rootEl.hidden = false;
+            preferredStartMode = 'bots';
             forceSelectPreset(resolvePresetIndex(currentColorGetter()), false);
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
@@ -200,6 +211,9 @@ export function createWelcomeModalController({
             const direction = Math.sign(step || 1) || 1;
             const baseIndex = transition.active ? transition.targetIndex : selectedColorIndex;
             requestSwap(baseIndex + direction, direction, true);
+        },
+        getPreferredStartMode() {
+            return preferredStartMode;
         },
     };
 

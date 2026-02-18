@@ -14,6 +14,7 @@ export function createGameRuntimeState({ selectedCarColorHex, batteryMax, player
         pickupRoundFinished: false,
         isGamePaused: false,
         isWelcomeModalVisible: false,
+        gameMode: 'bots',
         inputController: null,
         crashDebrisController: null,
         replayEffectsController: null,

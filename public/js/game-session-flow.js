@@ -67,6 +67,9 @@ export function createGameSessionController({
     setIsWelcomeModalVisible,
     getSelectedCarColorHex,
     setSelectedCarColorHex,
+    getGameMode = () => 'bots',
+    setGameMode = () => {},
+    setMultiplayerPanelVisible = () => {},
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
@@ -121,10 +124,14 @@ export function createGameSessionController({
         pauseMenuUi.hide();
     }
 
-    function dismissWelcomeModal() {
+    function dismissWelcomeModal(nextMode = getGameMode()) {
         if (!getIsWelcomeModalVisible()) {
             return;
         }
+        const mode = normalizeGameMode(nextMode);
+        setGameMode(mode);
+        getBotSystem()?.setEnabled?.(mode === 'bots');
+        setMultiplayerPanelVisible(mode === 'online');
         setIsWelcomeModalVisible(false);
         carEditModeController.setActive(false);
         welcomeModalUi.hide();
@@ -426,9 +433,15 @@ export function createGameSessionController({
         snapCarToGround();
         car.rotation.set(0, playerSpawnState.rotationY, 0);
 
+        const botsEnabled = normalizeGameMode(getGameMode()) === 'bots';
+        setMultiplayerPanelVisible(!botsEnabled);
+
         collectibleSystem.reset?.();
         collectibleSystem.setEnabled(true);
-        getBotSystem()?.reset?.({ sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX });
+        getBotSystem()?.setEnabled?.(botsEnabled);
+        if (botsEnabled) {
+            getBotSystem()?.reset?.({ sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX });
+        }
         botStatusUi.render(getBotSystem()?.getHudState?.() || []);
 
         crashDebrisController.resetPlayerDamageState();
@@ -446,5 +459,9 @@ export function createGameSessionController({
         if (persist) {
             persistPlayerCarColorHex(normalized);
         }
+    }
+
+    function normalizeGameMode(mode) {
+        return mode === 'online' ? 'online' : 'bots';
     }
 }

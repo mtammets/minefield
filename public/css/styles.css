@@ -485,9 +485,16 @@ canvas#gameCanvas {
     animation: previewSwapSweepRight 440ms ease-out;
 }
 
-#welcomeStartBtn {
-    position: relative;
+.welcomeStartActions {
     margin-top: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+#welcomeStartBtn,
+#welcomeStartOnlineBtn {
+    position: relative;
     width: 100%;
     border: 1px solid rgba(170, 238, 197, 0.72);
     border-radius: 12px;
@@ -509,6 +516,14 @@ canvas#gameCanvas {
         box-shadow 140ms ease;
 }
 
+#welcomeStartBtn {
+    color: #ecfff2;
+    background: linear-gradient(180deg, rgba(95, 228, 149, 0.32), rgba(36, 126, 81, 0.32));
+    box-shadow:
+        0 10px 26px rgba(47, 180, 111, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
 #welcomeStartBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.08);
@@ -518,6 +533,28 @@ canvas#gameCanvas {
 }
 
 #welcomeStartBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.95);
+}
+
+#welcomeStartOnlineBtn {
+    border-color: rgba(151, 213, 255, 0.72);
+    color: #e9f7ff;
+    background: linear-gradient(180deg, rgba(90, 185, 252, 0.3), rgba(26, 93, 146, 0.34));
+    box-shadow:
+        0 10px 26px rgba(43, 146, 231, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+#welcomeStartOnlineBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+    box-shadow:
+        0 12px 30px rgba(43, 146, 231, 0.32),
+        inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+#welcomeStartOnlineBtn:active {
     transform: translateY(0);
     filter: brightness(0.95);
 }
@@ -1449,8 +1486,13 @@ body.race-intro-active #minimap {
         padding: 4px 8px;
     }
 
-    #welcomeStartBtn {
+    .welcomeStartActions {
         margin-top: 12px;
+        gap: 8px;
+    }
+
+    #welcomeStartBtn,
+    #welcomeStartOnlineBtn {
         padding: 11px 12px;
         border-radius: 10px;
     }

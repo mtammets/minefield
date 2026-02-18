@@ -136,7 +136,7 @@ export function createInputController(options = {}) {
             }
             if (key === 'enter' && isKeyDown) {
                 event.preventDefault();
-                onDismissWelcomeModal();
+                onDismissWelcomeModal(welcomeModalUi.getPreferredStartMode?.() || 'bots');
             }
             return;
         }

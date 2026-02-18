@@ -11,6 +11,11 @@ const STATE_SEND_INTERVAL_MS = 50;
 const PROFILE_SYNC_INTERVAL_MS = 500;
 const REMOTE_STATE_TIMEOUT_MS = 10_000;
 const REMOTE_LERP_SPEED = 11;
+const MP_COLLISION_RADIUS = 1.34;
+const MP_COLLISION_HALF_WIDTH = 1.45;
+const MP_COLLISION_HALF_LENGTH = 2.3;
+const MP_COLLISION_MASS = 1.6;
+const COLLISION_RELAY_INTERVAL_MS = 90;
 
 export function createMultiplayerController(options = {}) {
     const {
@@ -20,6 +25,7 @@ export function createMultiplayerController(options = {}) {
         getInputState = () => ({}),
         getCrashReplicationState = () => null,
         getGroundHeightAt = () => 0,
+        applyNetworkCollisionImpulse = () => false,
         getSelectedCarColorHex = () => 0x2d67a6,
         getPlayerCollectedCount = () => 0,
         getIsCarDestroyed = () => false,
@@ -47,12 +53,14 @@ export function createMultiplayerController(options = {}) {
 
     const listeners = [];
     const remotePlayers = new Map();
+    const lastCollisionRelaySentAtByTarget = new Map();
 
     let socket = null;
     let room = null;
     let selfId = '';
     let isBusy = false;
     let isInitialized = false;
+    let isPanelVisible = true;
     let lastStateSentAt = 0;
     let lastProfileSyncedAt = 0;
     let lastProfileSignature = '';
@@ -61,7 +69,13 @@ export function createMultiplayerController(options = {}) {
         initialize,
         update,
         dispose,
+        setPanelVisible,
+        isPanelVisible() {
+            return isPanelVisible;
+        },
         getMiniMapMarkers,
+        getCollisionSnapshots,
+        reportLocalVehicleContacts,
     };
 
     function initialize() {
@@ -102,6 +116,7 @@ export function createMultiplayerController(options = {}) {
             socket.off('connect_error');
             socket.off('mp:roomState');
             socket.off('mp:playerState');
+            socket.off('mp:collision');
             socket.disconnect();
             socket = null;
         }
@@ -115,6 +130,9 @@ export function createMultiplayerController(options = {}) {
     }
 
     function update(deltaTime = 1 / 60) {
+        if (!isPanelVisible) {
+            return;
+        }
         const dt = Math.min(Math.max(deltaTime, 0), 0.05);
         updateRemoteCars(dt);
 
@@ -127,6 +145,9 @@ export function createMultiplayerController(options = {}) {
     }
 
     function getMiniMapMarkers() {
+        if (!isPanelVisible) {
+            return [];
+        }
         const markers = [];
         const now = performance.now();
         for (const remote of remotePlayers.values()) {
@@ -144,6 +165,97 @@ export function createMultiplayerController(options = {}) {
             });
         }
         return markers;
+    }
+
+    function getCollisionSnapshots() {
+        if (!isPanelVisible) {
+            return [];
+        }
+        const snapshots = [];
+        const now = performance.now();
+        for (const remote of remotePlayers.values()) {
+            if (!remote.hasState || remote.isDestroyed) {
+                continue;
+            }
+            if (now - remote.lastStateAt > REMOTE_STATE_TIMEOUT_MS) {
+                continue;
+            }
+            snapshots.push({
+                id: `player:${remote.id}`,
+                playerId: remote.id,
+                sourceType: 'player',
+                x: remote.car.position.x,
+                z: remote.car.position.z,
+                heading: normalizeAngle(remote.car.rotation.y),
+                halfWidth: MP_COLLISION_HALF_WIDTH,
+                halfLength: MP_COLLISION_HALF_LENGTH,
+                radius: MP_COLLISION_RADIUS,
+                collisionRadius: MP_COLLISION_RADIUS,
+                mass: MP_COLLISION_MASS,
+                velocityX: clampNumber(remote.visualState?.velocity?.x, -400, 400, 0),
+                velocityZ: clampNumber(remote.visualState?.velocity?.y, -400, 400, 0),
+            });
+        }
+        return snapshots;
+    }
+
+    function reportLocalVehicleContacts(contacts = [], vehicleStateSnapshot = null) {
+        if (!isPanelVisible) {
+            return;
+        }
+        if (!room || !socket?.connected || !Array.isArray(contacts) || contacts.length === 0) {
+            return;
+        }
+
+        const strongestByTarget = new Map();
+        for (let i = 0; i < contacts.length; i += 1) {
+            const contact = contacts[i];
+            const targetPlayerId = resolveTargetPlayerId(contact);
+            if (!targetPlayerId || targetPlayerId === selfId) {
+                continue;
+            }
+            const previous = strongestByTarget.get(targetPlayerId);
+            if (!previous || (contact.impactSpeed || 0) > (previous.impactSpeed || 0)) {
+                strongestByTarget.set(targetPlayerId, contact);
+            }
+        }
+        if (strongestByTarget.size === 0) {
+            return;
+        }
+
+        const now = performance.now();
+        const localVelocityX = clampNumber(vehicleStateSnapshot?.velocity?.x, -400, 400, 0);
+        const localVelocityZ = clampNumber(vehicleStateSnapshot?.velocity?.y, -400, 400, 0);
+        for (const [targetPlayerId, contact] of strongestByTarget.entries()) {
+            const lastSentAt = lastCollisionRelaySentAtByTarget.get(targetPlayerId) || 0;
+            if (now - lastSentAt < COLLISION_RELAY_INTERVAL_MS) {
+                continue;
+            }
+            lastCollisionRelaySentAtByTarget.set(targetPlayerId, now);
+            socket.emit('mp:collision', {
+                targetId: targetPlayerId,
+                normalX: -clampNumber(contact.normalX, -1, 1, 0),
+                normalZ: -clampNumber(contact.normalZ, -1, 1, 0),
+                penetration: clampNumber(contact.penetration, 0, 1.8, 0.04),
+                impactSpeed: clampNumber(contact.impactSpeed, 0, 90, 0),
+                otherVelocityX: localVelocityX,
+                otherVelocityZ: localVelocityZ,
+                mass: MP_COLLISION_MASS,
+            });
+        }
+    }
+
+    function resolveTargetPlayerId(contact = null) {
+        if (typeof contact?.playerId === 'string' && contact.playerId.trim()) {
+            return contact.playerId.trim();
+        }
+        if (typeof contact?.vehicleId === 'string') {
+            const match = contact.vehicleId.trim().match(/^player:(.+)$/);
+            if (match?.[1]) {
+                return match[1];
+            }
+        }
+        return '';
     }
 
     function handleCreateRoomClick() {
@@ -306,6 +418,9 @@ export function createMultiplayerController(options = {}) {
             }
             applyRemoteState(remote, payload.state, false);
         });
+        socket.on('mp:collision', (payload) => {
+            applyNetworkCollisionImpulse(payload);
+        });
 
         return socket;
     }
@@ -453,6 +568,7 @@ export function createMultiplayerController(options = {}) {
         lastStateSentAt = 0;
         lastProfileSyncedAt = 0;
         lastProfileSignature = '';
+        lastCollisionRelaySentAtByTarget.clear();
 
         for (const remote of remotePlayers.values()) {
             removeRemotePlayer(remote);
@@ -760,6 +876,24 @@ export function createMultiplayerController(options = {}) {
         dom.panel.dataset.connected = isConnected ? 'true' : 'false';
     }
 
+    function setPanelVisible(nextVisible = true) {
+        const visible = Boolean(nextVisible);
+        if (visible === isPanelVisible) {
+            return;
+        }
+        isPanelVisible = visible;
+        dom.panel.hidden = !isPanelVisible;
+        if (!isPanelVisible) {
+            isBusy = false;
+            clearRoomState();
+            teardownSocketConnection();
+            updatePanel();
+            return;
+        }
+        setStatus('Online mode available. Create or join a room.', 'info');
+        updatePanel();
+    }
+
     function removeRemotePlayer(remote) {
         if (!remote) {
             return;
@@ -782,6 +916,20 @@ export function createMultiplayerController(options = {}) {
             colorHex: safeColorHex,
         };
     }
+
+    function teardownSocketConnection() {
+        if (!socket) {
+            return;
+        }
+        socket.off('connect');
+        socket.off('disconnect');
+        socket.off('connect_error');
+        socket.off('mp:roomState');
+        socket.off('mp:playerState');
+        socket.off('mp:collision');
+        socket.disconnect();
+        socket = null;
+    }
 }
 
 function resolveDom() {
@@ -803,9 +951,17 @@ function createNoopController() {
         initialize() {},
         update() {},
         dispose() {},
+        setPanelVisible() {},
+        isPanelVisible() {
+            return false;
+        },
         getMiniMapMarkers() {
             return [];
         },
+        getCollisionSnapshots() {
+            return [];
+        },
+        reportLocalVehicleContacts() {},
     };
 }
 

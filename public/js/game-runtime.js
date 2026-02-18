@@ -4,6 +4,7 @@ import {
     sceneFog,
     renderSettings,
     worldBounds,
+    cityMapLayout,
     staticObstacles,
     ambientLight,
     skyLight,
@@ -53,6 +54,7 @@ import {
     setPlayerTopSpeedLimitKph,
     consumeCrashCollision,
     consumeVehicleCollisionContacts,
+    applyNetworkVehicleCollisionImpulse,
     setVehicleDamageState,
     keys,
 } from './carphysics.js';
@@ -258,7 +260,10 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
     getGroundHeightAt,
 });
-const miniMapController = createMiniMapController(worldBounds);
+const miniMapController = createMiniMapController(worldBounds, {
+    staticObstacles,
+    cityMapLayout,
+});
 const replayController = createReplayController(car, camera);
 runtimeState.crashDebrisController = createCrashDebrisController({
     scene,
@@ -287,6 +292,7 @@ runtimeState.multiplayerController = createMultiplayerController({
     getInputState: () => keys,
     getCrashReplicationState: () => runtimeState.crashDebrisController?.getReplicationState?.(),
     getGroundHeightAt,
+    applyNetworkCollisionImpulse: applyNetworkVehicleCollisionImpulse,
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
@@ -380,6 +386,13 @@ runtimeState.gameSessionController = createGameSessionController({
     setSelectedCarColorHex(value) {
         runtimeState.selectedCarColorHex = value >>> 0;
     },
+    getGameMode: () => runtimeState.gameMode,
+    setGameMode(mode) {
+        runtimeState.gameMode = mode === 'online' ? 'online' : 'bots';
+    },
+    setMultiplayerPanelVisible(visible) {
+        runtimeState.multiplayerController?.setPanelVisible?.(visible);
+    },
 });
 
 runtimeState.inputController = createInputController({
@@ -406,8 +419,8 @@ runtimeState.inputController = createInputController({
     onSetPauseState(nextPaused) {
         runtimeState.gameSessionController?.setPauseState(nextPaused);
     },
-    onDismissWelcomeModal() {
-        runtimeState.gameSessionController?.dismissWelcomeModal();
+    onDismissWelcomeModal(mode) {
+        runtimeState.gameSessionController?.dismissWelcomeModal(mode);
     },
     onRestartGameWithCountdown() {
         runtimeState.gameSessionController?.restartGameWithCountdown();
@@ -480,6 +493,9 @@ runtimeState.gameLoopController = createGameLoopController({
     getMultiplayerMiniMapMarkers() {
         return runtimeState.multiplayerController?.getMiniMapMarkers?.() || [];
     },
+    getMultiplayerCollisionSnapshots() {
+        return runtimeState.multiplayerController?.getCollisionSnapshots?.() || [];
+    },
     crashDebrisController: runtimeState.crashDebrisController,
     replayEffectsController: runtimeState.replayEffectsController,
     gameSessionController: runtimeState.gameSessionController,
@@ -517,6 +533,7 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsBatteryDepleted: () => runtimeState.isBatteryDepleted,
     getPickupRoundFinished: () => runtimeState.pickupRoundFinished,
     getTotalCollectedCount: () => runtimeState.totalCollectedCount,
+    getBotsEnabled: () => runtimeState.gameMode !== 'online',
 });
 
 botStatusUi.render(runtimeState.botTrafficSystem.getHudState());

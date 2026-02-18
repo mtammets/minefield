@@ -109,7 +109,7 @@ export function createSkidMarkController(scene, options = {}) {
             const handbrakePressed = Boolean(controls?.handbrake);
             const forwardPressed = Boolean(controls?.forward);
             const steeringPressed = Boolean(controls?.left) || Boolean(controls?.right);
-            const burnoutDrivenByState = burnout > 0.2 || (yawRateAbs > 0.9 && speedAbs > 1.4);
+            const burnoutDrivenByState = burnout > 0.2;
             const burnoutSmokeActive =
                 (handbrakePressed && (forwardPressed || throttle > 0.14)) ||
                 (burnoutDrivenByState && throttle > 0.08);
@@ -120,7 +120,7 @@ export function createSkidMarkController(scene, options = {}) {
             const steeringActive =
                 (steeringPressed && steerAbs > 0.14) ||
                 (steerAbs > 0.2 && Math.abs(yawRateAbs) > 0.6);
-            const handbrakeDrift = steeringActive && speedAbs >= 2.1;
+            const handbrakeDrift = handbrakePressed && steeringActive && speedAbs >= 2.1;
             const burnoutSmokeSignal = THREE.MathUtils.clamp(
                 throttle * 0.44 +
                     brake * 0.22 +

@@ -9,6 +9,8 @@ const renderSettings = {
 const CITY_GRID_SPACING = 42;
 const CITY_GRID_RANGE = 6;
 const CITY_ROAD_OFFSET = 10;
+const ROAD_WIDTH = 20;
+const SIDEWALK_WIDTH = 4.4;
 const SPEED_GLOW_MAX = 30;
 const LAMP_REAL_LIGHT_GRID_RADIUS = 1;
 const BUILDING_DISTRICT_RADIUS = 3;
@@ -38,6 +40,12 @@ const worldBounds = {
     maxZ: WORLD_HALF_SIZE,
     size: WORLD_HALF_SIZE * 2,
 };
+const cityMapLayout = {
+    gridSpacing: CITY_GRID_SPACING,
+    gridRange: CITY_GRID_RANGE,
+    roadWidth: ROAD_WIDTH,
+    sidewalkWidth: SIDEWALK_WIDTH,
+};
 const staticObstacles = [];
 
 const ambientLight = new THREE.AmbientLight(0x3d5378, 0.5);
@@ -66,6 +74,7 @@ export {
     sceneFog,
     renderSettings,
     worldBounds,
+    cityMapLayout,
     staticObstacles,
     ambientLight,
     skyLight,
@@ -544,8 +553,8 @@ function createRoadLayer() {
     const layer = new THREE.Group();
     layer.name = 'roadLayer';
 
-    const roadWidth = 20;
-    const sidewalkWidth = 4.4;
+    const roadWidth = ROAD_WIDTH;
+    const sidewalkWidth = SIDEWALK_WIDTH;
     const roadLength = worldBounds.size + CITY_GRID_SPACING * 2;
     const roadY = 0.028;
     const sidewalkY = 0.034;
