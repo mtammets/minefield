@@ -7,6 +7,7 @@ export function createGameLoopController(options = {}) {
         car,
         sunLight,
         carEditModeController,
+        cityBuilderController,
         raceIntroController,
         chargingZoneController,
         chargingProgressHudController,
@@ -117,6 +118,7 @@ export function createGameLoopController(options = {}) {
 
         const frameDelta = Math.min(clock.getDelta(), 0.05);
         const isEditModeActive = carEditModeController.isActive();
+        const isBuilderModeActive = cityBuilderController?.isActive?.() || false;
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;
@@ -126,7 +128,7 @@ export function createGameLoopController(options = {}) {
         welcomeModalUi.update(frameDelta);
         multiplayerController?.update?.(frameDelta);
 
-        if (!readGamePaused() && !isEditModeActive) {
+        if (!readGamePaused() && !isEditModeActive && !isBuilderModeActive) {
             if (raceIntroController.isActive()) {
                 writePhysicsAccumulator(0);
                 chargingZoneController.update(car.position, frameDelta, { enabled: false });
@@ -333,9 +335,14 @@ export function createGameLoopController(options = {}) {
                     crashDebrisController.updateDebris(frameDelta);
                 }
             }
-        } else if (isEditModeActive) {
+        } else if (isEditModeActive || isBuilderModeActive) {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
-            carEditModeController.update(frameDelta);
+            if (isEditModeActive) {
+                carEditModeController.update(frameDelta);
+            }
+            if (isBuilderModeActive) {
+                cityBuilderController?.update?.(frameDelta);
+            }
             starsController.update(frameDelta);
             updateGroundMotion(car.position, 0);
         } else {

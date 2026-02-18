@@ -11,6 +11,7 @@ export function createInputController(options = {}) {
         welcomeModalUi,
         finalScoreboardUi,
         carEditModeController,
+        cityBuilderController,
         raceIntroController,
         replayController,
         getVehicleState,
@@ -101,6 +102,7 @@ export function createInputController(options = {}) {
                 key === 'v' ||
                 key === 'f' ||
                 key === 'e' ||
+                key === 'b' ||
                 key === 'q' ||
                 key === 'enter' ||
                 key === 'escape' ||
@@ -109,7 +111,32 @@ export function createInputController(options = {}) {
                 key === '1' ||
                 key === '2' ||
                 key === '3' ||
-                key === '4')
+                key === '4' ||
+                key === '5' ||
+                key === '6' ||
+                key === '7' ||
+                key === 'r' ||
+                key === 'x' ||
+                key === 'c' ||
+                key === '[' ||
+                key === ']' ||
+                key === 'delete' ||
+                key === 'backspace')
+        ) {
+            return;
+        }
+
+        const canEnterBuilderMode =
+            !getIsWelcomeModalVisible() &&
+            !getIsGamePaused() &&
+            !raceIntroController.isActive() &&
+            !getIsCarDestroyed() &&
+            !finalScoreboardUi.isVisible();
+        const shouldRouteToBuilderMode = cityBuilderController?.isActive?.() || canEnterBuilderMode;
+        if (
+            cityBuilderController &&
+            shouldRouteToBuilderMode &&
+            cityBuilderController.handleKey(event, isKeyDown)
         ) {
             return;
         }
@@ -355,7 +382,8 @@ export function createInputController(options = {}) {
             getIsGamePaused() ||
             raceIntroController.isActive() ||
             getIsCarDestroyed() ||
-            carEditModeController.isActive()
+            carEditModeController.isActive() ||
+            cityBuilderController?.isActive?.()
         ) {
             return;
         }

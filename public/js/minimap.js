@@ -21,6 +21,12 @@ export function createMiniMapController(worldBounds, options = {}) {
     const gridRange = Number(cityMapLayout.gridRange) || 6;
     const roadWidth = Number(cityMapLayout.roadWidth) || 20;
     const sidewalkWidth = Number(cityMapLayout.sidewalkWidth) || 4.4;
+    const roadAxisLinesX = Array.isArray(cityMapLayout.roadAxisLinesX)
+        ? cityMapLayout.roadAxisLinesX
+        : null;
+    const roadAxisLinesZ = Array.isArray(cityMapLayout.roadAxisLinesZ)
+        ? cityMapLayout.roadAxisLinesZ
+        : null;
     const baseLayerCanvas = document.createElement('canvas');
     baseLayerCanvas.width = baseSize;
     baseLayerCanvas.height = baseSize;
@@ -74,6 +80,11 @@ export function createMiniMapController(worldBounds, options = {}) {
     }
 
     function drawRoadBands() {
+        if (roadAxisLinesX?.length && roadAxisLinesZ?.length) {
+            drawRoadBandsFromDescriptors();
+            return;
+        }
+
         for (let grid = -gridRange; grid <= gridRange; grid += 1) {
             if (Math.abs(grid) % 2 !== 0) {
                 continue;
@@ -88,6 +99,28 @@ export function createMiniMapController(worldBounds, options = {}) {
             drawVerticalBand(lineCoord, roadWidth, 'rgba(47, 65, 88, 0.96)');
             drawHorizontalBand(lineCoord, roadWidth, 'rgba(47, 65, 88, 0.96)');
         }
+    }
+
+    function drawRoadBandsFromDescriptors() {
+        roadAxisLinesX.forEach((line) => {
+            const lineCoord = Number(line.coord) || 0;
+            const resolvedRoadWidth = Number(line.roadWidth) || roadWidth;
+            const resolvedSidewalkWidth = Number(line.sidewalkWidth) || sidewalkWidth;
+            const edgeColor = line.minimapEdgeColor || 'rgba(86, 116, 148, 0.88)';
+            const roadColor = line.minimapRoadColor || 'rgba(47, 65, 88, 0.96)';
+            drawVerticalBand(lineCoord, resolvedRoadWidth + resolvedSidewalkWidth * 2, edgeColor);
+            drawVerticalBand(lineCoord, resolvedRoadWidth, roadColor);
+        });
+
+        roadAxisLinesZ.forEach((line) => {
+            const lineCoord = Number(line.coord) || 0;
+            const resolvedRoadWidth = Number(line.roadWidth) || roadWidth;
+            const resolvedSidewalkWidth = Number(line.sidewalkWidth) || sidewalkWidth;
+            const edgeColor = line.minimapEdgeColor || 'rgba(86, 116, 148, 0.88)';
+            const roadColor = line.minimapRoadColor || 'rgba(47, 65, 88, 0.96)';
+            drawHorizontalBand(lineCoord, resolvedRoadWidth + resolvedSidewalkWidth * 2, edgeColor);
+            drawHorizontalBand(lineCoord, resolvedRoadWidth, roadColor);
+        });
     }
 
     function drawBuildingFootprints() {

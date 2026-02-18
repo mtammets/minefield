@@ -6,33 +6,18 @@ const renderSettings = {
     maxPixelRatio: 0.75,
     shadowsEnabled: false,
 };
-const CITY_GRID_SPACING = 42;
+const CITY_GRID_SPACING = 16;
 const CITY_GRID_RANGE = 6;
-const CITY_ROAD_OFFSET = 10;
-const ROAD_WIDTH = 20;
-const SIDEWALK_WIDTH = 4.4;
+const CITY_ROAD_OFFSET = 4;
+const ROAD_WIDTH = 8;
+const SIDEWALK_WIDTH = 2.6;
 const SPEED_GLOW_MAX = 30;
-const LAMP_REAL_LIGHT_GRID_RADIUS = 1;
 const BUILDING_DISTRICT_RADIUS = 3;
 const WORLD_HALF_SIZE = CITY_GRID_SPACING * (CITY_GRID_RANGE + 0.5);
 const TERRAIN_SEGMENTS = 120;
 const CHARGING_ZONE_RADIUS = 2.45;
-const chargingZones = [
-    { id: 'charging_zone_0', x: 0, z: -168, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_1', x: 0, z: -84, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_2', x: -84, z: -84, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_3', x: 84, z: -84, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_4', x: -168, z: 0, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_5', x: -84, z: 0, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_6', x: 84, z: 0, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_7', x: 168, z: 0, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_8', x: -84, z: 84, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_9', x: 0, z: 84, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_10', x: 84, z: 84, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_11', x: 0, z: 168, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_12', x: -168, z: -168, radius: CHARGING_ZONE_RADIUS },
-    { id: 'charging_zone_13', x: 168, z: 168, radius: CHARGING_ZONE_RADIUS },
-];
+const chargingZones = createChargingZones();
+const chargingZoneIntersectionKeys = createChargingZoneIntersectionKeys(chargingZones);
 const worldBounds = {
     minX: -WORLD_HALF_SIZE,
     maxX: WORLD_HALF_SIZE,
@@ -40,13 +25,120 @@ const worldBounds = {
     maxZ: WORLD_HALF_SIZE,
     size: WORLD_HALF_SIZE * 2,
 };
+const ROAD_SIDE_LINE_POSITIONS = [0.18, 0.82];
+const ROAD_STYLE_CONFIGS = {
+    boulevard: {
+        key: 'boulevard',
+        sidewalkMode: 'both',
+        minimapRoadColor: 'rgba(53, 76, 102, 0.98)',
+        minimapEdgeColor: 'rgba(95, 124, 154, 0.9)',
+        texture: {
+            top: '#24374a',
+            bottom: '#1b2a39',
+            noiseBase: 66,
+            noiseSpread: 32,
+            sideLineColor: 'rgba(236, 242, 250, 0.48)',
+            sideLineWidth: 6.5,
+            sideLinePositions: ROAD_SIDE_LINE_POSITIONS,
+            centerMode: 'double-solid',
+            centerColor: 'rgba(255, 198, 112, 0.72)',
+            centerSecondaryColor: 'rgba(255, 225, 168, 0.52)',
+            repeatV: 18,
+            crackCount: 120,
+        },
+    },
+    avenue: {
+        key: 'avenue',
+        sidewalkMode: 'both',
+        minimapRoadColor: 'rgba(47, 65, 88, 0.96)',
+        minimapEdgeColor: 'rgba(84, 113, 145, 0.88)',
+        texture: {
+            top: '#1f2c3a',
+            bottom: '#182431',
+            noiseBase: 64,
+            noiseSpread: 28,
+            sideLineColor: 'rgba(224, 236, 250, 0.4)',
+            sideLineWidth: 6,
+            sideLinePositions: ROAD_SIDE_LINE_POSITIONS,
+            centerMode: 'dashed',
+            centerColor: 'rgba(232, 240, 250, 0.66)',
+            repeatV: 14,
+            crackCount: 94,
+        },
+    },
+    service: {
+        key: 'service',
+        sidewalkMode: 'none',
+        minimapRoadColor: 'rgba(39, 56, 77, 0.94)',
+        minimapEdgeColor: 'rgba(75, 104, 132, 0.82)',
+        texture: {
+            top: '#1a2531',
+            bottom: '#15202b',
+            noiseBase: 58,
+            noiseSpread: 24,
+            sideLineColor: 'rgba(193, 214, 238, 0.23)',
+            sideLineWidth: 4.5,
+            sideLinePositions: ROAD_SIDE_LINE_POSITIONS,
+            centerMode: 'none',
+            centerColor: 'rgba(197, 221, 247, 0.26)',
+            repeatV: 11,
+            crackCount: 70,
+        },
+    },
+};
+const roadAxisLineDescriptors = createRoadAxisLineDescriptors();
 const cityMapLayout = {
     gridSpacing: CITY_GRID_SPACING,
     gridRange: CITY_GRID_RANGE,
     roadWidth: ROAD_WIDTH,
     sidewalkWidth: SIDEWALK_WIDTH,
+    roadAxisLinesX: roadAxisLineDescriptors.xLines.map(toCityMapLineDescriptor),
+    roadAxisLinesZ: roadAxisLineDescriptors.zLines.map(toCityMapLineDescriptor),
 };
 const staticObstacles = [];
+
+function createChargingZones() {
+    const roadStep = CITY_GRID_SPACING * 2;
+    const majorStep = roadStep * 2;
+    const anchors = [
+        [0, -majorStep],
+        [0, -roadStep],
+        [-roadStep, -roadStep],
+        [roadStep, -roadStep],
+        [-majorStep, 0],
+        [-roadStep, 0],
+        [roadStep, 0],
+        [majorStep, 0],
+        [-roadStep, roadStep],
+        [0, roadStep],
+        [roadStep, roadStep],
+        [0, majorStep],
+        [-majorStep, -majorStep],
+        [majorStep, majorStep],
+    ];
+
+    return anchors.map(([x, z], index) => ({
+        id: `charging_zone_${index}`,
+        x,
+        z,
+        radius: CHARGING_ZONE_RADIUS,
+    }));
+}
+
+function createChargingZoneIntersectionKeys(zones = []) {
+    const keys = new Set();
+    zones.forEach((zone) => {
+        if (!zone || !Number.isFinite(zone.x) || !Number.isFinite(zone.z)) {
+            return;
+        }
+        keys.add(toIntersectionKey(zone.x, zone.z));
+    });
+    return keys;
+}
+
+function toIntersectionKey(x, z) {
+    return `${Math.round(x)}:${Math.round(z)}`;
+}
 
 const ambientLight = new THREE.AmbientLight(0x3d5378, 0.5);
 const skyLight = new THREE.HemisphereLight(0xa8cfff, 0x1f3146, 0.58);
@@ -253,46 +345,67 @@ function createGroundTexture() {
     return texture;
 }
 
-function createRoadSurfaceTexture() {
+function createRoadSurfaceTexture(styleTextureConfig = ROAD_STYLE_CONFIGS.avenue.texture) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext('2d');
 
     const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    baseGradient.addColorStop(0, '#1f2c3a');
-    baseGradient.addColorStop(1, '#182431');
+    baseGradient.addColorStop(0, styleTextureConfig.top);
+    baseGradient.addColorStop(1, styleTextureConfig.bottom);
     ctx.fillStyle = baseGradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     for (let i = 0; i < 3000; i += 1) {
         const x = Math.random() * canvas.width;
         const y = Math.random() * canvas.height;
-        const value = 62 + Math.random() * 26;
+        const value = styleTextureConfig.noiseBase + Math.random() * styleTextureConfig.noiseSpread;
         ctx.fillStyle = `rgba(${value}, ${value + 2}, ${value + 7}, 0.14)`;
         ctx.fillRect(x, y, 1.8, 1.8);
     }
 
-    // Side lane lines.
-    ctx.strokeStyle = 'rgba(224, 236, 250, 0.4)';
-    ctx.lineWidth = 6;
-    [canvas.width * 0.18, canvas.width * 0.82].forEach((lineX) => {
+    ctx.strokeStyle = styleTextureConfig.sideLineColor;
+    ctx.lineWidth = styleTextureConfig.sideLineWidth;
+    styleTextureConfig.sideLinePositions.forEach((positionRatio) => {
+        const lineX = canvas.width * positionRatio;
         ctx.beginPath();
         ctx.moveTo(lineX, 0);
         ctx.lineTo(lineX, canvas.height);
         ctx.stroke();
     });
 
-    // Center dashed line.
-    ctx.strokeStyle = 'rgba(222, 232, 245, 0.58)';
-    ctx.lineWidth = 5;
     const centerX = canvas.width * 0.5;
-    const dashHeight = 32;
-    const dashGap = 24;
-    for (let y = -dashHeight; y < canvas.height + dashHeight; y += dashHeight + dashGap) {
+    if (styleTextureConfig.centerMode === 'dashed') {
+        drawDashedVerticalLine(ctx, centerX, styleTextureConfig.centerColor, 5, 32, 24, canvas.height);
+    } else if (styleTextureConfig.centerMode === 'double-solid') {
+        drawSolidVerticalLine(
+            ctx,
+            centerX - 6,
+            styleTextureConfig.centerColor,
+            4,
+            canvas.height
+        );
+        drawSolidVerticalLine(
+            ctx,
+            centerX + 6,
+            styleTextureConfig.centerSecondaryColor || styleTextureConfig.centerColor,
+            4,
+            canvas.height
+        );
+    }
+
+    ctx.strokeStyle = 'rgba(17, 28, 39, 0.22)';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < styleTextureConfig.crackCount; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const length = 9 + Math.random() * 28;
+        const heading = (Math.random() - 0.5) * Math.PI * 0.45;
+        ctx.lineWidth = 0.8 + Math.random() * 0.7;
         ctx.beginPath();
-        ctx.moveTo(centerX, y);
-        ctx.lineTo(centerX, y + dashHeight);
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.sin(heading) * length, y + Math.cos(heading) * length);
         ctx.stroke();
     }
 
@@ -300,18 +413,21 @@ function createRoadSurfaceTexture() {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(1, 14);
+    texture.repeat.set(1, styleTextureConfig.repeatV);
     texture.anisotropy = 2;
     return texture;
 }
 
-function createIntersectionTexture() {
+function createIntersectionTexture({ variant = 'standard' } = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext('2d');
 
-    ctx.fillStyle = '#223140';
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#24374a');
+    baseGradient.addColorStop(1, '#1b2a39');
+    ctx.fillStyle = baseGradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     for (let i = 0; i < 2400; i += 1) {
@@ -322,18 +438,68 @@ function createIntersectionTexture() {
         ctx.fillRect(x, y, 2, 2);
     }
 
-    ctx.strokeStyle = 'rgba(214, 231, 251, 0.36)';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(84, 84, canvas.width - 168, canvas.height - 168);
+    const center = canvas.width * 0.5;
+    const laneInset = canvas.width * ROAD_SIDE_LINE_POSITIONS[0];
+    const laneOuter = canvas.width * ROAD_SIDE_LINE_POSITIONS[1];
 
-    ctx.strokeStyle = 'rgba(184, 214, 247, 0.2)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width * 0.5, 0);
-    ctx.lineTo(canvas.width * 0.5, canvas.height);
-    ctx.moveTo(0, canvas.height * 0.5);
-    ctx.lineTo(canvas.width, canvas.height * 0.5);
-    ctx.stroke();
+    // Keep lane edge continuation continuous so markings connect across seams.
+    ctx.strokeStyle = 'rgba(226, 238, 251, 0.52)';
+    ctx.lineWidth = 6;
+    drawSolidVerticalLine(ctx, laneInset, 'rgba(226, 238, 251, 0.52)', 6, canvas.height);
+    drawSolidVerticalLine(ctx, laneOuter, 'rgba(226, 238, 251, 0.52)', 6, canvas.height);
+    drawSolidHorizontalLine(ctx, laneInset, 'rgba(226, 238, 251, 0.52)', 6, canvas.width);
+    drawSolidHorizontalLine(ctx, laneOuter, 'rgba(226, 238, 251, 0.52)', 6, canvas.width);
+
+    // Center guidance stays simple and deterministic.
+    if (variant === 'boulevard') {
+        drawSolidVerticalLine(ctx, center - 6, 'rgba(255, 198, 112, 0.74)', 3.5, canvas.height);
+        drawSolidVerticalLine(ctx, center + 6, 'rgba(255, 225, 168, 0.58)', 3.5, canvas.height);
+        ctx.strokeStyle = 'rgba(255, 198, 112, 0.58)';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(0, center - 6);
+        ctx.lineTo(canvas.width, center - 6);
+        ctx.moveTo(0, center + 6);
+        ctx.lineTo(canvas.width, center + 6);
+        ctx.stroke();
+    } else if (variant === 'charging') {
+        drawDashedVerticalLine(ctx, center, 'rgba(179, 236, 255, 0.46)', 3, 24, 20, canvas.height);
+        drawDashedHorizontalLine(ctx, center, 'rgba(179, 236, 255, 0.46)', 3, 24, 20, canvas.width);
+        drawChargingIntersectionMarkings(ctx, canvas.width, center);
+    } else if (variant === 'standard') {
+        drawDashedVerticalLine(ctx, center, 'rgba(230, 241, 252, 0.52)', 3.2, 26, 20, canvas.height);
+        drawDashedHorizontalLine(ctx, center, 'rgba(230, 241, 252, 0.52)', 3.2, 26, 20, canvas.width);
+    } else {
+        drawDashedVerticalLine(ctx, center, 'rgba(207, 223, 241, 0.38)', 2.6, 20, 24, canvas.height);
+        drawDashedHorizontalLine(ctx, center, 'rgba(207, 223, 241, 0.38)', 2.6, 20, 24, canvas.width);
+    }
+
+    const shouldDrawCrosswalks = variant === 'boulevard' || variant === 'standard';
+    const shouldDrawStopBars = shouldDrawCrosswalks;
+    const crosswalkInset = 8;
+    const crosswalkDepth = 34;
+    const stopBarGap = 10;
+    if (shouldDrawCrosswalks) {
+        drawIntersectionCrosswalks(
+            ctx,
+            canvas.width,
+            laneInset,
+            laneOuter,
+            crosswalkInset,
+            crosswalkDepth,
+            8,
+            6
+        );
+    }
+    if (shouldDrawStopBars) {
+        drawIntersectionStopBars(
+            ctx,
+            canvas.width,
+            laneInset,
+            laneOuter,
+            crosswalkInset + crosswalkDepth + stopBarGap
+        );
+    }
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -342,6 +508,109 @@ function createIntersectionTexture() {
     texture.repeat.set(1, 1);
     texture.anisotropy = 2;
     return texture;
+}
+
+function drawSolidVerticalLine(ctx, x, color, lineWidth, height) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+}
+
+function drawSolidHorizontalLine(ctx, y, color, lineWidth, width) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+}
+
+function drawDashedVerticalLine(ctx, x, color, lineWidth, dashHeight, dashGap, height) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    for (let y = -dashHeight; y < height + dashHeight; y += dashHeight + dashGap) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + dashHeight);
+        ctx.stroke();
+    }
+}
+
+function drawDashedHorizontalLine(ctx, y, color, lineWidth, dashWidth, dashGap, width) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    for (let x = -dashWidth; x < width + dashWidth; x += dashWidth + dashGap) {
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + dashWidth, y);
+        ctx.stroke();
+    }
+}
+
+function drawIntersectionCrosswalks(
+    ctx,
+    size,
+    laneInset,
+    laneOuter,
+    inset,
+    stripeLength,
+    stripeWidth,
+    stripeGap
+) {
+    ctx.fillStyle = 'rgba(235, 245, 255, 0.62)';
+    const stripeStart = laneInset + 4;
+    const stripeEnd = laneOuter - 4;
+
+    for (let axisOffset = stripeStart; axisOffset <= stripeEnd; axisOffset += stripeWidth + stripeGap) {
+        ctx.fillRect(axisOffset, inset, stripeWidth, stripeLength);
+        ctx.fillRect(axisOffset, size - inset - stripeLength, stripeWidth, stripeLength);
+        ctx.fillRect(inset, axisOffset, stripeLength, stripeWidth);
+        ctx.fillRect(size - inset - stripeLength, axisOffset, stripeLength, stripeWidth);
+    }
+}
+
+function drawIntersectionStopBars(ctx, size, laneInset, laneOuter, offset) {
+    ctx.strokeStyle = 'rgba(230, 242, 255, 0.66)';
+    ctx.lineWidth = 4.2;
+    ctx.beginPath();
+    ctx.moveTo(laneInset, offset);
+    ctx.lineTo(laneOuter, offset);
+    ctx.moveTo(laneInset, size - offset);
+    ctx.lineTo(laneOuter, size - offset);
+    ctx.moveTo(offset, laneInset);
+    ctx.lineTo(offset, laneOuter);
+    ctx.moveTo(size - offset, laneInset);
+    ctx.lineTo(size - offset, laneOuter);
+    ctx.stroke();
+}
+
+function drawChargingIntersectionMarkings(ctx, size, center) {
+    ctx.strokeStyle = 'rgba(160, 232, 255, 0.5)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(center, center, size * 0.16, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(140, 222, 255, 0.42)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(center, center, size * 0.24, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(186, 240, 255, 0.8)';
+    ctx.beginPath();
+    ctx.moveTo(center - 12, center - 22);
+    ctx.lineTo(center + 4, center - 22);
+    ctx.lineTo(center - 5, center - 2);
+    ctx.lineTo(center + 12, center - 2);
+    ctx.lineTo(center - 6, center + 22);
+    ctx.lineTo(center - 1, center + 4);
+    ctx.lineTo(center - 15, center + 4);
+    ctx.closePath();
+    ctx.fill();
 }
 
 function createSidewalkTexture() {
@@ -556,45 +825,33 @@ function createRoadLayer() {
     const roadWidth = ROAD_WIDTH;
     const sidewalkWidth = SIDEWALK_WIDTH;
     const roadLength = worldBounds.size + CITY_GRID_SPACING * 2;
+    const roadExtentMin = -roadLength * 0.5;
+    const roadExtentMax = roadLength * 0.5;
     const roadY = 0.028;
     const sidewalkY = 0.034;
-    const verticalRoadTexture = createRoadSurfaceTexture();
-    const horizontalRoadTexture = verticalRoadTexture.clone();
-    horizontalRoadTexture.center.set(0.5, 0.5);
-    horizontalRoadTexture.rotation = Math.PI * 0.5;
-    horizontalRoadTexture.needsUpdate = true;
-    const intersectionSurfaceTexture = createIntersectionTexture();
+    const medianY = roadY + 0.006;
+
+    const xLineDescriptors = roadAxisLineDescriptors.xLines;
+    const zLineDescriptors = roadAxisLineDescriptors.zLines;
+    const xLineCoordinates = xLineDescriptors.map((line) => line.coordinate);
+    const zLineCoordinates = zLineDescriptors.map((line) => line.coordinate);
+    const intersectionGapHalfWidth = roadWidth * 0.5;
+    const verticalSidewalkIntervals = buildSidewalkIntervals(
+        zLineCoordinates,
+        roadExtentMin,
+        roadExtentMax,
+        intersectionGapHalfWidth
+    );
+    const horizontalSidewalkIntervals = buildSidewalkIntervals(
+        xLineCoordinates,
+        roadExtentMin,
+        roadExtentMax,
+        intersectionGapHalfWidth
+    );
+    const roadMaterialSet = createRoadMaterialSet();
+    const intersectionMaterialSet = createIntersectionMaterialSet();
     const sidewalkSurfaceTexture = createSidewalkTexture();
 
-    const roadMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: verticalRoadTexture,
-        emissive: 0x1a2a3b,
-        emissiveMap: verticalRoadTexture,
-        emissiveIntensity: 0.24,
-        roughness: 0.9,
-        metalness: 0.05,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-    });
-    const roadMaterialOverlay = roadMaterial.clone();
-    roadMaterialOverlay.map = horizontalRoadTexture;
-    roadMaterialOverlay.emissiveMap = horizontalRoadTexture;
-    roadMaterialOverlay.polygonOffsetFactor = -3;
-    roadMaterialOverlay.polygonOffsetUnits = -3;
-    const intersectionMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        map: intersectionSurfaceTexture,
-        emissive: 0x152536,
-        emissiveMap: intersectionSurfaceTexture,
-        emissiveIntensity: 0.3,
-        roughness: 0.88,
-        metalness: 0.06,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4,
-    });
     const sidewalkMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         map: sidewalkSurfaceTexture,
@@ -607,72 +864,342 @@ function createRoadLayer() {
         polygonOffsetFactor: -2,
         polygonOffsetUnits: -2,
     });
+    const medianMaterial = new THREE.MeshBasicMaterial({
+        color: 0xe6c98c,
+        transparent: true,
+        opacity: 0.58,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+    });
     const verticalRoadGeometry = new THREE.PlaneGeometry(roadWidth, roadLength);
     const horizontalRoadGeometry = new THREE.PlaneGeometry(roadLength, roadWidth);
-    const verticalSidewalkGeometry = new THREE.PlaneGeometry(sidewalkWidth, roadLength);
-    const horizontalSidewalkGeometry = new THREE.PlaneGeometry(roadLength, sidewalkWidth);
-    const intersectionGeometry = new THREE.PlaneGeometry(roadWidth, roadWidth);
+    const intersectionGeometry = new THREE.PlaneGeometry(roadWidth + 0.08, roadWidth + 0.08);
 
-    for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
-        if (Math.abs(gridX) % 2 !== 0) {
-            continue;
-        }
-
-        const lineX = gridX * CITY_GRID_SPACING;
-        const road = new THREE.Mesh(verticalRoadGeometry, roadMaterial);
+    xLineDescriptors.forEach((lineDescriptor) => {
+        const road = new THREE.Mesh(
+            verticalRoadGeometry,
+            roadMaterialSet[lineDescriptor.styleKey].vertical
+        );
         road.rotation.x = -Math.PI / 2;
-        road.position.set(lineX, roadY, 0);
+        road.position.set(lineDescriptor.coordinate, roadY, 0);
         layer.add(road);
 
-        const sidewalkWest = new THREE.Mesh(verticalSidewalkGeometry, sidewalkMaterial);
-        sidewalkWest.rotation.x = -Math.PI / 2;
-        sidewalkWest.position.set(lineX - roadWidth * 0.5 - sidewalkWidth * 0.5, sidewalkY, 0);
-        layer.add(sidewalkWest);
-
-        const sidewalkEast = new THREE.Mesh(verticalSidewalkGeometry, sidewalkMaterial);
-        sidewalkEast.rotation.x = -Math.PI / 2;
-        sidewalkEast.position.set(lineX + roadWidth * 0.5 + sidewalkWidth * 0.5, sidewalkY, 0);
-        layer.add(sidewalkEast);
-    }
-
-    for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
-        if (Math.abs(gridZ) % 2 !== 0) {
-            continue;
+        if (lineDescriptor.sidewalkMode === 'none') {
+            return;
         }
 
-        const lineZ = gridZ * CITY_GRID_SPACING;
-        const road = new THREE.Mesh(horizontalRoadGeometry, roadMaterialOverlay);
-        road.rotation.x = -Math.PI / 2;
-        road.position.set(0, roadY, lineZ);
-        layer.add(road);
-
-        const sidewalkNorth = new THREE.Mesh(horizontalSidewalkGeometry, sidewalkMaterial);
-        sidewalkNorth.rotation.x = -Math.PI / 2;
-        sidewalkNorth.position.set(0, sidewalkY, lineZ - roadWidth * 0.5 - sidewalkWidth * 0.5);
-        layer.add(sidewalkNorth);
-
-        const sidewalkSouth = new THREE.Mesh(horizontalSidewalkGeometry, sidewalkMaterial);
-        sidewalkSouth.rotation.x = -Math.PI / 2;
-        sidewalkSouth.position.set(0, sidewalkY, lineZ + roadWidth * 0.5 + sidewalkWidth * 0.5);
-        layer.add(sidewalkSouth);
-    }
-
-    for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
-        if (Math.abs(gridX) % 2 !== 0) {
-            continue;
-        }
-        for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
-            if (Math.abs(gridZ) % 2 !== 0) {
-                continue;
+        verticalSidewalkIntervals.forEach(([segmentStart, segmentEnd]) => {
+            const segmentLength = segmentEnd - segmentStart;
+            if (segmentLength <= 0.04) {
+                return;
             }
-            const patch = new THREE.Mesh(intersectionGeometry, intersectionMaterial);
-            patch.rotation.x = -Math.PI / 2;
-            patch.position.set(gridX * CITY_GRID_SPACING, roadY + 0.004, gridZ * CITY_GRID_SPACING);
-            layer.add(patch);
+            const segmentCenter = (segmentStart + segmentEnd) * 0.5;
+
+            const sidewalkWest = new THREE.Mesh(
+                new THREE.PlaneGeometry(sidewalkWidth, segmentLength),
+                sidewalkMaterial
+            );
+            sidewalkWest.rotation.x = -Math.PI / 2;
+            sidewalkWest.position.set(
+                lineDescriptor.coordinate - roadWidth * 0.5 - sidewalkWidth * 0.5,
+                sidewalkY,
+                segmentCenter
+            );
+            layer.add(sidewalkWest);
+
+            const sidewalkEast = new THREE.Mesh(
+                new THREE.PlaneGeometry(sidewalkWidth, segmentLength),
+                sidewalkMaterial
+            );
+            sidewalkEast.rotation.x = -Math.PI / 2;
+            sidewalkEast.position.set(
+                lineDescriptor.coordinate + roadWidth * 0.5 + sidewalkWidth * 0.5,
+                sidewalkY,
+                segmentCenter
+            );
+            layer.add(sidewalkEast);
+        });
+    });
+
+    zLineDescriptors.forEach((lineDescriptor) => {
+        const road = new THREE.Mesh(
+            horizontalRoadGeometry,
+            roadMaterialSet[lineDescriptor.styleKey].horizontal
+        );
+        road.rotation.x = -Math.PI / 2;
+        road.position.set(0, roadY, lineDescriptor.coordinate);
+        layer.add(road);
+
+        if (lineDescriptor.sidewalkMode === 'none') {
+            return;
         }
-    }
+
+        horizontalSidewalkIntervals.forEach(([segmentStart, segmentEnd]) => {
+            const segmentLength = segmentEnd - segmentStart;
+            if (segmentLength <= 0.04) {
+                return;
+            }
+            const segmentCenter = (segmentStart + segmentEnd) * 0.5;
+
+            const sidewalkNorth = new THREE.Mesh(
+                new THREE.PlaneGeometry(segmentLength, sidewalkWidth),
+                sidewalkMaterial
+            );
+            sidewalkNorth.rotation.x = -Math.PI / 2;
+            sidewalkNorth.position.set(
+                segmentCenter,
+                sidewalkY,
+                lineDescriptor.coordinate - roadWidth * 0.5 - sidewalkWidth * 0.5
+            );
+            layer.add(sidewalkNorth);
+
+            const sidewalkSouth = new THREE.Mesh(
+                new THREE.PlaneGeometry(segmentLength, sidewalkWidth),
+                sidewalkMaterial
+            );
+            sidewalkSouth.rotation.x = -Math.PI / 2;
+            sidewalkSouth.position.set(
+                segmentCenter,
+                sidewalkY,
+                lineDescriptor.coordinate + roadWidth * 0.5 + sidewalkWidth * 0.5
+            );
+            layer.add(sidewalkSouth);
+        });
+    });
+
+    addBoulevardMedians(
+        layer,
+        xLineDescriptors,
+        verticalSidewalkIntervals,
+        'vertical',
+        medianY,
+        medianMaterial
+    );
+    addBoulevardMedians(
+        layer,
+        zLineDescriptors,
+        horizontalSidewalkIntervals,
+        'horizontal',
+        medianY,
+        medianMaterial
+    );
+
+    xLineDescriptors.forEach((xLineDescriptor) => {
+        zLineDescriptors.forEach((zLineDescriptor) => {
+            const intersectionVariant = resolveIntersectionVariant(xLineDescriptor, zLineDescriptor);
+            const patch = new THREE.Mesh(
+                intersectionGeometry,
+                intersectionMaterialSet[intersectionVariant]
+            );
+            patch.rotation.x = -Math.PI / 2;
+            patch.position.set(xLineDescriptor.coordinate, roadY + 0.004, zLineDescriptor.coordinate);
+            layer.add(patch);
+        });
+    });
 
     return layer;
+}
+
+function createRoadAxisLineDescriptors() {
+    return {
+        xLines: createRoadAxisLines(17),
+        zLines: createRoadAxisLines(29),
+    };
+}
+
+function createRoadAxisLines(axisSalt) {
+    const lines = [];
+    for (let gridIndex = -CITY_GRID_RANGE; gridIndex <= CITY_GRID_RANGE; gridIndex += 1) {
+        if (Math.abs(gridIndex) % 2 !== 0) {
+            continue;
+        }
+        const styleKey = resolveRoadStyleKeyForAxisLine(gridIndex, axisSalt);
+        const style = ROAD_STYLE_CONFIGS[styleKey] || ROAD_STYLE_CONFIGS.avenue;
+
+        lines.push({
+            gridIndex,
+            coordinate: gridIndex * CITY_GRID_SPACING,
+            styleKey,
+            sidewalkMode: style.sidewalkMode || 'both',
+        });
+    }
+    return lines;
+}
+
+function resolveRoadStyleKeyForAxisLine(gridIndex, _axisSalt) {
+    const absIndex = Math.abs(gridIndex);
+    if (absIndex === 0) {
+        return 'boulevard';
+    }
+    if (absIndex === 2) {
+        return 'avenue';
+    }
+    if (absIndex >= 4) {
+        return 'service';
+    }
+
+    return 'avenue';
+}
+
+function toCityMapLineDescriptor(lineDescriptor) {
+    const style = ROAD_STYLE_CONFIGS[lineDescriptor.styleKey] || ROAD_STYLE_CONFIGS.avenue;
+    const hasSidewalks = lineDescriptor.sidewalkMode !== 'none';
+    return {
+        gridIndex: lineDescriptor.gridIndex,
+        coord: lineDescriptor.coordinate,
+        styleKey: lineDescriptor.styleKey,
+        roadWidth: ROAD_WIDTH,
+        sidewalkWidth: hasSidewalks ? SIDEWALK_WIDTH : 0,
+        minimapRoadColor: style.minimapRoadColor,
+        minimapEdgeColor: style.minimapEdgeColor,
+    };
+}
+
+function createRoadMaterialSet() {
+    const roadMaterialSet = {};
+    const styleEntries = Object.entries(ROAD_STYLE_CONFIGS);
+
+    styleEntries.forEach(([styleKey, style]) => {
+        const verticalRoadTexture = createRoadSurfaceTexture(style.texture);
+        const horizontalRoadTexture = verticalRoadTexture.clone();
+        horizontalRoadTexture.center.set(0.5, 0.5);
+        horizontalRoadTexture.rotation = Math.PI * 0.5;
+        horizontalRoadTexture.needsUpdate = true;
+
+        const emissiveColor =
+            styleKey === 'boulevard' ? 0x1d3046 : styleKey === 'service' ? 0x142537 : 0x1a2a3b;
+        const emissiveIntensity =
+            styleKey === 'boulevard' ? 0.29 : styleKey === 'service' ? 0.2 : 0.24;
+
+        const verticalMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: verticalRoadTexture,
+            emissive: emissiveColor,
+            emissiveMap: verticalRoadTexture,
+            emissiveIntensity,
+            roughness: 0.9,
+            metalness: 0.05,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+            polygonOffsetUnits: -2,
+        });
+        const horizontalMaterial = verticalMaterial.clone();
+        horizontalMaterial.map = horizontalRoadTexture;
+        horizontalMaterial.emissiveMap = horizontalRoadTexture;
+        horizontalMaterial.polygonOffsetFactor = -3;
+        horizontalMaterial.polygonOffsetUnits = -3;
+
+        roadMaterialSet[styleKey] = {
+            vertical: verticalMaterial,
+            horizontal: horizontalMaterial,
+        };
+    });
+
+    return roadMaterialSet;
+}
+
+function createIntersectionMaterialSet() {
+    const variants = ['boulevard', 'standard', 'minor', 'charging'];
+    const materialSet = {};
+
+    variants.forEach((variant) => {
+        const texture = createIntersectionTexture({ variant });
+        const emissiveColor =
+            variant === 'charging' ? 0x1a4858 : variant === 'boulevard' ? 0x203249 : 0x152536;
+        const emissiveIntensity =
+            variant === 'charging' ? 0.36 : variant === 'minor' ? 0.24 : 0.31;
+        materialSet[variant] = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            map: texture,
+            emissive: emissiveColor,
+            emissiveMap: texture,
+            emissiveIntensity,
+            roughness: 0.88,
+            metalness: 0.06,
+            polygonOffset: true,
+            polygonOffsetFactor: -4,
+            polygonOffsetUnits: -4,
+        });
+    });
+
+    return materialSet;
+}
+
+function addBoulevardMedians(layer, lineDescriptors, intervals, orientation, y, medianMaterial) {
+    lineDescriptors.forEach((lineDescriptor) => {
+        if (lineDescriptor.styleKey !== 'boulevard') {
+            return;
+        }
+        intervals.forEach(([segmentStart, segmentEnd]) => {
+            const segmentLength = segmentEnd - segmentStart;
+            if (segmentLength <= 8) {
+                return;
+            }
+            const segmentCenter = (segmentStart + segmentEnd) * 0.5;
+            if (orientation === 'vertical') {
+                const median = new THREE.Mesh(
+                    new THREE.PlaneGeometry(0.46, segmentLength * 0.72),
+                    medianMaterial
+                );
+                median.rotation.x = -Math.PI / 2;
+                median.position.set(lineDescriptor.coordinate, y, segmentCenter);
+                layer.add(median);
+                return;
+            }
+
+            const median = new THREE.Mesh(
+                new THREE.PlaneGeometry(segmentLength * 0.72, 0.46),
+                medianMaterial
+            );
+            median.rotation.x = -Math.PI / 2;
+            median.position.set(segmentCenter, y, lineDescriptor.coordinate);
+            layer.add(median);
+        });
+    });
+}
+
+function resolveIntersectionVariant(xLineDescriptor, zLineDescriptor) {
+    const xStyle = xLineDescriptor.styleKey;
+    const zStyle = zLineDescriptor.styleKey;
+    const intersectionKey = toIntersectionKey(xLineDescriptor.coordinate, zLineDescriptor.coordinate);
+
+    if (chargingZoneIntersectionKeys.has(intersectionKey)) {
+        return 'charging';
+    }
+    if (xStyle === 'boulevard' || zStyle === 'boulevard') {
+        return 'boulevard';
+    }
+    if (xStyle === 'service' || zStyle === 'service') {
+        return 'minor';
+    }
+
+    const selector = hashGrid(xLineDescriptor.gridIndex, zLineDescriptor.gridIndex, 907) % 4;
+    if (selector === 0) {
+        return 'minor';
+    }
+    return 'standard';
+}
+
+function buildSidewalkIntervals(lineCoordinates, minCoordinate, maxCoordinate, gapHalfWidth) {
+    const intervals = [];
+    const gapPadding = 0.06;
+    let cursor = minCoordinate;
+    const sortedCoordinates = [...lineCoordinates].sort((a, b) => a - b);
+
+    sortedCoordinates.forEach((lineCoordinate) => {
+        const gapStart = Math.max(minCoordinate, lineCoordinate - gapHalfWidth - gapPadding);
+        const gapEnd = Math.min(maxCoordinate, lineCoordinate + gapHalfWidth + gapPadding);
+        if (gapStart - cursor > 0.04) {
+            intervals.push([cursor, gapStart]);
+        }
+        cursor = Math.max(cursor, gapEnd);
+    });
+
+    if (maxCoordinate - cursor > 0.04) {
+        intervals.push([cursor, maxCoordinate]);
+    }
+
+    return intervals;
 }
 
 function createBuildingLayer() {
@@ -890,7 +1417,7 @@ function createParkLayer() {
     return layer;
 }
 
-function createStreetLampLayer(lampLights) {
+function createStreetLampLayer(_lampLights) {
     const layer = new THREE.Group();
     const poleMaterial = new THREE.MeshStandardMaterial({
         color: 0x2f3948,
@@ -902,18 +1429,8 @@ function createStreetLampLayer(lampLights) {
         transparent: true,
         opacity: 0.9,
     });
-    const poolMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffd39a,
-        transparent: true,
-        opacity: 0.24,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-    });
-
     const poleGeometry = new THREE.CylinderGeometry(0.22, 0.24, 8.6, 10);
     const headGeometry = new THREE.SphereGeometry(0.46, 10, 10);
-    const poolGeometry = new THREE.CircleGeometry(6.2, 20);
 
     for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
         for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
@@ -941,25 +1458,7 @@ function createStreetLampLayer(lampLights) {
             lampHead.position.set(positionX, baseY + 8.6, positionZ);
             layer.add(lampHead);
 
-            const pool = new THREE.Mesh(poolGeometry, poolMaterial);
-            pool.position.set(positionX, baseY + 0.07, positionZ);
-            pool.rotation.x = -Math.PI / 2;
-            pool.scale.setScalar(0.9 + randomFromGrid(gridX, gridZ, 38) * 0.45);
-            layer.add(pool);
-
-            const canHaveLight =
-                Math.abs(gridX) <= LAMP_REAL_LIGHT_GRID_RADIUS &&
-                Math.abs(gridZ) <= LAMP_REAL_LIGHT_GRID_RADIUS;
-            const isAlternatingSlot = Math.abs(gridX + gridZ) % 6 === 1;
-            if (canHaveLight && isAlternatingSlot) {
-                const light = new THREE.PointLight(0xffd6a1, 1.12, 34, 2);
-                light.position.set(positionX, baseY + 8.2, positionZ);
-                light.userData.baseIntensity = 1.08 + randomFromGrid(gridX, gridZ, 21) * 0.34;
-                light.userData.flickerPhase = randomFromGrid(gridX, gridZ, 211) * Math.PI * 2;
-                light.castShadow = false;
-                lampLights.push(light);
-                layer.add(light);
-            }
+            // Street lamps keep only emissive lamp heads; no ground pool/point light spill.
         }
     }
 

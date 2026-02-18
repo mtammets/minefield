@@ -1263,6 +1263,14 @@ body.edit-mode-active #minimap {
     pointer-events: none;
 }
 
+body.city-builder-active #objectivePanel,
+body.city-builder-active #botPanel,
+body.city-builder-active #minimap,
+body.city-builder-active #multiplayerPanel {
+    opacity: 0;
+    pointer-events: none;
+}
+
 body.race-intro-active #objectivePanel,
 body.race-intro-active #botPanel,
 body.race-intro-active #minimap {
@@ -1444,6 +1452,254 @@ body.race-intro-active #minimap {
     padding: 6px 2px;
 }
 
+#cityBuilderPanel {
+    position: fixed;
+    left: 50%;
+    top: 12px;
+    transform: translateX(-50%);
+    z-index: 10;
+    width: min(1120px, calc(100vw - 24px));
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    border: 1px solid rgba(170, 225, 255, 0.46);
+    border-radius: 16px;
+    padding: 12px;
+    background: linear-gradient(162deg, rgba(8, 16, 30, 0.95), rgba(6, 11, 22, 0.94));
+    box-shadow:
+        0 22px 56px rgba(0, 0, 0, 0.48),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(8px);
+    color: rgba(226, 242, 255, 0.98);
+    font-family: 'Sora', sans-serif;
+    display: grid;
+    gap: 10px;
+}
+
+#cityBuilderPanel[hidden] {
+    display: none;
+}
+
+.cityBuilderHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.cityBuilderTitle {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 17px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    color: #edf8ff;
+}
+
+.cityBuilderHint {
+    margin-top: 3px;
+    font-size: 11px;
+    color: rgba(181, 216, 242, 0.9);
+}
+
+.cityBuilderCloseBtn {
+    border: 1px solid rgba(255, 177, 177, 0.68);
+    border-radius: 8px;
+    padding: 7px 12px;
+    background: linear-gradient(180deg, rgba(109, 46, 57, 0.68), rgba(76, 29, 39, 0.72));
+    color: #ffe6e6;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+    transition:
+        transform 130ms ease,
+        filter 130ms ease;
+}
+
+.cityBuilderWorkspace {
+    display: grid;
+    grid-template-columns: 194px minmax(0, 1fr);
+    gap: 12px;
+    align-items: start;
+}
+
+.cityBuilderPalette {
+    border: 1px solid rgba(143, 198, 255, 0.34);
+    border-radius: 12px;
+    padding: 9px;
+    background: linear-gradient(180deg, rgba(12, 23, 40, 0.88), rgba(9, 17, 31, 0.9));
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.cityBuilderPieceBtn {
+    position: relative;
+    border: 1px solid rgba(157, 208, 255, 0.34);
+    border-radius: 10px;
+    padding: 3px;
+    min-height: 86px;
+    background: linear-gradient(180deg, rgba(31, 59, 92, 0.76), rgba(19, 35, 56, 0.82));
+    cursor: grab;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.cityBuilderPieceBtn:active {
+    cursor: grabbing;
+    transform: scale(0.98);
+}
+
+.cityBuilderPieceBtn:hover,
+.cityBuilderCloseBtn:hover,
+.cityBuilderToolBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.07);
+}
+
+.cityBuilderPieceBtn.active {
+    border-color: rgba(214, 241, 255, 0.95);
+    box-shadow:
+        0 0 0 1px rgba(186, 234, 255, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.cityBuilderPieceIcon {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+}
+
+.cityBuilderPieceIndex {
+    position: absolute;
+    right: 6px;
+    top: 6px;
+    min-width: 18px;
+    min-height: 18px;
+    border-radius: 999px;
+    padding: 1px 5px;
+    border: 1px solid rgba(215, 239, 255, 0.56);
+    background: rgba(11, 25, 43, 0.78);
+    color: rgba(230, 247, 255, 0.96);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+}
+
+.cityBuilderMapWrap {
+    position: relative;
+    border: 1px solid rgba(145, 198, 255, 0.38);
+    border-radius: 12px;
+    padding: 10px;
+    background: linear-gradient(176deg, rgba(10, 21, 37, 0.9), rgba(7, 15, 29, 0.93));
+}
+
+.cityBuilderMapCanvas {
+    display: block;
+    width: min(76vh, 760px, 100%);
+    max-width: 100%;
+    margin: 0 auto;
+    aspect-ratio: 1 / 1;
+    border-radius: 11px;
+    border: 1px solid rgba(165, 214, 255, 0.46);
+    background: linear-gradient(180deg, rgba(12, 26, 45, 0.98), rgba(8, 18, 33, 0.98));
+    box-shadow:
+        inset 0 0 0 1px rgba(220, 243, 255, 0.06),
+        0 12px 30px rgba(0, 0, 0, 0.42);
+    touch-action: none;
+    cursor: crosshair;
+}
+
+.cityBuilderActivePreview {
+    position: absolute;
+    right: 14px;
+    bottom: 14px;
+    width: 68px;
+    height: 68px;
+    border-radius: 10px;
+    border: 1px solid rgba(183, 224, 255, 0.55);
+    background: rgba(9, 20, 34, 0.72);
+    box-shadow:
+        0 8px 20px rgba(0, 0, 0, 0.35),
+        inset 0 0 0 1px rgba(214, 239, 255, 0.15);
+}
+
+.cityBuilderFooter {
+    border: 1px solid rgba(145, 198, 255, 0.34);
+    border-radius: 11px;
+    padding: 8px;
+    background: rgba(9, 20, 36, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.cityBuilderTools {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 7px;
+    min-width: min(600px, 100%);
+}
+
+.cityBuilderToolBtn {
+    border: 1px solid rgba(160, 210, 255, 0.42);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(180deg, rgba(29, 58, 92, 0.76), rgba(20, 40, 64, 0.82));
+    color: #e6f5ff;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.7px;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.cityBuilderToolBtn.active {
+    border-color: rgba(255, 194, 194, 0.9);
+    background: linear-gradient(180deg, rgba(131, 54, 64, 0.76), rgba(95, 34, 44, 0.82));
+    color: #ffe6e6;
+    box-shadow: 0 0 0 1px rgba(255, 182, 182, 0.26);
+}
+
+.cityBuilderMeta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: rgba(184, 219, 244, 0.94);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+}
+
+.cityBuilderMeta span {
+    border: 1px solid rgba(155, 207, 255, 0.36);
+    border-radius: 999px;
+    padding: 5px 10px;
+    background: rgba(25, 50, 78, 0.42);
+}
+
+.cityBuilderDragGhost {
+    position: fixed;
+    z-index: 15;
+    width: 96px;
+    height: 96px;
+    pointer-events: none;
+    opacity: 0.94;
+    filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.38));
+}
+
 @media (max-width: 720px) {
     .welcomeCard {
         border-radius: 16px;
@@ -1539,6 +1795,51 @@ body.race-intro-active #minimap {
 
     .editModePartList {
         max-height: min(42vh, 300px);
+    }
+
+    #cityBuilderPanel {
+        left: 10px;
+        right: 10px;
+        top: 10px;
+        transform: none;
+        width: auto;
+        max-height: calc(100vh - 20px);
+        padding: 10px;
+    }
+
+    .cityBuilderWorkspace {
+        grid-template-columns: 1fr;
+        gap: 9px;
+    }
+
+    .cityBuilderMapWrap {
+        order: 1;
+    }
+
+    .cityBuilderPalette {
+        order: 2;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .cityBuilderPieceBtn {
+        min-height: 66px;
+    }
+
+    .cityBuilderActivePreview {
+        width: 56px;
+        height: 56px;
+        right: 10px;
+        bottom: 10px;
+    }
+
+    .cityBuilderFooter {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .cityBuilderTools {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        min-width: 0;
     }
 
     #multiplayerPanel {

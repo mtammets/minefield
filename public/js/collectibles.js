@@ -9,10 +9,10 @@ const ACTIVE_CELL_RADIUS = 6;
 const PICKUP_HEIGHT_ABOVE_GROUND = 1.35;
 
 const shapeGeometries = [
-    new THREE.IcosahedronGeometry(1.35, 0),
-    new THREE.OctahedronGeometry(1.25, 0),
-    new THREE.TetrahedronGeometry(1.35, 0),
-    new THREE.DodecahedronGeometry(1.2, 0),
+    new THREE.IcosahedronGeometry(0.92, 1),
+    new THREE.OctahedronGeometry(0.98, 1),
+    new THREE.DodecahedronGeometry(0.9, 1),
+    new THREE.TorusKnotGeometry(0.58, 0.19, 72, 10, 2, 3),
 ];
 
 const shapeColors = [0x7cf9ff, 0xff85f8, 0x8dff9a, 0xffd86b];
@@ -22,19 +22,59 @@ const pickupMaterials = shapeColors.map(
         new THREE.MeshStandardMaterial({
             color,
             emissive: color,
-            emissiveIntensity: 0.85,
-            metalness: 0.28,
-            roughness: 0.22,
+            emissiveIntensity: 0.95,
+            metalness: 0.16,
+            roughness: 0.18,
         })
 );
 
-const haloGeometry = new THREE.RingGeometry(1.7, 2.3, 28);
+const pickupShellGeometry = new THREE.IcosahedronGeometry(1.36, 2);
+const shellMaterials = shapeColors.map(
+    (color) =>
+        new THREE.MeshStandardMaterial({
+            color,
+            emissive: color,
+            emissiveIntensity: 0.22,
+            roughness: 0.24,
+            metalness: 0.14,
+            transparent: true,
+            opacity: 0.23,
+            depthWrite: false,
+        })
+);
+
+const pickupAccentGeometry = new THREE.OctahedronGeometry(0.34, 0);
+const accentMaterials = shapeColors.map((color) => {
+    const accentColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.42);
+    return new THREE.MeshBasicMaterial({
+        color: accentColor,
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+    });
+});
+
+const orbitGeometry = new THREE.TorusGeometry(1.14, 0.07, 12, 56);
+const orbitMaterials = shapeColors.map(
+    (color) =>
+        new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.34,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        })
+);
+
+const haloGeometry = new THREE.RingGeometry(1.78, 2.52, 40);
 const haloMaterials = shapeColors.map(
     (color) =>
         new THREE.MeshBasicMaterial({
             color,
             transparent: true,
-            opacity: 0.35,
+            opacity: 0.4,
             side: THREE.DoubleSide,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
@@ -673,15 +713,34 @@ function findCollectorInRange(pickupPosition, collectors) {
 }
 
 function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {
-    if (timeLeft >= blinkWindowSec) {
-        pickup.mesh.scale.setScalar(1);
-        return;
+    const liftWave = Math.sin(elapsedTime * 1.9 + pickup.floatOffset);
+    const microLift = Math.sin(elapsedTime * 4.6 + pickup.floatOffset * 1.6);
+    pickup.mesh.position.y = pickup.baseY + liftWave * 0.2 + microLift * 0.04;
+
+    pickup.mesh.rotation.y = pickup.baseRotationY + elapsedTime * pickup.spinSpeed;
+    pickup.core.rotation.x = elapsedTime * pickup.coreSpinX + pickup.floatOffset * 0.4;
+    pickup.core.rotation.z = elapsedTime * pickup.coreSpinZ;
+    pickup.shell.rotation.x = elapsedTime * pickup.shellSpinX + pickup.floatOffset * 0.35;
+    pickup.shell.rotation.y = elapsedTime * pickup.shellSpinY;
+    pickup.orbit.rotation.y = elapsedTime * pickup.orbitSpinY + pickup.floatOffset;
+    pickup.orbit.rotation.x =
+        Math.PI * 0.5 +
+        Math.sin(elapsedTime * pickup.orbitTiltSpeed + pickup.floatOffset * 1.2) * 0.28;
+
+    const idlePulse = 0.96 + (0.5 + Math.sin(elapsedTime * 2.8 + pickup.pulseOffset) * 0.5) * 0.09;
+    let blinkScale = 1;
+
+    if (timeLeft < blinkWindowSec) {
+        const urgency = 1 - THREE.MathUtils.clamp(timeLeft / blinkWindowSec, 0, 1);
+        const blink = 0.5 + Math.sin(elapsedTime * (8 + urgency * 14) + pickup.pulseOffset) * 0.5;
+        blinkScale = 0.88 + blink * 0.26 + urgency * 0.11;
     }
 
-    const urgency = 1 - THREE.MathUtils.clamp(timeLeft / blinkWindowSec, 0, 1);
-    const blink = 0.5 + Math.sin(elapsedTime * (8 + urgency * 14) + pickup.pulseOffset) * 0.5;
-    const pulseScale = 0.86 + blink * 0.28 + urgency * 0.06;
-    pickup.mesh.scale.setScalar(pulseScale);
+    const coreScale = idlePulse * blinkScale;
+    pickup.core.scale.setScalar(coreScale);
+    pickup.accent.scale.setScalar(0.9 + coreScale * 0.25);
+    pickup.halo.scale.setScalar(0.95 + coreScale * 0.12);
+    pickup.orbit.scale.setScalar(0.96 + coreScale * 0.08);
 }
 
 function createPickupForCell(
@@ -749,22 +808,60 @@ function hashCell(cellX, cellZ, salt, seedOffset = 0) {
 
 function createPickup(x, y, z, shapeIndex, rotYFactor = 0) {
     const color = shapeColors[shapeIndex];
-    const mesh = new THREE.Mesh(shapeGeometries[shapeIndex], pickupMaterials[shapeIndex]);
+    const mesh = new THREE.Group();
     mesh.position.set(x, y, z);
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
     mesh.rotation.set(0, rotYFactor * Math.PI * 2, 0);
+
+    const shell = new THREE.Mesh(pickupShellGeometry, shellMaterials[shapeIndex]);
+    shell.castShadow = false;
+    shell.receiveShadow = false;
+    mesh.add(shell);
+
+    const core = new THREE.Mesh(shapeGeometries[shapeIndex], pickupMaterials[shapeIndex]);
+    core.castShadow = false;
+    core.receiveShadow = false;
+    mesh.add(core);
+
+    const accent = new THREE.Mesh(pickupAccentGeometry, accentMaterials[shapeIndex]);
+    accent.castShadow = false;
+    accent.receiveShadow = false;
+    mesh.add(accent);
+
+    const orbit = new THREE.Mesh(orbitGeometry, orbitMaterials[shapeIndex]);
+    orbit.castShadow = false;
+    orbit.receiveShadow = false;
+    orbit.rotation.x = Math.PI * 0.5;
+    mesh.add(orbit);
 
     const halo = new THREE.Mesh(haloGeometry, haloMaterials[shapeIndex]);
     halo.rotation.x = Math.PI / 2;
-    halo.position.y = -1.2;
+    halo.position.y = -1.06;
     mesh.add(halo);
+
+    const phase = rotYFactor * Math.PI * 2;
+    const speedVarianceA = (Math.sin(phase * 1.77) + 1) * 0.5;
+    const speedVarianceB = (Math.cos(phase * 2.31) + 1) * 0.5;
 
     return {
         mesh,
+        core,
+        shell,
+        accent,
+        orbit,
         halo,
         color,
         shapeIndex,
+        baseY: y,
+        baseRotationY: phase,
+        floatOffset: phase,
+        spinSpeed: 0.7 + speedVarianceA * 0.75,
+        coreSpinX: 1 + speedVarianceB * 0.8,
+        coreSpinZ: 0.75 + speedVarianceA * 0.7,
+        shellSpinX: 0.32 + speedVarianceB * 0.24,
+        shellSpinY: -0.26 - speedVarianceA * 0.22,
+        orbitSpinY: 1.5 + speedVarianceB * 1.25,
+        orbitTiltSpeed: 1.85 + speedVarianceA * 0.9,
+        pulseOffset: phase * 0.7,
     };
 }
 

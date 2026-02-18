@@ -32,6 +32,7 @@ export function createGameSessionController({
     welcomeModalUi,
     raceIntroController,
     carEditModeController,
+    cityBuilderController,
     chargingZoneController,
     chargingProgressHudController,
     skidMarkController,
@@ -134,12 +135,14 @@ export function createGameSessionController({
         setMultiplayerPanelVisible(mode === 'online');
         setIsWelcomeModalVisible(false);
         carEditModeController.setActive(false);
+        cityBuilderController?.setActive?.(false);
         welcomeModalUi.hide();
         restartGameWithCountdown();
     }
 
     function showWelcomeModal() {
         carEditModeController.setActive(false);
+        cityBuilderController?.setActive?.(false);
         raceIntroController.stop();
         setIsWelcomeModalVisible(true);
         setIsGamePaused(true);
@@ -365,7 +368,9 @@ export function createGameSessionController({
                 ? 'a building'
                 : collision.obstacleCategory === 'tree'
                   ? 'a tree'
-                  : 'a lamp post';
+                  : collision.obstacleCategory === 'lamp_post'
+                    ? 'a lamp post'
+                    : 'an obstacle';
         const speedLabel = Math.round(collision.impactSpeed);
         triggerCarExplosion(collision.position, 0xffa66b, 0xff4b4b, {
             statusText: `You hit ${obstacleLabel} at high speed (${speedLabel}).`,
@@ -374,6 +379,7 @@ export function createGameSessionController({
     }
 
     function resetRunStateForReplay() {
+        cityBuilderController?.setActive?.(false);
         raceIntroController.stop();
         setCameraKeyboardControlsEnabled(true);
         clearPendingRespawn();
@@ -404,6 +410,7 @@ export function createGameSessionController({
     function startNewGame() {
         raceIntroController.stop();
         carEditModeController.setActive(false);
+        cityBuilderController?.setActive?.(false);
         setCameraKeyboardControlsEnabled(true);
         setPauseState(false);
         replayController.stopRecording();

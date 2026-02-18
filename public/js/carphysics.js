@@ -1,4 +1,5 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { OBSTACLE_CRASH_MIN_SPEED } from './constants.js';
 
 export const keys = {
     forward: false,
@@ -25,6 +26,8 @@ const TUNING = {
     coastAerodynamicScale: 0.85,
     throttleRise: 8.6,
     throttleFall: 7.4,
+    lowSpeedThrottleRiseFadeSpeed: 9.5,
+    lowSpeedThrottleRiseScale: 0.58,
     brakeRise: 24,
     brakeFall: 12.5,
     holdRampTime: 1.1,
@@ -49,6 +52,9 @@ const TUNING = {
     steerFadeSpeed: 52,
     steerResponse: 10.8,
     steerReturn: 13.2,
+    lowSpeedSteerWeightFadeSpeed: 10,
+    lowSpeedSteerInputScale: 0.72,
+    lowSpeedSteerResponseScale: 0.62,
     steerResistanceStartSpeed: 26,
     steerResistanceFullSpeed: 82,
     highSpeedSteerInputScale: 0.9,
@@ -85,6 +91,9 @@ const TUNING = {
     handbrakeBrakeRise: 46,
 
     launchSlipFadeSpeed: 15,
+    lowSpeedLaunchFadeSpeed: 12,
+    lowSpeedLaunchThrottleCurve: 1.45,
+    lowSpeedLaunchBoostScale: 0.7,
     launchSlipRise: 3.1,
     launchSlipFall: 9.6,
     launchAccelNorm: 52,
@@ -108,12 +117,22 @@ const TUNING = {
     vehicleImpactSpeedDamping: 0.9,
     vehicleImpactYawDamping: 0.86,
     vehicleImpactResponse: 0.74,
-    crashSpeedThreshold: 38,
+    crashSpeedThreshold: OBSTACLE_CRASH_MIN_SPEED,
 };
 const TOP_SPEED_LIMIT_TUNING = {
     stepKph: 5,
     minKph: 50,
     maxKph: 220,
+};
+const AUTOMATIC_TRANSMISSION = {
+    enabled: true,
+    gearTopSpeedsKph: [34, 62, 94, 128, 164, 200],
+    gearForceScales: [1.18, 1.04, 0.92, 0.84, 0.78, 0.72],
+    upshiftWindowRatio: 0.9,
+    upshiftBaseDelaySec: 0.34,
+    downshiftHysteresisKph: 9,
+    capRiseRateKphPerSec: 210,
+    capFallRateKphPerSec: 320,
 };
 
 const VEHICLE_COLLISION_RADIUS = 1.34;
@@ -168,6 +187,9 @@ const vehicleState = {
     terrainGrounded: 1,
     topSpeedLimitKph: TOP_SPEED_LIMIT_TUNING.maxKph,
     topSpeedLimitPercent: 100,
+    autoGearIndex: 0,
+    autoShiftTimerSec: 0,
+    autoTransmissionSpeedCapKph: AUTOMATIC_TRANSMISSION.gearTopSpeedsKph[0],
 };
 
 const forward = new THREE.Vector2();
@@ -356,6 +378,9 @@ export function initializePlayerPhysics(player) {
     vehicleState.terrainGrounded = 1;
     vehicleState.topSpeedLimitKph = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph);
     vehicleState.topSpeedLimitPercent = getTopSpeedLimitPercent(vehicleState.topSpeedLimitKph);
+    vehicleState.autoGearIndex = 0;
+    vehicleState.autoShiftTimerSec = 0;
+    vehicleState.autoTransmissionSpeedCapKph = AUTOMATIC_TRANSMISSION.gearTopSpeedsKph[0];
 
     physicsPosition.copy(player.position);
     previousPhysicsPosition.copy(player.position);
@@ -555,7 +580,7 @@ export function updatePlayerPhysics(
         worldBounds,
         staticObstacles,
         dynamicVehicles,
-        Math.abs(vehicleState.speed)
+        vehicleState.velocity.length()
     );
     if (typeof sampleGroundHeight === 'function') {
         applyTerrainSupport(sampleGroundHeight, dt);
@@ -745,15 +770,14 @@ function constrainToObstacles(position, staticObstacles, impactSpeed = 0) {
         vehicleState.speed = 0;
     }
 
-    if (
-        impactSpeed >= TUNING.crashSpeedThreshold &&
-        (collidedWithBuilding || collidedWithLampPost || collidedWithTree)
-    ) {
+    if (impactSpeed >= TUNING.crashSpeedThreshold) {
         const obstacleCategory = collidedWithBuilding
             ? 'building'
             : collidedWithLampPost
               ? 'lamp_post'
-              : 'tree';
+              : collidedWithTree
+                ? 'tree'
+                : 'generic';
         if (!pendingCrashCollision || impactSpeed > pendingCrashCollision.impactSpeed) {
             pendingCrashCollision = {
                 obstacleCategory,
@@ -1119,21 +1143,28 @@ function constrainToWorld(position, worldBounds) {
 
     let hitX = false;
     let hitZ = false;
+    const preImpactSpeed = vehicleState.velocity.length();
+    let worldNormalX = 0;
+    let worldNormalZ = 0;
 
     if (position.x < worldBounds.minX) {
         position.x = worldBounds.minX;
         hitX = true;
+        worldNormalX = 1;
     } else if (position.x > worldBounds.maxX) {
         position.x = worldBounds.maxX;
         hitX = true;
+        worldNormalX = -1;
     }
 
     if (position.z < worldBounds.minZ) {
         position.z = worldBounds.minZ;
         hitZ = true;
+        worldNormalZ = 1;
     } else if (position.z > worldBounds.maxZ) {
         position.z = worldBounds.maxZ;
         hitZ = true;
+        worldNormalZ = -1;
     }
 
     if (!hitX && !hitZ) {
@@ -1154,11 +1185,43 @@ function constrainToWorld(position, worldBounds) {
     if (Math.abs(vehicleState.speed) < 0.2) {
         vehicleState.speed = 0;
     }
+
+    if (preImpactSpeed < TUNING.crashSpeedThreshold) {
+        return;
+    }
+
+    if (worldNormalX === 0 && worldNormalZ === 0) {
+        return;
+    }
+
+    const normalLength = Math.hypot(worldNormalX, worldNormalZ);
+    const normalX = worldNormalX / normalLength;
+    const normalZ = worldNormalZ / normalLength;
+    if (!pendingCrashCollision || preImpactSpeed > pendingCrashCollision.impactSpeed) {
+        pendingCrashCollision = {
+            obstacleCategory: 'building',
+            impactSpeed: preImpactSpeed,
+            position: position.clone(),
+            impactNormal: new THREE.Vector3(normalX, 0, normalZ),
+        };
+    }
 }
 
 function updateDriverInputs(dt) {
     const steerDirection = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
     const speedAbs = vehicleState.velocity.length();
+    const lowSpeedSteerWeight = 1 -
+        THREE.MathUtils.clamp(speedAbs / TUNING.lowSpeedSteerWeightFadeSpeed, 0, 1);
+    const lowSpeedInputScale = THREE.MathUtils.lerp(
+        1,
+        TUNING.lowSpeedSteerInputScale,
+        lowSpeedSteerWeight
+    );
+    const lowSpeedResponseScale = THREE.MathUtils.lerp(
+        1,
+        TUNING.lowSpeedSteerResponseScale,
+        lowSpeedSteerWeight
+    );
     const highSpeedSteerResistance = THREE.MathUtils.clamp(
         (speedAbs - TUNING.steerResistanceStartSpeed) /
             (TUNING.steerResistanceFullSpeed - TUNING.steerResistanceStartSpeed),
@@ -1168,6 +1231,7 @@ function updateDriverInputs(dt) {
 
     const steerTarget =
         steerDirection *
+        lowSpeedInputScale *
         THREE.MathUtils.lerp(1, TUNING.highSpeedSteerInputScale, highSpeedSteerResistance);
 
     if (steerTarget === 0) {
@@ -1185,6 +1249,7 @@ function updateDriverInputs(dt) {
         steerTarget === 0
             ? TUNING.steerReturn
             : TUNING.steerResponse *
+              lowSpeedResponseScale *
               THREE.MathUtils.lerp(1, TUNING.highSpeedSteerResponseScale, highSpeedSteerResistance);
     const directionSnapBoost =
         Math.sign(steerTarget) !== Math.sign(vehicleState.steerInput) ? 1.35 : 1;
@@ -1214,7 +1279,19 @@ function updateDriverInputs(dt) {
         targetBrake = 1;
     }
 
-    const throttleRate = targetThrottle === 0 ? TUNING.throttleFall : TUNING.throttleRise;
+    const lowSpeedThrottleWeight =
+        1 - THREE.MathUtils.clamp(speedAbs / TUNING.lowSpeedThrottleRiseFadeSpeed, 0, 1);
+    const forwardThrottleRiseScale = THREE.MathUtils.lerp(
+        1,
+        TUNING.lowSpeedThrottleRiseScale,
+        lowSpeedThrottleWeight
+    );
+    const throttleRate =
+        targetThrottle === 0
+            ? TUNING.throttleFall
+            : targetThrottle > 0
+              ? TUNING.throttleRise * forwardThrottleRiseScale
+              : TUNING.throttleRise;
     const brakeRate =
         targetBrake === 0
             ? TUNING.brakeFall
@@ -1241,6 +1318,7 @@ function updateDriverInputs(dt) {
         1
     );
     vehicleState.powerBoost = 1 + holdRatio * TUNING.holdBoost;
+    updateAutomaticTransmission(dt);
 }
 
 function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
@@ -1251,14 +1329,34 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
     const powerScale = damageDynamics.powerScale;
 
     if (vehicleState.throttle > 0) {
+        const forwardDriveScale = getAutomaticForwardDriveScale();
+        const throttleForward = THREE.MathUtils.clamp(vehicleState.throttle, 0, 1);
+        const lowSpeedLaunchWeight =
+            1 - THREE.MathUtils.clamp(Math.abs(longitudinalSpeed) / TUNING.lowSpeedLaunchFadeSpeed, 0, 1);
+        const easedThrottleForward = Math.pow(
+            throttleForward,
+            TUNING.lowSpeedLaunchThrottleCurve
+        );
+        const effectiveThrottleForward = THREE.MathUtils.lerp(
+            throttleForward,
+            easedThrottleForward,
+            lowSpeedLaunchWeight
+        );
         const speedNorm = THREE.MathUtils.clamp(longitudinalSpeed / maxForwardSpeed, 0, 1);
         const thrustCurve = 1 - Math.pow(speedNorm, 1.35);
-        const launchBoost = Math.exp(-Math.abs(longitudinalSpeed) / 6.2) * TUNING.launchBoost;
+        const launchBoostScale = THREE.MathUtils.lerp(
+            1,
+            TUNING.lowSpeedLaunchBoostScale,
+            lowSpeedLaunchWeight
+        );
+        const launchBoost =
+            Math.exp(-Math.abs(longitudinalSpeed) / 6.2) * TUNING.launchBoost * launchBoostScale;
         force +=
             (TUNING.engineAcceleration * (0.42 + thrustCurve * 0.58) + launchBoost) *
-            vehicleState.throttle *
+            effectiveThrottleForward *
             vehicleState.powerBoost *
-            powerScale;
+            powerScale *
+            forwardDriveScale;
     } else if (vehicleState.throttle < 0) {
         const reverseNorm = THREE.MathUtils.clamp(-longitudinalSpeed / maxReverseSpeed, 0, 1);
         const reverseCurve = 1 - Math.pow(reverseNorm, 1.15);
@@ -1655,8 +1753,88 @@ function getBrakeSlideFactor(longitudinalSpeed, lateralSpeed) {
 function getEffectiveForwardSpeedLimit(maxSpeedScale = 1) {
     const tuningLimit = TOP_SPEED_LIMIT_TUNING.maxKph / 3.6;
     const playerLimit = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph) / 3.6;
-    const cappedForwardLimit = Math.min(tuningLimit, playerLimit);
+    const automaticLimit = getAutomaticForwardSpeedLimitMps();
+    const cappedForwardLimit = Math.min(tuningLimit, playerLimit, automaticLimit);
     return Math.max(1, cappedForwardLimit * Math.max(0, maxSpeedScale));
+}
+
+function updateAutomaticTransmission(dt) {
+    if (!AUTOMATIC_TRANSMISSION.enabled) {
+        return;
+    }
+
+    const gearTopSpeeds = AUTOMATIC_TRANSMISSION.gearTopSpeedsKph;
+    const maxGearIndex = gearTopSpeeds.length - 1;
+    let gearIndex = THREE.MathUtils.clamp(Math.floor(vehicleState.autoGearIndex || 0), 0, maxGearIndex);
+    const speedKph = Math.abs(vehicleState.speed || 0) * 3.6;
+    const forwardThrottle = THREE.MathUtils.clamp(vehicleState.throttle || 0, 0, 1);
+    const isForwardDriveIntent =
+        keys.forward && !keys.backward && !keys.handbrake && forwardThrottle > 0.08;
+
+    while (
+        gearIndex > 0 &&
+        speedKph < gearTopSpeeds[gearIndex - 1] - AUTOMATIC_TRANSMISSION.downshiftHysteresisKph
+    ) {
+        gearIndex -= 1;
+    }
+
+    if (isForwardDriveIntent && gearIndex < maxGearIndex) {
+        const gearTopKph = gearTopSpeeds[gearIndex];
+        const shiftWindowStartKph = gearTopKph * AUTOMATIC_TRANSMISSION.upshiftWindowRatio;
+        if (speedKph >= shiftWindowStartKph) {
+            const shiftDelay = THREE.MathUtils.lerp(
+                AUTOMATIC_TRANSMISSION.upshiftBaseDelaySec * 1.25,
+                AUTOMATIC_TRANSMISSION.upshiftBaseDelaySec * 0.7,
+                forwardThrottle
+            );
+            vehicleState.autoShiftTimerSec += dt;
+            if (vehicleState.autoShiftTimerSec >= shiftDelay) {
+                gearIndex = Math.min(maxGearIndex, gearIndex + 1);
+                vehicleState.autoShiftTimerSec = 0;
+            }
+        } else {
+            vehicleState.autoShiftTimerSec = Math.max(0, vehicleState.autoShiftTimerSec - dt * 2.5);
+        }
+    } else {
+        vehicleState.autoShiftTimerSec = 0;
+    }
+
+    vehicleState.autoGearIndex = gearIndex;
+    const targetCapKph = gearTopSpeeds[gearIndex];
+    const currentCapKph = Number.isFinite(vehicleState.autoTransmissionSpeedCapKph)
+        ? vehicleState.autoTransmissionSpeedCapKph
+        : gearTopSpeeds[0];
+    const capRate =
+        targetCapKph > currentCapKph
+            ? AUTOMATIC_TRANSMISSION.capRiseRateKphPerSec
+            : AUTOMATIC_TRANSMISSION.capFallRateKphPerSec;
+    vehicleState.autoTransmissionSpeedCapKph = moveToward(
+        currentCapKph,
+        targetCapKph,
+        capRate * dt
+    );
+}
+
+function getAutomaticForwardSpeedLimitMps() {
+    if (!AUTOMATIC_TRANSMISSION.enabled) {
+        return Number.POSITIVE_INFINITY;
+    }
+    const maxAutomaticKph =
+        AUTOMATIC_TRANSMISSION.gearTopSpeedsKph[AUTOMATIC_TRANSMISSION.gearTopSpeedsKph.length - 1];
+    const capKph = Number.isFinite(vehicleState.autoTransmissionSpeedCapKph)
+        ? vehicleState.autoTransmissionSpeedCapKph
+        : maxAutomaticKph;
+    return Math.max(1, THREE.MathUtils.clamp(capKph, 1, maxAutomaticKph) / 3.6);
+}
+
+function getAutomaticForwardDriveScale() {
+    if (!AUTOMATIC_TRANSMISSION.enabled) {
+        return 1;
+    }
+    const scales = AUTOMATIC_TRANSMISSION.gearForceScales;
+    const maxGearIndex = scales.length - 1;
+    const gearIndex = THREE.MathUtils.clamp(Math.floor(vehicleState.autoGearIndex || 0), 0, maxGearIndex);
+    return scales[gearIndex] ?? 1;
 }
 
 function clampTopSpeedLimitKph(speedKph) {

@@ -10,6 +10,7 @@ export const COLOR_NAMES = {
 
 export const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
 export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
+export const CITY_LAYOUT_STORAGE_KEY = 'silentdrift-city-layout-v1';
 export const CAR_COLOR_PRESETS = [
     { hex: 0x2d67a6, name: 'Cobalt Blue' },
     { hex: 0xd34545, name: 'Racing Red' },
@@ -40,7 +41,7 @@ export const WHEEL_ROLL_DRIVE_MAX = 9.8;
 export const WHEEL_ORIENTATION_ALIGN_RATE = 14;
 export const BODY_PANEL_ORIENTATION_ALIGN_RATE = 9.5;
 
-export const OBSTACLE_CRASH_MIN_SPEED = 38;
+export const OBSTACLE_CRASH_MIN_SPEED = 28;
 export const OBSTACLE_CRASH_MAX_SPEED = 84;
 export const VEHICLE_DAMAGE_COLLISION_MIN = 8;
 export const VEHICLE_DAMAGE_COLLISION_MED = 14;

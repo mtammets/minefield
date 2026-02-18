@@ -23,6 +23,18 @@ Open `http://localhost:3000`.
 
 - Remote players appear in the world and on the minimap in real time.
 
+## City Builder (Local Per User)
+
+- Press `B` to open/close the 2D map editor.
+- Drag piece icons from the palette onto the map (or paint with left click/drag).
+- Erase with right click/drag.
+- Press `R` to rotate the selected piece.
+- Press `X` to toggle erase mode.
+- Press `[` / `]` to switch piece type quickly.
+- Press number keys `1-7` to pick a piece directly.
+- Layout is saved in browser `localStorage` per user/device/browser profile.
+- Use `CLEAR` in the panel to remove your custom map and return to default city.
+
 ## Quality Workflow
 
 ```bash

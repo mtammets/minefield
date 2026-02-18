@@ -43,6 +43,7 @@ import {
     resetCameraTrackingState,
 } from './camera.js';
 import { createCarEditModeController } from './editmode.js';
+import { createCityBuilderController } from './city-builder.js';
 import {
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
@@ -174,6 +175,7 @@ const skidMarkController = createSkidMarkController(scene, {
     sampleGroundHeight: getGroundHeightAt,
     keys,
 });
+let cityBuilderController = null;
 const carEditModeController = createCarEditModeController({
     camera,
     car,
@@ -184,9 +186,29 @@ const carEditModeController = createCarEditModeController({
     captureEditablePartVisibility: capturePlayerCarPartVisibility,
     restoreEditablePartVisibility: restorePlayerCarPartVisibility,
     onEditModeChanged(isActive) {
-        setCameraKeyboardControlsEnabled(!isActive);
+        setCameraKeyboardControlsEnabled(!(isActive || cityBuilderController?.isActive?.()));
         runtimeState.gameSessionController?.clearDriveKeys();
         if (isActive) {
+            cityBuilderController?.setActive(false);
+            runtimeState.gameSessionController?.setPauseState(false);
+        }
+    },
+    onStatus(messageText) {
+        objectiveUi.showInfo(messageText, 1800);
+    },
+});
+cityBuilderController = createCityBuilderController({
+    scene,
+    camera,
+    canvas: renderer.domElement,
+    cityScenery,
+    staticObstacles,
+    cityMapLayout,
+    onModeChanged(isActive) {
+        setCameraKeyboardControlsEnabled(!(isActive || carEditModeController.isActive()));
+        runtimeState.gameSessionController?.clearDriveKeys();
+        if (isActive) {
+            carEditModeController.setActive(false);
             runtimeState.gameSessionController?.setPauseState(false);
         }
     },
@@ -319,6 +341,7 @@ runtimeState.gameSessionController = createGameSessionController({
     welcomeModalUi,
     raceIntroController,
     carEditModeController,
+    cityBuilderController,
     chargingZoneController,
     chargingProgressHudController,
     skidMarkController,
@@ -405,6 +428,7 @@ runtimeState.inputController = createInputController({
     welcomeModalUi,
     finalScoreboardUi,
     carEditModeController,
+    cityBuilderController,
     raceIntroController,
     replayController,
     getVehicleState,
@@ -478,6 +502,7 @@ runtimeState.gameLoopController = createGameLoopController({
     car,
     sunLight,
     carEditModeController,
+    cityBuilderController,
     raceIntroController,
     chargingZoneController,
     chargingProgressHudController,
