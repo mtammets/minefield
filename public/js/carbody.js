@@ -144,7 +144,6 @@ function addLightsToCar(car, lightConfig = {}) {
         enableNearFillProjectors = true,
         enableFacadeFillProjectors = true,
         enableTaillightPointLights = true,
-        enableAccentPointLights = true,
         accentLedColor = ACCENT_LED_COLOR,
         accentLedSecondaryColor = ACCENT_LED_SECONDARY_COLOR,
         accentBaseEmissive = 0.95,
@@ -152,9 +151,6 @@ function addLightsToCar(car, lightConfig = {}) {
         accentPulseSpeed = 4.2,
         accentPulseDepth = 0.12,
         accentGlowOpacity = 0.1,
-        accentPointIntensity = 0.58,
-        accentPointDistance = 8,
-        accentPointDecay = 2.2,
     } = lightConfig;
     const headlightProjectorLights = [];
     const headlightLensMeshes = [];
@@ -165,8 +161,6 @@ function addLightsToCar(car, lightConfig = {}) {
     const accentStripBaseColors = [];
     const accentGlowMaterials = [];
     const accentGlowBaseColors = [];
-    const accentPointLights = [];
-    const accentPointBaseColors = [];
     const accentPulseOffsets = [];
     const accentChargeFlowMeshes = [];
     const accentChargeFlowMaterials = [];
@@ -210,8 +204,7 @@ function addLightsToCar(car, lightConfig = {}) {
         return light;
     };
 
-    const createLightMesh = (GeometryType, color, emissive, emissiveIntensity, position, rotation = null) => {
-        const geometry = new GeometryType();
+    const createLightMesh = (geometry, color, emissive, emissiveIntensity, position, rotation = null) => {
         const material = createMaterial({ color, emissive, emissiveIntensity });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(...position);
@@ -267,7 +260,7 @@ function addLightsToCar(car, lightConfig = {}) {
             }
         }
         const headlightLens = createLightMesh(
-            THREE.BoxGeometry.bind(null, 0.22, 0.1, 0.08),
+            new THREE.BoxGeometry(0.22, 0.1, 0.08),
             headlightColor,
             headlightColor,
             3.1,
@@ -290,7 +283,7 @@ function addLightsToCar(car, lightConfig = {}) {
             taillightPointLights.push(taillight);
         }
         const taillightLens = createLightMesh(
-            THREE.BoxGeometry.bind(null, 0.2, 0.1, 0.1),
+            createRoundedBoxGeometry(0.2, 0.1, 0.1, 0.018, 4),
             taillightColor,
             taillightColor,
             TAILLIGHT_RUNNING_EMISSIVE,
@@ -364,9 +357,13 @@ function addLightsToCar(car, lightConfig = {}) {
     }
 
     function createAccentLighting() {
+        const bodyCoreHalfWidth = 1.22 * 0.5;
+        const sideStripThickness = 0.016;
+        const sideStripOutset = 0.04;
+        const sideStripX = bodyCoreHalfWidth + sideStripThickness * 0.5 + sideStripOutset;
         const stripLayouts = [
-            { size: [0.016, 0.022, 2.88], position: [-0.632, 0.43, 0.03], color: accentLedColor, pulseOffset: 0.2, glowAxis: 'z' },
-            { size: [0.016, 0.022, 2.88], position: [0.632, 0.43, 0.03], color: accentLedColor, pulseOffset: 1.4, glowAxis: 'z' },
+            { size: [sideStripThickness, 0.022, 2.88], position: [-sideStripX, 0.43, 0.03], color: accentLedColor, pulseOffset: 0.2, glowAxis: 'z' },
+            { size: [sideStripThickness, 0.022, 2.88], position: [sideStripX, 0.43, 0.03], color: accentLedColor, pulseOffset: 1.4, glowAxis: 'z' },
             { size: [0.64, 0.018, 0.016], position: [0, 0.54, -1.94], color: accentLedColor, pulseOffset: 2.2, glowAxis: 'x' },
         ];
 
@@ -392,18 +389,13 @@ function addLightsToCar(car, lightConfig = {}) {
                 depthWrite: false,
                 toneMapped: false,
             });
-            const glowGeometry = glowAxis === 'z'
-                ? new THREE.PlaneGeometry(size[2] * 1.05, size[1] * 5.2)
-                : new THREE.PlaneGeometry(size[0] * 1.12, size[1] * 5.4);
-            const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
-            glowMesh.position.copy(stripMesh.position);
-            if (glowAxis === 'z') {
-                glowMesh.rotation.y = Math.PI / 2;
-                glowMesh.position.x += Math.sign(position[0]) * 0.011;
-            } else {
+            if (glowAxis !== 'z') {
+                const glowGeometry = new THREE.PlaneGeometry(size[0] * 1.12, size[1] * 5.4);
+                const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
+                glowMesh.position.copy(stripMesh.position);
                 glowMesh.position.z += Math.sign(position[2]) * 0.007;
+                car.add(glowMesh);
             }
-            car.add(glowMesh);
 
             if (glowAxis === 'z') {
                 const flowMaterial = new THREE.MeshBasicMaterial({
@@ -444,22 +436,6 @@ function addLightsToCar(car, lightConfig = {}) {
             accentPulseOffsets.push(pulseOffset);
         });
 
-        if (enableAccentPointLights) {
-            [
-                { position: [-0.53, 0.28, 0.08], color: accentLedColor },
-                { position: [0.53, 0.28, 0.08], color: accentLedColor },
-            ].forEach(({ position, color }) => {
-                const light = createPoint({
-                    color,
-                    intensity: accentPointIntensity,
-                    distance: accentPointDistance,
-                    decay: accentPointDecay,
-                    position,
-                });
-                accentPointLights.push(light);
-                accentPointBaseColors.push(new THREE.Color(color));
-            });
-        }
     }
 
     function applyAccentLighting(vehicleState, dt, powerBlend = 1) {
@@ -502,19 +478,6 @@ function addLightsToCar(car, lightConfig = {}) {
             material.color
                 .copy(accentGlowBaseColors[index])
                 .lerp(accentChargeColor, chargingBoost * (0.52 + chargeWave * 0.36));
-        });
-
-        accentPointLights.forEach((light, index) => {
-            const wave = 0.86 + 0.14 * Math.sin(accentState.phase * 1.14 + index * 1.8);
-            const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.4 + index * 1.26);
-            light.intensity = accentPointIntensity
-                * wave
-                * (0.82 + activity * 0.44 + chargingBoost * (0.88 + chargeWave * 0.52))
-                * clampedPower;
-            light.distance = accentPointDistance * (0.92 + speedRatio * 0.12 + chargingBoost * 0.24) * clampedPower;
-            light.color
-                .copy(accentPointBaseColors[index])
-                .lerp(accentChargeColor, chargingBoost * (0.54 + chargeWave * 0.34));
         });
 
         accentChargeFlowMeshes.forEach((entry, index) => {
@@ -669,17 +632,33 @@ function addLuxuryBody(car, bodyConfig = {}) {
 function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
     const markerGroup = new THREE.Group();
     markerGroup.name = 'wireless_charge_marker_group';
+    const underbodyMarkerDrop = Math.max(0.064, bodyDimensions.height * 0.12);
     markerGroup.position.set(
         0,
-        0.56 - bodyDimensions.height * 0.5 - 0.008,
+        0.56 - bodyDimensions.height * 0.5 - underbodyMarkerDrop,
         0.06
     );
     markerGroup.rotation.x = Math.PI * 0.5;
     parent.add(markerGroup);
 
-    const outerRadius = Math.min(Math.max(bodyDimensions.width * 0.45, 0.46), 0.56);
+    const outerRadius = Math.min(Math.max(bodyDimensions.width * 0.34, 0.36), 0.44);
     const innerRadius = outerRadius * 0.66;
-    const coreRadius = innerRadius * 0.72;
+    const coreRadius = innerRadius * 0.55;
+    const markerBaseThickness = 0.012;
+
+    const basePlate = new THREE.Mesh(
+        new THREE.CylinderGeometry(outerRadius * 1.02, outerRadius * 1.06, markerBaseThickness, 56),
+        new THREE.MeshStandardMaterial({
+            color: 0x0b1624,
+            emissive: 0x12324a,
+            emissiveIntensity: 0.2,
+            metalness: 0.62,
+            roughness: 0.38,
+        })
+    );
+    basePlate.rotation.x = Math.PI * 0.5;
+    basePlate.position.z = -markerBaseThickness * 0.5;
+    markerGroup.add(basePlate);
 
     const haloMaterial = new THREE.MeshBasicMaterial({
         color: WIRELESS_CHARGE_GLOW_COLOR,
