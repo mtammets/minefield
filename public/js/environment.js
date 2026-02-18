@@ -14,157 +14,23 @@ const LAMP_REAL_LIGHT_GRID_RADIUS = 1;
 const BUILDING_DISTRICT_RADIUS = 3;
 const WORLD_HALF_SIZE = CITY_GRID_SPACING * (CITY_GRID_RANGE + 0.5);
 const TERRAIN_SEGMENTS = 120;
-const JUMP_RAMP_SURFACE_Y = 0.046;
-const JUMP_RAMPS = [
-    createJumpRampConfig({
-        x: 0,
-        z: -168,
-        headingDeg: 0,
-        height: 1.08,
-        approachLength: 8.2,
-        tableLength: 4.2,
-        width: 8.2,
-        sideFade: 1.2,
-    }),
-    createJumpRampConfig({
-        x: 0,
-        z: -84,
-        headingDeg: 0,
-        height: 1.14,
-        approachLength: 8.7,
-        tableLength: 4.2,
-        width: 8.6,
-        sideFade: 1.3,
-    }),
-    createJumpRampConfig({
-        x: -84,
-        z: -84,
-        headingDeg: 90,
-        height: 0.98,
-        approachLength: 7.8,
-        tableLength: 3.8,
-        width: 7.8,
-        sideFade: 1.1,
-    }),
-    createJumpRampConfig({
-        x: 84,
-        z: -84,
-        headingDeg: 90,
-        height: 0.98,
-        approachLength: 7.8,
-        tableLength: 3.8,
-        width: 7.8,
-        sideFade: 1.1,
-    }),
-    createJumpRampConfig({
-        x: -168,
-        z: 0,
-        headingDeg: 90,
-        height: 1.08,
-        approachLength: 8.1,
-        tableLength: 4.1,
-        width: 8.2,
-        sideFade: 1.2,
-    }),
-    createJumpRampConfig({
-        x: -84,
-        z: 0,
-        headingDeg: 90,
-        height: 1.08,
-        approachLength: 8.4,
-        tableLength: 4.2,
-        width: 8.2,
-        sideFade: 1.2,
-    }),
-    createJumpRampConfig({
-        x: 84,
-        z: 0,
-        headingDeg: 90,
-        height: 1.08,
-        approachLength: 8.4,
-        tableLength: 4.2,
-        width: 8.2,
-        sideFade: 1.2,
-    }),
-    createJumpRampConfig({
-        x: 168,
-        z: 0,
-        headingDeg: 90,
-        height: 1.08,
-        approachLength: 8.1,
-        tableLength: 4.1,
-        width: 8.2,
-        sideFade: 1.2,
-    }),
-    createJumpRampConfig({
-        x: -84,
-        z: 84,
-        headingDeg: 90,
-        height: 0.98,
-        approachLength: 7.8,
-        tableLength: 3.8,
-        width: 7.8,
-        sideFade: 1.1,
-    }),
-    createJumpRampConfig({
-        x: 0,
-        z: 84,
-        headingDeg: 0,
-        height: 1.14,
-        approachLength: 8.7,
-        tableLength: 4.2,
-        width: 8.6,
-        sideFade: 1.3,
-    }),
-    createJumpRampConfig({
-        x: 84,
-        z: 84,
-        headingDeg: 90,
-        height: 0.98,
-        approachLength: 7.8,
-        tableLength: 3.8,
-        width: 7.8,
-        sideFade: 1.1,
-    }),
-    createJumpRampConfig({
-        x: 0,
-        z: 168,
-        headingDeg: 0,
-        height: 1.08,
-        approachLength: 8.2,
-        tableLength: 4.2,
-        width: 8.2,
-        sideFade: 1.2,
-    }),
-    createJumpRampConfig({
-        x: -168,
-        z: -168,
-        headingDeg: 45,
-        height: 1.22,
-        approachLength: 8.9,
-        tableLength: 4.6,
-        width: 8.8,
-        sideFade: 1.4,
-    }),
-    createJumpRampConfig({
-        x: 168,
-        z: 168,
-        headingDeg: 135,
-        height: 1.22,
-        approachLength: 8.9,
-        tableLength: 4.6,
-        width: 8.8,
-        sideFade: 1.4,
-    }),
+const CHARGING_ZONE_RADIUS = 2.45;
+const chargingZones = [
+    { id: 'charging_zone_0', x: 0, z: -168, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_1', x: 0, z: -84, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_2', x: -84, z: -84, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_3', x: 84, z: -84, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_4', x: -168, z: 0, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_5', x: -84, z: 0, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_6', x: 84, z: 0, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_7', x: 168, z: 0, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_8', x: -84, z: 84, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_9', x: 0, z: 84, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_10', x: 84, z: 84, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_11', x: 0, z: 168, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_12', x: -168, z: -168, radius: CHARGING_ZONE_RADIUS },
+    { id: 'charging_zone_13', x: 168, z: 168, radius: CHARGING_ZONE_RADIUS },
 ];
-const JUMP_RAMP_CHARGE_ZONE_RADIUS = 2.45;
-const jumpRampChargeZones = JUMP_RAMPS.map((ramp, index) => ({
-    id: `ramp_charge_zone_${index}`,
-    x: ramp.x,
-    z: ramp.z,
-    y: JUMP_RAMP_SURFACE_Y + ramp.height + 0.03,
-    radius: JUMP_RAMP_CHARGE_ZONE_RADIUS,
-}));
 const worldBounds = {
     minX: -WORLD_HALF_SIZE,
     maxX: WORLD_HALF_SIZE,
@@ -209,7 +75,7 @@ export {
     worldBoundary,
     getGroundHeightAt,
     updateGroundMotion,
-    jumpRampChargeZones,
+    chargingZones,
 };
 
 function createLight(type, { color, intensity, position, shadow }) {
@@ -260,14 +126,7 @@ function createGround({ texture, size, positionY }) {
 }
 
 function getGroundHeightAt(_x, _z) {
-    let height = 0;
-    for (let i = 0; i < JUMP_RAMPS.length; i += 1) {
-        const rampHeight = sampleJumpRampHeight(_x, _z, JUMP_RAMPS[i]);
-        if (rampHeight > height) {
-            height = rampHeight;
-        }
-    }
-    return height;
+    return 0;
 }
 
 function updateGroundMotion(_playerPosition, playerSpeed = 0) {
@@ -372,10 +231,7 @@ function createGroundTexture() {
         ctx.lineWidth = 0.9 + Math.random() * 1.3;
         ctx.beginPath();
         ctx.moveTo(x, y);
-        ctx.lineTo(
-            x + Math.cos(heading) * length,
-            y + Math.sin(heading) * length
-        );
+        ctx.lineTo(x + Math.cos(heading) * length, y + Math.sin(heading) * length);
         ctx.stroke();
     }
 
@@ -624,7 +480,6 @@ function createCityScenery() {
     staticObstacles.length = 0;
 
     group.add(createRoadLayer());
-    group.add(createJumpRampLayer());
     group.add(createParkLayer());
     group.add(createBuildingLayer());
     group.add(createStreetLampLayer(group.userData.lampLights));
@@ -683,100 +538,6 @@ function createHorizonBackdropLayer() {
     skylineMesh.instanceColor.needsUpdate = true;
     layer.add(skylineMesh);
     return layer;
-}
-
-function createJumpRampLayer() {
-    const layer = new THREE.Group();
-    layer.name = 'jumpRampLayer';
-
-    const rampMaterial = new THREE.MeshStandardMaterial({
-        color: 0x4b627f,
-        emissive: 0x284462,
-        emissiveIntensity: 0.66,
-        roughness: 0.7,
-        metalness: 0.16,
-    });
-    const markerTexture = createJumpRampMarkerTexture();
-    const markerGeometry = new THREE.PlaneGeometry(8, 8);
-    const markerMaterial = new THREE.MeshBasicMaterial({
-        map: markerTexture,
-        transparent: true,
-        opacity: 0.46,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide,
-        toneMapped: false,
-    });
-
-    for (let i = 0; i < JUMP_RAMPS.length; i += 1) {
-        const ramp = JUMP_RAMPS[i];
-        const width = ramp.halfWidth * 2 + ramp.sideFade * 1.8;
-        const length = ramp.totalHalfLength * 2;
-        const geometry = new THREE.PlaneGeometry(width, length, 7, 22);
-        geometry.rotateX(-Math.PI / 2);
-
-        const positions = geometry.attributes.position;
-        for (let vertex = 0; vertex < positions.count; vertex += 1) {
-            const localLat = positions.getX(vertex);
-            const localLong = positions.getZ(vertex);
-            positions.setY(vertex, getJumpRampLocalHeight(localLong, localLat, ramp));
-        }
-        positions.needsUpdate = true;
-        geometry.computeVertexNormals();
-
-        const mesh = new THREE.Mesh(geometry, rampMaterial);
-        mesh.position.set(ramp.x, JUMP_RAMP_SURFACE_Y, ramp.z);
-        mesh.rotation.y = ramp.headingRad;
-        mesh.receiveShadow = false;
-        mesh.castShadow = false;
-        layer.add(mesh);
-
-        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
-        marker.rotation.x = -Math.PI / 2;
-        marker.position.set(ramp.x, JUMP_RAMP_SURFACE_Y + ramp.height + 0.03, ramp.z);
-        layer.add(marker);
-    }
-
-    return layer;
-}
-
-function createJumpRampMarkerTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 1024;
-    const ctx = canvas.getContext('2d');
-    const cx = canvas.width * 0.5;
-    const cy = canvas.height * 0.5;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 468);
-    halo.addColorStop(0, 'rgba(158, 223, 255, 0.26)');
-    halo.addColorStop(0.48, 'rgba(144, 213, 255, 0.14)');
-    halo.addColorStop(1, 'rgba(144, 213, 255, 0)');
-    ctx.fillStyle = halo;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 468, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = 'rgba(190, 242, 255, 0.9)';
-    ctx.shadowColor = 'rgba(127, 220, 255, 0.9)';
-    ctx.shadowBlur = 24;
-    ctx.lineWidth = 36;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 360, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 14;
-    ctx.strokeStyle = 'rgba(163, 232, 255, 0.82)';
-    ctx.beginPath();
-    ctx.arc(cx, cy, 284, 0, Math.PI * 2);
-    ctx.stroke();
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 2;
-    return texture;
 }
 
 function createRoadLayer() {
@@ -863,7 +624,6 @@ function createRoadLayer() {
         sidewalkEast.rotation.x = -Math.PI / 2;
         sidewalkEast.position.set(lineX + roadWidth * 0.5 + sidewalkWidth * 0.5, sidewalkY, 0);
         layer.add(sidewalkEast);
-
     }
 
     for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
@@ -886,7 +646,6 @@ function createRoadLayer() {
         sidewalkSouth.rotation.x = -Math.PI / 2;
         sidewalkSouth.position.set(0, sidewalkY, lineZ + roadWidth * 0.5 + sidewalkWidth * 0.5);
         layer.add(sidewalkSouth);
-
     }
 
     for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
@@ -899,11 +658,7 @@ function createRoadLayer() {
             }
             const patch = new THREE.Mesh(intersectionGeometry, intersectionMaterial);
             patch.rotation.x = -Math.PI / 2;
-            patch.position.set(
-                gridX * CITY_GRID_SPACING,
-                roadY + 0.004,
-                gridZ * CITY_GRID_SPACING
-            );
+            patch.position.set(gridX * CITY_GRID_SPACING, roadY + 0.004, gridZ * CITY_GRID_SPACING);
             layer.add(patch);
         }
     }
@@ -956,7 +711,11 @@ function createBuildingLayer() {
         return layer;
     }
 
-    const buildings = new THREE.InstancedMesh(buildingGeometry, buildingMaterial, placements.length);
+    const buildings = new THREE.InstancedMesh(
+        buildingGeometry,
+        buildingMaterial,
+        placements.length
+    );
     buildings.castShadow = false;
     buildings.receiveShadow = false;
 
@@ -1156,8 +915,10 @@ function createStreetLampLayer(lampLights) {
                 continue;
             }
 
-            const positionX = gridX * CITY_GRID_SPACING + (Math.abs(gridX) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
-            const positionZ = gridZ * CITY_GRID_SPACING + (Math.abs(gridZ) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
+            const positionX =
+                gridX * CITY_GRID_SPACING + (Math.abs(gridX) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
+            const positionZ =
+                gridZ * CITY_GRID_SPACING + (Math.abs(gridZ) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
             const baseY = getGroundHeightAt(positionX, positionZ);
 
             const pole = new THREE.Mesh(poleGeometry, poleMaterial);
@@ -1198,8 +959,7 @@ function createStreetLampLayer(lampLights) {
 
 function isInsideBuildingDistrict(gridX, gridZ) {
     return (
-        Math.abs(gridX) <= BUILDING_DISTRICT_RADIUS &&
-        Math.abs(gridZ) <= BUILDING_DISTRICT_RADIUS
+        Math.abs(gridX) <= BUILDING_DISTRICT_RADIUS && Math.abs(gridZ) <= BUILDING_DISTRICT_RADIUS
     );
 }
 
@@ -1239,76 +999,4 @@ function addObstacleAabb(x, z, width, depth, padding = 0, category = 'generic') 
         maxZ: z + halfDepth,
         category,
     });
-}
-
-function createJumpRampConfig({
-    x,
-    z,
-    headingDeg = 0,
-    height = 1,
-    approachLength = 8,
-    tableLength = 4,
-    width = 8,
-    sideFade = 1.2,
-}) {
-    const headingRad = THREE.MathUtils.degToRad(headingDeg);
-    return {
-        x,
-        z,
-        headingRad,
-        dirX: Math.sin(headingRad),
-        dirZ: Math.cos(headingRad),
-        height,
-        approachLength,
-        tableHalfLength: tableLength * 0.5,
-        halfWidth: width * 0.5,
-        sideFade,
-        totalHalfLength: approachLength + tableLength * 0.5,
-    };
-}
-
-function sampleJumpRampHeight(x, z, ramp) {
-    const dx = x - ramp.x;
-    const dz = z - ramp.z;
-    const localLong = dx * ramp.dirX + dz * ramp.dirZ;
-    const localLat = -dx * ramp.dirZ + dz * ramp.dirX;
-    return getJumpRampLocalHeight(localLong, localLat, ramp);
-}
-
-function getJumpRampLocalHeight(localLong, localLat, ramp) {
-    const absLat = Math.abs(localLat);
-    const maxLat = ramp.halfWidth + ramp.sideFade;
-    if (absLat >= maxLat) {
-        return 0;
-    }
-
-    const longitudinalHeight = getJumpRampLongitudinalHeight(localLong, ramp);
-    if (longitudinalHeight <= 0) {
-        return 0;
-    }
-
-    if (absLat <= ramp.halfWidth) {
-        return longitudinalHeight;
-    }
-
-    const fade = (absLat - ramp.halfWidth) / Math.max(0.001, ramp.sideFade);
-    return longitudinalHeight * (1 - smoothStep01(fade));
-}
-
-function getJumpRampLongitudinalHeight(localLong, ramp) {
-    const absLong = Math.abs(localLong);
-    if (absLong >= ramp.totalHalfLength) {
-        return 0;
-    }
-    if (absLong <= ramp.tableHalfLength) {
-        return ramp.height;
-    }
-
-    const slopeT = (absLong - ramp.tableHalfLength) / Math.max(0.001, ramp.approachLength);
-    return ramp.height * (1 - smoothStep01(slopeT));
-}
-
-function smoothStep01(value) {
-    const t = THREE.MathUtils.clamp(value, 0, 1);
-    return t * t * (3 - 2 * t);
 }

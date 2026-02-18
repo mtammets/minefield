@@ -176,7 +176,11 @@ export function createCarEditModeController({
         const allParts = Array.isArray(getEditableParts?.()) ? getEditableParts() : [];
         const searchTerm = ui.getSearchValue().trim().toLowerCase();
         const filteredParts = searchTerm
-            ? allParts.filter((part) => String(part.label || '').toLowerCase().includes(searchTerm))
+            ? allParts.filter((part) =>
+                  String(part.label || '')
+                      .toLowerCase()
+                      .includes(searchTerm)
+              )
             : allParts;
         ui.renderParts(filteredParts);
     }
@@ -438,21 +442,20 @@ function createEditModeUi({
                 categoryGroups.get(category).push(part);
             }
 
-            const categories = Array.from(categoryGroups.keys())
-                .sort((a, b) => {
-                    const ia = categoryOrder.indexOf(a);
-                    const ib = categoryOrder.indexOf(b);
-                    if (ia === -1 && ib === -1) {
-                        return a.localeCompare(b);
-                    }
-                    if (ia === -1) {
-                        return 1;
-                    }
-                    if (ib === -1) {
-                        return -1;
-                    }
-                    return ia - ib;
-                });
+            const categories = Array.from(categoryGroups.keys()).sort((a, b) => {
+                const ia = categoryOrder.indexOf(a);
+                const ib = categoryOrder.indexOf(b);
+                if (ia === -1 && ib === -1) {
+                    return a.localeCompare(b);
+                }
+                if (ia === -1) {
+                    return 1;
+                }
+                if (ib === -1) {
+                    return -1;
+                }
+                return ia - ib;
+            });
 
             for (let i = 0; i < categories.length; i += 1) {
                 const category = categories[i];
@@ -464,7 +467,9 @@ function createEditModeUi({
                 title.textContent = category;
                 section.appendChild(title);
 
-                const rows = categoryGroups.get(category).slice()
+                const rows = categoryGroups
+                    .get(category)
+                    .slice()
                     .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
 
                 for (let j = 0; j < rows.length; j += 1) {
@@ -501,29 +506,31 @@ function normalizeKey(rawKey) {
 }
 
 function isEditRelevantKey(key) {
-    return key === 'arrowup'
-        || key === 'arrowdown'
-        || key === 'arrowleft'
-        || key === 'arrowright'
-        || key === 'w'
-        || key === 'a'
-        || key === 's'
-        || key === 'd'
-        || key === 'space'
-        || key === 'q'
-        || key === 'm'
-        || key === 'tab'
-        || key === '1'
-        || key === '2'
-        || key === '3'
-        || key === '4'
-        || key === '5'
-        || key === '6'
-        || key === '7'
-        || key === 'c'
-        || key === 'v'
-        || key === 'k'
-        || key === 'enter';
+    return (
+        key === 'arrowup' ||
+        key === 'arrowdown' ||
+        key === 'arrowleft' ||
+        key === 'arrowright' ||
+        key === 'w' ||
+        key === 'a' ||
+        key === 's' ||
+        key === 'd' ||
+        key === 'space' ||
+        key === 'q' ||
+        key === 'm' ||
+        key === 'tab' ||
+        key === '1' ||
+        key === '2' ||
+        key === '3' ||
+        key === '4' ||
+        key === '5' ||
+        key === '6' ||
+        key === '7' ||
+        key === 'c' ||
+        key === 'v' ||
+        key === 'k' ||
+        key === 'enter'
+    );
 }
 
 function createNoopController() {

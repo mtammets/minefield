@@ -3,7 +3,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 const tireMaterial = new THREE.MeshPhysicalMaterial({
     color: 0x222222,
     metalness: 0.7,
-    roughness: 0.4
+    roughness: 0.4,
 });
 
 const rimMaterial = new THREE.MeshPhysicalMaterial({
@@ -12,7 +12,7 @@ const rimMaterial = new THREE.MeshPhysicalMaterial({
     roughness: 0.1,
     clearcoat: 1.0,
     clearcoatRoughness: 0.06,
-    envMapIntensity: 1.8
+    envMapIntensity: 1.8,
 });
 
 const rimAccentMaterial = new THREE.MeshPhysicalMaterial({
@@ -36,14 +36,14 @@ const rimBaseMaterial = new THREE.MeshPhysicalMaterial({
 const brakeDiskMaterial = new THREE.MeshPhysicalMaterial({
     color: 0x888888,
     metalness: 0.8,
-    roughness: 0.3
+    roughness: 0.3,
 });
 
 const wheelMirrorConfig = {
     frontLeft: false,
     frontRight: true,
     backLeft: false,
-    backRight: true
+    backRight: true,
 };
 
 const WHEEL_RADIUS = 0.5;
@@ -85,10 +85,7 @@ function createRim(side = 1, mirror = false) {
         rim.add(spoke);
     }
 
-    const centerHub = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.09, 0.09, 0.08, 24),
-        rimMaterial
-    );
+    const centerHub = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 24), rimMaterial);
     centerHub.rotation.z = Math.PI / 2;
     rim.add(centerHub);
 
@@ -102,10 +99,7 @@ function createRim(side = 1, mirror = false) {
 }
 
 function createBrakeDisk() {
-    return new THREE.Mesh(
-        new THREE.CylinderGeometry(0.4, 0.4, 0.05, 32),
-        brakeDiskMaterial
-    );
+    return new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.05, 32), brakeDiskMaterial);
 }
 
 function createWheelWellLight(x, z, parent) {
@@ -164,9 +158,7 @@ function createSteerableWheel(x, z, parent, mirror = false) {
 }
 
 function initializeWheels(car, options = {}) {
-    const {
-        addWheelWellLights = true,
-    } = options;
+    const { addWheelWellLights = true } = options;
     const frontAxleGroup = new THREE.Group();
     frontAxleGroup.name = 'front_axle_group';
     car.add(frontAxleGroup);
@@ -179,10 +171,30 @@ function initializeWheels(car, options = {}) {
     wheelLightGroup.name = 'wheel_well_light_group';
     car.add(wheelLightGroup);
 
-    const frontLeft = createSteerableWheel(-WHEEL_CENTER_X, FRONT_WHEEL_Z, frontAxleGroup, wheelMirrorConfig.frontLeft);
-    const frontRight = createSteerableWheel(WHEEL_CENTER_X, FRONT_WHEEL_Z, frontAxleGroup, wheelMirrorConfig.frontRight);
-    const backLeft = createWheel(-WHEEL_CENTER_X, REAR_WHEEL_Z, rearAxleGroup, wheelMirrorConfig.backLeft);
-    const backRight = createWheel(WHEEL_CENTER_X, REAR_WHEEL_Z, rearAxleGroup, wheelMirrorConfig.backRight);
+    const frontLeft = createSteerableWheel(
+        -WHEEL_CENTER_X,
+        FRONT_WHEEL_Z,
+        frontAxleGroup,
+        wheelMirrorConfig.frontLeft
+    );
+    const frontRight = createSteerableWheel(
+        WHEEL_CENTER_X,
+        FRONT_WHEEL_Z,
+        frontAxleGroup,
+        wheelMirrorConfig.frontRight
+    );
+    const backLeft = createWheel(
+        -WHEEL_CENTER_X,
+        REAR_WHEEL_Z,
+        rearAxleGroup,
+        wheelMirrorConfig.backLeft
+    );
+    const backRight = createWheel(
+        WHEEL_CENTER_X,
+        REAR_WHEEL_Z,
+        rearAxleGroup,
+        wheelMirrorConfig.backRight
+    );
     frontLeft.steeringPivot.name = 'steering_pivot_front_left';
     frontRight.steeringPivot.name = 'steering_pivot_front_right';
     frontLeft.wheel.name = 'wheel_front_left';
@@ -253,27 +265,28 @@ function initializeWheels(car, options = {}) {
                 pivot.rotation.y = THREE.MathUtils.lerp(pivot.rotation.y, targetSteer, steerLerp);
             });
 
-            const velocityLength = typeof vehicleState.velocity?.length === 'function'
-                ? vehicleState.velocity.length()
-                : Math.abs(vehicleState.speed || 0);
-            const longitudinalSpeed = velocityLength < 0.01
-                ? 0
-                : (vehicleState.speed || 0);
+            const velocityLength =
+                typeof vehicleState.velocity?.length === 'function'
+                    ? vehicleState.velocity.length()
+                    : Math.abs(vehicleState.speed || 0);
+            const longitudinalSpeed = velocityLength < 0.01 ? 0 : vehicleState.speed || 0;
             const baseRollAmount = (longitudinalSpeed / WHEEL_RADIUS) * dt;
             const speedAbs = Math.abs(vehicleState.speed || 0);
             const throttle = vehicleState.throttle || 0;
             const throttleAbs = Math.abs(throttle);
             const launchSlip = THREE.MathUtils.clamp(vehicleState.launchSlip || 0, 0, 1);
-            const slipFade = 1 - THREE.MathUtils.clamp(speedAbs / REAR_DRIVE_VISUAL_SLIP_FADE_SPEED, 0, 1);
+            const slipFade =
+                1 - THREE.MathUtils.clamp(speedAbs / REAR_DRIVE_VISUAL_SLIP_FADE_SPEED, 0, 1);
             const wheelSpinDirection = Math.sign(throttle) || Math.sign(longitudinalSpeed) || 1;
-            const rearDriveSlipRoll = throttleAbs * slipFade * REAR_DRIVE_VISUAL_SLIP * dt * wheelSpinDirection;
+            const rearDriveSlipRoll =
+                throttleAbs * slipFade * REAR_DRIVE_VISUAL_SLIP * dt * wheelSpinDirection;
             const launchSlipRoll = launchSlip * REAR_DRIVE_LAUNCH_SPIN * dt * wheelSpinDirection;
 
             frontWheelMeshes.forEach((wheel) => {
                 wheel.rotation.x -= baseRollAmount;
             });
             rearWheelMeshes.forEach((wheel) => {
-                wheel.rotation.x -= (baseRollAmount + rearDriveSlipRoll + launchSlipRoll);
+                wheel.rotation.x -= baseRollAmount + rearDriveSlipRoll + launchSlipRoll;
             });
         },
         getDetachableWheels() {

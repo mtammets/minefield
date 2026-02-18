@@ -1,0 +1,23 @@
+export function createGameRuntimeState({ selectedCarColorHex, batteryMax, playerCarPoolSize }) {
+    return {
+        physicsAccumulator: 0,
+        minimapAccumulator: 0,
+        selectedCarColorHex: selectedCarColorHex >>> 0,
+        isCarDestroyed: false,
+        botTrafficSystem: null,
+        playerBattery: batteryMax,
+        isBatteryDepleted: false,
+        playerCollectedCount: 0,
+        totalCollectedCount: 0,
+        playerCarsRemaining: playerCarPoolSize,
+        pendingRespawnTimeout: null,
+        pickupRoundFinished: false,
+        isGamePaused: false,
+        isWelcomeModalVisible: false,
+        inputController: null,
+        crashDebrisController: null,
+        replayEffectsController: null,
+        gameSessionController: null,
+        gameLoopController: null,
+    };
+}

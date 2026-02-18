@@ -9,7 +9,7 @@ export function addStars(scene) {
     for (let i = 0; i < starCount; i++) {
         const radius = Math.random() * 9000 + 900;
         const theta = Math.random() * 2 * Math.PI;
-        const phi = Math.acos((Math.random() * 2) - 1);
+        const phi = Math.acos(Math.random() * 2 - 1);
 
         positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
         positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);

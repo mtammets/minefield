@@ -17,27 +17,29 @@ const shapeGeometries = [
 
 const shapeColors = [0x7cf9ff, 0xff85f8, 0x8dff9a, 0xffd86b];
 
-const pickupMaterials = shapeColors.map((color) => (
-    new THREE.MeshStandardMaterial({
-        color,
-        emissive: color,
-        emissiveIntensity: 0.85,
-        metalness: 0.28,
-        roughness: 0.22,
-    })
-));
+const pickupMaterials = shapeColors.map(
+    (color) =>
+        new THREE.MeshStandardMaterial({
+            color,
+            emissive: color,
+            emissiveIntensity: 0.85,
+            metalness: 0.28,
+            roughness: 0.22,
+        })
+);
 
 const haloGeometry = new THREE.RingGeometry(1.7, 2.3, 28);
-const haloMaterials = shapeColors.map((color) => (
-    new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.35,
-        side: THREE.DoubleSide,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-    })
-));
+const haloMaterials = shapeColors.map(
+    (color) =>
+        new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.35,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        })
+);
 
 const effectBurstGeometry = new THREE.IcosahedronGeometry(0.7, 1);
 const effectRingGeometry = new THREE.TorusGeometry(1.2, 0.12, 12, 40);
@@ -128,9 +130,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     const finiteQueueTemplate = finiteMode
         ? buildFinitePickupQueue(worldBounds, resolvedFiniteTotalPickups, resolvedSeedOffset)
         : [];
-    const finiteSpawnQueue = finiteMode
-        ? cloneFiniteQueueItems(finiteQueueTemplate)
-        : [];
+    const finiteSpawnQueue = finiteMode ? cloneFiniteQueueItems(finiteQueueTemplate) : [];
     const finiteRoundState = {
         total: finiteQueueTemplate.length,
         spawned: 0,
@@ -148,12 +148,15 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
 
     return {
         update(carPosition, deltaTime = 1 / 60) {
-            return this.updateForCollectors([
-                {
-                    id: 'player',
-                    position: carPosition,
-                },
-            ], deltaTime);
+            return this.updateForCollectors(
+                [
+                    {
+                        id: 'player',
+                        position: carPosition,
+                    },
+                ],
+                deltaTime
+            );
         },
         updateForCollectors(collectorEntries, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
@@ -195,7 +198,9 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             }
 
             for (const [pickupId, pickup] of pickups) {
-                const expireAt = Number.isFinite(pickup.expireAt) ? pickup.expireAt : Number.POSITIVE_INFINITY;
+                const expireAt = Number.isFinite(pickup.expireAt)
+                    ? pickup.expireAt
+                    : Number.POSITIVE_INFINITY;
                 const timeLeft = expireAt - elapsedTime;
                 if (timeLeft <= 0) {
                     const queueItem = finiteMode ? pickup.finiteQueueItem : null;
@@ -223,7 +228,8 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 }
 
                 const pickupPosition = pickup.mesh.position.clone();
-                const isCorrectPickup = resolvedSingleType || pickup.shapeIndex === targetColorIndex;
+                const isCorrectPickup =
+                    resolvedSingleType || pickup.shapeIndex === targetColorIndex;
                 const effectColor = isCorrectPickup ? pickup.color : 0xff4b4b;
 
                 if (resolvedEnableEffects) {
@@ -267,7 +273,11 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
 
             if (finiteMode) {
                 spawnFinitePickupsIntoActiveSlots();
-                if (!finiteRoundState.exhausted && pickups.size === 0 && finiteSpawnQueue.length === 0) {
+                if (
+                    !finiteRoundState.exhausted &&
+                    pickups.size === 0 &&
+                    finiteSpawnQueue.length === 0
+                ) {
                     finiteRoundState.exhausted = true;
                     enabled = false;
                     onExhausted({
@@ -371,13 +381,15 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         disposePickup(pickup);
         pickups.delete(pickupId);
         if (applyCooldown && !finiteMode) {
-            const cooldown = resolvedPickupRespawnDelaySec
-                + randomFromCell(
+            const cooldown =
+                resolvedPickupRespawnDelaySec +
+                randomFromCell(
                     pickup.cellX,
                     pickup.cellZ,
                     131,
                     resolvedSeedOffset + Math.floor(elapsedTime * 100)
-                ) * resolvedPickupRespawnJitterSec;
+                ) *
+                    resolvedPickupRespawnJitterSec;
             pickupCooldownUntil.set(pickupId, elapsedTime + cooldown);
         }
     }
@@ -407,12 +419,15 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             pickup.cellZ = queueItem.cellZ;
             pickup.expireAt = makePickupExpireAt(queueItem.cellX, queueItem.cellZ);
             pickup.finiteQueueItem = queueItem;
-            pickup.pulseOffset = randomFromCell(
-                queueItem.cellX,
-                queueItem.cellZ,
-                199,
-                resolvedSeedOffset + queueItem.seedOffset
-            ) * Math.PI * 2;
+            pickup.pulseOffset =
+                randomFromCell(
+                    queueItem.cellX,
+                    queueItem.cellZ,
+                    199,
+                    resolvedSeedOffset + queueItem.seedOffset
+                ) *
+                Math.PI *
+                2;
 
             pickups.set(pickupId, pickup);
             pickupGroup.add(pickup.mesh);
@@ -431,13 +446,10 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     }
 
     function makePickupExpireAt(cellX, cellZ) {
-        const lifetime = resolvedPickupLifetimeSec
-            + randomFromCell(
-                cellX,
-                cellZ,
-                171,
-                resolvedSeedOffset + Math.floor(elapsedTime * 60)
-            ) * resolvedPickupLifetimeJitterSec;
+        const lifetime =
+            resolvedPickupLifetimeSec +
+            randomFromCell(cellX, cellZ, 171, resolvedSeedOffset + Math.floor(elapsedTime * 60)) *
+                resolvedPickupLifetimeJitterSec;
         return elapsedTime + lifetime;
     }
 
@@ -542,11 +554,11 @@ function buildFinitePickupQueue(worldBounds, totalPickups, seedOffset = 0) {
     const bounds = worldBounds
         ? getWorldCellBounds(worldBounds)
         : {
-            minCellX: -10,
-            maxCellX: 10,
-            minCellZ: -10,
-            maxCellZ: 10,
-        };
+              minCellX: -10,
+              maxCellX: 10,
+              minCellZ: -10,
+              maxCellZ: 10,
+          };
     const candidates = [];
 
     for (let x = bounds.minCellX; x <= bounds.maxCellX; x += 1) {
@@ -572,10 +584,11 @@ function buildFinitePickupQueue(worldBounds, totalPickups, seedOffset = 0) {
         }
     }
 
-    candidates.sort((a, b) => (
-        hashCell(a.cellX, a.cellZ, 457, seedOffset)
-        - hashCell(b.cellX, b.cellZ, 457, seedOffset)
-    ));
+    candidates.sort(
+        (a, b) =>
+            hashCell(a.cellX, a.cellZ, 457, seedOffset) -
+            hashCell(b.cellX, b.cellZ, 457, seedOffset)
+    );
 
     let cursor = 0;
     while (queue.length < totalPickups && candidates.length > 0) {
@@ -686,15 +699,12 @@ function createPickupForCell(
     if (worldBounds && !isInsideWorldBounds(x, z, worldBounds)) {
         return null;
     }
-    const groundHeight = typeof getGroundHeightAt === 'function'
-        ? getGroundHeightAt(x, z)
-        : 0;
+    const groundHeight = typeof getGroundHeightAt === 'function' ? getGroundHeightAt(x, z) : 0;
     const y = groundHeight + PICKUP_HEIGHT_ABOVE_GROUND;
     const shapeIndex = singleType
         ? normalizeColorIndex(singleShapeIndex)
-        : Math.floor(
-            randomFromCell(cellX, cellZ, 14, seedOffset) * shapeGeometries.length
-        ) % shapeGeometries.length;
+        : Math.floor(randomFromCell(cellX, cellZ, 14, seedOffset) * shapeGeometries.length) %
+          shapeGeometries.length;
 
     return createPickup(x, y, z, shapeIndex, randomFromCell(cellX, cellZ, 22, seedOffset));
 }
@@ -730,12 +740,8 @@ function hashToUnit(value) {
 }
 
 function hashCell(cellX, cellZ, salt, seedOffset = 0) {
-    let h = (
-        cellX * 374761393
-        + cellZ * 668265263
-        + salt * 1442695041
-        + seedOffset * 1013904223
-    ) | 0;
+    let h =
+        (cellX * 374761393 + cellZ * 668265263 + salt * 1442695041 + seedOffset * 1013904223) | 0;
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     h ^= h >>> 16;
     return h >>> 0;
@@ -775,10 +781,7 @@ function createCollectEffect(effectGroup, effects, position, colorHex) {
         depthWrite: false,
     });
 
-    const burst = new THREE.Mesh(
-        effectBurstGeometry,
-        burstMaterial
-    );
+    const burst = new THREE.Mesh(effectBurstGeometry, burstMaterial);
     const ringMaterial = new THREE.MeshBasicMaterial({
         color: colorHex,
         transparent: true,
@@ -786,10 +789,7 @@ function createCollectEffect(effectGroup, effects, position, colorHex) {
         blending: THREE.AdditiveBlending,
         depthWrite: false,
     });
-    const ring = new THREE.Mesh(
-        effectRingGeometry,
-        ringMaterial
-    );
+    const ring = new THREE.Mesh(effectRingGeometry, ringMaterial);
     burst.position.copy(position);
     effectGroup.add(burst);
 

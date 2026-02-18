@@ -203,7 +203,8 @@ export function createReplayController(car, camera) {
         switch (directorState.shotType) {
             case SHOT_TYPES.SIDE: {
                 const side = directorState.shotSide;
-                shotPosition.copy(car.position)
+                shotPosition
+                    .copy(car.position)
                     .addScaledVector(replayRight, side * THREE.MathUtils.lerp(6.4, 8.4, speedRatio))
                     .addScaledVector(replayForward, THREE.MathUtils.lerp(-1.2, 1.8, speedRatio));
                 shotPosition.y += THREE.MathUtils.lerp(2.2, 3.1, speedRatio);
@@ -212,7 +213,8 @@ export function createReplayController(car, camera) {
                 break;
             }
             case SHOT_TYPES.LEAD: {
-                shotPosition.copy(car.position)
+                shotPosition
+                    .copy(car.position)
                     .addScaledVector(replayForward, THREE.MathUtils.lerp(7.5, 13, speedRatio))
                     .addScaledVector(replayRight, directorState.shotSide * 1.25);
                 shotPosition.y += THREE.MathUtils.lerp(1.6, 2.8, speedRatio);
@@ -220,11 +222,17 @@ export function createReplayController(car, camera) {
                 break;
             }
             case SHOT_TYPES.HELI: {
-                shotPosition.copy(car.position)
+                shotPosition
+                    .copy(car.position)
                     .addScaledVector(replayForward, -THREE.MathUtils.lerp(2.8, 5.6, speedRatio))
-                    .addScaledVector(replayRight, directorState.shotSide * THREE.MathUtils.lerp(1.8, 4.2, steerRatio));
+                    .addScaledVector(
+                        replayRight,
+                        directorState.shotSide * THREE.MathUtils.lerp(1.8, 4.2, steerRatio)
+                    );
                 shotPosition.y += THREE.MathUtils.lerp(7.4, 10.8, speedRatio);
-                shotLook.copy(car.position).addScaledVector(replayForward, THREE.MathUtils.lerp(2.5, 8.5, speedRatio));
+                shotLook
+                    .copy(car.position)
+                    .addScaledVector(replayForward, THREE.MathUtils.lerp(2.5, 8.5, speedRatio));
                 shotLook.y += 0.6;
                 break;
             }
@@ -241,11 +249,16 @@ export function createReplayController(car, camera) {
             }
             case SHOT_TYPES.CHASE:
             default: {
-                shotPosition.copy(car.position)
+                shotPosition
+                    .copy(car.position)
                     .addScaledVector(replayForward, -THREE.MathUtils.lerp(6.8, 10.2, speedRatio))
-                    .addScaledVector(replayRight, directorState.shotSide * THREE.MathUtils.lerp(0.4, 1.8, steerRatio));
+                    .addScaledVector(
+                        replayRight,
+                        directorState.shotSide * THREE.MathUtils.lerp(0.4, 1.8, steerRatio)
+                    );
                 shotPosition.y += THREE.MathUtils.lerp(2.0, 3.4, speedRatio);
-                shotLook.copy(car.position)
+                shotLook
+                    .copy(car.position)
                     .addScaledVector(replayForward, THREE.MathUtils.lerp(4.6, 11.5, speedRatio));
                 shotLook.y += THREE.MathUtils.lerp(0.85, 1.35, speedRatio);
                 break;
@@ -285,8 +298,8 @@ export function createReplayController(car, camera) {
         const nextShot = pool[Math.floor(Math.random() * pool.length)] || SHOT_TYPES.CHASE;
         directorState.shotType = nextShot;
         directorState.shotSide = Math.random() < 0.5 ? -1 : 1;
-        directorState.shotCutTimer = THREE.MathUtils.lerp(1.7, 3.8, Math.random())
-            * THREE.MathUtils.lerp(0.9, 0.72, drama);
+        directorState.shotCutTimer =
+            THREE.MathUtils.lerp(1.7, 3.8, Math.random()) * THREE.MathUtils.lerp(0.9, 0.72, drama);
     }
 
     function recordFrame(sourceCar, vehicleState, time) {

@@ -1,6 +1,12 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 
-export const keys = { forward: false, backward: false, left: false, right: false, handbrake: false };
+export const keys = {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    handbrake: false,
+};
 
 const TUNING = {
     maxForwardSpeed: 65,
@@ -216,7 +222,9 @@ export function setPlayerTopSpeedLimitKph(speedKph) {
 }
 
 export function adjustPlayerTopSpeedLimit(direction = 0) {
-    const delta = Number.isFinite(direction) ? Math.sign(direction) * TOP_SPEED_LIMIT_TUNING.stepKph : 0;
+    const delta = Number.isFinite(direction)
+        ? Math.sign(direction) * TOP_SPEED_LIMIT_TUNING.stepKph
+        : 0;
     if (delta === 0) {
         return createTopSpeedLimitSnapshot();
     }
@@ -324,7 +332,11 @@ export function updatePlayerPhysics(
     vehicleState.burnout = burnoutFactor;
     const bodySlip = Math.atan2(lateralSpeed, Math.abs(longitudinalSpeed) + TUNING.slipSpeedFloor);
 
-    const steerLimit = THREE.MathUtils.lerp(TUNING.lowSpeedSteer, TUNING.highSpeedSteer, speedRatio);
+    const steerLimit = THREE.MathUtils.lerp(
+        TUNING.lowSpeedSteer,
+        TUNING.highSpeedSteer,
+        speedRatio
+    );
     const steerLoadScale = THREE.MathUtils.clamp(
         1 - Math.abs(bodySlip) * TUNING.steerSlipReduction,
         TUNING.minSteerSlipScale,
@@ -346,16 +358,22 @@ export function updatePlayerPhysics(
 
     let longitudinalAccel = longitudinalForce + lateralSpeed * vehicleState.yawRate;
     let lateralAccel = tireForces.lateral - longitudinalSpeed * vehicleState.yawRate;
-    let yawAccel = (tireForces.yaw / TUNING.yawInertia)
-        - vehicleState.yawRate * TUNING.yawDamping
-        - bodySlip * TUNING.yawStability * (1 - brakeSlideFactor * TUNING.brakeSlideStabilityReduction);
+    let yawAccel =
+        tireForces.yaw / TUNING.yawInertia -
+        vehicleState.yawRate * TUNING.yawDamping -
+        bodySlip *
+            TUNING.yawStability *
+            (1 - brakeSlideFactor * TUNING.brakeSlideStabilityReduction);
 
     const lateralDamping = THREE.MathUtils.lerp(
         TUNING.lateralDampingLowSpeed,
         TUNING.lateralDampingHighSpeed,
         speedRatio
     );
-    lateralAccel -= lateralSpeed * lateralDamping * (1 - brakeSlideFactor * TUNING.brakeSlideLateralDampingReduction);
+    lateralAccel -=
+        lateralSpeed *
+        lateralDamping *
+        (1 - brakeSlideFactor * TUNING.brakeSlideLateralDampingReduction);
 
     if (brakeSlideFactor > 0) {
         const slideDirection = Math.sign(vehicleState.steerInput) || Math.sign(bodySlip) || 1;
@@ -369,7 +387,8 @@ export function updatePlayerPhysics(
             1
         );
         if (handbrakeSpeedFactor > 0) {
-            const handbrakeDirection = Math.sign(vehicleState.steerInput) || Math.sign(bodySlip) || 1;
+            const handbrakeDirection =
+                Math.sign(vehicleState.steerInput) || Math.sign(bodySlip) || 1;
             yawAccel += handbrakeDirection * handbrakeSpeedFactor * TUNING.handbrakeYawAssist;
             lateralAccel += handbrakeDirection * handbrakeSpeedFactor * TUNING.handbrakeLateralKick;
         }
@@ -380,8 +399,13 @@ export function updatePlayerPhysics(
         0,
         1
     );
-    yawAccel += vehicleState.steerAngle * vehicleState.throttle * TUNING.lowSpeedYawAssist * lowSpeedYawAssist;
-    yawAccel += damageDynamics.yawBiasTorque * THREE.MathUtils.clamp(Math.abs(longitudinalSpeed) / 8, 0, 1);
+    yawAccel +=
+        vehicleState.steerAngle *
+        vehicleState.throttle *
+        TUNING.lowSpeedYawAssist *
+        lowSpeedYawAssist;
+    yawAccel +=
+        damageDynamics.yawBiasTorque * THREE.MathUtils.clamp(Math.abs(longitudinalSpeed) / 8, 0, 1);
     longitudinalAccel -= longitudinalSpeed * damageDynamics.dragPenalty;
 
     if (burnoutFactor > 0) {
@@ -399,7 +423,11 @@ export function updatePlayerPhysics(
     const maxReverseSpeed = TUNING.maxReverseSpeed * damageDynamics.maxReverseScale;
     longitudinalSpeed = THREE.MathUtils.clamp(longitudinalSpeed, -maxReverseSpeed, maxForwardSpeed);
     if (burnoutFactor > 0) {
-        longitudinalSpeed = THREE.MathUtils.clamp(longitudinalSpeed, -1.2, TUNING.burnoutForwardClamp);
+        longitudinalSpeed = THREE.MathUtils.clamp(
+            longitudinalSpeed,
+            -1.2,
+            TUNING.burnoutForwardClamp
+        );
     }
 
     if (!vehicleState.throttle && !vehicleState.brake) {
@@ -417,14 +445,17 @@ export function updatePlayerPhysics(
         speedRatio
     );
     const dynamicYawCap = THREE.MathUtils.lerp(yawRateCap, TUNING.burnoutYawRateCap, burnoutFactor);
-    vehicleState.yawRate = THREE.MathUtils.clamp(vehicleState.yawRate, -dynamicYawCap, dynamicYawCap);
+    vehicleState.yawRate = THREE.MathUtils.clamp(
+        vehicleState.yawRate,
+        -dynamicYawCap,
+        dynamicYawCap
+    );
 
-    if (Math.abs(longitudinalSpeed) < TUNING.minTurningSpeed && Math.abs(vehicleState.throttle) < 0.02) {
-        vehicleState.yawRate = moveToward(
-            vehicleState.yawRate,
-            0,
-            TUNING.stationaryYawReturn * dt
-        );
+    if (
+        Math.abs(longitudinalSpeed) < TUNING.minTurningSpeed &&
+        Math.abs(vehicleState.throttle) < 0.02
+    ) {
+        vehicleState.yawRate = moveToward(vehicleState.yawRate, 0, TUNING.stationaryYawReturn * dt);
     }
 
     physicsRotationY += vehicleState.yawRate * dt;
@@ -637,12 +668,14 @@ function constrainToObstacles(position, staticObstacles, impactSpeed = 0) {
     }
 
     if (
-        impactSpeed >= TUNING.crashSpeedThreshold
-        && (collidedWithBuilding || collidedWithLampPost || collidedWithTree)
+        impactSpeed >= TUNING.crashSpeedThreshold &&
+        (collidedWithBuilding || collidedWithLampPost || collidedWithTree)
     ) {
         const obstacleCategory = collidedWithBuilding
             ? 'building'
-            : (collidedWithLampPost ? 'lamp_post' : 'tree');
+            : collidedWithLampPost
+              ? 'lamp_post'
+              : 'tree';
         if (!pendingCrashCollision || impactSpeed > pendingCrashCollision.impactSpeed) {
             pendingCrashCollision = {
                 obstacleCategory,
@@ -693,16 +726,16 @@ function constrainToVehicles(position, dynamicVehicles = null) {
         collisionCount += 1;
         const otherMass = Math.max(0.4, vehicle.mass || VEHICLE_COLLISION_MASS);
         const penetration = combinedRadius - distance;
-        const penetrationCorrection = penetration * VEHICLE_COLLISION_PENETRATION_SHARE * (0.7 + otherMass * 0.22);
+        const penetrationCorrection =
+            penetration * VEHICLE_COLLISION_PENETRATION_SHARE * (0.7 + otherMass * 0.22);
         position.x += normalX * penetrationCorrection;
         position.z += normalZ * penetrationCorrection;
 
         const otherVelocityX = vehicle.velocityX || 0;
         const otherVelocityZ = vehicle.velocityZ || 0;
-        const relativeAlongNormal = (
-            (vehicleState.velocity.x - otherVelocityX) * normalX
-            + (vehicleState.velocity.y - otherVelocityZ) * normalZ
-        );
+        const relativeAlongNormal =
+            (vehicleState.velocity.x - otherVelocityX) * normalX +
+            (vehicleState.velocity.y - otherVelocityZ) * normalZ;
         const impactSpeed = Math.max(0, -relativeAlongNormal);
         if (impactSpeed < 0.05) {
             continue;
@@ -729,7 +762,6 @@ function constrainToVehicles(position, dynamicVehicles = null) {
             impactSpeed,
             position: contactPosition,
         });
-
     }
 
     if (collisionCount > 0) {
@@ -801,17 +833,15 @@ function updateDriverInputs(dt) {
     const steerDirection = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
     const speedAbs = vehicleState.velocity.length();
     const highSpeedSteerResistance = THREE.MathUtils.clamp(
-        (speedAbs - TUNING.steerResistanceStartSpeed)
-        / (TUNING.steerResistanceFullSpeed - TUNING.steerResistanceStartSpeed),
+        (speedAbs - TUNING.steerResistanceStartSpeed) /
+            (TUNING.steerResistanceFullSpeed - TUNING.steerResistanceStartSpeed),
         0,
         1
     );
 
-    const steerTarget = steerDirection * THREE.MathUtils.lerp(
-        1,
-        TUNING.highSpeedSteerInputScale,
-        highSpeedSteerResistance
-    );
+    const steerTarget =
+        steerDirection *
+        THREE.MathUtils.lerp(1, TUNING.highSpeedSteerInputScale, highSpeedSteerResistance);
 
     if (steerTarget === 0) {
         vehicleState.steerPressTimer = 0;
@@ -824,14 +854,13 @@ function updateDriverInputs(dt) {
         vehicleState.steerReleaseTimer = 0;
     }
 
-    const steerRate = steerTarget === 0
-        ? TUNING.steerReturn
-        : TUNING.steerResponse * THREE.MathUtils.lerp(
-            1,
-            TUNING.highSpeedSteerResponseScale,
-            highSpeedSteerResistance
-        );
-    const directionSnapBoost = Math.sign(steerTarget) !== Math.sign(vehicleState.steerInput) ? 1.35 : 1;
+    const steerRate =
+        steerTarget === 0
+            ? TUNING.steerReturn
+            : TUNING.steerResponse *
+              THREE.MathUtils.lerp(1, TUNING.highSpeedSteerResponseScale, highSpeedSteerResistance);
+    const directionSnapBoost =
+        Math.sign(steerTarget) !== Math.sign(vehicleState.steerInput) ? 1.35 : 1;
     vehicleState.steerInput = moveToward(
         vehicleState.steerInput,
         steerTarget,
@@ -859,18 +888,31 @@ function updateDriverInputs(dt) {
     }
 
     const throttleRate = targetThrottle === 0 ? TUNING.throttleFall : TUNING.throttleRise;
-    const brakeRate = targetBrake === 0
-        ? TUNING.brakeFall
-        : (keys.handbrake ? TUNING.handbrakeBrakeRise : TUNING.brakeRise);
+    const brakeRate =
+        targetBrake === 0
+            ? TUNING.brakeFall
+            : keys.handbrake
+              ? TUNING.handbrakeBrakeRise
+              : TUNING.brakeRise;
     vehicleState.throttle = moveToward(vehicleState.throttle, targetThrottle, throttleRate * dt);
     vehicleState.brake = moveToward(vehicleState.brake, targetBrake, brakeRate * dt);
 
     if (vehicleState.throttle > 0.15 && vehicleState.brake < 0.1) {
-        vehicleState.throttleHoldTime = Math.min(vehicleState.throttleHoldTime + dt, TUNING.holdRampTime);
+        vehicleState.throttleHoldTime = Math.min(
+            vehicleState.throttleHoldTime + dt,
+            TUNING.holdRampTime
+        );
     } else {
-        vehicleState.throttleHoldTime = Math.max(0, vehicleState.throttleHoldTime - dt * TUNING.holdDecay);
+        vehicleState.throttleHoldTime = Math.max(
+            0,
+            vehicleState.throttleHoldTime - dt * TUNING.holdDecay
+        );
     }
-    const holdRatio = THREE.MathUtils.clamp(vehicleState.throttleHoldTime / TUNING.holdRampTime, 0, 1);
+    const holdRatio = THREE.MathUtils.clamp(
+        vehicleState.throttleHoldTime / TUNING.holdRampTime,
+        0,
+        1
+    );
     vehicleState.powerBoost = 1 + holdRatio * TUNING.holdBoost;
 }
 
@@ -885,17 +927,20 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
         const speedNorm = THREE.MathUtils.clamp(longitudinalSpeed / maxForwardSpeed, 0, 1);
         const thrustCurve = 1 - Math.pow(speedNorm, 1.35);
         const launchBoost = Math.exp(-Math.abs(longitudinalSpeed) / 6.2) * TUNING.launchBoost;
-        force += (
-            TUNING.engineAcceleration * (0.42 + thrustCurve * 0.58) + launchBoost
-        ) * vehicleState.throttle * vehicleState.powerBoost * powerScale;
+        force +=
+            (TUNING.engineAcceleration * (0.42 + thrustCurve * 0.58) + launchBoost) *
+            vehicleState.throttle *
+            vehicleState.powerBoost *
+            powerScale;
     } else if (vehicleState.throttle < 0) {
         const reverseNorm = THREE.MathUtils.clamp(-longitudinalSpeed / maxReverseSpeed, 0, 1);
         const reverseCurve = 1 - Math.pow(reverseNorm, 1.15);
-        force -= TUNING.reverseAcceleration
-            * (0.35 + reverseCurve * 0.65)
-            * Math.abs(vehicleState.throttle)
-            * vehicleState.powerBoost
-            * powerScale;
+        force -=
+            TUNING.reverseAcceleration *
+            (0.35 + reverseCurve * 0.65) *
+            Math.abs(vehicleState.throttle) *
+            vehicleState.powerBoost *
+            powerScale;
     }
 
     if (vehicleState.brake > 0 && Math.abs(longitudinalSpeed) > 0.01) {
@@ -907,10 +952,11 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
             TUNING.brakeHighSpeedEffectiveness,
             Math.pow(speedNorm, TUNING.brakeEffectivenessCurve)
         );
-        force -= Math.sign(longitudinalSpeed)
-            * TUNING.brakeDeceleration
-            * vehicleState.brake
-            * brakeSpeedFactor;
+        force -=
+            Math.sign(longitudinalSpeed) *
+            TUNING.brakeDeceleration *
+            vehicleState.brake *
+            brakeSpeedFactor;
     } else if (isCoasting && Math.abs(longitudinalSpeed) > 0.02) {
         force -= Math.sign(longitudinalSpeed) * TUNING.coastBrake;
     }
@@ -918,9 +964,7 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
     const aerodynamicDrag = isCoasting
         ? TUNING.aerodynamicDrag * TUNING.coastAerodynamicScale
         : TUNING.aerodynamicDrag;
-    const rollingResistance = isCoasting
-        ? TUNING.coastRollingResistance
-        : TUNING.rollingResistance;
+    const rollingResistance = isCoasting ? TUNING.coastRollingResistance : TUNING.rollingResistance;
     force -= longitudinalSpeed * Math.abs(longitudinalSpeed) * aerodynamicDrag;
     force -= longitudinalSpeed * rollingResistance;
     return force;
@@ -943,30 +987,35 @@ function calculateTireForces(
         1
     );
     const forwardForSlip = Math.max(Math.abs(longitudinalSpeed), TUNING.slipSpeedFloor);
-    const frontSlip = Math.atan2(
-        lateralSpeed + TUNING.frontAxleDistance * yawRate,
-        forwardForSlip
-    ) - steerAngle * driveDirection * steerForceScale;
-    const rearSlip = Math.atan2(
-        lateralSpeed - TUNING.rearAxleDistance * yawRate,
-        forwardForSlip
-    );
+    const frontSlip =
+        Math.atan2(lateralSpeed + TUNING.frontAxleDistance * yawRate, forwardForSlip) -
+        steerAngle * driveDirection * steerForceScale;
+    const rearSlip = Math.atan2(lateralSpeed - TUNING.rearAxleDistance * yawRate, forwardForSlip);
 
-    const rearGripLoss = Math.abs(vehicleState.throttle) * TUNING.throttleRearGripLoss
-        + vehicleState.brake * TUNING.brakeRearGripLoss
-        + brakeSlideFactor * TUNING.brakeSlideRearGripLoss
-        + (keys.handbrake ? TUNING.handbrakeRearGripLoss : 0);
+    const rearGripLoss =
+        Math.abs(vehicleState.throttle) * TUNING.throttleRearGripLoss +
+        vehicleState.brake * TUNING.brakeRearGripLoss +
+        brakeSlideFactor * TUNING.brakeSlideRearGripLoss +
+        (keys.handbrake ? TUNING.handbrakeRearGripLoss : 0);
     const gripScale = THREE.MathUtils.lerp(TUNING.lowSpeedGripScale, 1, speedRatio);
-    const frontGrip = TUNING.frontGripBase * gripScale * damageDynamics.gripScale
-        * (
-            1
-            + burnoutFactor * TUNING.burnoutFrontGripBoost
-            + brakeSlideFactor * TUNING.brakeSlideFrontGripBoost
-        );
+    const frontGrip =
+        TUNING.frontGripBase *
+        gripScale *
+        damageDynamics.gripScale *
+        (1 +
+            burnoutFactor * TUNING.burnoutFrontGripBoost +
+            brakeSlideFactor * TUNING.brakeSlideFrontGripBoost);
     const rearGripLossCap = THREE.MathUtils.lerp(0.86, 0.94, brakeSlideFactor);
-    const rearGrip = TUNING.rearGripBase * gripScale * (
-        1 - THREE.MathUtils.clamp(rearGripLoss + burnoutFactor * TUNING.burnoutRearGripLoss, 0, rearGripLossCap)
-    ) * damageDynamics.gripScale;
+    const rearGrip =
+        TUNING.rearGripBase *
+        gripScale *
+        (1 -
+            THREE.MathUtils.clamp(
+                rearGripLoss + burnoutFactor * TUNING.burnoutRearGripLoss,
+                0,
+                rearGripLossCap
+            )) *
+        damageDynamics.gripScale;
 
     const frontForce = THREE.MathUtils.clamp(
         -TUNING.cornerStiffnessFront * frontSlip,
@@ -981,8 +1030,8 @@ function calculateTireForces(
 
     const steerCos = Math.cos(steerAngle);
     const lateralForce = frontForce * steerCos + rearForce;
-    const yawMoment = TUNING.frontAxleDistance * frontForce * steerCos
-        - TUNING.rearAxleDistance * rearForce;
+    const yawMoment =
+        TUNING.frontAxleDistance * frontForce * steerCos - TUNING.rearAxleDistance * rearForce;
 
     return { lateral: lateralForce, yaw: yawMoment };
 }
@@ -991,7 +1040,11 @@ function updateLaunchTractionState(dt, burnoutFactor = 0) {
     const speedAbs = Math.abs(vehicleState.speed);
     const forwardThrottle = THREE.MathUtils.clamp(vehicleState.throttle, 0, 1);
     const lowSpeedFactor = THREE.MathUtils.clamp(1 - speedAbs / TUNING.launchSlipFadeSpeed, 0, 1);
-    const accelFactor = THREE.MathUtils.clamp(vehicleState.acceleration / TUNING.launchAccelNorm, 0, 1);
+    const accelFactor = THREE.MathUtils.clamp(
+        vehicleState.acceleration / TUNING.launchAccelNorm,
+        0,
+        1
+    );
     let launchTarget = forwardThrottle * lowSpeedFactor * accelFactor;
     if (burnoutFactor > 0) {
         launchTarget = Math.max(launchTarget, TUNING.burnoutSlipTarget * burnoutFactor);
@@ -1020,7 +1073,8 @@ function updateLaunchTractionState(dt, burnoutFactor = 0) {
         vehicleState.launchSlip
     );
     vehicleState.launchPhase += dt * phaseSpeed;
-    const wobbleEnvelope = vehicleState.launchSlip * lowSpeedFactor * THREE.MathUtils.clamp(speedAbs / 1.25, 0.35, 1);
+    const wobbleEnvelope =
+        vehicleState.launchSlip * lowSpeedFactor * THREE.MathUtils.clamp(speedAbs / 1.25, 0.35, 1);
     vehicleState.launchWobble = Math.sin(vehicleState.launchPhase) * wobbleEnvelope;
 }
 
@@ -1034,7 +1088,11 @@ function getDamageDynamics() {
         powerScale: THREE.MathUtils.clamp(1 - wheelLoss * 0.16 - suspensionLoss * 0.08, 0.34, 1),
         gripScale: THREE.MathUtils.clamp(1 - wheelLoss * 0.2 - suspensionLoss * 0.08, 0.28, 1),
         maxSpeedScale: THREE.MathUtils.clamp(1 - wheelLoss * 0.13 - suspensionLoss * 0.06, 0.42, 1),
-        maxReverseScale: THREE.MathUtils.clamp(1 - wheelLoss * 0.11 - suspensionLoss * 0.05, 0.45, 1),
+        maxReverseScale: THREE.MathUtils.clamp(
+            1 - wheelLoss * 0.11 - suspensionLoss * 0.05,
+            0.45,
+            1
+        ),
         yawBiasTorque: THREE.MathUtils.clamp(
             sideImbalance * 0.95 + axleImbalance * 0.22,
             -2.8,
@@ -1126,7 +1184,12 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
         (frontAverage + rearAverage) * 0.5
     );
     const averageHeight = (frontAverage + rearAverage) * 0.5;
-    const maxWheelHeight = Math.max(frontLeftHeight, frontRightHeight, rearLeftHeight, rearRightHeight);
+    const maxWheelHeight = Math.max(
+        frontLeftHeight,
+        frontRightHeight,
+        rearLeftHeight,
+        rearRightHeight
+    );
     const supportedGroundHeight = Math.max(centerHeight, averageHeight);
     if (!terrainSupportFilterInitialized) {
         smoothedSupportedGroundHeight = supportedGroundHeight;
@@ -1151,10 +1214,12 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     );
     const compressionFloor = maxWheelHeight + minRideOffset;
 
-    const springDamping = physicsVerticalVelocity < 0
-        ? TERRAIN_SUSPENSION_COMPRESSION_DAMPING
-        : TERRAIN_SUSPENSION_REBOUND_DAMPING;
-    const springAcceleration = (targetRideHeight - physicsPosition.y) * TERRAIN_SUSPENSION_STIFFNESS;
+    const springDamping =
+        physicsVerticalVelocity < 0
+            ? TERRAIN_SUSPENSION_COMPRESSION_DAMPING
+            : TERRAIN_SUSPENSION_REBOUND_DAMPING;
+    const springAcceleration =
+        (targetRideHeight - physicsPosition.y) * TERRAIN_SUSPENSION_STIFFNESS;
     const dampingAcceleration = -physicsVerticalVelocity * springDamping;
     physicsVerticalVelocity += (springAcceleration + dampingAcceleration - TERRAIN_GRAVITY) * dt;
     physicsPosition.y += physicsVerticalVelocity * dt;
@@ -1173,8 +1238,10 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
         physicsPosition.y = compressionFloor;
     }
 
-    const centerHardFloor = Math.max(centerHeight, smoothedCenterGroundHeight)
-        + minRideOffset + TERRAIN_HARD_FLOOR_MARGIN;
+    const centerHardFloor =
+        Math.max(centerHeight, smoothedCenterGroundHeight) +
+        minRideOffset +
+        TERRAIN_HARD_FLOOR_MARGIN;
     if (physicsPosition.y < centerHardFloor) {
         physicsPosition.y = centerHardFloor;
         if (physicsVerticalVelocity < 0) {
@@ -1191,7 +1258,8 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     }
 
     vehicleState.verticalSpeed = (physicsPosition.y - previousY) / Math.max(0.0001, dt);
-    const normalizedCompression = (targetRideHeight - physicsPosition.y) / Math.max(0.001, TERRAIN_MAX_COMPRESSION);
+    const normalizedCompression =
+        (targetRideHeight - physicsPosition.y) / Math.max(0.001, TERRAIN_MAX_COMPRESSION);
     vehicleState.terrainCompression = THREE.MathUtils.clamp(normalizedCompression, -1.2, 1.2);
     const groundedFloor = Math.max(compressionFloor, centerHardFloor);
     vehicleState.terrainGrounded = physicsPosition.y <= groundedFloor + 0.006 ? 1 : 0;
@@ -1224,7 +1292,8 @@ function getBurnoutFactor(totalSpeed) {
 function getBrakeSlideFactor(longitudinalSpeed, lateralSpeed) {
     const speedAbs = Math.hypot(longitudinalSpeed, lateralSpeed);
     const steerFactor = THREE.MathUtils.clamp(
-        (Math.abs(vehicleState.steerInput) - TUNING.brakeSlideSteerMin) / (1 - TUNING.brakeSlideSteerMin),
+        (Math.abs(vehicleState.steerInput) - TUNING.brakeSlideSteerMin) /
+            (1 - TUNING.brakeSlideSteerMin),
         0,
         1
     );

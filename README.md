@@ -1,0 +1,44 @@
+# Auto
+
+Browser-based 3D driving game built with Three.js and served with a minimal Express server.
+
+## Run
+
+```bash
+npm install
+npm start
+```
+
+Open `http://localhost:3000`.
+
+## Quality Workflow
+
+```bash
+npm run format
+npm run format:check
+npm run check:syntax
+npm run check
+```
+
+`npm run check` runs syntax validation for all JavaScript files and verifies Prettier formatting.
+
+## Project Structure
+
+- `public/index.html`: application shell and HUD containers
+- `public/css/styles.css`: all UI and overlay styles
+- `public/js/main.js`: entrypoint
+- `public/js/game-runtime.js`: runtime composition/wiring
+- `public/js/game-loop-controller.js`: render/update loop
+- `public/js/game-session-flow.js`: game lifecycle/session flow
+- `public/js/crash-debris-system.js`: crash, explosion, and debris behavior
+- `public/js/replay-effects-system.js`: replay-specific visual effects
+- `public/js/game-runtime-state.js`: central runtime state container
+- `public/js/game-runtime-ui.js`: UI controller composition
+- `public/js/game-bootstrap.js`: scene/renderer bootstrap
+- `server/server.js`: static file hosting and health endpoint
+
+## Notes
+
+- Code style is enforced with Prettier (`.prettierrc.json`).
+- Editor defaults are defined in `.editorconfig`.
+- Browser gameplay code is organized as ES modules under `public/js`.

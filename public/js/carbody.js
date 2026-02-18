@@ -1,9 +1,9 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 
-const ACCENT_LED_COLOR = 0x64f4ff; // Külm neo türkiis
-const ACCENT_LED_SECONDARY_COLOR = 0xff4f7f; // Soe neo punakas-roosa
-const HEADLIGHT_COLOR = 0xffffff; // Valge esituli
-const TAILLIGHT_COLOR = 0xff0000; // Punane tagatuli
+const ACCENT_LED_COLOR = 0x64f4ff; // Cool neon turquoise
+const ACCENT_LED_SECONDARY_COLOR = 0xff4f7f; // Warm neon red-pink
+const HEADLIGHT_COLOR = 0xffffff; // White headlight
+const TAILLIGHT_COLOR = 0xff0000; // Red taillight
 const DEFAULT_BODY_DIMENSIONS = { width: 1.2, height: 0.4, depth: 4 };
 const DEFAULT_WHEEL_POSITIONS = [
     { x: -1.28, z: -1.8 },
@@ -22,8 +22,16 @@ const TAILLIGHT_RUNNING_EMISSIVE = 0.62;
 const TAILLIGHT_BRAKE_EMISSIVE = 2.45;
 const WIRELESS_CHARGE_GLOW_COLOR = 0x88eeff;
 
-// Abifunktsioon materjalide loomiseks
-function createMaterial({ color, emissive = 0x000000, emissiveIntensity = 0, metalness = 0, roughness = 1, clearcoat = 0, clearcoatRoughness = 0 }) {
+// Helper for creating tuned physical materials.
+function createMaterial({
+    color,
+    emissive = 0x000000,
+    emissiveIntensity = 0,
+    metalness = 0,
+    roughness = 1,
+    clearcoat = 0,
+    clearcoatRoughness = 0,
+}) {
     return new THREE.MeshPhysicalMaterial({
         color,
         emissive,
@@ -107,7 +115,7 @@ function createAccentChargeFlowTexture() {
     return texture;
 }
 
-// Esitulede ja tagatulede lisamine
+// Add headlights and taillights.
 function addLightsToCar(car, lightConfig = {}) {
     const {
         headlightColor = HEADLIGHT_COLOR,
@@ -135,10 +143,7 @@ function addLightsToCar(car, lightConfig = {}) {
         taillightIntensity = 1.8,
         taillightDistance = 16,
         taillightDecay = 2.1,
-        taillightPositions = [
-            { position: [-0.3, 0.4, 2] },
-            { position: [0.3, 0.4, 2] },
-        ],
+        taillightPositions = [{ position: [-0.3, 0.4, 2] }, { position: [0.3, 0.4, 2] }],
         enableHeadlightProjectors = true,
         enablePrimaryHeadlightProjectors = true,
         enableNearFillProjectors = true,
@@ -204,7 +209,14 @@ function addLightsToCar(car, lightConfig = {}) {
         return light;
     };
 
-    const createLightMesh = (geometry, color, emissive, emissiveIntensity, position, rotation = null) => {
+    const createLightMesh = (
+        geometry,
+        color,
+        emissive,
+        emissiveIntensity,
+        position,
+        rotation = null
+    ) => {
         const material = createMaterial({ color, emissive, emissiveIntensity });
         const mesh = new THREE.Mesh(geometry, material);
         mesh.position.set(...position);
@@ -215,7 +227,7 @@ function addLightsToCar(car, lightConfig = {}) {
         return mesh;
     };
 
-    // Esituled
+    // Headlights.
     headlightPositions.forEach(({ position, target }) => {
         const side = Math.sign(position[0]) || 1;
 
@@ -270,7 +282,7 @@ function addLightsToCar(car, lightConfig = {}) {
         headlightLensMeshes.push(headlightLens);
     });
 
-    // Tagatuled
+    // Taillights.
     taillightPositions.forEach(({ position }) => {
         if (enableTaillightPointLights) {
             const taillight = createPoint({
@@ -302,12 +314,20 @@ function addLightsToCar(car, lightConfig = {}) {
             const targetPower = vehicleState?.batteryDepleted ? 0 : 1;
             const powerResponse = targetPower > lightState.powerBlend ? 14 : 20;
             const powerBlend = 1 - Math.exp(-powerResponse * dt);
-            lightState.powerBlend = THREE.MathUtils.lerp(lightState.powerBlend, targetPower, powerBlend);
+            lightState.powerBlend = THREE.MathUtils.lerp(
+                lightState.powerBlend,
+                targetPower,
+                powerBlend
+            );
             const brakeInput = THREE.MathUtils.clamp(vehicleState?.brake || 0, 0, 1);
             const targetBrakeLevel = brakeInput * lightState.powerBlend;
             const response = targetBrakeLevel > lightState.brakeLevel ? 18 : 10;
             const blend = 1 - Math.exp(-response * dt);
-            lightState.brakeLevel = THREE.MathUtils.lerp(lightState.brakeLevel, targetBrakeLevel, blend);
+            lightState.brakeLevel = THREE.MathUtils.lerp(
+                lightState.brakeLevel,
+                targetBrakeLevel,
+                blend
+            );
             applyHeadlightPower(lightState.powerBlend);
             applyBrakeLightLevel(lightState.brakeLevel, lightState.powerBlend);
             applyAccentLighting(vehicleState, dt, lightState.powerBlend);
@@ -331,21 +351,25 @@ function addLightsToCar(car, lightConfig = {}) {
     function applyBrakeLightLevel(level, powerBlend = 1) {
         const brakeLevel = THREE.MathUtils.clamp(level, 0, 1);
         const clampedPower = THREE.MathUtils.clamp(powerBlend, 0, 1);
-        const pointIntensity = taillightIntensity * THREE.MathUtils.lerp(
-            TAILLIGHT_RUNNING_LIGHT_FACTOR,
-            TAILLIGHT_BRAKE_LIGHT_FACTOR,
-            brakeLevel
-        ) * clampedPower;
-        const pointDistance = taillightDistance * THREE.MathUtils.lerp(
-            TAILLIGHT_RUNNING_DISTANCE_FACTOR,
-            TAILLIGHT_BRAKE_DISTANCE_FACTOR,
-            brakeLevel
-        ) * clampedPower;
-        const lensEmissive = THREE.MathUtils.lerp(
-            TAILLIGHT_RUNNING_EMISSIVE,
-            TAILLIGHT_BRAKE_EMISSIVE,
-            brakeLevel
-        ) * clampedPower;
+        const pointIntensity =
+            taillightIntensity *
+            THREE.MathUtils.lerp(
+                TAILLIGHT_RUNNING_LIGHT_FACTOR,
+                TAILLIGHT_BRAKE_LIGHT_FACTOR,
+                brakeLevel
+            ) *
+            clampedPower;
+        const pointDistance =
+            taillightDistance *
+            THREE.MathUtils.lerp(
+                TAILLIGHT_RUNNING_DISTANCE_FACTOR,
+                TAILLIGHT_BRAKE_DISTANCE_FACTOR,
+                brakeLevel
+            ) *
+            clampedPower;
+        const lensEmissive =
+            THREE.MathUtils.lerp(TAILLIGHT_RUNNING_EMISSIVE, TAILLIGHT_BRAKE_EMISSIVE, brakeLevel) *
+            clampedPower;
 
         taillightPointLights.forEach((light) => {
             light.intensity = pointIntensity;
@@ -362,9 +386,27 @@ function addLightsToCar(car, lightConfig = {}) {
         const sideStripOutset = 0.04;
         const sideStripX = bodyCoreHalfWidth + sideStripThickness * 0.5 + sideStripOutset;
         const stripLayouts = [
-            { size: [sideStripThickness, 0.022, 2.88], position: [-sideStripX, 0.43, 0.03], color: accentLedColor, pulseOffset: 0.2, glowAxis: 'z' },
-            { size: [sideStripThickness, 0.022, 2.88], position: [sideStripX, 0.43, 0.03], color: accentLedColor, pulseOffset: 1.4, glowAxis: 'z' },
-            { size: [0.64, 0.018, 0.016], position: [0, 0.54, -1.94], color: accentLedColor, pulseOffset: 2.2, glowAxis: 'x' },
+            {
+                size: [sideStripThickness, 0.022, 2.88],
+                position: [-sideStripX, 0.43, 0.03],
+                color: accentLedColor,
+                pulseOffset: 0.2,
+                glowAxis: 'z',
+            },
+            {
+                size: [sideStripThickness, 0.022, 2.88],
+                position: [sideStripX, 0.43, 0.03],
+                color: accentLedColor,
+                pulseOffset: 1.4,
+                glowAxis: 'z',
+            },
+            {
+                size: [0.64, 0.018, 0.016],
+                position: [0, 0.54, -1.94],
+                color: accentLedColor,
+                pulseOffset: 2.2,
+                glowAxis: 'x',
+            },
         ];
 
         stripLayouts.forEach(({ size, position, color, pulseOffset, glowAxis }) => {
@@ -375,7 +417,10 @@ function addLightsToCar(car, lightConfig = {}) {
                 metalness: 0.25,
                 roughness: 0.28,
             });
-            const stripMesh = new THREE.Mesh(new THREE.BoxGeometry(size[0], size[1], size[2]), stripMaterial);
+            const stripMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(size[0], size[1], size[2]),
+                stripMaterial
+            );
             stripMesh.position.set(...position);
             stripMesh.castShadow = false;
             stripMesh.receiveShadow = false;
@@ -435,7 +480,6 @@ function addLightsToCar(car, lightConfig = {}) {
             accentGlowBaseColors.push(new THREE.Color(color));
             accentPulseOffsets.push(pulseOffset);
         });
-
     }
 
     function applyAccentLighting(vehicleState, dt, powerBlend = 1) {
@@ -443,8 +487,16 @@ function addLightsToCar(car, lightConfig = {}) {
         const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.speed || 0) / 58, 0, 1);
         const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.throttle || 0), 0, 1);
         const steerRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.steerInput || 0), 0, 1);
-        const burnoutRatio = THREE.MathUtils.clamp(vehicleState?.burnout || vehicleState?.launchSlip || 0, 0, 1);
-        const chargingRatio = THREE.MathUtils.clamp(vehicleState?.chargingLevelNormalized || 0, 0, 1);
+        const burnoutRatio = THREE.MathUtils.clamp(
+            vehicleState?.burnout || vehicleState?.launchSlip || 0,
+            0,
+            1
+        );
+        const chargingRatio = THREE.MathUtils.clamp(
+            vehicleState?.chargingLevelNormalized || 0,
+            0,
+            1
+        );
         const chargingBoost = chargingRatio * chargingRatio;
         const activity = THREE.MathUtils.clamp(
             speedRatio * 0.72 + throttleRatio * 0.24 + steerRatio * 0.12 + burnoutRatio * 0.35,
@@ -457,12 +509,13 @@ function addLightsToCar(car, lightConfig = {}) {
         accentStripMaterials.forEach((material, index) => {
             const wave = 0.5 + 0.5 * Math.sin(accentState.phase + accentPulseOffsets[index]);
             const pulse = 1 + (wave - 0.5) * 2 * accentPulseDepth;
-            const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.22 + accentPulseOffsets[index] * 1.64);
-            material.emissiveIntensity = (
-                accentBaseEmissive * pulse
-                + activity * accentSpeedBoost
-                + chargingBoost * (0.6 + chargeWave * 1.1)
-            ) * clampedPower;
+            const chargeWave =
+                0.5 + 0.5 * Math.sin(accentState.phase * 2.22 + accentPulseOffsets[index] * 1.64);
+            material.emissiveIntensity =
+                (accentBaseEmissive * pulse +
+                    activity * accentSpeedBoost +
+                    chargingBoost * (0.6 + chargeWave * 1.1)) *
+                clampedPower;
             material.emissive
                 .copy(accentStripBaseColors[index])
                 .lerp(accentChargeHotColor, chargingBoost * (0.34 + chargeWave * 0.56));
@@ -470,11 +523,13 @@ function addLightsToCar(car, lightConfig = {}) {
 
         accentGlowMaterials.forEach((material, index) => {
             const wave = 0.5 + 0.5 * Math.sin(accentState.phase + accentPulseOffsets[index] + 0.3);
-            const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.7 + accentPulseOffsets[index] * 1.9);
-            material.opacity = accentGlowOpacity
-                * (0.84 + wave * 0.42)
-                * (1 + activity * 0.38 + chargingBoost * (0.84 + chargeWave * 0.84))
-                * clampedPower;
+            const chargeWave =
+                0.5 + 0.5 * Math.sin(accentState.phase * 2.7 + accentPulseOffsets[index] * 1.9);
+            material.opacity =
+                accentGlowOpacity *
+                (0.84 + wave * 0.42) *
+                (1 + activity * 0.38 + chargingBoost * (0.84 + chargeWave * 0.84)) *
+                clampedPower;
             material.color
                 .copy(accentGlowBaseColors[index])
                 .lerp(accentChargeColor, chargingBoost * (0.52 + chargeWave * 0.36));
@@ -482,7 +537,8 @@ function addLightsToCar(car, lightConfig = {}) {
 
         accentChargeFlowMeshes.forEach((entry, index) => {
             const material = accentChargeFlowMaterials[index];
-            const flowPhase = accentState.phase * (1.62 + chargingBoost * 2.1) + accentChargeFlowOffsets[index];
+            const flowPhase =
+                accentState.phase * (1.62 + chargingBoost * 2.1) + accentChargeFlowOffsets[index];
             const flowTravel = Math.sin(flowPhase) * entry.travelHalfRange * -entry.sideSign;
             const flowPulse = 0.5 + 0.5 * Math.sin(flowPhase * 1.82);
 
@@ -498,7 +554,7 @@ function addLightsToCar(car, lightConfig = {}) {
     }
 }
 
-// Luksusliku kere lisamine
+// Build the main luxury body shell and editable assemblies.
 function addLuxuryBody(car, bodyConfig = {}) {
     const {
         bodyColor = 0x2d67a6,
@@ -567,7 +623,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
         });
     };
 
-    // Kere on nüüd samadest paneelidest, mida saab avariis eraldi lahti rebida.
+    // Body shell is split into detachable panels for crash effects.
     createBodyPanel({
         id: 'body_center_core',
         size: [1.22, 0.42, 3.94],
@@ -633,11 +689,7 @@ function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
     const markerGroup = new THREE.Group();
     markerGroup.name = 'wireless_charge_marker_group';
     const underbodyMarkerDrop = Math.max(0.064, bodyDimensions.height * 0.12);
-    markerGroup.position.set(
-        0,
-        0.56 - bodyDimensions.height * 0.5 - underbodyMarkerDrop,
-        0.06
-    );
+    markerGroup.position.set(0, 0.56 - bodyDimensions.height * 0.5 - underbodyMarkerDrop, 0.06);
     markerGroup.rotation.x = Math.PI * 0.5;
     parent.add(markerGroup);
 
@@ -742,7 +794,11 @@ function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
         update(vehicleState = {}, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime || 1 / 60, 0.05);
             glowState.phase += dt * 2.2;
-            const chargingTarget = THREE.MathUtils.clamp(vehicleState?.chargingLevelNormalized || 0, 0, 1);
+            const chargingTarget = THREE.MathUtils.clamp(
+                vehicleState?.chargingLevelNormalized || 0,
+                0,
+                1
+            );
             const chargingBlendRate = chargingTarget > chargingBlend ? 7.8 : 4.6;
             chargingBlend = THREE.MathUtils.lerp(
                 chargingBlend,
@@ -831,9 +887,10 @@ function addVoltlineRoofBranding(
     const shimmerTexture = createRoofShimmerTexture();
     const roofCenterY = 0.56 + bodyDimensions.height * 0.5 + ROOF_MODULE_LIFT;
     const roofCenterZ = 0.1;
-    const screenAspect = roofTexture.image?.width && roofTexture.image?.height
-        ? roofTexture.image.width / roofTexture.image.height
-        : 2.2;
+    const screenAspect =
+        roofTexture.image?.width && roofTexture.image?.height
+            ? roofTexture.image.width / roofTexture.image.height
+            : 2.2;
     const screenWidth = bodyDimensions.width * 0.72;
     const screenDepth = screenWidth / screenAspect;
     const badgePadding = 0.075;
@@ -980,7 +1037,11 @@ function addVoltlineRoofBranding(
         brandState.modeTimer = 0;
         brandState.refreshTimer = 0;
         brandState.manualControlEnabled = true;
-        roofScreen.render(brandState.activeMode, brandState.batteryLevel, brandState.lastVehicleState);
+        roofScreen.render(
+            brandState.activeMode,
+            brandState.batteryLevel,
+            brandState.lastVehicleState
+        );
         return brandState.activeMode;
     }
 
@@ -990,7 +1051,11 @@ function addVoltlineRoofBranding(
         brandState.modeTimer = 0;
         brandState.refreshTimer = 0;
         brandState.manualControlEnabled = true;
-        roofScreen.render(brandState.activeMode, brandState.batteryLevel, brandState.lastVehicleState);
+        roofScreen.render(
+            brandState.activeMode,
+            brandState.batteryLevel,
+            brandState.lastVehicleState
+        );
         return brandState.activeMode;
     }
 
@@ -1011,7 +1076,11 @@ function addVoltlineRoofBranding(
             brandState.lastVehicleState = vehicleState;
             const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.speed || 0) / 62, 0, 1);
             const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.throttle || 0), 0, 1);
-            const burnoutRatio = THREE.MathUtils.clamp(vehicleState.burnout || vehicleState.launchSlip || 0, 0, 1);
+            const burnoutRatio = THREE.MathUtils.clamp(
+                vehicleState.burnout || vehicleState.launchSlip || 0,
+                0,
+                1
+            );
             const activity = THREE.MathUtils.clamp(
                 speedRatio * 0.7 + throttleRatio * 0.22 + burnoutRatio * 0.55,
                 0,
@@ -1022,12 +1091,19 @@ function addVoltlineRoofBranding(
             const pulse = 0.5 + 0.5 * Math.sin(brandState.phase);
             const highPulse = 0.5 + 0.5 * Math.sin(brandState.phase * 1.7 + 0.4);
 
-            const nextBatteryLevel = THREE.MathUtils.clamp(vehicleState.batteryLevelNormalized ?? brandState.batteryLevel, 0, 1);
+            const nextBatteryLevel = THREE.MathUtils.clamp(
+                vehicleState.batteryLevelNormalized ?? brandState.batteryLevel,
+                0,
+                1
+            );
             const nextBatteryPercent = Math.round(nextBatteryLevel * 100);
             let needsScreenRefresh = false;
             if (Math.abs(nextBatteryLevel - brandState.batteryLevel) > 0.0005) {
                 brandState.batteryLevel = nextBatteryLevel;
-                if (brandState.activeMode === 'battery' && nextBatteryPercent !== brandState.batteryPercent) {
+                if (
+                    brandState.activeMode === 'battery' &&
+                    nextBatteryPercent !== brandState.batteryPercent
+                ) {
                     needsScreenRefresh = true;
                 }
                 brandState.batteryPercent = nextBatteryPercent;
@@ -1038,11 +1114,12 @@ function addVoltlineRoofBranding(
                 brandState.modeTimer = 0;
             } else {
                 brandState.modeTimer += dt;
-                const switchInterval = brandState.activeMode === 'dashboard'
-                    ? 4.4
-                    : brandState.activeMode === 'battery'
-                        ? 2.8
-                        : 3.4;
+                const switchInterval =
+                    brandState.activeMode === 'dashboard'
+                        ? 4.4
+                        : brandState.activeMode === 'battery'
+                          ? 2.8
+                          : 3.4;
                 if (brandState.modeTimer >= switchInterval) {
                     brandState.modeTimer = 0;
                     setActiveModeByIndex(brandState.activeModeIndex + 1);
@@ -1067,7 +1144,8 @@ function addVoltlineRoofBranding(
             logoPlateMaterial.emissiveIntensity = 0.58 + pulse * 0.26 + activity * 0.32;
             railMaterial.emissiveIntensity = 0.42 + highPulse * 0.3 + activity * 0.34;
             shimmerMaterial.opacity = 0.08 + highPulse * 0.08 + activity * 0.08;
-            shimmerTexture.offset.x = (shimmerTexture.offset.x + dt * (0.13 + speedRatio * 0.9 + burnoutRatio * 1.1)) % 1;
+            shimmerTexture.offset.x =
+                (shimmerTexture.offset.x + dt * (0.13 + speedRatio * 0.9 + burnoutRatio * 1.1)) % 1;
         },
         setBatteryLevel(levelNormalized) {
             const level = THREE.MathUtils.clamp(levelNormalized, 0, 1);
@@ -1227,9 +1305,14 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
                 const sideSign = link.side === 'left' ? -1 : 1;
                 const zoneSign = link.zone === 'front' ? -1 : 1;
                 const trail = (0.08 + speedNorm * DRAG_MAX_TRAIL) * speedSign;
-                const steerSweep = (vehicleState?.steerInput || 0) * sideSign * 0.24 * (0.36 + speedNorm * 0.64);
+                const steerSweep =
+                    (vehicleState?.steerInput || 0) * sideSign * 0.24 * (0.36 + speedNorm * 0.64);
                 const zoneBias = zoneSign * (0.04 + speedNorm * 0.05);
-                const dragDrop = THREE.MathUtils.clamp(speedNorm * 0.02 + steerAbs * 0.016, 0, 0.045);
+                const dragDrop = THREE.MathUtils.clamp(
+                    speedNorm * 0.02 + steerAbs * 0.016,
+                    0,
+                    0.045
+                );
 
                 link.dragTargetLocal.set(
                     link.wheelAnchorLocal.x * 0.92,
@@ -1241,22 +1324,31 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
                 link.endLocal.copy(link.dragEndLocal);
 
                 link.scrapeCooldown = Math.max(0, link.scrapeCooldown - dt);
-                const scrapeActive = speedAbs >= SCRAPE_MIN_SPEED
-                    && (steerAbs >= SCRAPE_MIN_STEER || yawRateAbs >= 0.34);
+                const scrapeActive =
+                    speedAbs >= SCRAPE_MIN_SPEED &&
+                    (steerAbs >= SCRAPE_MIN_STEER || yawRateAbs >= 0.34);
                 if (scrapeActive && link.scrapeCooldown <= 0) {
                     scratchWorld.copy(link.endLocal);
                     carRoot.localToWorld(scratchWorld);
                     scrapeContacts.push({
                         position: scratchWorld.clone(),
-                        intensity: THREE.MathUtils.clamp(0.28 + speedNorm * 0.55 + steerAbs * 0.35, 0, 1),
+                        intensity: THREE.MathUtils.clamp(
+                            0.28 + speedNorm * 0.55 + steerAbs * 0.35,
+                            0,
+                            1
+                        ),
                     });
-                    link.scrapeCooldown = THREE.MathUtils.lerp(0.12, 0.045, speedNorm) * (0.72 + Math.random() * 0.6);
+                    link.scrapeCooldown =
+                        THREE.MathUtils.lerp(0.12, 0.045, speedNorm) * (0.72 + Math.random() * 0.6);
                 }
             }
 
             link.direction.subVectors(link.endLocal, link.startLocal);
             const fullLength = Math.max(link.direction.length(), 0.0001);
-            const wheelSideInset = Math.min(WHEEL_SIDE_ROD_INSET, fullLength * MAX_WHEEL_SIDE_INSET_RATIO);
+            const wheelSideInset = Math.min(
+                WHEEL_SIDE_ROD_INSET,
+                fullLength * MAX_WHEEL_SIDE_INSET_RATIO
+            );
             const rodLength = Math.max(fullLength - wheelSideInset, 0.0001);
             link.direction.multiplyScalar(1 / fullLength);
 
@@ -1434,7 +1526,11 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const height = canvas.height;
         const clampedBattery = THREE.MathUtils.clamp(batteryLevel, 0, 1);
         const isBatteryDepleted = Boolean(vehicleState?.batteryDepleted);
-        const batteryDepletedBlink = THREE.MathUtils.clamp(vehicleState?.batteryDepletedBlink ?? 0.5, 0, 1);
+        const batteryDepletedBlink = THREE.MathUtils.clamp(
+            vehicleState?.batteryDepletedBlink ?? 0.5,
+            0,
+            1
+        );
         const telemetry = {
             speedKph: Math.round(Math.abs((vehicleState.speed || 0) * 3.6)),
             throttle: THREE.MathUtils.clamp(Math.abs(vehicleState.throttle || 0), 0, 1),
@@ -1442,20 +1538,45 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             yawRate: THREE.MathUtils.clamp(Math.abs(vehicleState.yawRate || 0), 0, 2),
             batteryPercent: Math.round(clampedBattery * 100),
             rangeKm: Math.round(520 * clampedBattery),
-            suspensionHeightLevel: THREE.MathUtils.clamp(vehicleState.suspensionHeightLevel ?? 0, -1, 1),
-            suspensionStiffnessLevel: THREE.MathUtils.clamp(vehicleState.suspensionStiffnessLevel ?? 0, -1, 1),
-            suspensionHeightPercent: THREE.MathUtils.clamp(vehicleState.suspensionHeightPercent ?? 50, 0, 100),
-            suspensionStiffnessPercent: THREE.MathUtils.clamp(vehicleState.suspensionStiffnessPercent ?? 50, 0, 100),
+            suspensionHeightLevel: THREE.MathUtils.clamp(
+                vehicleState.suspensionHeightLevel ?? 0,
+                -1,
+                1
+            ),
+            suspensionStiffnessLevel: THREE.MathUtils.clamp(
+                vehicleState.suspensionStiffnessLevel ?? 0,
+                -1,
+                1
+            ),
+            suspensionHeightPercent: THREE.MathUtils.clamp(
+                vehicleState.suspensionHeightPercent ?? 50,
+                0,
+                100
+            ),
+            suspensionStiffnessPercent: THREE.MathUtils.clamp(
+                vehicleState.suspensionStiffnessPercent ?? 50,
+                0,
+                100
+            ),
             suspensionHeightMm: Math.round(vehicleState.suspensionHeightMm ?? 0),
             suspensionStiffnessScale: vehicleState.suspensionStiffnessScale ?? 1,
             topSpeedLimitKph: Math.round(
                 THREE.MathUtils.clamp(vehicleState.topSpeedLimitKph ?? 220, 50, 220)
             ),
-            topSpeedLimitPercent: THREE.MathUtils.clamp(vehicleState.topSpeedLimitPercent ?? 100, 0, 100),
+            topSpeedLimitPercent: THREE.MathUtils.clamp(
+                vehicleState.topSpeedLimitPercent ?? 100,
+                0,
+                100
+            ),
         };
         ctx.clearRect(0, 0, width, height);
         if (isBatteryDepleted) {
-            drawBatteryDepletedScreen(width, height, telemetry.batteryPercent, batteryDepletedBlink);
+            drawBatteryDepletedScreen(
+                width,
+                height,
+                telemetry.batteryPercent,
+                batteryDepletedBlink
+            );
             texture.needsUpdate = true;
             return;
         }
@@ -1465,7 +1586,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const shellW = width - 76;
         const shellH = height - 80;
         const shellRadius = 62;
-        const shellGradient = ctx.createLinearGradient(shellX, shellY, shellX + shellW, shellY + shellH);
+        const shellGradient = ctx.createLinearGradient(
+            shellX,
+            shellY,
+            shellX + shellW,
+            shellY + shellH
+        );
         shellGradient.addColorStop(0, '#060b12');
         shellGradient.addColorStop(0.52, '#0a1220');
         shellGradient.addColorStop(1, '#060b12');
@@ -1486,7 +1612,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const panelW = shellW - 36;
         const panelH = shellH - 36;
         const panelRadius = shellRadius - 14;
-        const panelGradient = ctx.createLinearGradient(panelX, panelY, panelX + panelW, panelY + panelH);
+        const panelGradient = ctx.createLinearGradient(
+            panelX,
+            panelY,
+            panelX + panelW,
+            panelY + panelH
+        );
         panelGradient.addColorStop(0, '#08111d');
         panelGradient.addColorStop(0.5, '#0d1928');
         panelGradient.addColorStop(1, '#09121c');
@@ -1594,7 +1725,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const speedCardH = contentH;
         const rightX = contentX + leftW + 16;
 
-        const speedGradient = ctx.createLinearGradient(speedCardX, speedCardY, speedCardX + leftW, speedCardY + speedCardH);
+        const speedGradient = ctx.createLinearGradient(
+            speedCardX,
+            speedCardY,
+            speedCardX + leftW,
+            speedCardY + speedCardH
+        );
         speedGradient.addColorStop(0, 'rgba(18, 36, 58, 0.86)');
         speedGradient.addColorStop(1, 'rgba(14, 24, 40, 0.86)');
         ctx.fillStyle = speedGradient;
@@ -1629,7 +1765,11 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         drawRoundedRect(ctx, rightX, modeCardY, rightW, modeCardH, cardRadius);
         ctx.stroke();
 
-        const activity = THREE.MathUtils.clamp(telemetry.throttle * 0.74 + telemetry.yawRate * 0.26, 0, 1);
+        const activity = THREE.MathUtils.clamp(
+            telemetry.throttle * 0.74 + telemetry.yawRate * 0.26,
+            0,
+            1
+        );
         const driveLabel = activity >= 0.7 ? 'SPORT' : activity >= 0.38 ? 'DYNAMIC' : 'ECO';
         ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
         ctx.fillStyle = 'rgba(165, 193, 218, 0.86)';
@@ -1638,9 +1778,27 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         ctx.fillStyle = activity >= 0.7 ? '#a4f4ff' : '#d5e9fb';
         ctx.fillText(driveLabel, rightX + 22, modeCardY + 94);
 
-        const steerStability = 1 - THREE.MathUtils.clamp(Math.abs(telemetry.steer) * 0.6 + telemetry.yawRate * 0.3, 0, 1);
-        drawMetricBar(rightX + 24, modeCardY + 120, rightW - 48, 12, 'TRACTION', steerStability, '#8fe8ff');
-        drawMetricBar(rightX + 24, modeCardY + 162, rightW - 48, 12, 'TORQUE', telemetry.throttle, '#b3f8d0');
+        const steerStability =
+            1 -
+            THREE.MathUtils.clamp(Math.abs(telemetry.steer) * 0.6 + telemetry.yawRate * 0.3, 0, 1);
+        drawMetricBar(
+            rightX + 24,
+            modeCardY + 120,
+            rightW - 48,
+            12,
+            'TRACTION',
+            steerStability,
+            '#8fe8ff'
+        );
+        drawMetricBar(
+            rightX + 24,
+            modeCardY + 162,
+            rightW - 48,
+            12,
+            'TORQUE',
+            telemetry.throttle,
+            '#b3f8d0'
+        );
 
         const energyCardY = modeCardY + modeCardH + 14;
         const energyCardH = contentH - modeCardH - 14;
@@ -1654,8 +1812,24 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         ctx.font = "600 20px 'Sora', 'Segoe UI', sans-serif";
         ctx.fillStyle = 'rgba(165, 193, 218, 0.86)';
         ctx.fillText('ENERGY FLOW', rightX + 24, energyCardY + 30);
-        drawMetricBar(rightX + 24, energyCardY + 60, rightW - 48, 14, 'BATTERY', batteryLevel, getRoofBatteryColor(batteryLevel));
-        drawMetricBar(rightX + 24, energyCardY + 104, rightW - 48, 14, 'REGEN', 1 - telemetry.throttle * 0.72, '#8dd9ff');
+        drawMetricBar(
+            rightX + 24,
+            energyCardY + 60,
+            rightW - 48,
+            14,
+            'BATTERY',
+            batteryLevel,
+            getRoofBatteryColor(batteryLevel)
+        );
+        drawMetricBar(
+            rightX + 24,
+            energyCardY + 104,
+            rightW - 48,
+            14,
+            'REGEN',
+            1 - telemetry.throttle * 0.72,
+            '#8dd9ff'
+        );
     }
 
     function drawBatteryMode(batteryLevel, contentX, contentY, contentW, contentH, telemetry) {
@@ -1741,7 +1915,14 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         ctx.fillStyle = bgGradient;
         ctx.fillRect(0, 0, width, height);
 
-        const haloGradient = ctx.createRadialGradient(centerX, centerY, 32, centerX, centerY, cardW * 0.56);
+        const haloGradient = ctx.createRadialGradient(
+            centerX,
+            centerY,
+            32,
+            centerX,
+            centerY,
+            cardW * 0.56
+        );
         haloGradient.addColorStop(0, `rgba(255, 106, 126, ${0.22 + pulse * 0.16})`);
         haloGradient.addColorStop(1, 'rgba(255, 106, 126, 0)');
         ctx.fillStyle = haloGradient;
@@ -1955,7 +2136,12 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
     }
 
     function drawChassisAdjustButton(buttonRect, label, color) {
-        const gradient = ctx.createLinearGradient(buttonRect.x, buttonRect.y, buttonRect.x + buttonRect.w, buttonRect.y);
+        const gradient = ctx.createLinearGradient(
+            buttonRect.x,
+            buttonRect.y,
+            buttonRect.x + buttonRect.w,
+            buttonRect.y
+        );
         gradient.addColorStop(0, 'rgba(32, 57, 80, 0.96)');
         gradient.addColorStop(1, 'rgba(20, 40, 60, 0.96)');
         ctx.fillStyle = gradient;
@@ -1985,7 +2171,14 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         gradient.addColorStop(0, color);
         gradient.addColorStop(1, '#e9f9ff');
         ctx.fillStyle = gradient;
-        drawRoundedRect(ctx, x + 2, y + 2, fillW, height - 4, Math.max(4, Math.floor((height - 4) * 0.5)));
+        drawRoundedRect(
+            ctx,
+            x + 2,
+            y + 2,
+            fillW,
+            height - 4,
+            Math.max(4, Math.floor((height - 4) * 0.5))
+        );
         ctx.fill();
     }
 
@@ -2107,10 +2300,10 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const pointerY = (1 - THREE.MathUtils.clamp(uv.y, 0, 1)) * canvas.height;
 
         if (
-            pointerX < ui.panelX
-            || pointerX > ui.panelX + ui.panelW
-            || pointerY < ui.panelY
-            || pointerY > ui.panelY + ui.panelH
+            pointerX < ui.panelX ||
+            pointerX > ui.panelX + ui.panelW ||
+            pointerY < ui.panelY ||
+            pointerY > ui.panelY + ui.panelH
         ) {
             return null;
         }
@@ -2119,10 +2312,10 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         for (let i = 0; i < modeOrder.length; i += 1) {
             const x = tabStartX + i * (tabW + tabGap);
             if (
-                pointerX >= x
-                && pointerX <= x + tabW
-                && pointerY >= barY
-                && pointerY <= barY + tabH
+                pointerX >= x &&
+                pointerX <= x + tabW &&
+                pointerY >= barY &&
+                pointerY <= barY + tabH
             ) {
                 return { type: 'mode', modeKey: modeOrder[i] };
             }
