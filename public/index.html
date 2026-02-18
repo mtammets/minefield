@@ -29,6 +29,22 @@
                 </div>
                 <div id="welcomePreviewShell">
                     <div class="welcomePreviewLabel">VEHICLE PREVIEW</div>
+                    <button
+                        id="welcomeVehiclePrevBtn"
+                        class="welcomeVehicleNav welcomeVehicleNavPrev"
+                        type="button"
+                        aria-label="Previous vehicle"
+                    >
+                        <span aria-hidden="true">‹</span>
+                    </button>
+                    <button
+                        id="welcomeVehicleNextBtn"
+                        class="welcomeVehicleNav welcomeVehicleNavNext"
+                        type="button"
+                        aria-label="Next vehicle"
+                    >
+                        <span aria-hidden="true">›</span>
+                    </button>
                     <canvas
                         id="welcomeCarCanvas"
                         width="560"
@@ -37,23 +53,15 @@
                     ></canvas>
                     <div class="welcomePreviewSweep" aria-hidden="true"></div>
                 </div>
-                <div id="welcomeColorPicker" aria-label="Car color picker">
-                    <div class="welcomeColorPickerHeader">
-                        <span class="welcomeColorPickerLabel">CAR COLOR</span>
-                        <span id="welcomeSelectedColorName">-</span>
-                    </div>
-                    <div
-                        id="welcomeColorOptions"
-                        class="welcomeColorOptions"
-                        role="radiogroup"
-                        aria-label="Select car color"
-                    ></div>
+                <div class="welcomeVehicleInfo" aria-live="polite">
+                    <span class="welcomeVehicleInfoLabel">SELECTED VEHICLE</span>
+                    <span id="welcomeSelectedColorName">-</span>
                 </div>
                 <button id="welcomeStartBtn" type="button">
                     START GAME <span aria-hidden="true">→</span>
                 </button>
                 <div id="welcomeHint">
-                    Press Enter to start • Change color with mouse or ← → / A D • Camera 1-7 (7 =
+                    Press Enter to start • Change vehicle with arrows or ← → / A D • Camera 1-7 (7 =
                     roof display) • E = Edit mode
                 </div>
             </div>
@@ -95,8 +103,45 @@
                 </div>
             </div>
         </div>
+        <aside id="multiplayerPanel" aria-label="Online multiplayer panel">
+            <div id="multiplayerTitle">ONLINE MULTIPLAYER</div>
+            <div id="multiplayerStatus" data-tone="info">
+                Online mode available. Create or join a room.
+            </div>
+            <label class="mpFieldLabel" for="multiplayerNameInput">Player Name</label>
+            <input
+                id="multiplayerNameInput"
+                class="mpInput"
+                type="text"
+                maxlength="18"
+                autocomplete="nickname"
+            />
+            <label class="mpFieldLabel" for="multiplayerRoomInput">Room Code</label>
+            <div class="mpRoomRow">
+                <input
+                    id="multiplayerRoomInput"
+                    class="mpInput mpRoomInput"
+                    type="text"
+                    maxlength="6"
+                    inputmode="latin"
+                    autocapitalize="characters"
+                    spellcheck="false"
+                    placeholder="ABC123"
+                />
+                <button id="multiplayerJoinBtn" class="mpButton join" type="button">JOIN</button>
+            </div>
+            <div class="mpActionRow">
+                <button id="multiplayerCreateBtn" class="mpButton create" type="button">
+                    CREATE ROOM
+                </button>
+                <button id="multiplayerLeaveBtn" class="mpButton leave" type="button">LEAVE</button>
+            </div>
+            <div id="multiplayerRoomMeta">Offline</div>
+            <div id="multiplayerPlayerList" aria-live="polite"></div>
+        </aside>
 
         <!-- Main logic -->
+        <script src="/socket.io/socket.io.js"></script>
         <script type="module" src="js/main.js"></script>
     </body>
 </html>

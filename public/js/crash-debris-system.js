@@ -27,6 +27,8 @@ import {
     VEHICLE_DENT_MAX,
 } from './constants.js';
 
+const EXPLOSION_LIGHT_MAX_LIFE = 0.7;
+
 export function createCrashDebrisController({
     scene,
     car,
@@ -48,11 +50,14 @@ export function createCrashDebrisController({
     const getDestroyed = typeof isCarDestroyed === 'function' ? isCarDestroyed : () => false;
 
     const debrisPieces = [];
+    const debrisPieceById = new Map();
     const detachedCrashPartIds = new Set();
+    const crashPartById = new Map();
     const playerDamageState = createEmptyDamageState();
     const bodyDamageVisual = { left: 0, right: 0, front: 0, rear: 0 };
     const bodyPartBaselines = new Map();
     const debrisBottomProbeBox = new THREE.Box3();
+    let nextDebrisPieceId = 1;
 
     let explosionLight = null;
     let explosionLightLife = 0;
@@ -69,6 +74,8 @@ export function createCrashDebrisController({
         },
         processVehicleCollisionContacts,
         spawnCarDebris,
+        getReplicationState,
+        applyReplicationState,
         updateDebris,
         clearDebris,
         hasActiveDebrisOrExplosion() {
@@ -89,8 +96,12 @@ export function createCrashDebrisController({
 
     function initializeBodyPartBaselines() {
         bodyPartBaselines.clear();
+        crashPartById.clear();
         for (let i = 0; i < crashParts.length; i += 1) {
             const part = crashParts[i];
+            if (part?.id) {
+                crashPartById.set(part.id, part);
+            }
             if (part?.type !== 'body_panel' || !part.source) {
                 continue;
             }
@@ -179,7 +190,30 @@ export function createCrashDebrisController({
                 }
             }
         }
+        applyDetachedPartVisibility();
         applyVehicleDamageState(playerDamageState);
+    }
+
+    function applyDetachedPartVisibility() {
+        for (let i = 0; i < crashParts.length; i += 1) {
+            const part = crashParts[i];
+            if (!part?.source || !part?.id) {
+                continue;
+            }
+            part.source.visible = !detachedCrashPartIds.has(part.id);
+        }
+    }
+
+    function setDetachedPartIds(partIds = []) {
+        detachedCrashPartIds.clear();
+        for (let i = 0; i < partIds.length; i += 1) {
+            const partId = partIds[i];
+            if (typeof partId !== 'string' || !crashPartById.has(partId)) {
+                continue;
+            }
+            detachedCrashPartIds.add(partId);
+        }
+        applyDetachedPartVisibility();
     }
 
     function processVehicleCollisionContacts(contacts) {
@@ -391,14 +425,153 @@ export function createCrashDebrisController({
         const selectedParts =
             visibleParts.length > 0 ? visibleParts : selectCrashPartsForImpact(crashContext, true);
         selectedParts.forEach((part) => {
+            if (part?.id) {
+                detachedCrashPartIds.add(part.id);
+            }
+            if (part?.source) {
+                part.source.visible = false;
+            }
             spawnCrashPartDebris(part, crashContext);
         });
+        applyDetachedPartVisibility();
 
         explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
         explosionLight.position.copy(crashContext.origin);
         explosionLight.position.y += 1.2;
-        explosionLightLife = 0.7;
+        explosionLightLife = EXPLOSION_LIGHT_MAX_LIFE;
         scene.add(explosionLight);
+    }
+
+    function getReplicationState() {
+        const detachedPartIds = Array.from(detachedCrashPartIds.values());
+        const debrisPiecesSnapshot = debrisPieces.map((piece) => ({
+            id: piece.id,
+            partId: piece.partId || '',
+            x: piece.mesh.position.x,
+            y: piece.mesh.position.y,
+            z: piece.mesh.position.z,
+            rotationX: piece.mesh.rotation.x,
+            rotationY: piece.mesh.rotation.y,
+            rotationZ: piece.mesh.rotation.z,
+            velocityX: piece.velocity.x,
+            velocityY: piece.velocity.y,
+            velocityZ: piece.velocity.z,
+            angularVelocityX: piece.angularVelocity.x,
+            angularVelocityY: piece.angularVelocity.y,
+            angularVelocityZ: piece.angularVelocity.z,
+            groundOffset: piece.groundOffset,
+            drag: piece.drag,
+            bounce: piece.bounce,
+            settled: Boolean(piece.settled),
+            life: Number.isFinite(piece.life) ? piece.life : null,
+            wheelRoll: piece.wheelRoll ? { ...piece.wheelRoll } : null,
+            bodyRest: piece.bodyRest ? { ...piece.bodyRest } : null,
+        }));
+
+        return {
+            detachedPartIds,
+            debrisPieces: debrisPiecesSnapshot,
+            explosion: explosionLight
+                ? {
+                      x: explosionLight.position.x,
+                      y: explosionLight.position.y,
+                      z: explosionLight.position.z,
+                      life: explosionLightLife,
+                  }
+                : null,
+        };
+    }
+
+    function applyReplicationState(snapshot) {
+        if (!snapshot || typeof snapshot !== 'object') {
+            return;
+        }
+
+        ensureCrashPartIndex();
+        setDetachedPartIds(Array.isArray(snapshot.detachedPartIds) ? snapshot.detachedPartIds : []);
+
+        const incomingPieces = Array.isArray(snapshot.debrisPieces) ? snapshot.debrisPieces : [];
+        const incomingIds = new Set();
+
+        for (let i = 0; i < incomingPieces.length; i += 1) {
+            const serializedPiece = incomingPieces[i];
+            if (!serializedPiece || typeof serializedPiece !== 'object') {
+                continue;
+            }
+
+            const id = Math.max(1, Math.round(Number(serializedPiece.id) || 0));
+            const partId = typeof serializedPiece.partId === 'string' ? serializedPiece.partId : '';
+            const part = crashPartById.get(partId);
+            if (!part?.source) {
+                continue;
+            }
+
+            incomingIds.add(id);
+            let piece = debrisPieceById.get(id);
+            if (!piece) {
+                const source = part.source;
+                source.updateWorldMatrix(true, true);
+                const debrisMesh = cloneCrashPartSource(source);
+                source.matrixWorld.decompose(
+                    debrisMesh.position,
+                    debrisMesh.quaternion,
+                    debrisMesh.scale
+                );
+                scene.add(debrisMesh);
+                piece = addDebrisPiece({
+                    id,
+                    partId,
+                    mesh: debrisMesh,
+                    velocity: new THREE.Vector3(),
+                    angularVelocity: new THREE.Vector3(),
+                    life: Number.POSITIVE_INFINITY,
+                    groundOffset: 0.12,
+                });
+            }
+
+            piece.partId = partId;
+            piece.mesh.position.set(
+                coerceFinite(serializedPiece.x, piece.mesh.position.x),
+                coerceFinite(serializedPiece.y, piece.mesh.position.y),
+                coerceFinite(serializedPiece.z, piece.mesh.position.z)
+            );
+            piece.mesh.rotation.set(
+                coerceFinite(serializedPiece.rotationX, piece.mesh.rotation.x),
+                coerceFinite(serializedPiece.rotationY, piece.mesh.rotation.y),
+                coerceFinite(serializedPiece.rotationZ, piece.mesh.rotation.z)
+            );
+            piece.velocity.set(
+                coerceFinite(serializedPiece.velocityX, piece.velocity.x),
+                coerceFinite(serializedPiece.velocityY, piece.velocity.y),
+                coerceFinite(serializedPiece.velocityZ, piece.velocity.z)
+            );
+            piece.angularVelocity.set(
+                coerceFinite(serializedPiece.angularVelocityX, piece.angularVelocity.x),
+                coerceFinite(serializedPiece.angularVelocityY, piece.angularVelocity.y),
+                coerceFinite(serializedPiece.angularVelocityZ, piece.angularVelocity.z)
+            );
+            piece.groundOffset = Math.max(
+                0.03,
+                coerceFinite(serializedPiece.groundOffset, piece.groundOffset)
+            );
+            piece.drag = Math.max(0, coerceFinite(serializedPiece.drag, piece.drag));
+            piece.bounce = Math.max(0, coerceFinite(serializedPiece.bounce, piece.bounce));
+            piece.life = Number.isFinite(serializedPiece.life)
+                ? serializedPiece.life
+                : Number.POSITIVE_INFINITY;
+            piece.settled = Boolean(serializedPiece.settled);
+            piece.wheelRoll = deserializeWheelRollState(serializedPiece.wheelRoll);
+            piece.bodyRest = deserializeBodyRestState(serializedPiece.bodyRest);
+        }
+
+        for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
+            const piece = debrisPieces[i];
+            if (!incomingIds.has(piece.id)) {
+                removeDebrisPieceAtIndex(i);
+            }
+        }
+
+        applyExplosionSnapshot(snapshot.explosion);
     }
 
     function buildCrashContext(hitPosition, collision) {
@@ -671,6 +844,7 @@ export function createCrashDebrisController({
 
         const debrisGroundOffset = estimateDebrisGroundOffset(debrisMesh);
         addDebrisPiece({
+            partId: part.id || '',
             mesh: debrisMesh,
             velocity,
             angularVelocity,
@@ -799,6 +973,8 @@ export function createCrashDebrisController({
     }
 
     function addDebrisPiece({
+        id = null,
+        partId = '',
         mesh,
         velocity,
         angularVelocity,
@@ -809,7 +985,13 @@ export function createCrashDebrisController({
         wheelRoll = null,
         bodyRest = null,
     }) {
-        debrisPieces.push({
+        const nextId = Number.isFinite(id) ? Math.max(1, Math.round(id)) : nextDebrisPieceId++;
+        if (nextId >= nextDebrisPieceId) {
+            nextDebrisPieceId = nextId + 1;
+        }
+        const piece = {
+            id: nextId,
+            partId: typeof partId === 'string' ? partId : '',
             mesh,
             velocity,
             angularVelocity,
@@ -820,7 +1002,10 @@ export function createCrashDebrisController({
             settled: false,
             wheelRoll,
             bodyRest,
-        });
+        };
+        debrisPieces.push(piece);
+        debrisPieceById.set(piece.id, piece);
+        return piece;
     }
 
     function updateDebris(dt) {
@@ -829,9 +1014,7 @@ export function createCrashDebrisController({
             if (Number.isFinite(piece.life)) {
                 piece.life -= dt;
                 if (piece.life <= 0) {
-                    scene.remove(piece.mesh);
-                    disposeDebrisObject(piece.mesh);
-                    debrisPieces.splice(i, 1);
+                    removeDebrisPieceAtIndex(i);
                     continue;
                 }
             }
@@ -913,7 +1096,7 @@ export function createCrashDebrisController({
 
         if (explosionLight) {
             explosionLightLife -= dt;
-            const lifeRatio = Math.max(explosionLightLife / 0.7, 0);
+            const lifeRatio = Math.max(explosionLightLife / EXPLOSION_LIGHT_MAX_LIFE, 0);
             explosionLight.intensity = 4.8 * lifeRatio;
             explosionLight.distance = 28 + lifeRatio * 22;
             if (explosionLightLife <= 0) {
@@ -925,16 +1108,97 @@ export function createCrashDebrisController({
 
     function clearDebris() {
         for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
-            scene.remove(debrisPieces[i].mesh);
-            disposeDebrisObject(debrisPieces[i].mesh);
+            removeDebrisPieceAtIndex(i);
         }
         debrisPieces.length = 0;
+        debrisPieceById.clear();
 
         if (explosionLight) {
             scene.remove(explosionLight);
             explosionLight = null;
             explosionLightLife = 0;
         }
+    }
+
+    function removeDebrisPieceAtIndex(index) {
+        const piece = debrisPieces[index];
+        if (!piece) {
+            return;
+        }
+        scene.remove(piece.mesh);
+        disposeDebrisObject(piece.mesh);
+        debrisPieceById.delete(piece.id);
+        debrisPieces.splice(index, 1);
+    }
+
+    function applyExplosionSnapshot(snapshot) {
+        if (!snapshot || typeof snapshot !== 'object') {
+            if (explosionLight) {
+                scene.remove(explosionLight);
+                explosionLight = null;
+                explosionLightLife = 0;
+            }
+            return;
+        }
+
+        if (!explosionLight) {
+            explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
+            scene.add(explosionLight);
+        }
+
+        explosionLight.position.set(
+            coerceFinite(snapshot.x, explosionLight.position.x),
+            coerceFinite(snapshot.y, explosionLight.position.y),
+            coerceFinite(snapshot.z, explosionLight.position.z)
+        );
+        explosionLightLife = THREE.MathUtils.clamp(
+            coerceFinite(snapshot.life, EXPLOSION_LIGHT_MAX_LIFE),
+            0,
+            EXPLOSION_LIGHT_MAX_LIFE
+        );
+    }
+
+    function ensureCrashPartIndex() {
+        if (crashPartById.size > 0) {
+            return;
+        }
+        crashPartById.clear();
+        for (let i = 0; i < crashParts.length; i += 1) {
+            const part = crashParts[i];
+            if (part?.id) {
+                crashPartById.set(part.id, part);
+            }
+        }
+    }
+
+    function deserializeWheelRollState(value) {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+        return {
+            drive: coerceFinite(value.drive, 0),
+            heading: coerceFinite(value.heading, 0),
+            turnRate: coerceFinite(value.turnRate, 0),
+            wobblePhase: coerceFinite(value.wobblePhase, 0),
+            wobbleRate: coerceFinite(value.wobbleRate, 0),
+            decel: coerceFinite(value.decel, 0),
+            spin: coerceFinite(value.spin, 0),
+            restPose: value.restPose === 'flat' ? 'flat' : 'upright',
+            restYaw: coerceFinite(value.restYaw, 0),
+        };
+    }
+
+    function deserializeBodyRestState(value) {
+        if (!value || typeof value !== 'object') {
+            return null;
+        }
+        return {
+            yaw: coerceFinite(value.yaw, 0),
+        };
+    }
+
+    function coerceFinite(value, fallback = 0) {
+        return Number.isFinite(value) ? value : fallback;
     }
 
     function disposeDebrisObject(object3D) {

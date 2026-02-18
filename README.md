@@ -11,6 +11,18 @@ npm start
 
 Open `http://localhost:3000`.
 
+## Online Multiplayer
+
+- Multiplayer runs over Socket.IO on the same Node server.
+- Open the game in two or more browser windows/devices.
+- In the `ONLINE MULTIPLAYER` panel:
+
+1. Set your player name.
+2. Click `CREATE ROOM` (host) or enter a code and click `JOIN`.
+3. Share the 6-character room code with other players.
+
+- Remote players appear in the world and on the minimap in real time.
+
 ## Quality Workflow
 
 ```bash

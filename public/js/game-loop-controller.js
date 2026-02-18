@@ -18,11 +18,13 @@ export function createGameLoopController(options = {}) {
         botStatusUi,
         collectibleSystem,
         replayController,
+        multiplayerController,
         getPlayerTopSpeedLimit,
         crashDebrisController,
         replayEffectsController,
         gameSessionController,
         getBotTrafficSystem,
+        getMultiplayerMiniMapMarkers,
         getVehicleState,
         getGroundHeightAt,
         updateGroundMotion,
@@ -119,6 +121,7 @@ export function createGameLoopController(options = {}) {
         let skidMarkVehicleState = null;
 
         welcomeModalUi.update(frameDelta);
+        multiplayerController?.update?.(frameDelta);
 
         if (!readGamePaused() && !isEditModeActive) {
             if (raceIntroController.isActive()) {
@@ -281,11 +284,15 @@ export function createGameLoopController(options = {}) {
                     if (minimapAccumulator >= minimapUpdateInterval) {
                         const visiblePickups = collectibleSystem.getVisiblePickups();
                         const botMarkers = botTrafficSystem?.getMiniMapMarkers?.() || [];
+                        const multiplayerMarkers =
+                            typeof getMultiplayerMiniMapMarkers === 'function'
+                                ? getMultiplayerMiniMapMarkers()
+                                : [];
                         miniMapController.update(
                             car.position,
                             car.rotation.y,
                             visiblePickups,
-                            botMarkers,
+                            botMarkers.concat(multiplayerMarkers),
                             { hidePlayer: readCarDestroyed() }
                         );
                         botStatusUi.render(botTrafficSystem?.getHudState?.() || []);

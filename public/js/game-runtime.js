@@ -103,6 +103,7 @@ import { createGameLoopController } from './game-loop-controller.js';
 import { createGameRuntimeState } from './game-runtime-state.js';
 import { initializeScene, initializeRenderer } from './game-bootstrap.js';
 import { createRuntimeUiControllers } from './game-runtime-ui.js';
+import { createMultiplayerController } from './multiplayer-controller.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
@@ -278,6 +279,18 @@ runtimeState.replayEffectsController = createReplayEffectsController({
     replayEventPickup: REPLAY_EVENT_PICKUP,
     replayEventCrash: REPLAY_EVENT_CRASH,
     obstacleCrashMaxSpeed: OBSTACLE_CRASH_MAX_SPEED,
+});
+runtimeState.multiplayerController = createMultiplayerController({
+    scene,
+    car,
+    getVehicleState,
+    getInputState: () => keys,
+    getCrashReplicationState: () => runtimeState.crashDebrisController?.getReplicationState?.(),
+    getGroundHeightAt,
+    getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
+    getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
+    getIsCarDestroyed: () => runtimeState.isCarDestroyed,
+    objectiveUi,
 });
 
 runtimeState.gameSessionController = createGameSessionController({
@@ -463,6 +476,10 @@ runtimeState.gameLoopController = createGameLoopController({
     botStatusUi,
     collectibleSystem,
     replayController,
+    multiplayerController: runtimeState.multiplayerController,
+    getMultiplayerMiniMapMarkers() {
+        return runtimeState.multiplayerController?.getMiniMapMarkers?.() || [];
+    },
     crashDebrisController: runtimeState.crashDebrisController,
     replayEffectsController: runtimeState.replayEffectsController,
     gameSessionController: runtimeState.gameSessionController,
@@ -511,5 +528,6 @@ if (welcomeModalUi.isAvailable()) {
     runtimeState.gameSessionController.showWelcomeModal();
 }
 
+runtimeState.multiplayerController.initialize();
 runtimeState.inputController.initialize();
 runtimeState.gameLoopController.start();

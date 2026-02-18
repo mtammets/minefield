@@ -86,7 +86,10 @@ export function createSkidMarkController(scene, options = {}) {
     const smokeSpawnPosition = new THREE.Vector3();
 
     return {
-        update(deltaTime = 1 / 60, { enabled = true, vehicle = null, vehicleState = null } = {}) {
+        update(
+            deltaTime = 1 / 60,
+            { enabled = true, vehicle = null, vehicleState = null, inputState = null } = {}
+        ) {
             const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
             updateSmokeParticles(dt);
             if (!enabled || !vehicle || !vehicleState) {
@@ -102,12 +105,21 @@ export function createSkidMarkController(scene, options = {}) {
             const yawRateAbs = Math.abs(vehicleState.yawRate || 0);
             const lateralAbs = Math.abs(getLateralSpeed(vehicleState, vehicle.rotation.y));
 
-            const burnoutSmokeActive = keyState.handbrake && keyState.forward && throttle > 0.12;
+            const controls = inputState && typeof inputState === 'object' ? inputState : keyState;
+            const handbrakePressed = Boolean(controls?.handbrake);
+            const forwardPressed = Boolean(controls?.forward);
+            const steeringPressed = Boolean(controls?.left) || Boolean(controls?.right);
+            const burnoutDrivenByState = burnout > 0.2 || (yawRateAbs > 0.9 && speedAbs > 1.4);
+            const burnoutSmokeActive =
+                (handbrakePressed && (forwardPressed || throttle > 0.14)) ||
+                (burnoutDrivenByState && throttle > 0.08);
             if (!burnoutSmokeActive) {
                 resetWheelSamples();
                 return;
             }
-            const steeringActive = (keyState.left || keyState.right) && steerAbs > 0.14;
+            const steeringActive =
+                (steeringPressed && steerAbs > 0.14) ||
+                (steerAbs > 0.2 && Math.abs(yawRateAbs) > 0.6);
             const handbrakeDrift = steeringActive && speedAbs >= 2.1;
             const burnoutSmokeSignal = THREE.MathUtils.clamp(
                 throttle * 0.44 +
