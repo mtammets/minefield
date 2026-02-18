@@ -156,9 +156,11 @@ function addLightsToCar(car, lightConfig = {}) {
         accentPointDistance = 8,
         accentPointDecay = 2.2,
     } = lightConfig;
+    const headlightProjectorLights = [];
+    const headlightLensMeshes = [];
     const taillightPointLights = [];
     const taillightMeshes = [];
-    const lightState = { brakeLevel: 0 };
+    const lightState = { brakeLevel: 0, powerBlend: 1 };
     const accentStripMaterials = [];
     const accentStripBaseColors = [];
     const accentGlowMaterials = [];
@@ -194,6 +196,9 @@ function addLightsToCar(car, lightConfig = {}) {
         light.shadow.focus = 0.5;
         car.add(light.target);
         car.add(light);
+        light.userData.baseIntensity = intensity;
+        light.userData.baseDistance = distance;
+        headlightProjectorLights.push(light);
         return light;
     };
 
@@ -261,13 +266,15 @@ function addLightsToCar(car, lightConfig = {}) {
                 });
             }
         }
-        createLightMesh(
+        const headlightLens = createLightMesh(
             THREE.BoxGeometry.bind(null, 0.22, 0.1, 0.08),
             headlightColor,
             headlightColor,
             3.1,
             [position[0], position[1], position[2] - 0.05]
         );
+        headlightLens.material.userData.baseEmissiveIntensity = 3.1;
+        headlightLensMeshes.push(headlightLens);
     });
 
     // Tagatuled
@@ -299,33 +306,53 @@ function addLightsToCar(car, lightConfig = {}) {
     return {
         update(vehicleState, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
+            const targetPower = vehicleState?.batteryDepleted ? 0 : 1;
+            const powerResponse = targetPower > lightState.powerBlend ? 14 : 20;
+            const powerBlend = 1 - Math.exp(-powerResponse * dt);
+            lightState.powerBlend = THREE.MathUtils.lerp(lightState.powerBlend, targetPower, powerBlend);
             const brakeInput = THREE.MathUtils.clamp(vehicleState?.brake || 0, 0, 1);
-            const targetBrakeLevel = brakeInput;
+            const targetBrakeLevel = brakeInput * lightState.powerBlend;
             const response = targetBrakeLevel > lightState.brakeLevel ? 18 : 10;
             const blend = 1 - Math.exp(-response * dt);
             lightState.brakeLevel = THREE.MathUtils.lerp(lightState.brakeLevel, targetBrakeLevel, blend);
-            applyBrakeLightLevel(lightState.brakeLevel);
-            applyAccentLighting(vehicleState, dt);
+            applyHeadlightPower(lightState.powerBlend);
+            applyBrakeLightLevel(lightState.brakeLevel, lightState.powerBlend);
+            applyAccentLighting(vehicleState, dt, lightState.powerBlend);
         },
     };
 
-    function applyBrakeLightLevel(level) {
+    function applyHeadlightPower(powerBlend = 1) {
+        const clampedPower = THREE.MathUtils.clamp(powerBlend, 0, 1);
+        headlightProjectorLights.forEach((light) => {
+            const baseIntensity = Number(light?.userData?.baseIntensity) || 0;
+            const baseDistance = Number(light?.userData?.baseDistance) || light.distance || 0;
+            light.intensity = baseIntensity * clampedPower;
+            light.distance = baseDistance * clampedPower;
+        });
+        headlightLensMeshes.forEach((mesh) => {
+            const baseEmissive = Number(mesh?.material?.userData?.baseEmissiveIntensity) || 0;
+            mesh.material.emissiveIntensity = baseEmissive * clampedPower;
+        });
+    }
+
+    function applyBrakeLightLevel(level, powerBlend = 1) {
         const brakeLevel = THREE.MathUtils.clamp(level, 0, 1);
+        const clampedPower = THREE.MathUtils.clamp(powerBlend, 0, 1);
         const pointIntensity = taillightIntensity * THREE.MathUtils.lerp(
             TAILLIGHT_RUNNING_LIGHT_FACTOR,
             TAILLIGHT_BRAKE_LIGHT_FACTOR,
             brakeLevel
-        );
+        ) * clampedPower;
         const pointDistance = taillightDistance * THREE.MathUtils.lerp(
             TAILLIGHT_RUNNING_DISTANCE_FACTOR,
             TAILLIGHT_BRAKE_DISTANCE_FACTOR,
             brakeLevel
-        );
+        ) * clampedPower;
         const lensEmissive = THREE.MathUtils.lerp(
             TAILLIGHT_RUNNING_EMISSIVE,
             TAILLIGHT_BRAKE_EMISSIVE,
             brakeLevel
-        );
+        ) * clampedPower;
 
         taillightPointLights.forEach((light) => {
             light.intensity = pointIntensity;
@@ -435,7 +462,8 @@ function addLightsToCar(car, lightConfig = {}) {
         }
     }
 
-    function applyAccentLighting(vehicleState, dt) {
+    function applyAccentLighting(vehicleState, dt, powerBlend = 1) {
+        const clampedPower = THREE.MathUtils.clamp(powerBlend, 0, 1);
         const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.speed || 0) / 58, 0, 1);
         const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.throttle || 0), 0, 1);
         const steerRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.steerInput || 0), 0, 1);
@@ -454,9 +482,11 @@ function addLightsToCar(car, lightConfig = {}) {
             const wave = 0.5 + 0.5 * Math.sin(accentState.phase + accentPulseOffsets[index]);
             const pulse = 1 + (wave - 0.5) * 2 * accentPulseDepth;
             const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.22 + accentPulseOffsets[index] * 1.64);
-            material.emissiveIntensity = accentBaseEmissive * pulse
+            material.emissiveIntensity = (
+                accentBaseEmissive * pulse
                 + activity * accentSpeedBoost
-                + chargingBoost * (0.6 + chargeWave * 1.1);
+                + chargingBoost * (0.6 + chargeWave * 1.1)
+            ) * clampedPower;
             material.emissive
                 .copy(accentStripBaseColors[index])
                 .lerp(accentChargeHotColor, chargingBoost * (0.34 + chargeWave * 0.56));
@@ -467,7 +497,8 @@ function addLightsToCar(car, lightConfig = {}) {
             const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.7 + accentPulseOffsets[index] * 1.9);
             material.opacity = accentGlowOpacity
                 * (0.84 + wave * 0.42)
-                * (1 + activity * 0.38 + chargingBoost * (0.84 + chargeWave * 0.84));
+                * (1 + activity * 0.38 + chargingBoost * (0.84 + chargeWave * 0.84))
+                * clampedPower;
             material.color
                 .copy(accentGlowBaseColors[index])
                 .lerp(accentChargeColor, chargingBoost * (0.52 + chargeWave * 0.36));
@@ -476,8 +507,11 @@ function addLightsToCar(car, lightConfig = {}) {
         accentPointLights.forEach((light, index) => {
             const wave = 0.86 + 0.14 * Math.sin(accentState.phase * 1.14 + index * 1.8);
             const chargeWave = 0.5 + 0.5 * Math.sin(accentState.phase * 2.4 + index * 1.26);
-            light.intensity = accentPointIntensity * wave * (0.82 + activity * 0.44 + chargingBoost * (0.88 + chargeWave * 0.52));
-            light.distance = accentPointDistance * (0.92 + speedRatio * 0.12 + chargingBoost * 0.24);
+            light.intensity = accentPointIntensity
+                * wave
+                * (0.82 + activity * 0.44 + chargingBoost * (0.88 + chargeWave * 0.52))
+                * clampedPower;
+            light.distance = accentPointDistance * (0.92 + speedRatio * 0.12 + chargingBoost * 0.24) * clampedPower;
             light.color
                 .copy(accentPointBaseColors[index])
                 .lerp(accentChargeColor, chargingBoost * (0.54 + chargeWave * 0.34));
@@ -489,11 +523,11 @@ function addLightsToCar(car, lightConfig = {}) {
             const flowTravel = Math.sin(flowPhase) * entry.travelHalfRange * -entry.sideSign;
             const flowPulse = 0.5 + 0.5 * Math.sin(flowPhase * 1.82);
 
-            entry.mesh.visible = chargingBoost > 0.01;
+            entry.mesh.visible = chargingBoost > 0.01 && clampedPower > 0.01;
             entry.mesh.position.z = entry.baseZ + flowTravel;
             entry.mesh.scale.x = 0.72 + chargingBoost * (0.24 + flowPulse * 0.52);
             entry.mesh.scale.y = 0.9 + chargingBoost * (0.22 + flowPulse * 0.26);
-            material.opacity = chargingBoost * (0.12 + flowPulse * 0.5);
+            material.opacity = chargingBoost * (0.12 + flowPulse * 0.5) * clampedPower;
             material.color
                 .copy(accentChargeColor)
                 .lerp(accentChargeHotColor, 0.38 + flowPulse * 0.62);
@@ -1420,6 +1454,8 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
         const width = canvas.width;
         const height = canvas.height;
         const clampedBattery = THREE.MathUtils.clamp(batteryLevel, 0, 1);
+        const isBatteryDepleted = Boolean(vehicleState?.batteryDepleted);
+        const batteryDepletedBlink = THREE.MathUtils.clamp(vehicleState?.batteryDepletedBlink ?? 0.5, 0, 1);
         const telemetry = {
             speedKph: Math.round(Math.abs((vehicleState.speed || 0) * 3.6)),
             throttle: THREE.MathUtils.clamp(Math.abs(vehicleState.throttle || 0), 0, 1),
@@ -1439,6 +1475,11 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             topSpeedLimitPercent: THREE.MathUtils.clamp(vehicleState.topSpeedLimitPercent ?? 100, 0, 100),
         };
         ctx.clearRect(0, 0, width, height);
+        if (isBatteryDepleted) {
+            drawBatteryDepletedScreen(width, height, telemetry.batteryPercent, batteryDepletedBlink);
+            texture.needsUpdate = true;
+            return;
+        }
 
         const shellX = 38;
         const shellY = 40;
@@ -1698,6 +1739,97 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             ctx.fillStyle = row[0] === 'CELLS' ? '#9af4c7' : '#e8f4ff';
             ctx.fillText(row[1], statX + 18, y + 56);
         });
+    }
+
+    function drawBatteryDepletedScreen(width, height, batteryPercent = 0, blinkLevel = 0.5) {
+        const pulse = THREE.MathUtils.clamp(blinkLevel, 0, 1);
+        const centerX = width * 0.5;
+        const centerY = height * 0.46;
+        const cardW = Math.min(width * 0.74, 960);
+        const cardH = Math.min(height * 0.68, 500);
+        const cardX = centerX - cardW * 0.5;
+        const cardY = centerY - cardH * 0.5;
+        const batteryW = Math.min(cardW * 0.46, 320);
+        const batteryH = Math.max(86, cardH * 0.22);
+        const batteryX = centerX - batteryW * 0.5;
+        const batteryY = centerY - batteryH * 0.5;
+
+        ctx.save();
+        const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+        bgGradient.addColorStop(0, '#14080d');
+        bgGradient.addColorStop(0.5, '#190a11');
+        bgGradient.addColorStop(1, '#0d070a');
+        ctx.fillStyle = bgGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const haloGradient = ctx.createRadialGradient(centerX, centerY, 32, centerX, centerY, cardW * 0.56);
+        haloGradient.addColorStop(0, `rgba(255, 106, 126, ${0.22 + pulse * 0.16})`);
+        haloGradient.addColorStop(1, 'rgba(255, 106, 126, 0)');
+        ctx.fillStyle = haloGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.fillStyle = 'rgba(20, 8, 14, 0.9)';
+        drawRoundedRect(ctx, cardX, cardY, cardW, cardH, 34);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(255, 126, 138, ${0.42 + pulse * 0.36})`;
+        ctx.lineWidth = 2;
+        drawRoundedRect(ctx, cardX, cardY, cardW, cardH, 34);
+        ctx.stroke();
+
+        ctx.strokeStyle = `rgba(255, 126, 138, ${0.44 + pulse * 0.52})`;
+        ctx.lineWidth = 8;
+        ctx.shadowColor = `rgba(255, 86, 108, ${0.36 + pulse * 0.46})`;
+        ctx.shadowBlur = 18 + pulse * 26;
+        drawRoundedRect(ctx, batteryX, batteryY, batteryW, batteryH, 20);
+        ctx.stroke();
+
+        const terminalW = Math.max(16, batteryW * 0.08);
+        const terminalH = batteryH * 0.3;
+        ctx.fillStyle = `rgba(255, 118, 132, ${0.4 + pulse * 0.42})`;
+        drawRoundedRect(
+            ctx,
+            batteryX + batteryW + 8,
+            batteryY + batteryH * 0.5 - terminalH * 0.5,
+            terminalW,
+            terminalH,
+            8
+        );
+        ctx.fill();
+
+        const innerPad = 10;
+        const cellX = batteryX + innerPad;
+        const cellY = batteryY + innerPad;
+        const cellW = batteryW - innerPad * 2;
+        const cellH = batteryH - innerPad * 2;
+        ctx.fillStyle = 'rgba(40, 12, 18, 0.76)';
+        drawRoundedRect(ctx, cellX, cellY, cellW, cellH, 13);
+        ctx.fill();
+
+        const fillRatio = THREE.MathUtils.clamp(batteryPercent / 100, 0, 1);
+        const fillW = Math.max(10, (cellW - 6) * Math.max(0.02, fillRatio));
+        const fillGradient = ctx.createLinearGradient(cellX, cellY, cellX + fillW, cellY);
+        fillGradient.addColorStop(0, `rgba(255, 82, 104, ${0.66 + pulse * 0.3})`);
+        fillGradient.addColorStop(1, `rgba(255, 158, 170, ${0.74 + pulse * 0.22})`);
+        ctx.fillStyle = fillGradient;
+        drawRoundedRect(ctx, cellX + 3, cellY + 3, fillW, cellH - 6, 10);
+        ctx.fill();
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowBlur = 26 + pulse * 20;
+        ctx.shadowColor = `rgba(255, 88, 111, ${0.56 + pulse * 0.34})`;
+        ctx.font = "800 58px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = `rgba(255, 212, 217, ${0.82 + pulse * 0.16})`;
+        ctx.fillText('LOW BATTERY', centerX, batteryY + batteryH + 82);
+
+        ctx.shadowBlur = 12 + pulse * 12;
+        ctx.font = "700 30px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = `rgba(255, 156, 168, ${0.72 + pulse * 0.24})`;
+        ctx.fillText('CHARGE REQUIRED', centerX, batteryY + batteryH + 128);
+        ctx.font = "800 68px 'Orbitron', 'Segoe UI', sans-serif";
+        ctx.fillStyle = `rgba(255, 227, 231, ${0.88 + pulse * 0.1})`;
+        ctx.fillText(`${Math.round(fillRatio * 100)}%`, centerX, batteryY - 42);
+        ctx.restore();
     }
 
     function drawNavigationMode(contentX, contentY, contentW, contentH, telemetry) {

@@ -55,6 +55,15 @@ const BATTERY_COLOR_MID = new THREE.Color(0xffd86b);
 const BATTERY_COLOR_HIGH = new THREE.Color(0x8dff9a);
 const BATTERY_CRITICAL_LEVEL = 0.22;
 const BATTERY_WARNING_LEVEL = 0.6;
+const POWER_DOWN = {
+    collapseSink: -0.34,
+    collapsePitch: 0,
+    collapseWobble: 0.006,
+    collapseRise: 9.5,
+    collapseFall: 5.6,
+    impactDrop: 0.058,
+    impactDecay: 7.8,
+};
 
 export function createCarRig(options = {}) {
     const {
@@ -122,6 +131,12 @@ export function createCarRig(options = {}) {
         heightLevel: 0,
         stiffnessLevel: 0,
     };
+    let isBatteryDepleted = false;
+    const powerDownState = {
+        collapseBlend: 0,
+        impactBlend: 0,
+        blinkPhase: Math.random() * Math.PI * 2,
+    };
 
     function clampSuspensionTuneLevel(level) {
         return THREE.MathUtils.clamp(level, SUSPENSION_TUNING.minLevel, SUSPENSION_TUNING.maxLevel);
@@ -168,22 +183,62 @@ export function createCarRig(options = {}) {
 
     function updateVisuals(vehicleState, deltaTime) {
         const dt = Math.min(deltaTime || 1 / 60, 0.05);
+        const rawVehicleState = vehicleState || {};
+        const depletedVisual = isBatteryDepleted || Boolean(rawVehicleState.batteryDepleted);
+        const collapseTarget = depletedVisual ? 1 : 0;
+        const collapseRate = depletedVisual ? POWER_DOWN.collapseRise : POWER_DOWN.collapseFall;
+        powerDownState.collapseBlend = THREE.MathUtils.lerp(
+            powerDownState.collapseBlend,
+            collapseTarget,
+            1 - Math.exp(-collapseRate * dt)
+        );
+        powerDownState.impactBlend = Math.max(0, powerDownState.impactBlend - POWER_DOWN.impactDecay * dt);
+        powerDownState.blinkPhase += dt * (depletedVisual ? 8.4 : 1.5);
+
+        lightRig.visible = true;
+
         const suspensionSnapshot = getSuspensionTuneSnapshot();
-        bodyMeta?.update?.({
-            ...(vehicleState || {}),
+        const vehicleVisualState = {
+            ...rawVehicleState,
             batteryLevelNormalized,
             ...suspensionSnapshot,
-        }, dt);
-        wheelController.update(vehicleState, dt);
-        lightController?.update(vehicleState, dt);
+            batteryDepleted: depletedVisual,
+            batteryDepletedBlink: 0.5 + 0.5 * Math.sin(powerDownState.blinkPhase),
+        };
+        bodyMeta?.update?.(vehicleVisualState, dt);
+        wheelController.update(vehicleVisualState, dt);
+        lightController?.update(vehicleVisualState, dt);
+        setWheelWellLightPower(depletedVisual ? 0 : 1);
         collectMissingWheelState(detachableWheels, missingWheelState);
-        updateBodySuspension(vehicleState, missingWheelState, dt);
-        suspensionLinkage.update(missingWheelState, vehicleState, dt);
+        updateBodySuspension(vehicleVisualState, missingWheelState, dt, powerDownState);
+        suspensionLinkage.update(missingWheelState, vehicleVisualState, dt);
         const scrapeContacts = suspensionLinkage.consumeScrapeContacts?.() || [];
-        scrapeSparkSystem.update(vehicleState, scrapeContacts, dt);
+        scrapeSparkSystem.update(vehicleVisualState, scrapeContacts, dt);
     }
 
-    function updateBodySuspension(vehicleState, missingWheels, dt) {
+    function setWheelWellLightPower(powerFactor = 1) {
+        const lightGroup = wheelEditGroups?.wheelLightGroup;
+        if (!lightGroup) {
+            return;
+        }
+        const clampedPower = THREE.MathUtils.clamp(powerFactor, 0, 1);
+        for (let i = 0; i < lightGroup.children.length; i += 1) {
+            const child = lightGroup.children[i];
+            if (!child?.isLight) {
+                continue;
+            }
+            if (!Number.isFinite(child.userData.baseIntensity)) {
+                child.userData.baseIntensity = child.intensity || 0;
+            }
+            if (!Number.isFinite(child.userData.baseDistance)) {
+                child.userData.baseDistance = child.distance || 0;
+            }
+            child.intensity = child.userData.baseIntensity * clampedPower;
+            child.distance = child.userData.baseDistance * clampedPower;
+        }
+    }
+
+    function updateBodySuspension(vehicleState, missingWheels, dt, powerState = null) {
         const speedAbs = Math.abs(vehicleState.speed || 0);
         const speedRatio = THREE.MathUtils.clamp(speedAbs / 75, 0, 1);
         const stiffnessScale = getSuspensionStiffnessScale();
@@ -224,12 +279,12 @@ export function createCarRig(options = {}) {
 
         const maxRoll = SUSPENSION.maxRoll + SUSPENSION.maxDamageExtraRoll;
         const maxPitch = SUSPENSION.maxPitch + SUSPENSION.maxDamageExtraPitch;
-        const targetRoll = THREE.MathUtils.clamp(
+        let targetRoll = THREE.MathUtils.clamp(
             (steerRoll + wheelDamageRoll + wheelTurnRoll) * motionScale,
             -maxRoll,
             maxRoll
         );
-        const targetPitchWithDamage = THREE.MathUtils.clamp(
+        let targetPitchWithDamage = THREE.MathUtils.clamp(
             (targetPitch + wheelDamagePitch) * motionScale,
             -maxPitch,
             maxPitch
@@ -253,9 +308,19 @@ export function createCarRig(options = {}) {
         const dynamicSink = -Math.abs(targetRoll) * 0.15 - Math.abs(targetPitchWithDamage) * 0.12;
         const wheelLossSink = -missingWheels.total * SUSPENSION.damageHeaveSinkPerWheel;
         const brakeRearLiftHeave = brakeStoppie * SUSPENSION.brakeRearLiftHeave;
-        const targetHeave = (roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave + brakeRearLiftHeave)
+        let targetHeave = (roadShake * roadAmplitude + dynamicSink + wheelLossSink + terrainHeave + brakeRearLiftHeave)
             * motionScale;
-        const targetLateralOffset = -sideWheelDelta * SUSPENSION.damageLateralShiftPerWheel * motionScale;
+        let targetLateralOffset = -sideWheelDelta * SUSPENSION.damageLateralShiftPerWheel * motionScale;
+        const collapseBlend = THREE.MathUtils.clamp(powerState?.collapseBlend || 0, 0, 1);
+        if (collapseBlend > 0) {
+            const blinkPulse = 0.5 + 0.5 * Math.sin((powerState?.blinkPhase || 0) * 1.3);
+            const collapseWobble = (blinkPulse - 0.5) * POWER_DOWN.collapseWobble * collapseBlend;
+            const impactDrop = (powerState?.impactBlend || 0) * POWER_DOWN.impactDrop;
+            targetPitchWithDamage = THREE.MathUtils.lerp(targetPitchWithDamage, POWER_DOWN.collapsePitch, collapseBlend);
+            targetRoll = THREE.MathUtils.lerp(targetRoll, 0, collapseBlend);
+            targetLateralOffset = THREE.MathUtils.lerp(targetLateralOffset, 0, collapseBlend);
+            targetHeave = THREE.MathUtils.lerp(targetHeave, POWER_DOWN.collapseSink - impactDrop + collapseWobble, collapseBlend);
+        }
 
         springToTarget(
             suspensionState,
@@ -297,7 +362,7 @@ export function createCarRig(options = {}) {
         bodyRig.rotation.x = suspensionState.pitch;
         bodyRig.rotation.z = suspensionState.roll;
         bodyRig.position.x = suspensionState.lateralOffset;
-        bodyRig.position.y = suspensionState.heave + getSuspensionHeightOffset();
+        bodyRig.position.y = suspensionState.heave + getSuspensionHeightOffset() * (1 - collapseBlend);
     }
 
     return {
@@ -310,6 +375,20 @@ export function createCarRig(options = {}) {
             batteryLevelNormalized = THREE.MathUtils.clamp(levelNormalized, 0, 1);
             batteryIndicator?.setLevel(batteryLevelNormalized);
             bodyMeta?.setBatteryLevel?.(batteryLevelNormalized);
+        },
+        setBatteryDepleted(isDepleted = false) {
+            const nextDepleted = Boolean(isDepleted);
+            if (nextDepleted === isBatteryDepleted) {
+                return isBatteryDepleted;
+            }
+            isBatteryDepleted = nextDepleted;
+            if (isBatteryDepleted) {
+                powerDownState.impactBlend = 1;
+            } else {
+                powerDownState.impactBlend = 0;
+                powerDownState.collapseBlend = 0;
+            }
+            return isBatteryDepleted;
         },
         adjustSuspensionHeight(direction = 0) {
             const delta = Number.isFinite(direction) ? Math.sign(direction) * SUSPENSION_TUNING.heightStep : 0;
@@ -897,6 +976,7 @@ const playerCarRig = createCarRig({
 const car = playerCarRig.car;
 const updateCarVisuals = playerCarRig.updateVisuals;
 const setPlayerBatteryLevel = playerCarRig.setBatteryLevel;
+const setPlayerBatteryDepleted = playerCarRig.setBatteryDepleted;
 const getPlayerCarCrashParts = playerCarRig.getCrashParts;
 const adjustPlayerSuspensionHeight = playerCarRig.adjustSuspensionHeight;
 const adjustPlayerSuspensionStiffness = playerCarRig.adjustSuspensionStiffness;
@@ -916,6 +996,7 @@ export {
     car,
     updateCarVisuals,
     setPlayerBatteryLevel,
+    setPlayerBatteryDepleted,
     getPlayerCarCrashParts,
     adjustPlayerSuspensionHeight,
     adjustPlayerSuspensionStiffness,

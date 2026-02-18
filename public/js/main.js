@@ -20,6 +20,7 @@ import {
     createCarRig,
     updateCarVisuals,
     setPlayerBatteryLevel,
+    setPlayerBatteryDepleted,
     getPlayerCarCrashParts,
     adjustPlayerSuspensionHeight,
     adjustPlayerSuspensionStiffness,
@@ -120,9 +121,15 @@ const BATTERY_MAX = 100;
 const BATTERY_PICKUP_GAIN = 24;
 const BATTERY_IDLE_DRAIN_PER_SEC = 0;
 const BATTERY_SPEED_DRAIN_PER_SPEED = 0.055;
+const BATTERY_LOW_HUD_SHOW_THRESHOLD = 0.25;
+const BATTERY_LOW_HUD_HIDE_THRESHOLD = 0.3;
+const BATTERY_CRITICAL_HUD_SHOW_THRESHOLD = 0.1;
+const BATTERY_CRITICAL_HUD_HIDE_THRESHOLD = 0.12;
+const BATTERY_DEPLETED_TRIGGER_LEVEL = 0.001;
+const BATTERY_DEPLETED_RECOVER_LEVEL = 0.06;
 const CHARGING_ZONE_ACTIVATION_DELAY_SEC = 2;
 const CHARGING_BATTERY_GAIN_PER_SEC = 16;
-const ROUND_TOTAL_PICKUPS = 10;
+const ROUND_TOTAL_PICKUPS = 30;
 const PLAYER_CAR_POOL_SIZE = 3;
 const PLAYER_RESPAWN_DELAY_MS = 850;
 const REPLAY_EVENT_PICKUP = 'pickup';
@@ -186,6 +193,7 @@ let explosionLight = null;
 let explosionLightLife = 0;
 let botTrafficSystem = null;
 let playerBattery = BATTERY_MAX;
+let isBatteryDepleted = false;
 let playerCollectedCount = 0;
 let totalCollectedCount = 0;
 let playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
@@ -307,6 +315,7 @@ botStatusUi.render(botTrafficSystem.getHudState());
 initializePlayerPhysics(car);
 resetPlayerDamageState();
 setPlayerBatteryLevel(1);
+setBatteryDepletedState(false, { showStatus: false });
 if (welcomeModalUi.isAvailable()) {
     showWelcomeModal();
 }
@@ -766,6 +775,7 @@ function animate() {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
             const vehicleState = getVehicleState();
             vehicleState.chargingLevelNormalized = 0;
+            vehicleState.batteryDepleted = isBatteryDepleted;
             updateCarVisuals(vehicleState, frameDelta);
             const introFinished = raceIntroController.update(frameDelta);
             updateGroundMotion(car.position, 0);
@@ -806,6 +816,7 @@ function animate() {
                 visualState.topSpeedLimitKph = topSpeedTune.topSpeedKph;
                 visualState.topSpeedLimitPercent = topSpeedTune.topSpeedPercent;
                 visualState.chargingLevelNormalized = chargingSnapshot.visualLevel;
+                visualState.batteryDepleted = false;
                 updateCarVisuals(visualState, frameDelta);
                 processReplayEvents(replayFrame?.events);
 
@@ -820,6 +831,9 @@ function animate() {
             } else if (!isCarDestroyed && !pickupRoundFinished) {
                 physicsAccumulator += frameDelta;
                 const vehicleCollisionSnapshots = botTrafficSystem?.getCollisionSnapshots?.() || [];
+                if (isBatteryDepleted) {
+                    clearDriveKeys();
+                }
 
                 let physicsSteps = 0;
                 while (physicsAccumulator >= physicsStep && physicsSteps < MAX_PHYSICS_STEPS_PER_FRAME) {
@@ -854,6 +868,7 @@ function animate() {
                     const interpolationAlpha = physicsAccumulator / physicsStep;
                     applyInterpolatedPlayerTransform(car, interpolationAlpha);
                     vehicleState.chargingLevelNormalized = chargingSnapshot.visualLevel;
+                    vehicleState.batteryDepleted = isBatteryDepleted;
                     updateCarVisuals(vehicleState, frameDelta);
                     updateBattery(vehicleState, frameDelta);
                     replayController.updateRecording(frameDelta, vehicleState);
@@ -918,6 +933,7 @@ function animate() {
         enabled: chargingHudEnabled,
         isCharging: chargingHudActive,
         chargingLevel: chargingHudLevel,
+        batteryDepleted: isBatteryDepleted,
     });
     skidMarkController.update(frameDelta, {
         enabled: skidMarksEnabled,
@@ -944,6 +960,32 @@ function createChargingProgressHudController(scene, camera, options = {}) {
     const getBatteryNormalized = typeof options.getBatteryNormalized === 'function'
         ? options.getBatteryNormalized
         : (() => 0);
+    const lowBatteryShowThreshold = THREE.MathUtils.clamp(
+        Number(options.lowBatteryShowThreshold) || BATTERY_LOW_HUD_SHOW_THRESHOLD,
+        0.02,
+        0.95
+    );
+    const lowBatteryHideThreshold = THREE.MathUtils.clamp(
+        Math.max(
+            lowBatteryShowThreshold,
+            Number(options.lowBatteryHideThreshold) || BATTERY_LOW_HUD_HIDE_THRESHOLD
+        ),
+        lowBatteryShowThreshold,
+        0.98
+    );
+    const criticalBatteryShowThreshold = THREE.MathUtils.clamp(
+        Number(options.criticalBatteryShowThreshold) || BATTERY_CRITICAL_HUD_SHOW_THRESHOLD,
+        0.01,
+        lowBatteryHideThreshold
+    );
+    const criticalBatteryHideThreshold = THREE.MathUtils.clamp(
+        Math.max(
+            criticalBatteryShowThreshold,
+            Number(options.criticalBatteryHideThreshold) || BATTERY_CRITICAL_HUD_HIDE_THRESHOLD
+        ),
+        criticalBatteryShowThreshold,
+        lowBatteryHideThreshold
+    );
     const fallback = {
         update() {},
         reset() {},
@@ -994,18 +1036,38 @@ function createChargingProgressHudController(scene, camera, options = {}) {
         displayPercent: THREE.MathUtils.clamp(getBatteryPercent(), 0, 100),
         time: Math.random() * 11.7,
         scanPhase: Math.random() * Math.PI * 2,
+        lowBatteryReminderActive: false,
+        criticalBatteryAlertActive: false,
     };
 
-    drawPanel(state.displayPercent, 0, 0, false);
+    drawPanel(state.displayPercent, 0, 0, false, false, false);
     return {
         update(deltaTime = 1 / 60, {
             enabled = true,
             isCharging = false,
             chargingLevel = 0,
+            batteryDepleted = false,
         } = {}) {
             const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
             const charging = THREE.MathUtils.clamp(chargingLevel || 0, 0, 1);
-            const targetVisible = enabled && isCharging ? 1 : 0;
+            if (batteryDepleted) {
+                state.visibleBlend = 0;
+                root.visible = false;
+                return;
+            }
+            const batteryNormalized = THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
+            if (state.lowBatteryReminderActive) {
+                state.lowBatteryReminderActive = batteryNormalized <= lowBatteryHideThreshold;
+            } else if (batteryNormalized <= lowBatteryShowThreshold) {
+                state.lowBatteryReminderActive = true;
+            }
+            if (state.criticalBatteryAlertActive) {
+                state.criticalBatteryAlertActive = batteryNormalized <= criticalBatteryHideThreshold;
+            } else if (batteryNormalized <= criticalBatteryShowThreshold) {
+                state.criticalBatteryAlertActive = true;
+            }
+            const showLowBatteryReminder = enabled && !isCharging && state.lowBatteryReminderActive;
+            const targetVisible = enabled && !batteryDepleted && (isCharging || showLowBatteryReminder) ? 1 : 0;
             const visibleRate = targetVisible > state.visibleBlend ? 8.8 : 7.2;
             state.visibleBlend = THREE.MathUtils.lerp(
                 state.visibleBlend,
@@ -1039,20 +1101,24 @@ function createChargingProgressHudController(scene, camera, options = {}) {
             root.scale.setScalar(baseScale * scalePulse);
 
             const haloPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 2.2);
-            haloMaterial.opacity = state.visibleBlend * (0.12 + charging * (0.28 + haloPulse * 0.24));
+            const isCriticalBattery = state.criticalBatteryAlertActive;
+            haloMaterial.opacity = state.visibleBlend * (0.12 + charging * (0.28 + haloPulse * 0.24) + (isCriticalBattery ? 0.14 : 0));
+            haloMaterial.color.setHex(isCriticalBattery ? 0xff4f5e : 0xffffff);
             haloMesh.rotation.z += dt * (0.08 + charging * 0.42);
             panelMaterial.opacity = state.visibleBlend * (0.52 + charging * 0.36);
 
-            drawPanel(state.displayPercent, charging, state.time, isCharging);
+            drawPanel(state.displayPercent, charging, state.time, isCharging, showLowBatteryReminder, isCriticalBattery);
             panelTexture.needsUpdate = true;
         },
         reset() {
             state.visibleBlend = 0;
+            state.lowBatteryReminderActive = false;
+            state.criticalBatteryAlertActive = false;
             root.visible = false;
         },
     };
 
-    function drawPanel(displayPercent, charging, time, isCharging) {
+    function drawPanel(displayPercent, charging, time, isCharging, showLowBatteryReminder, isCriticalBattery) {
         const ctx = panelCtx;
         const w = panelCanvas.width;
         const h = panelCanvas.height;
@@ -1062,24 +1128,46 @@ function createChargingProgressHudController(scene, camera, options = {}) {
         const py = 58;
         const pw = w - px * 2;
         const ph = h - py * 2;
+        const accentStroke = isCriticalBattery ? 'rgba(255, 126, 138, 0.6)' : 'rgba(152, 230, 255, 0.45)';
+        const scanMidColor = isCriticalBattery
+            ? `rgba(255, 116, 130, ${0.16 + charging * 0.2})`
+            : `rgba(146, 239, 255, ${0.08 + charging * 0.16})`;
+        const bigTextColor = isCriticalBattery ? 'rgba(255, 219, 223, 0.99)' : 'rgba(224, 252, 255, 0.98)';
+        const smallTextColor = isCriticalBattery ? 'rgba(255, 176, 186, 0.97)' : 'rgba(173, 239, 255, 0.95)';
+        const textShadow = isCriticalBattery ? 'rgba(255, 92, 112, 0.88)' : 'rgba(132, 231, 255, 0.85)';
+        const barBgColor = isCriticalBattery ? 'rgba(58, 10, 20, 0.94)' : 'rgba(8, 32, 58, 0.92)';
+        const barStrokeColor = isCriticalBattery ? 'rgba(255, 136, 148, 0.76)' : 'rgba(155, 233, 255, 0.7)';
+        const tickerTextColor = isCriticalBattery ? 'rgba(255, 182, 190, 0.94)' : 'rgba(172, 240, 255, 0.9)';
         drawRoundedRect(ctx, px, py, pw, ph, 42);
 
         const panelGradient = ctx.createLinearGradient(px, py, px + pw, py + ph);
-        panelGradient.addColorStop(0, 'rgba(7, 24, 46, 0.84)');
-        panelGradient.addColorStop(0.52, 'rgba(4, 18, 36, 0.78)');
-        panelGradient.addColorStop(1, 'rgba(3, 16, 30, 0.84)');
+        if (isCriticalBattery) {
+            panelGradient.addColorStop(0, 'rgba(56, 10, 20, 0.86)');
+            panelGradient.addColorStop(0.52, 'rgba(42, 8, 16, 0.8)');
+            panelGradient.addColorStop(1, 'rgba(31, 6, 13, 0.86)');
+        } else {
+            panelGradient.addColorStop(0, 'rgba(7, 24, 46, 0.84)');
+            panelGradient.addColorStop(0.52, 'rgba(4, 18, 36, 0.78)');
+            panelGradient.addColorStop(1, 'rgba(3, 16, 30, 0.84)');
+        }
         ctx.fillStyle = panelGradient;
         ctx.fill();
 
         ctx.lineWidth = 3;
-        ctx.strokeStyle = 'rgba(152, 230, 255, 0.45)';
+        ctx.strokeStyle = accentStroke;
         ctx.stroke();
 
         const scanY = py + ((time * 120) % ph);
         const scanGradient = ctx.createLinearGradient(px, scanY - 24, px, scanY + 24);
-        scanGradient.addColorStop(0, 'rgba(126, 231, 255, 0)');
-        scanGradient.addColorStop(0.5, `rgba(146, 239, 255, ${0.08 + charging * 0.16})`);
-        scanGradient.addColorStop(1, 'rgba(126, 231, 255, 0)');
+        if (isCriticalBattery) {
+            scanGradient.addColorStop(0, 'rgba(255, 121, 135, 0)');
+            scanGradient.addColorStop(0.5, scanMidColor);
+            scanGradient.addColorStop(1, 'rgba(255, 121, 135, 0)');
+        } else {
+            scanGradient.addColorStop(0, 'rgba(126, 231, 255, 0)');
+            scanGradient.addColorStop(0.5, scanMidColor);
+            scanGradient.addColorStop(1, 'rgba(126, 231, 255, 0)');
+        }
         ctx.fillStyle = scanGradient;
         ctx.fillRect(px + 10, scanY - 24, pw - 20, 48);
 
@@ -1087,17 +1175,17 @@ function createChargingProgressHudController(scene, camera, options = {}) {
         const bigPercentText = `${Math.round(displayPercent)}%`;
         const subText = isCharging
             ? `LAADIMINE +${CHARGING_BATTERY_GAIN_PER_SEC.toFixed(1)}%/s`
-            : 'LAADIMISE OOTEL';
+            : (isCriticalBattery ? 'CRITICAL BATTERY - CHARGE NOW' : (showLowBatteryReminder ? 'LOW BATTERY - DRIVE TO CHARGER' : 'LAADIMISE OOTEL'));
 
         ctx.textAlign = 'center';
-        ctx.shadowColor = 'rgba(132, 231, 255, 0.85)';
-        ctx.shadowBlur = 28 + charging * 16;
-        ctx.fillStyle = 'rgba(224, 252, 255, 0.98)';
+        ctx.shadowColor = textShadow;
+        ctx.shadowBlur = 28 + charging * 16 + (isCriticalBattery ? 10 : 0);
+        ctx.fillStyle = bigTextColor;
         ctx.font = '800 122px "Orbitron", "Trebuchet MS", sans-serif';
         ctx.fillText(bigPercentText, w * 0.5, py + 168);
 
         ctx.shadowBlur = 10;
-        ctx.fillStyle = 'rgba(173, 239, 255, 0.95)';
+        ctx.fillStyle = smallTextColor;
         ctx.font = '700 32px "Orbitron", "Trebuchet MS", sans-serif';
         ctx.fillText(subText, w * 0.5, py + 216);
 
@@ -1106,22 +1194,28 @@ function createChargingProgressHudController(scene, camera, options = {}) {
         const barW = pw - 184;
         const barH = 36;
         drawRoundedRect(ctx, barX, barY, barW, barH, 18);
-        ctx.fillStyle = 'rgba(8, 32, 58, 0.92)';
+        ctx.fillStyle = barBgColor;
         ctx.fill();
 
         const fillW = Math.max(0, Math.min(barW, barW * batteryLevel));
         if (fillW > 0) {
             drawRoundedRect(ctx, barX, barY, fillW, barH, 18);
             const fillGradient = ctx.createLinearGradient(barX, barY, barX + fillW, barY + barH);
-            fillGradient.addColorStop(0, 'rgba(112, 228, 255, 0.82)');
-            fillGradient.addColorStop(0.5, 'rgba(186, 250, 255, 0.98)');
-            fillGradient.addColorStop(1, 'rgba(120, 232, 255, 0.88)');
+            if (isCriticalBattery) {
+                fillGradient.addColorStop(0, 'rgba(255, 94, 111, 0.86)');
+                fillGradient.addColorStop(0.5, 'rgba(255, 170, 180, 0.98)');
+                fillGradient.addColorStop(1, 'rgba(255, 106, 122, 0.9)');
+            } else {
+                fillGradient.addColorStop(0, 'rgba(112, 228, 255, 0.82)');
+                fillGradient.addColorStop(0.5, 'rgba(186, 250, 255, 0.98)');
+                fillGradient.addColorStop(1, 'rgba(120, 232, 255, 0.88)');
+            }
             ctx.fillStyle = fillGradient;
             ctx.fill();
         }
 
         ctx.lineWidth = 2;
-        ctx.strokeStyle = 'rgba(155, 233, 255, 0.7)';
+        ctx.strokeStyle = barStrokeColor;
         ctx.stroke();
         ctx.shadowBlur = 0;
 
@@ -1143,7 +1237,7 @@ function createChargingProgressHudController(scene, camera, options = {}) {
         drawRoundedRect(ctx, tickerX, tickerY - 30, tickerW, tickerH, 14);
         ctx.clip();
         ctx.font = '700 24px "Orbitron", "Trebuchet MS", sans-serif';
-        ctx.fillStyle = 'rgba(172, 240, 255, 0.9)';
+        ctx.fillStyle = tickerTextColor;
         const textW = ctx.measureText(tickerText).width + 80;
         const offset = (time * (130 + charging * 150)) % textW;
         const startX = tickerX + 14 - offset;
@@ -2227,6 +2321,7 @@ function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, option
     replayController.stopRecording();
     replayController.stopPlayback();
     isCarDestroyed = true;
+    setBatteryDepletedState(false, { showStatus: false });
     chargingZoneController.reset();
     chargingProgressHudController.reset();
     collectibleSystem.setEnabled(false);
@@ -2265,6 +2360,25 @@ function triggerObstacleCrash(collision) {
     });
 }
 
+function setBatteryDepletedState(nextDepleted, options = {}) {
+    const depleted = Boolean(nextDepleted);
+    if (depleted === isBatteryDepleted) {
+        setPlayerBatteryDepleted(isBatteryDepleted);
+        return isBatteryDepleted;
+    }
+    isBatteryDepleted = depleted;
+    setPlayerBatteryDepleted(isBatteryDepleted);
+    if (isBatteryDepleted) {
+        clearDriveKeys();
+        if (options.showStatus !== false) {
+            objectiveUi.showInfo('Battery empty. Suspension collapsed. Charge to recover.', 2600);
+        }
+    } else if (options.showStatus !== false) {
+        objectiveUi.showInfo('Battery restored. Drive systems online.', 1600);
+    }
+    return isBatteryDepleted;
+}
+
 function updateBattery(vehicleState, dt) {
     if (isCarDestroyed || pickupRoundFinished) {
         return;
@@ -2278,17 +2392,19 @@ function updateBattery(vehicleState, dt) {
 
     playerBattery = Math.max(0, playerBattery - drain);
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
-
-    if (playerBattery <= 0.001) {
-        triggerCarExplosion(car.position.clone(), 0xffb07d, 0xff4b4b, {
-            statusText: 'Battery depleted.',
-        });
+    if (!isBatteryDepleted && playerBattery <= BATTERY_DEPLETED_TRIGGER_LEVEL) {
+        playerBattery = 0;
+        setPlayerBatteryLevel(0);
+        setBatteryDepletedState(true);
     }
 }
 
 function addBattery(amount) {
     playerBattery = Math.min(BATTERY_MAX, playerBattery + Math.max(0, amount));
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    if (isBatteryDepleted && playerBattery >= BATTERY_DEPLETED_RECOVER_LEVEL) {
+        setBatteryDepletedState(false);
+    }
 }
 
 function finalizePickupRound(totalPickups, collectedPickups) {
@@ -3460,6 +3576,7 @@ function respawnPlayerCar() {
     resetPlayerDamageState();
     playerBattery = BATTERY_MAX;
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    setBatteryDepletedState(false, { showStatus: false });
     initializePlayerPhysics(car);
     physicsAccumulator = 0;
 
@@ -3577,6 +3694,7 @@ function resetRunStateForReplay() {
     playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
     playerBattery = BATTERY_MAX;
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    setBatteryDepletedState(false, { showStatus: false });
     chargingZoneController.reset();
     chargingProgressHudController.reset();
     skidMarkController.reset();
@@ -3608,6 +3726,7 @@ function startNewGame() {
     playerCarsRemaining = PLAYER_CAR_POOL_SIZE;
     playerBattery = BATTERY_MAX;
     setPlayerBatteryLevel(playerBattery / BATTERY_MAX);
+    setBatteryDepletedState(false, { showStatus: false });
     chargingZoneController.reset();
     chargingProgressHudController.reset();
     skidMarkController.reset();
