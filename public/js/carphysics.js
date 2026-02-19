@@ -1,5 +1,10 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
-import { OBSTACLE_CRASH_MIN_SPEED } from './constants.js';
+import {
+    OBSTACLE_CRASH_MIN_SPEED,
+    PLAYER_TOP_SPEED_LIMIT_STEP_KPH,
+    PLAYER_TOP_SPEED_LIMIT_MIN_KPH,
+    PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
+} from './constants.js';
 
 export const keys = {
     forward: false,
@@ -110,6 +115,9 @@ const TUNING = {
     launchSlipRise: 3.1,
     launchSlipFall: 9.6,
     launchAccelNorm: 52,
+    // Small assist near the configured speed cap so full throttle can actually reach it.
+    topSpeedAssistStartRatio: 0.82,
+    topSpeedAssistMpsPerSec: 9.2,
     launchWobbleSpeedLow: 7.4,
     launchWobbleSpeedHigh: 12.8,
     burnoutMaxSpeed: 8,
@@ -133,9 +141,9 @@ const TUNING = {
     crashSpeedThreshold: OBSTACLE_CRASH_MIN_SPEED,
 };
 const TOP_SPEED_LIMIT_TUNING = {
-    stepKph: 5,
-    minKph: 50,
-    maxKph: 220,
+    stepKph: PLAYER_TOP_SPEED_LIMIT_STEP_KPH,
+    minKph: PLAYER_TOP_SPEED_LIMIT_MIN_KPH,
+    maxKph: PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
 };
 const AUTOMATIC_TRANSMISSION = {
     enabled: true,
@@ -574,6 +582,27 @@ export function updatePlayerPhysics(
 
     const maxForwardSpeed = getEffectiveForwardSpeedLimit(damageDynamics.maxSpeedScale);
     const maxReverseSpeed = TUNING.maxReverseSpeed * damageDynamics.maxReverseScale;
+    if (
+        vehicleState.throttle > 0.98 &&
+        vehicleState.brake < 0.05 &&
+        longitudinalSpeed > 0 &&
+        maxForwardSpeed > 1
+    ) {
+        const assistStartSpeed = maxForwardSpeed * TUNING.topSpeedAssistStartRatio;
+        if (longitudinalSpeed >= assistStartSpeed) {
+            const assistBlend = THREE.MathUtils.clamp(
+                (longitudinalSpeed - assistStartSpeed) /
+                    Math.max(0.1, maxForwardSpeed - assistStartSpeed),
+                0,
+                1
+            );
+            longitudinalSpeed = moveToward(
+                longitudinalSpeed,
+                maxForwardSpeed,
+                TUNING.topSpeedAssistMpsPerSec * assistBlend * dt
+            );
+        }
+    }
     longitudinalSpeed = THREE.MathUtils.clamp(longitudinalSpeed, -maxReverseSpeed, maxForwardSpeed);
     if (burnoutFactor > 0) {
         longitudinalSpeed = THREE.MathUtils.clamp(

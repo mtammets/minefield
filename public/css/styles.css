@@ -1261,78 +1261,9 @@ canvas#gameCanvas {
     color: rgba(223, 241, 255, 0.98);
 }
 
-#multiplayerStatus {
-    border: 1px solid rgba(152, 202, 245, 0.42);
-    border-radius: 9px;
-    padding: 7px 8px;
-    margin-bottom: 8px;
-    font-size: 11px;
-    line-height: 1.35;
-    color: rgba(196, 228, 255, 0.94);
-    background: rgba(18, 34, 56, 0.58);
-}
-
-#multiplayerStatus[data-tone='success'] {
-    border-color: rgba(148, 242, 186, 0.52);
-    color: rgba(213, 255, 230, 0.96);
-    background: rgba(24, 58, 41, 0.56);
-}
-
-#multiplayerStatus[data-tone='error'] {
-    border-color: rgba(255, 171, 171, 0.58);
-    color: rgba(255, 219, 219, 0.98);
-    background: rgba(78, 32, 38, 0.58);
-}
-
-#multiplayerStatus[data-tone='pending'] {
-    border-color: rgba(255, 214, 144, 0.58);
-    color: rgba(255, 234, 196, 0.97);
-    background: rgba(72, 47, 18, 0.58);
-}
-
-.mpFieldLabel {
-    display: block;
-    margin-top: 2px;
-    margin-bottom: 4px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.85px;
-    text-transform: uppercase;
-    color: rgba(176, 212, 241, 0.9);
-}
-
-.mpInput {
-    width: 100%;
-    border: 1px solid rgba(145, 198, 244, 0.44);
-    border-radius: 8px;
-    padding: 8px 9px;
-    background: rgba(8, 17, 31, 0.8);
-    color: #f0f8ff;
-    font-family: 'Sora', sans-serif;
-    font-size: 12px;
-}
-
-.mpInput:focus {
-    outline: none;
-    border-color: rgba(193, 233, 255, 0.92);
-    box-shadow: 0 0 0 1px rgba(146, 215, 255, 0.28);
-}
-
-.mpRoomRow {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 7px;
-    align-items: center;
-}
-
-.mpRoomInput {
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-}
-
 .mpActionRow {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 7px;
     margin-top: 8px;
 }
@@ -1363,27 +1294,115 @@ canvas#gameCanvas {
     cursor: not-allowed;
 }
 
-.mpButton.create {
-    border-color: rgba(159, 241, 188, 0.7);
-    background: rgba(30, 81, 53, 0.7);
-    color: rgba(234, 255, 241, 0.97);
-}
-
-.mpButton.join {
-    border-color: rgba(175, 223, 255, 0.7);
-    background: rgba(31, 61, 98, 0.72);
-}
-
 .mpButton.leave {
     border-color: rgba(255, 167, 167, 0.72);
     background: rgba(92, 35, 44, 0.72);
     color: rgba(255, 231, 231, 0.97);
 }
 
-#multiplayerRoomMeta {
+.mpRoomMeta {
+    position: relative;
     margin-top: 8px;
-    font-size: 11px;
-    color: rgba(201, 228, 252, 0.92);
+    border: 1px solid rgba(139, 201, 255, 0.42);
+    border-radius: 11px;
+    padding: 9px 10px;
+    background:
+        linear-gradient(135deg, rgba(15, 44, 78, 0.52), rgba(8, 25, 46, 0.72)),
+        radial-gradient(circle at 16% 12%, rgba(113, 205, 255, 0.16), transparent 58%);
+    overflow: hidden;
+}
+
+.mpRoomMeta::after {
+    content: '';
+    position: absolute;
+    top: -55%;
+    right: -22%;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(92, 183, 255, 0.2), transparent 70%);
+    pointer-events: none;
+}
+
+.mpRoomMetaHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.mpRoomMetaLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.05px;
+    color: rgba(169, 213, 248, 0.94);
+}
+
+.mpRoomMetaBadge {
+    border: 1px solid rgba(132, 224, 174, 0.58);
+    border-radius: 999px;
+    padding: 2px 8px;
+    background: rgba(28, 94, 62, 0.58);
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    color: rgba(216, 255, 229, 0.95);
+}
+
+.mpRoomMetaValues {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.mpRoomCodeValue {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 1.3px;
+    color: rgba(226, 245, 255, 0.98);
+    text-shadow: 0 0 18px rgba(124, 208, 255, 0.34);
+}
+
+.mpPlayerCountValue {
+    border: 1px solid rgba(156, 208, 252, 0.58);
+    border-radius: 999px;
+    padding: 3px 8px;
+    background: rgba(22, 56, 90, 0.68);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.75px;
+    color: rgba(210, 237, 255, 0.96);
+    white-space: nowrap;
+}
+
+.mpRoomMeta[data-state='offline'] .mpRoomMetaBadge {
+    border-color: rgba(172, 190, 210, 0.45);
+    background: rgba(51, 69, 88, 0.56);
+    color: rgba(222, 232, 243, 0.9);
+}
+
+.mpRoomMeta[data-state='offline'] .mpRoomCodeValue {
+    color: rgba(178, 206, 229, 0.86);
+    text-shadow: none;
+}
+
+.mpRoomMeta[data-state='active'] .mpRoomCodeValue {
+    animation: mpRoomCodePulse 3.2s ease-in-out infinite;
+}
+
+@keyframes mpRoomCodePulse {
+    0%,
+    100% {
+        text-shadow: 0 0 18px rgba(124, 208, 255, 0.34);
+    }
+    50% {
+        text-shadow:
+            0 0 10px rgba(124, 208, 255, 0.34),
+            0 0 26px rgba(124, 208, 255, 0.46);
+    }
 }
 
 #multiplayerPlayerList {
@@ -2069,9 +2088,9 @@ body.race-intro-active #minimap {
     overflow: hidden;
     isolation: isolate;
     background:
-        radial-gradient(circle at 18% 16%, rgba(132, 212, 255, 0.14), rgba(6, 12, 20, 0) 36%),
-        radial-gradient(circle at 84% 84%, rgba(255, 198, 137, 0.12), rgba(6, 12, 20, 0) 34%),
-        linear-gradient(165deg, rgba(4, 9, 15, 0.95), rgba(3, 7, 12, 0.98));
+        radial-gradient(circle at 24% 18%, rgba(118, 180, 226, 0.08), rgba(4, 8, 13, 0) 40%),
+        radial-gradient(circle at 78% 84%, rgba(238, 166, 108, 0.06), rgba(4, 8, 13, 0) 38%),
+        linear-gradient(160deg, rgba(2, 5, 9, 0.965), rgba(3, 7, 12, 0.985));
     backdrop-filter: blur(8px) saturate(1.12);
 }
 
@@ -2080,9 +2099,9 @@ body.race-intro-active #minimap {
     position: absolute;
     inset: -20% -12%;
     background:
-        radial-gradient(circle at 62% 8%, rgba(165, 225, 255, 0.2), rgba(165, 225, 255, 0) 32%),
-        radial-gradient(circle at 34% 88%, rgba(255, 221, 176, 0.16), rgba(255, 221, 176, 0) 30%);
-    filter: blur(22px);
+        radial-gradient(circle at 58% 10%, rgba(165, 225, 255, 0.14), rgba(165, 225, 255, 0) 36%),
+        radial-gradient(circle at 38% 90%, rgba(255, 221, 176, 0.1), rgba(255, 221, 176, 0) 34%);
+    filter: blur(28px);
     animation: welcomeAtmosphereShift 14s ease-in-out infinite;
     pointer-events: none;
 }
@@ -2572,20 +2591,35 @@ body.race-intro-active #minimap {
     min-height: min(760px, calc(100vh - 36px));
     overflow: hidden;
     background:
-        radial-gradient(circle at 50% 74%, rgba(143, 223, 255, 0.28), rgba(9, 17, 27, 0) 44%),
-        linear-gradient(180deg, rgba(11, 22, 34, 0.94), rgba(6, 12, 20, 0.97));
+        radial-gradient(circle at 50% 76%, rgba(138, 201, 244, 0.18), rgba(9, 15, 23, 0) 45%),
+        radial-gradient(circle at 52% 18%, rgba(112, 171, 222, 0.08), rgba(9, 15, 23, 0) 52%),
+        linear-gradient(180deg, rgba(5, 8, 13, 0.96), rgba(7, 12, 19, 0.98) 56%, rgba(11, 18, 27, 0.995));
     box-shadow:
-        0 28px 62px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        0 34px 74px rgba(0, 0, 0, 0.56),
+        inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 .welcomeShowroomBay::before {
     content: '';
     position: absolute;
     inset: 11px;
+    z-index: 1;
     border-radius: 18px;
     border: 1px solid rgba(148, 194, 219, 0.24);
     pointer-events: none;
+}
+
+.welcomeShowroomBay::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    opacity: 0.22;
+    pointer-events: none;
+    mix-blend-mode: normal;
+    background:
+        radial-gradient(circle at 50% 60%, rgba(126, 196, 246, 0.18), rgba(126, 196, 246, 0) 40%),
+        radial-gradient(circle at 50% 50%, rgba(0, 0, 0, 0), rgba(2, 5, 8, 0.54) 88%);
 }
 
 .welcomePreviewLabel {
@@ -2618,31 +2652,31 @@ body.race-intro-active #minimap {
     position: absolute;
     z-index: 2;
     left: 50%;
-    bottom: 14%;
-    width: min(80%, 700px);
-    height: clamp(120px, 22vh, 210px);
+    bottom: 13%;
+    width: min(74%, 640px);
+    height: clamp(108px, 20vh, 176px);
     transform: translateX(-50%);
     border-radius: 50%;
     background:
-        radial-gradient(ellipse at center, rgba(162, 228, 255, 0.28), rgba(162, 228, 255, 0) 66%),
-        radial-gradient(ellipse at center, rgba(255, 214, 165, 0.16), rgba(255, 214, 165, 0) 74%);
-    filter: blur(1px);
-    animation: welcomeFloorBreath 4.8s ease-in-out infinite;
+        radial-gradient(ellipse at center, rgba(152, 212, 252, 0.24), rgba(152, 212, 252, 0) 65%),
+        radial-gradient(ellipse at center, rgba(255, 196, 148, 0.08), rgba(255, 196, 148, 0) 76%);
+    filter: blur(0.5px);
+    animation: welcomeFloorBreath 7.8s ease-in-out infinite;
     pointer-events: none;
 }
 
 .welcomePreviewSweep {
     position: absolute;
     z-index: 3;
-    inset: -22% -32%;
+    inset: -18% -26%;
     background: linear-gradient(
         108deg,
         rgba(255, 255, 255, 0) 41%,
-        rgba(205, 239, 255, 0.24) 51%,
+        rgba(205, 239, 255, 0.07) 51%,
         rgba(255, 255, 255, 0) 63%
     );
     transform: translateX(-44%);
-    animation: welcomePreviewSweepModern 5s ease-in-out infinite;
+    animation: welcomePreviewSweepModern 11.5s ease-in-out infinite;
     pointer-events: none;
 }
 
@@ -2732,10 +2766,10 @@ body.race-intro-active #minimap {
 
 #welcomePreviewShell.vehicle-swap-active {
     box-shadow:
-        0 0 0 1px rgba(185, 227, 248, 0.5),
-        0 0 38px rgba(120, 213, 255, 0.2),
-        0 28px 62px rgba(0, 0, 0, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        0 0 0 1px rgba(204, 229, 245, 0.42),
+        0 0 28px rgba(113, 197, 242, 0.12),
+        0 34px 74px rgba(0, 0, 0, 0.56),
+        inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 #welcomePreviewShell.vehicle-swap-left .welcomePreviewSweep {
@@ -2898,7 +2932,7 @@ body.race-intro-active #minimap {
         transform: translateX(-44%);
     }
     40% {
-        opacity: 1;
+        opacity: 0.24;
     }
     62% {
         opacity: 0;
@@ -2913,12 +2947,12 @@ body.race-intro-active #minimap {
 @keyframes welcomeFloorBreath {
     0%,
     100% {
-        opacity: 0.55;
+        opacity: 0.34;
         transform: translateX(-50%) scale(1);
     }
     50% {
-        opacity: 0.8;
-        transform: translateX(-50%) scale(1.04);
+        opacity: 0.5;
+        transform: translateX(-50%) scale(1.02);
     }
 }
 
@@ -2928,7 +2962,7 @@ body.race-intro-active #minimap {
         transform: translateX(-48%);
     }
     34% {
-        opacity: 1;
+        opacity: 0.58;
     }
     100% {
         opacity: 0;
@@ -2942,7 +2976,7 @@ body.race-intro-active #minimap {
         transform: translateX(48%);
     }
     34% {
-        opacity: 1;
+        opacity: 0.58;
     }
     100% {
         opacity: 0;

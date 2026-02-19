@@ -10,6 +10,9 @@ export const COLOR_NAMES = {
 
 export const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
 export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
+export const PLAYER_TOP_SPEED_LIMIT_STEP_KPH = 5;
+export const PLAYER_TOP_SPEED_LIMIT_MIN_KPH = 50;
+export const PLAYER_TOP_SPEED_LIMIT_MAX_KPH = 100;
 export const CITY_LAYOUT_STORAGE_KEY = 'silentdrift-city-layout-v1';
 export const CAR_COLOR_PRESETS = [
     { hex: 0x2d67a6, name: 'Cobalt Blue' },

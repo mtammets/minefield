@@ -342,6 +342,10 @@ export function createGameLoopController(options = {}) {
             }
         } else if (isEditModeActive || isBuilderModeActive) {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
+            const inspectionVehicleState = getVehicleState();
+            inspectionVehicleState.chargingLevelNormalized = 0;
+            inspectionVehicleState.batteryDepleted = false;
+            updateCarVisuals(inspectionVehicleState, frameDelta);
             if (isEditModeActive) {
                 carEditModeController.update(frameDelta);
             }

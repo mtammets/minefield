@@ -110,6 +110,7 @@ export function createCarRig(options = {}) {
         wheelEditGroups,
         suspensionLinkage,
         lightRig,
+        lightEditableParts: lightController?.editableParts || [],
         batteryIndicator,
     });
     const editablePartIndex = new Map(
@@ -532,6 +533,7 @@ function buildEditablePartDescriptors({
     wheelEditGroups = null,
     suspensionLinkage = null,
     lightRig = null,
+    lightEditableParts = [],
     batteryIndicator = null,
 } = {}) {
     const descriptors = [];
@@ -596,6 +598,18 @@ function buildEditablePartDescriptors({
         category: 'Modules',
         sources: lightRig,
     });
+    for (let i = 0; i < lightEditableParts.length; i += 1) {
+        const part = lightEditableParts[i];
+        if (!part?.id || !part?.sources) {
+            continue;
+        }
+        register({
+            id: part.id,
+            label: part.label || part.id,
+            category: part.category || 'Lights',
+            sources: part.sources,
+        });
+    }
     register({
         id: 'module_wheel_well_lights',
         label: 'Wheel well lights',

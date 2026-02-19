@@ -131,6 +131,7 @@ export function createGameSessionController({
         if (!getIsWelcomeModalVisible()) {
             return;
         }
+        requestGameplayFullscreen();
         const mode = normalizeGameMode(nextMode);
         setGameMode(mode);
         getBotSystem()?.setEnabled?.(mode === 'bots');
@@ -480,6 +481,19 @@ export function createGameSessionController({
         if (persist) {
             persistPlayerCarColorHex(normalized);
         }
+    }
+
+    function requestGameplayFullscreen() {
+        if (document.fullscreenElement) {
+            return;
+        }
+        const fullscreenRoot = document.documentElement;
+        if (!fullscreenRoot || typeof fullscreenRoot.requestFullscreen !== 'function') {
+            return;
+        }
+        void fullscreenRoot.requestFullscreen().catch(() => {
+            // Ignore browser/user-denied fullscreen attempts.
+        });
     }
 
     function normalizeGameMode(mode) {

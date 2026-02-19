@@ -170,38 +170,21 @@
         </div>
         <aside id="multiplayerPanel" aria-label="Online multiplayer panel">
             <div id="multiplayerTitle">ONLINE MULTIPLAYER</div>
-            <div id="multiplayerStatus" data-tone="info">
-                Online mode available. Create or join a room.
-            </div>
-            <label class="mpFieldLabel" for="multiplayerNameInput">Player Name</label>
-            <input
-                id="multiplayerNameInput"
-                class="mpInput"
-                type="text"
-                maxlength="18"
-                autocomplete="nickname"
-            />
-            <label class="mpFieldLabel" for="multiplayerRoomInput">Room Code</label>
-            <div class="mpRoomRow">
-                <input
-                    id="multiplayerRoomInput"
-                    class="mpInput mpRoomInput"
-                    type="text"
-                    maxlength="6"
-                    inputmode="latin"
-                    autocapitalize="characters"
-                    spellcheck="false"
-                    placeholder="ABC123"
-                />
-                <button id="multiplayerJoinBtn" class="mpButton join" type="button">JOIN</button>
+            <div id="multiplayerRoomMeta" class="mpRoomMeta" data-state="offline">
+                <div class="mpRoomMetaHeader">
+                    <span class="mpRoomMetaLabel">ROOM CODE</span>
+                    <span class="mpRoomMetaBadge">ONLINE</span>
+                </div>
+                <div class="mpRoomMetaValues">
+                    <span id="multiplayerRoomCodeValue" class="mpRoomCodeValue">------</span>
+                    <span id="multiplayerPlayerCountValue" class="mpPlayerCountValue"
+                        >0/0 PLAYERS</span
+                    >
+                </div>
             </div>
             <div class="mpActionRow">
-                <button id="multiplayerCreateBtn" class="mpButton create" type="button">
-                    CREATE ROOM
-                </button>
                 <button id="multiplayerLeaveBtn" class="mpButton leave" type="button">LEAVE</button>
             </div>
-            <div id="multiplayerRoomMeta">Offline</div>
             <div id="multiplayerPlayerList" aria-live="polite"></div>
         </aside>
 

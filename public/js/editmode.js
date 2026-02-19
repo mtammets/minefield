@@ -431,7 +431,7 @@ function createEditModeUi({
                 return;
             }
 
-            const categoryOrder = ['Modules', 'Body', 'Wheels', 'Suspension', 'Details'];
+            const categoryOrder = ['Modules', 'Lights', 'Body', 'Wheels', 'Suspension', 'Details'];
             const categoryGroups = new Map();
             for (let i = 0; i < parts.length; i += 1) {
                 const part = parts[i];

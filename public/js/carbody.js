@@ -1,4 +1,5 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { PLAYER_TOP_SPEED_LIMIT_MIN_KPH, PLAYER_TOP_SPEED_LIMIT_MAX_KPH } from './constants.js';
 
 const ACCENT_LED_COLOR = 0x64f4ff; // Cool neon turquoise
 const ACCENT_LED_SECONDARY_COLOR = 0xff4f7f; // Warm neon red-pink
@@ -158,6 +159,53 @@ function createTaillightSweepTexture() {
     return texture;
 }
 
+function createHeadlightSignatureTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 76;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const centerY = canvas.height * 0.5;
+    const coreGradient = ctx.createLinearGradient(0, centerY, canvas.width, centerY);
+    coreGradient.addColorStop(0, 'rgba(214, 236, 255, 0)');
+    coreGradient.addColorStop(0.2, 'rgba(214, 236, 255, 0.24)');
+    coreGradient.addColorStop(0.5, 'rgba(246, 252, 255, 0.96)');
+    coreGradient.addColorStop(0.8, 'rgba(214, 236, 255, 0.24)');
+    coreGradient.addColorStop(1, 'rgba(214, 236, 255, 0)');
+    ctx.fillStyle = coreGradient;
+    ctx.fillRect(0, centerY - 12, canvas.width, 24);
+
+    const haloGradient = ctx.createRadialGradient(
+        canvas.width * 0.5,
+        centerY,
+        10,
+        canvas.width * 0.5,
+        centerY,
+        148
+    );
+    haloGradient.addColorStop(0, 'rgba(238, 248, 255, 0.72)');
+    haloGradient.addColorStop(0.42, 'rgba(188, 220, 255, 0.3)');
+    haloGradient.addColorStop(1, 'rgba(170, 210, 255, 0)');
+    ctx.fillStyle = haloGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const verticalFade = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    verticalFade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    verticalFade.addColorStop(0.24, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(0.76, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = verticalFade;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    return texture;
+}
+
 // Add headlights and taillights.
 function addLightsToCar(car, lightConfig = {}) {
     const {
@@ -226,6 +274,10 @@ function addLightsToCar(car, lightConfig = {}) {
             : [{ position: [-0.52, 0.52, 2.04] }, { position: [0.52, 0.52, 2.04] }];
     const headlightProjectorLights = [];
     const headlightLensMeshes = [];
+    const headlightDrlEntries = [];
+    const headlightStripHaloEntries = [];
+    const headlightHaloEntries = [];
+    const headlightGlassMaterials = [];
     const taillightPointLights = [];
     const taillightMeshes = [];
     const taillightCoreMaterials = [];
@@ -235,6 +287,7 @@ function addLightsToCar(car, lightConfig = {}) {
     const taillightSweepEntries = [];
     const reversePointLights = [];
     const reverseLensMaterials = [];
+    const lightEditableParts = [];
     const lightState = {
         brakeLevel: 0,
         powerBlend: 1,
@@ -242,6 +295,8 @@ function addLightsToCar(car, lightConfig = {}) {
         reverseBlend: 0,
         tailPhase: Math.random() * Math.PI * 2,
         tailSweepPhase: Math.random() * Math.PI * 2,
+        headPhase: Math.random() * Math.PI * 2,
+        headSweepPhase: Math.random() * Math.PI * 2,
     };
     const accentStripMaterials = [];
     const accentStripBaseColors = [];
@@ -255,13 +310,102 @@ function addLightsToCar(car, lightConfig = {}) {
     const accentChargeColor = new THREE.Color(0x92f3ff);
     const accentChargeHotColor = new THREE.Color(0xe8feff);
     const accentChargeFlowTexture = createAccentChargeFlowTexture();
+    const headlightSignatureTexture = createHeadlightSignatureTexture();
     const taillightFlowTexture = createTaillightSweepTexture();
+    const headlightDrlColor = new THREE.Color(headlightColor).lerp(new THREE.Color(0xd6ecff), 0.34);
+    const headlightHotColor = new THREE.Color(0xf5fbff);
     const taillightBaseColor = new THREE.Color(taillightColor);
     const taillightChargeColor = new THREE.Color(accentLedSecondaryColor).lerp(
         new THREE.Color(0xff90aa),
         0.42
     );
     const taillightHotColor = new THREE.Color(0xffb4c6);
+    const headlightVisualGroupsBySide = {
+        left: new THREE.Group(),
+        right: new THREE.Group(),
+    };
+    const headlightBeamGroupsBySide = {
+        left: new THREE.Group(),
+        right: new THREE.Group(),
+    };
+    const headlightBeamRoleGroupsBySide = {
+        left: {
+            near: new THREE.Group(),
+            facade: new THREE.Group(),
+        },
+        right: {
+            near: new THREE.Group(),
+            facade: new THREE.Group(),
+        },
+    };
+    const headlightVisualPartsBySide = {
+        left: null,
+        right: null,
+    };
+    const taillightGroupsBySide = {
+        left: new THREE.Group(),
+        right: new THREE.Group(),
+    };
+    const taillightSignatureGroup = new THREE.Group();
+    const reverseLightsGroup = new THREE.Group();
+    const accentGroupsBySide = {
+        left: new THREE.Group(),
+        right: new THREE.Group(),
+    };
+
+    headlightVisualGroupsBySide.left.name = 'headlight_visual_left_group';
+    headlightVisualGroupsBySide.right.name = 'headlight_visual_right_group';
+    headlightBeamGroupsBySide.left.name = 'headlight_beam_left_group';
+    headlightBeamGroupsBySide.right.name = 'headlight_beam_right_group';
+    headlightBeamRoleGroupsBySide.left.near.name = 'headlight_beam_left_near_group';
+    headlightBeamRoleGroupsBySide.left.facade.name = 'headlight_beam_left_facade_group';
+    headlightBeamRoleGroupsBySide.right.near.name = 'headlight_beam_right_near_group';
+    headlightBeamRoleGroupsBySide.right.facade.name = 'headlight_beam_right_facade_group';
+    taillightGroupsBySide.left.name = 'taillight_left_group';
+    taillightGroupsBySide.right.name = 'taillight_right_group';
+    taillightSignatureGroup.name = 'taillight_signature_group';
+    reverseLightsGroup.name = 'reverse_lights_group';
+    accentGroupsBySide.left.name = 'accent_left_group';
+    accentGroupsBySide.right.name = 'accent_right_group';
+    car.add(
+        headlightVisualGroupsBySide.left,
+        headlightVisualGroupsBySide.right,
+        headlightBeamGroupsBySide.left,
+        headlightBeamGroupsBySide.right,
+        taillightGroupsBySide.left,
+        taillightGroupsBySide.right,
+        taillightSignatureGroup,
+        reverseLightsGroup,
+        accentGroupsBySide.left,
+        accentGroupsBySide.right
+    );
+    headlightBeamGroupsBySide.left.add(
+        headlightBeamRoleGroupsBySide.left.near,
+        headlightBeamRoleGroupsBySide.left.facade
+    );
+    headlightBeamGroupsBySide.right.add(
+        headlightBeamRoleGroupsBySide.right.near,
+        headlightBeamRoleGroupsBySide.right.facade
+    );
+
+    const resolveSideKey = (sideSign = 1) => (sideSign < 0 ? 'left' : 'right');
+    const registerLightEditablePart = ({ id, label, sources, category = 'Lights' }) => {
+        if (!id || !label) {
+            return;
+        }
+        const resolvedSources = (Array.isArray(sources) ? sources : [sources]).filter(
+            (source) => source && source.children && source.children.length > 0
+        );
+        if (resolvedSources.length === 0) {
+            return;
+        }
+        lightEditableParts.push({
+            id,
+            label,
+            category,
+            sources: resolvedSources,
+        });
+    };
 
     const createSpot = ({
         color,
@@ -272,6 +416,9 @@ function addLightsToCar(car, lightConfig = {}) {
         decay,
         position,
         target,
+        sideSign = 1,
+        role = 'primary',
+        parent = car,
     }) => {
         const light = new THREE.SpotLight(color, intensity, distance, angle, penumbra, decay);
         light.position.set(...position);
@@ -281,19 +428,21 @@ function addLightsToCar(car, lightConfig = {}) {
         light.shadow.camera.near = 0.2;
         light.shadow.camera.far = Math.max(distance, 30);
         light.shadow.focus = 0.5;
-        car.add(light.target);
-        car.add(light);
+        parent.add(light.target);
+        parent.add(light);
         light.userData.baseIntensity = intensity;
         light.userData.baseDistance = distance;
+        light.userData.sideSign = sideSign;
+        light.userData.role = role;
         headlightProjectorLights.push(light);
         return light;
     };
 
-    const createPoint = ({ color, intensity, distance, decay, position }) => {
+    const createPoint = ({ color, intensity, distance, decay, position, parent = car }) => {
         const light = new THREE.PointLight(color, intensity, distance, decay);
         light.position.set(...position);
         light.castShadow = false;
-        car.add(light);
+        parent.add(light);
         return light;
     };
 
@@ -303,7 +452,8 @@ function addLightsToCar(car, lightConfig = {}) {
         emissive,
         emissiveIntensity,
         position,
-        rotation = null
+        rotation = null,
+        parent = car
     ) => {
         const material = createMaterial({ color, emissive, emissiveIntensity });
         const mesh = new THREE.Mesh(geometry, material);
@@ -311,25 +461,166 @@ function addLightsToCar(car, lightConfig = {}) {
         if (rotation) {
             mesh.rotation.set(...rotation);
         }
-        car.add(mesh);
+        parent.add(mesh);
         return mesh;
+    };
+
+    const createPremiumHeadlightAssembly = (position, sideSign, parent = car) => {
+        const headlightGroup = new THREE.Group();
+        headlightGroup.position.set(position[0], position[1], position[2] - 0.065);
+        headlightGroup.rotation.y = sideSign * THREE.MathUtils.degToRad(4.8);
+        parent.add(headlightGroup);
+
+        const housingShellGroup = new THREE.Group();
+        const lensCoverGroup = new THREE.Group();
+        const signatureStripGroup = new THREE.Group();
+        const haloGroup = new THREE.Group();
+        headlightGroup.add(housingShellGroup, lensCoverGroup, signatureStripGroup, haloGroup);
+
+        const housingMesh = new THREE.Mesh(
+            createRoundedBoxGeometry(0.34, 0.116, 0.11, 0.03, 5),
+            new THREE.MeshStandardMaterial({
+                color: 0x070b10,
+                emissive: 0x172230,
+                emissiveIntensity: 0.24,
+                metalness: 0.62,
+                roughness: 0.2,
+            })
+        );
+        housingMesh.position.set(0, 0, -0.004);
+        housingShellGroup.add(housingMesh);
+
+        const lensCoverMaterial = createMaterial({
+            color: 0xffffff,
+            emissive: 0xffffff,
+            emissiveIntensity: 8.4,
+            metalness: 0,
+            roughness: 0.02,
+            clearcoat: 0,
+            clearcoatRoughness: 0,
+        });
+        lensCoverMaterial.transparent = true;
+        lensCoverMaterial.opacity = 0.42;
+        lensCoverMaterial.blending = THREE.AdditiveBlending;
+        lensCoverMaterial.depthWrite = false;
+        lensCoverMaterial.toneMapped = false;
+        lensCoverMaterial.userData.baseOpacity = 0.42;
+        lensCoverMaterial.userData.baseEmissiveIntensity = 8.4;
+        const lensCover = new THREE.Mesh(
+            createRoundedBoxGeometry(0.336, 0.112, 0.034, 0.02, 4),
+            lensCoverMaterial
+        );
+        lensCover.position.set(0, 0.002, -0.058);
+        lensCoverGroup.add(lensCover);
+        headlightGlassMaterials.push(lensCoverMaterial);
+
+        const signatureMaterial = new THREE.MeshStandardMaterial({
+            color: 0x0e171f,
+            emissive: headlightColor,
+            emissiveIntensity: 6.8,
+            metalness: 0.2,
+            roughness: 0.22,
+        });
+        signatureMaterial.userData.baseEmissiveIntensity = 6.8;
+        const signatureMesh = new THREE.Mesh(
+            createRoundedBoxGeometry(0.168, 0.016, 0.009, 0.004, 3),
+            signatureMaterial
+        );
+        signatureMesh.position.set(0, 0.004, -0.082);
+        signatureStripGroup.add(signatureMesh);
+        headlightLensMeshes.push(signatureMesh);
+        headlightDrlEntries.push({
+            material: signatureMaterial,
+            sideSign,
+            phaseOffset: sideSign < 0 ? 0.38 : 1.3,
+        });
+
+        const stripHaloMaterial = new THREE.MeshBasicMaterial({
+            map: headlightSignatureTexture,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.92,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+        });
+        stripHaloMaterial.userData.baseOpacity = 0.92;
+        const stripHaloMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.38, 0.13),
+            stripHaloMaterial
+        );
+        stripHaloMesh.position.set(0, 0.0045, -0.087);
+        stripHaloMesh.rotation.y = Math.PI;
+        signatureStripGroup.add(stripHaloMesh);
+        headlightStripHaloEntries.push({
+            material: stripHaloMaterial,
+            sideSign,
+            phaseOffset: sideSign < 0 ? 0.56 : 1.52,
+            intensity: 1,
+        });
+
+        const outerStripHaloMaterial = new THREE.MeshBasicMaterial({
+            map: headlightSignatureTexture,
+            color: 0xf8fcff,
+            transparent: true,
+            opacity: 0.62,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+        });
+        outerStripHaloMaterial.userData.baseOpacity = 0.62;
+        const outerStripHaloMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.56, 0.21),
+            outerStripHaloMaterial
+        );
+        outerStripHaloMesh.position.set(0, 0.0048, -0.091);
+        outerStripHaloMesh.rotation.y = Math.PI;
+        signatureStripGroup.add(outerStripHaloMesh);
+        headlightStripHaloEntries.push({
+            material: outerStripHaloMaterial,
+            sideSign,
+            phaseOffset: sideSign < 0 ? 1.04 : 2.06,
+            intensity: 0.84,
+        });
+
+        const haloMaterial = new THREE.MeshBasicMaterial({
+            map: headlightSignatureTexture,
+            color: 0xdaeeff,
+            transparent: true,
+            opacity: 0.16,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+        });
+        const haloMesh = new THREE.Mesh(new THREE.PlaneGeometry(0.35, 0.128), haloMaterial);
+        haloMesh.position.set(0, 0.011, -0.084);
+        haloMesh.rotation.y = Math.PI;
+        haloGroup.add(haloMesh);
+        headlightHaloEntries.push({
+            material: haloMaterial,
+            baseOpacity: 0.16,
+            phaseOffset: sideSign < 0 ? 0.18 : 1.12,
+        });
+
+        return {
+            group: headlightGroup,
+            housingShellGroup,
+            lensCoverGroup,
+            signatureStripGroup,
+            haloGroup,
+        };
     };
 
     // Headlights.
     headlightPositions.forEach(({ position, target }) => {
         const side = Math.sign(position[0]) || 1;
+        const sideKey = resolveSideKey(side);
+        const beamRoleGroups = headlightBeamRoleGroupsBySide[sideKey];
 
         if (enableHeadlightProjectors && enablePrimaryHeadlightProjectors) {
-            createSpot({
-                color: headlightColor,
-                intensity: headlightIntensity,
-                distance: headlightDistance,
-                angle: headlightAngle,
-                penumbra: headlightPenumbra,
-                decay: headlightDecay,
-                position,
-                target,
-            });
             if (enableNearFillProjectors) {
                 createSpot({
                     color: headlightColor,
@@ -340,6 +631,9 @@ function addLightsToCar(car, lightConfig = {}) {
                     decay: headlightDecay,
                     position: [position[0], position[1] - 0.02, position[2]],
                     target: [target[0] * 0.7, 0.14, target[2] * 0.48],
+                    sideSign: side,
+                    role: 'near',
+                    parent: beamRoleGroups.near,
                 });
             }
             if (enableFacadeFillProjectors) {
@@ -356,18 +650,17 @@ function addLightsToCar(car, lightConfig = {}) {
                         facadeFillVerticalAim,
                         -facadeFillForwardAim,
                     ],
+                    sideSign: side,
+                    role: 'facade',
+                    parent: beamRoleGroups.facade,
                 });
             }
         }
-        const headlightLens = createLightMesh(
-            new THREE.BoxGeometry(0.22, 0.1, 0.08),
-            headlightColor,
-            headlightColor,
-            3.1,
-            [position[0], position[1], position[2] - 0.05]
+        headlightVisualPartsBySide[sideKey] = createPremiumHeadlightAssembly(
+            position,
+            side,
+            headlightVisualGroupsBySide[sideKey]
         );
-        headlightLens.material.userData.baseEmissiveIntensity = 3.1;
-        headlightLensMeshes.push(headlightLens);
     });
 
     // Taillights.
@@ -376,6 +669,7 @@ function addLightsToCar(car, lightConfig = {}) {
             Math.sign(position[0]) ||
             (taillightIndex % 2 === 0 ? -1 : 1) ||
             (taillightIndex === 0 ? -1 : 1);
+        const sideKey = resolveSideKey(sideSign);
         if (enableTaillightPointLights) {
             const taillight = createPoint({
                 color: taillightColor,
@@ -383,6 +677,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 distance: taillightDistance,
                 decay: taillightDecay,
                 position,
+                parent: taillightGroupsBySide[sideKey],
             });
             taillightPointLights.push(taillight);
         }
@@ -392,7 +687,9 @@ function addLightsToCar(car, lightConfig = {}) {
                 0x16070a,
                 taillightColor,
                 TAILLIGHT_RUNNING_EMISSIVE * 0.72,
-                [position[0], position[1], position[2] + 0.006]
+                [position[0], position[1], position[2] + 0.006],
+                null,
+                taillightGroupsBySide[sideKey]
             );
             taillightLens.material.userData.sideSign = sideSign;
             taillightMeshes.push(taillightLens);
@@ -401,10 +698,82 @@ function addLightsToCar(car, lightConfig = {}) {
     createRearTaillightSignature();
 
     createAccentLighting();
+    const registerHeadlightEditablePartsForSide = (sideKey) => {
+        const sideLabel = sideKey === 'left' ? 'left' : 'right';
+        const visualParts = headlightVisualPartsBySide[sideKey];
+        const beamRoles = headlightBeamRoleGroupsBySide[sideKey];
+        if (!visualParts || !beamRoles) {
+            return;
+        }
+
+        registerLightEditablePart({
+            id: `light_headlight_${sideLabel}_housing_shell`,
+            label: `Headlight: ${sideLabel} housing shell`,
+            sources: visualParts.housingShellGroup,
+        });
+        registerLightEditablePart({
+            id: `light_headlight_${sideLabel}_lens_cover`,
+            label: `Headlight: ${sideLabel} lens cover`,
+            sources: visualParts.lensCoverGroup,
+        });
+        registerLightEditablePart({
+            id: `light_headlight_${sideLabel}_led_strip`,
+            label: `Headlight: ${sideLabel} LED strip`,
+            sources: visualParts.signatureStripGroup,
+        });
+        registerLightEditablePart({
+            id: `light_headlight_${sideLabel}_halo`,
+            label: `Headlight: ${sideLabel} halo`,
+            sources: visualParts.haloGroup,
+        });
+        registerLightEditablePart({
+            id: `light_headlight_${sideLabel}_beam_near`,
+            label: `Headlight: ${sideLabel} beam cast near-fill`,
+            sources: beamRoles.near,
+        });
+        registerLightEditablePart({
+            id: `light_headlight_${sideLabel}_beam_facade`,
+            label: `Headlight: ${sideLabel} beam cast facade-fill`,
+            sources: beamRoles.facade,
+        });
+    };
+    registerHeadlightEditablePartsForSide('left');
+    registerHeadlightEditablePartsForSide('right');
+    registerLightEditablePart({
+        id: 'light_taillight_left',
+        label: 'Taillight: left',
+        sources: taillightGroupsBySide.left,
+    });
+    registerLightEditablePart({
+        id: 'light_taillight_right',
+        label: 'Taillight: right',
+        sources: taillightGroupsBySide.right,
+    });
+    registerLightEditablePart({
+        id: 'light_taillight_signature',
+        label: 'Taillight signature',
+        sources: taillightSignatureGroup,
+    });
+    registerLightEditablePart({
+        id: 'light_reverse',
+        label: 'Reverse lights',
+        sources: reverseLightsGroup,
+    });
+    registerLightEditablePart({
+        id: 'light_accent_left',
+        label: 'Accent lights: left',
+        sources: accentGroupsBySide.left,
+    });
+    registerLightEditablePart({
+        id: 'light_accent_right',
+        label: 'Accent lights: right',
+        sources: accentGroupsBySide.right,
+    });
     applyBrakeLightLevel(0, 1, {}, 0, 0, 0);
     applyAccentLighting({}, 0);
 
     return {
+        editableParts: lightEditableParts,
         update(vehicleState, deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
             const targetPower = vehicleState?.batteryDepleted ? 0 : 1;
@@ -466,7 +835,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 reverseBlend
             );
 
-            applyHeadlightPower(lightState.powerBlend);
+            applyHeadlightPower(lightState.powerBlend, vehicleState, dt);
             applyBrakeLightLevel(
                 lightState.brakeLevel,
                 lightState.powerBlend,
@@ -479,17 +848,98 @@ function addLightsToCar(car, lightConfig = {}) {
         },
     };
 
-    function applyHeadlightPower(powerBlend = 1) {
+    function applyHeadlightPower(powerBlend = 1, vehicleState = {}, dt = 1 / 60) {
         const clampedPower = THREE.MathUtils.clamp(powerBlend, 0, 1);
+        const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.speed || 0) / 62, 0, 1);
+        const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.throttle || 0), 0, 1);
+        const steerInput = THREE.MathUtils.clamp(vehicleState?.steerInput || 0, -1, 1);
+        const steerAbs = Math.abs(steerInput);
+
+        lightState.headPhase += dt * (2.9 + speedRatio * 2.4 + throttleRatio * 1.4);
+        lightState.headSweepPhase += dt * (1.8 + speedRatio * 2.7 + steerAbs * 2.1);
+
         headlightProjectorLights.forEach((light) => {
             const baseIntensity = Number(light?.userData?.baseIntensity) || 0;
             const baseDistance = Number(light?.userData?.baseDistance) || light.distance || 0;
-            light.intensity = baseIntensity * clampedPower;
-            light.distance = baseDistance * clampedPower;
+            const sideSign = Number(light?.userData?.sideSign) || 1;
+            const role = light?.userData?.role || 'primary';
+            const cornerMatch = sideSign * steerInput;
+            let roleBoost = 1;
+            if (role === 'near') {
+                roleBoost =
+                    0.82 + Math.max(0, cornerMatch) * 0.46 - Math.max(0, -cornerMatch) * 0.12;
+            } else if (role === 'facade') {
+                roleBoost =
+                    0.76 + Math.max(0, cornerMatch) * 0.62 - Math.max(0, -cornerMatch) * 0.24;
+            } else {
+                roleBoost = 0.94 + speedRatio * 0.12;
+            }
+            roleBoost = THREE.MathUtils.clamp(roleBoost, 0.45, 1.85);
+            const shimmer = 0.96 + 0.04 * Math.sin(lightState.headPhase + sideSign * 0.7);
+            const distanceBoost = THREE.MathUtils.clamp(
+                0.86 + speedRatio * 0.2 + (role === 'facade' ? steerAbs * 0.08 : 0),
+                0.64,
+                1.2
+            );
+            light.intensity = baseIntensity * clampedPower * roleBoost * shimmer;
+            light.distance = baseDistance * clampedPower * distanceBoost;
         });
         headlightLensMeshes.forEach((mesh) => {
             const baseEmissive = Number(mesh?.material?.userData?.baseEmissiveIntensity) || 0;
             mesh.material.emissiveIntensity = baseEmissive * clampedPower;
+        });
+
+        headlightDrlEntries.forEach((entry) => {
+            const wave =
+                0.5 +
+                0.5 *
+                    Math.sin(
+                        lightState.headSweepPhase * 2.25 +
+                            entry.phaseOffset +
+                            steerInput * entry.sideSign
+                    );
+            const activity = 0.82 + speedRatio * 0.28 + steerAbs * 0.18 + wave * 0.26;
+            entry.material.emissiveIntensity =
+                (Number(entry.material.userData.baseEmissiveIntensity) || 0) *
+                activity *
+                clampedPower;
+            entry.material.emissive.copy(headlightDrlColor).lerp(headlightHotColor, wave * 0.42);
+        });
+
+        headlightStripHaloEntries.forEach((entry) => {
+            const wave =
+                0.5 +
+                0.5 *
+                    Math.sin(
+                        lightState.headSweepPhase * 2.4 +
+                            entry.phaseOffset +
+                            steerInput * entry.sideSign * 0.85
+                    );
+            const baseOpacity = Number(entry.material?.userData?.baseOpacity) || 0.58;
+            const intensity = Number.isFinite(entry.intensity) ? entry.intensity : 1;
+            entry.material.opacity = THREE.MathUtils.clamp(
+                baseOpacity *
+                    (1.24 + wave * 1.38) *
+                    (1.08 + clampedPower * 1.18 + speedRatio * 0.74) *
+                    intensity,
+                0,
+                1
+            );
+            entry.material.color.copy(headlightHotColor);
+        });
+
+        headlightHaloEntries.forEach((entry) => {
+            const wave = 0.5 + 0.5 * Math.sin(lightState.headPhase * 1.15 + entry.phaseOffset);
+            entry.material.opacity =
+                entry.baseOpacity * (0.7 + speedRatio * 0.34 + wave * 0.42) * clampedPower;
+        });
+
+        headlightGlassMaterials.forEach((material) => {
+            const baseOpacity = Number(material?.userData?.baseOpacity) || 0;
+            const baseEmissive = Number(material?.userData?.baseEmissiveIntensity) || 8.4;
+            material.opacity = baseOpacity * (0.46 + clampedPower * 0.54 + speedRatio * 0.12);
+            material.emissiveIntensity =
+                baseEmissive * (0.92 + clampedPower * 1.1 + speedRatio * 0.34);
         });
     }
 
@@ -721,7 +1171,7 @@ function addLightsToCar(car, lightConfig = {}) {
             barMaterial
         );
         barMesh.position.set(centerX, centerY, centerZ);
-        car.add(barMesh);
+        taillightSignatureGroup.add(barMesh);
         taillightCoreMaterials.push(barMaterial);
 
         const divider = new THREE.Mesh(
@@ -735,7 +1185,7 @@ function addLightsToCar(car, lightConfig = {}) {
             })
         );
         divider.position.set(centerX, centerY, centerZ + 0.024);
-        car.add(divider);
+        taillightSignatureGroup.add(divider);
 
         const segmentCount = Math.max(3, Math.floor(taillightSegmentCount));
         const halfWidth = barWidth * 0.5;
@@ -769,7 +1219,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 );
                 segmentMesh.rotation.y =
                     sideSign * THREE.MathUtils.degToRad(2.1 + segmentIndex * 0.9);
-                car.add(segmentMesh);
+                taillightSignatureGroup.add(segmentMesh);
 
                 taillightSignatureSegments.push({
                     material: segmentMaterial,
@@ -795,7 +1245,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 haloMaterial
             );
             haloMesh.position.set(centerX, centerY + 0.0015, centerZ + 0.056);
-            car.add(haloMesh);
+            taillightSignatureGroup.add(haloMesh);
             taillightHaloMaterials.push(haloMaterial);
         }
 
@@ -814,7 +1264,7 @@ function addLightsToCar(car, lightConfig = {}) {
             });
             const pulseMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), pulseMaterial);
             pulseMesh.position.set(centerX, centerY + 0.001, centerZ + 0.057 + pulseIndex * 0.0008);
-            car.add(pulseMesh);
+            taillightSignatureGroup.add(pulseMesh);
             taillightPulseMaterials.push({ material: pulseMaterial, weight, phaseOffset });
         });
 
@@ -834,7 +1284,7 @@ function addLightsToCar(car, lightConfig = {}) {
         );
         sweepMesh.position.set(centerX, centerY + 0.001, centerZ + 0.058);
         sweepMesh.visible = false;
-        car.add(sweepMesh);
+        taillightSignatureGroup.add(sweepMesh);
         taillightSweepEntries.push({
             mesh: sweepMesh,
             material: sweepMaterial,
@@ -872,7 +1322,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 centerZ + 0.035
             );
             reverseMesh.rotation.y = sideSign * THREE.MathUtils.degToRad(2.8);
-            car.add(reverseMesh);
+            reverseLightsGroup.add(reverseMesh);
             reverseLensMaterials.push(reverseMaterial);
 
             const reversePoint = createPoint({
@@ -881,6 +1331,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 distance: reverseLightDistance,
                 decay: reverseLightDecay,
                 position: [centerX + sideSign * reverseXOffset, centerY - 0.012, centerZ + 0.01],
+                parent: reverseLightsGroup,
             });
             reversePointLights.push(reversePoint);
         }
@@ -906,16 +1357,15 @@ function addLightsToCar(car, lightConfig = {}) {
                 pulseOffset: 1.4,
                 glowAxis: 'z',
             },
-            {
-                size: [0.64, 0.018, 0.016],
-                position: [0, 0.54, -1.94],
-                color: accentLedColor,
-                pulseOffset: 2.2,
-                glowAxis: 'x',
-            },
         ];
 
         stripLayouts.forEach(({ size, position, color, pulseOffset, glowAxis }) => {
+            const parentGroup =
+                position[0] < -0.001
+                    ? accentGroupsBySide.left
+                    : position[0] > 0.001
+                      ? accentGroupsBySide.right
+                      : car;
             const stripMaterial = new THREE.MeshStandardMaterial({
                 color: 0x0b121a,
                 emissive: color,
@@ -930,7 +1380,7 @@ function addLightsToCar(car, lightConfig = {}) {
             stripMesh.position.set(...position);
             stripMesh.castShadow = false;
             stripMesh.receiveShadow = false;
-            car.add(stripMesh);
+            parentGroup.add(stripMesh);
 
             const glowMaterial = new THREE.MeshBasicMaterial({
                 color,
@@ -945,7 +1395,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 const glowMesh = new THREE.Mesh(glowGeometry, glowMaterial);
                 glowMesh.position.copy(stripMesh.position);
                 glowMesh.position.z += Math.sign(position[2]) * 0.007;
-                car.add(glowMesh);
+                parentGroup.add(glowMesh);
             }
 
             if (glowAxis === 'z') {
@@ -968,7 +1418,7 @@ function addLightsToCar(car, lightConfig = {}) {
                 flowMesh.position.z = stripMesh.position.z - size[2] * 0.42;
                 flowMesh.rotation.y = Math.PI / 2;
                 flowMesh.visible = false;
-                car.add(flowMesh);
+                parentGroup.add(flowMesh);
 
                 accentChargeFlowMeshes.push({
                     mesh: flowMesh,
@@ -2035,7 +2485,11 @@ function createVoltlineRoofScreenController(brandName, playerName = 'MAREK') {
             suspensionHeightMm: Math.round(vehicleState.suspensionHeightMm ?? 0),
             suspensionStiffnessScale: vehicleState.suspensionStiffnessScale ?? 1,
             topSpeedLimitKph: Math.round(
-                THREE.MathUtils.clamp(vehicleState.topSpeedLimitKph ?? 220, 50, 220)
+                THREE.MathUtils.clamp(
+                    vehicleState.topSpeedLimitKph ?? PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
+                    PLAYER_TOP_SPEED_LIMIT_MIN_KPH,
+                    PLAYER_TOP_SPEED_LIMIT_MAX_KPH
+                )
             ),
             topSpeedLimitPercent: THREE.MathUtils.clamp(
                 vehicleState.topSpeedLimitPercent ?? 100,

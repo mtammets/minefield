@@ -103,25 +103,34 @@ export function createWelcomeModalController({
     });
     previewRenderer.outputColorSpace = THREE.SRGBColorSpace;
     previewRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-    previewRenderer.toneMappingExposure = 1.18;
+    previewRenderer.toneMappingExposure = 1.2;
+    previewScene.fog = new THREE.FogExp2(0x02070d, 0.068);
 
-    const skyFillLight = new THREE.HemisphereLight(0xaed8ff, 0x0f1b2d, 1.04);
+    const skyFillLight = new THREE.HemisphereLight(0xbad8ff, 0x090f18, 0.86);
     previewScene.add(skyFillLight);
 
-    const keyLight = new THREE.DirectionalLight(0xffffff, 0.92);
-    keyLight.position.set(4.4, 5.8, 6.1);
+    const keyLight = new THREE.DirectionalLight(0xffffff, 1.24);
+    keyLight.position.set(4.8, 6.3, 4.6);
     previewScene.add(keyLight);
 
-    const rimLight = new THREE.DirectionalLight(0x9cc5ff, 0.7);
-    rimLight.position.set(-5.4, 3.2, -4.7);
+    const rimLight = new THREE.DirectionalLight(0x9acbff, 0.96);
+    rimLight.position.set(-6.1, 2.9, -5.8);
     previewScene.add(rimLight);
+
+    const kickerLight = new THREE.PointLight(0xffb27f, 0.34, 11, 2);
+    kickerLight.position.set(2.3, 1.3, -2.2);
+    previewScene.add(kickerLight);
+
+    const fillLight = new THREE.PointLight(0x8bbfff, 0.42, 14, 2.4);
+    fillLight.position.set(0, 0.62, 2.2);
+    previewScene.add(fillLight);
 
     const underGlow = new THREE.Mesh(
         new THREE.CircleGeometry(2.45, 48),
         new THREE.MeshBasicMaterial({
-            color: 0x7fc0ff,
+            color: 0xb4d9ff,
             transparent: true,
-            opacity: 0.16,
+            opacity: 0.1,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
         })
@@ -185,6 +194,7 @@ export function createWelcomeModalController({
         previewRadius * 0.76,
         previewRadius * 1.85
     );
+    const showroomAtmosphere = createShowroomAtmosphere(previewScene, previewRadius);
 
     const transition = {
         active: false,
@@ -230,14 +240,12 @@ export function createWelcomeModalController({
             onlineNameInputEl.value = safeName;
             preferredOnlinePlayerName = safeName;
             writeStoredOnlinePlayerName(safeName);
-            syncMultiplayerNameInput(safeName);
         });
         onlineNameInputEl?.addEventListener('blur', () => {
             const safeName = sanitizeOnlinePlayerNameInput(onlineNameInputEl.value);
             onlineNameInputEl.value = safeName;
             preferredOnlinePlayerName = safeName;
             writeStoredOnlinePlayerName(safeName);
-            syncMultiplayerNameInput(safeName);
         });
         onlineCreateChoiceBtnEl.addEventListener('click', () => {
             setOnlineRoomAction('create');
@@ -281,6 +289,7 @@ export function createWelcomeModalController({
             forceSelectPreset(resolvePresetIndex(currentColorGetter()), false);
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
+            updateShowroomAtmosphere(0);
             applyPreviewPose();
             renderPreview();
         },
@@ -302,6 +311,7 @@ export function createWelcomeModalController({
             previewSpinYaw += frameDt * WELCOME_CAR_SPIN_SPEED;
             updateTransition(frameDt);
             updatePreviewVisualState(frameDt);
+            updateShowroomAtmosphere(frameDt);
             updateTaglineRotation(frameDt);
             applyPreviewPose();
             renderPreview();
@@ -352,6 +362,12 @@ export function createWelcomeModalController({
             if (preferredOnlineRoomAction === 'join') {
                 const roomCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
                 if (roomCode.length !== ONLINE_ROOM_CODE_LENGTH) {
+                    return null;
+                }
+                if (
+                    customCreateCodeStatus !== 'occupied' ||
+                    customCreateCodeStatusCode !== roomCode
+                ) {
                     return null;
                 }
                 return {
@@ -435,11 +451,16 @@ export function createWelcomeModalController({
             customCreateCodeStatus === 'available' &&
             customCreateCodeStatusCode === normalizedCode &&
             normalizedCode.length === ONLINE_ROOM_CODE_LENGTH;
+        const isJoinRoomAvailable =
+            customCreateCodeStatus === 'occupied' &&
+            customCreateCodeStatusCode === normalizedCode &&
+            normalizedCode.length === ONLINE_ROOM_CODE_LENGTH;
         const canContinue =
             (preferredOnlineRoomAction === 'create' &&
                 (normalizedCode.length === 0 || isCustomCreateCodeAvailable)) ||
             (preferredOnlineRoomAction === 'join' &&
-                normalizedCode.length === ONLINE_ROOM_CODE_LENGTH);
+                normalizedCode.length === ONLINE_ROOM_CODE_LENGTH &&
+                isJoinRoomAvailable);
         onlineContinueBtnEl.disabled = !canContinue;
     }
 
@@ -461,7 +482,9 @@ export function createWelcomeModalController({
                   };
         if (
             (startContext.roomAction === 'join' &&
-                startContext.roomCode.length !== ONLINE_ROOM_CODE_LENGTH) ||
+                (startContext.roomCode.length !== ONLINE_ROOM_CODE_LENGTH ||
+                    customCreateCodeStatus !== 'occupied' ||
+                    customCreateCodeStatusCode !== startContext.roomCode)) ||
             (startContext.roomAction === 'create' &&
                 startContext.roomCode.length > 0 &&
                 (startContext.roomCode.length !== ONLINE_ROOM_CODE_LENGTH ||
@@ -517,6 +540,39 @@ export function createWelcomeModalController({
             previewVehicles[i].rig.setBatteryLevel(0.34 + batteryWave * 0.62);
             previewVehicles[i].rig.updateVisuals(previewState, dt || 1 / 60);
         }
+    }
+
+    function updateShowroomAtmosphere(dt) {
+        const safeDt = Math.min(Math.max(dt || 0, 0), 0.05);
+        showroomAtmosphere.timeSec += safeDt;
+        const motionTime = showroomAtmosphere.timeSec;
+
+        const backdropParallaxTarget = -transition.cameraKick * 0.2;
+        showroomAtmosphere.backdropGroup.position.x = THREE.MathUtils.lerp(
+            showroomAtmosphere.backdropGroup.position.x,
+            backdropParallaxTarget,
+            1 - Math.exp(-7 * safeDt)
+        );
+        showroomAtmosphere.backdropGroup.position.y = Math.sin(motionTime * 0.15 + 0.4) * 0.02;
+
+        const breath = 0.5 + 0.5 * Math.sin(motionTime * 0.7);
+        const shimmer = 0.5 + 0.5 * Math.sin(motionTime * 0.42 + 1.1);
+
+        showroomAtmosphere.cycloramaMaterial.opacity = 0.94 + breath * 0.03;
+        showroomAtmosphere.backdropSoftLightMaterial.opacity =
+            0.14 + shimmer * 0.08 + transition.glowBoost * 0.04;
+        showroomAtmosphere.floorSheenMaterial.opacity = 0.15 + breath * 0.05;
+        showroomAtmosphere.accentHalo.material.opacity =
+            0.08 + breath * 0.06 + transition.glowBoost * 0.05;
+        showroomAtmosphere.accentHalo.scale.setScalar(1 + breath * 0.015);
+
+        keyLight.intensity = 1.18 + breath * 0.08;
+        rimLight.intensity = 0.9 + shimmer * 0.08;
+        kickerLight.intensity = 0.26 + breath * 0.08;
+        fillLight.intensity = 0.34 + shimmer * 0.06;
+
+        showroomAtmosphere.particles.rotation.y += safeDt * 0.014;
+        showroomAtmosphere.particles.rotation.x = Math.sin(motionTime * 0.12) * 0.01;
     }
 
     function updateTaglineRotation(dt) {
@@ -877,8 +933,13 @@ export function createWelcomeModalController({
             outgoingVehicle.car.visible = false;
         }
 
-        underGlow.scale.setScalar(1 + transition.glowBoost * 0.34);
-        underGlow.material.opacity = 0.16 + transition.glowBoost * 0.2;
+        underGlow.scale.setScalar(1 + transition.glowBoost * 0.26);
+        underGlow.material.opacity = 0.1 + transition.glowBoost * 0.12;
+
+        showroomAtmosphere.contactShadow.scale.setScalar(1 + transition.glowBoost * 0.12);
+        showroomAtmosphere.contactShadow.material.opacity =
+            0.52 + Math.sin(previewPulseTime * 0.72 + 0.2) * 0.03 - transition.glowBoost * 0.04;
+        showroomAtmosphere.stageFloor.material.opacity = 0.95 + transition.glowBoost * 0.03;
     }
 
     function resetTransitionVisuals() {
@@ -907,7 +968,10 @@ export function createWelcomeModalController({
         }
 
         underGlow.scale.setScalar(1);
-        underGlow.material.opacity = 0.16;
+        underGlow.material.opacity = 0.1;
+        showroomAtmosphere.contactShadow.scale.setScalar(1);
+        showroomAtmosphere.contactShadow.material.opacity = 0.52;
+        showroomAtmosphere.stageFloor.material.opacity = 0.95;
     }
 
     function renderSelectedVehicleLabel(index) {
@@ -928,6 +992,315 @@ export function createWelcomeModalController({
         const nextPreset = CAR_COLOR_PRESETS[getWrappedIndex(normalizedIndex + 1)];
         prevVehicleBtnEl?.setAttribute('aria-label', `Previous vehicle: ${previousPreset.name}`);
         nextVehicleBtnEl?.setAttribute('aria-label', `Next vehicle: ${nextPreset.name}`);
+    }
+
+    function createShowroomAtmosphere(scene, previewRadius) {
+        const stageRadius = previewRadius * 2.92;
+        const backdropY = previewRadius * 0.94;
+        const backdropZ = -previewRadius * 3.24;
+
+        const backdropGroup = new THREE.Group();
+        scene.add(backdropGroup);
+
+        const cycloramaMaterial = new THREE.MeshBasicMaterial({
+            map: createCycloramaTexture(),
+            color: 0xadd5ff,
+            transparent: true,
+            opacity: 0.96,
+            side: THREE.BackSide,
+            depthWrite: false,
+        });
+        const cyclorama = new THREE.Mesh(
+            new THREE.SphereGeometry(previewRadius * 9.2, 64, 40),
+            cycloramaMaterial
+        );
+        cyclorama.position.set(0, previewRadius * 1.24, -previewRadius * 0.42);
+        backdropGroup.add(cyclorama);
+
+        const backdropSoftLightMaterial = new THREE.MeshBasicMaterial({
+            map: createBackdropSoftLightTexture(),
+            color: 0x8ed8ff,
+            transparent: true,
+            opacity: 0.18,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const backdropSoftLight = new THREE.Mesh(
+            new THREE.PlaneGeometry(previewRadius * 7.2, previewRadius * 3.05),
+            backdropSoftLightMaterial
+        );
+        backdropSoftLight.position.set(0, backdropY, backdropZ);
+        backdropGroup.add(backdropSoftLight);
+
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particleCount = 56;
+        const particlePositions = new Float32Array(particleCount * 3);
+        const random = createSeededRandom(61);
+        for (let i = 0; i < particleCount; i += 1) {
+            const idx = i * 3;
+            particlePositions[idx] = (random() - 0.5) * previewRadius * 7.0;
+            particlePositions[idx + 1] = previewRadius * (0.2 + random() * 2.2);
+            particlePositions[idx + 2] = backdropZ + random() * previewRadius * 1.6;
+        }
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+        const dustTexture = createDustParticleTexture();
+        const particlesMaterial = new THREE.PointsMaterial({
+            map: dustTexture,
+            color: 0xb5dcff,
+            transparent: true,
+            opacity: 0.11,
+            size: 0.055,
+            sizeAttenuation: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            alphaTest: 0.05,
+        });
+        const particles = new THREE.Points(particlesGeometry, particlesMaterial);
+        backdropGroup.add(particles);
+
+        const stageFloor = new THREE.Mesh(
+            new THREE.CircleGeometry(stageRadius, 108),
+            new THREE.MeshPhysicalMaterial({
+                color: 0x0a1119,
+                metalness: 0.08,
+                roughness: 0.34,
+                clearcoat: 0.72,
+                clearcoatRoughness: 0.46,
+                transparent: true,
+                opacity: 0.95,
+            })
+        );
+        stageFloor.rotation.x = -Math.PI * 0.5;
+        stageFloor.position.y = -0.018;
+        scene.add(stageFloor);
+
+        const floorSheenMaterial = new THREE.MeshBasicMaterial({
+            map: createFloorSheenTexture(),
+            color: 0x8ecfff,
+            transparent: true,
+            opacity: 0.2,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const floorSheen = new THREE.Mesh(
+            new THREE.CircleGeometry(stageRadius * 0.94, 108),
+            floorSheenMaterial
+        );
+        floorSheen.rotation.x = -Math.PI * 0.5;
+        floorSheen.position.y = 0.002;
+        scene.add(floorSheen);
+
+        const accentHalo = new THREE.Mesh(
+            new THREE.RingGeometry(previewRadius * 1.26, previewRadius * 1.86, 140),
+            new THREE.MeshBasicMaterial({
+                color: 0x89cbff,
+                transparent: true,
+                opacity: 0.1,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                side: THREE.DoubleSide,
+            })
+        );
+        accentHalo.rotation.x = -Math.PI * 0.5;
+        accentHalo.position.y = 0.01;
+        scene.add(accentHalo);
+
+        const contactShadow = new THREE.Mesh(
+            new THREE.CircleGeometry(previewRadius * 1.56, 72),
+            new THREE.MeshBasicMaterial({
+                map: createContactShadowTexture(),
+                transparent: true,
+                opacity: 0.52,
+                depthWrite: false,
+            })
+        );
+        contactShadow.rotation.x = -Math.PI * 0.5;
+        contactShadow.position.y = 0.015;
+        scene.add(contactShadow);
+
+        return {
+            timeSec: Math.random() * 6,
+            backdropGroup,
+            cycloramaMaterial,
+            backdropSoftLightMaterial,
+            floorSheenMaterial,
+            particles,
+            stageFloor,
+            accentHalo,
+            contactShadow,
+        };
+    }
+
+    function createCycloramaTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+
+        const skyGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        skyGradient.addColorStop(0, '#03070d');
+        skyGradient.addColorStop(0.46, '#050a12');
+        skyGradient.addColorStop(1, '#0b1521');
+        ctx.fillStyle = skyGradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const topBloom = ctx.createRadialGradient(
+            canvas.width * 0.5,
+            canvas.height * 0.25,
+            24,
+            canvas.width * 0.5,
+            canvas.height * 0.25,
+            canvas.width * 0.52
+        );
+        topBloom.addColorStop(0, 'rgba(112, 183, 235, 0.2)');
+        topBloom.addColorStop(0.64, 'rgba(74, 132, 186, 0.08)');
+        topBloom.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = topBloom;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const floorLift = ctx.createLinearGradient(0, canvas.height * 0.56, 0, canvas.height);
+        floorLift.addColorStop(0, 'rgba(106, 171, 224, 0)');
+        floorLift.addColorStop(1, 'rgba(106, 171, 224, 0.16)');
+        ctx.fillStyle = floorLift;
+        ctx.fillRect(0, canvas.height * 0.56, canvas.width, canvas.height * 0.44);
+
+        const vignette = ctx.createRadialGradient(
+            canvas.width * 0.5,
+            canvas.height * 0.52,
+            canvas.width * 0.24,
+            canvas.width * 0.5,
+            canvas.height * 0.52,
+            canvas.width * 0.72
+        );
+        vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        vignette.addColorStop(1, 'rgba(0, 0, 0, 0.52)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.wrapS = THREE.ClampToEdgeWrapping;
+        texture.wrapT = THREE.ClampToEdgeWrapping;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    function createBackdropSoftLightTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+
+        const centerGlow = ctx.createRadialGradient(
+            canvas.width * 0.5,
+            canvas.height * 0.56,
+            12,
+            canvas.width * 0.5,
+            canvas.height * 0.56,
+            canvas.width * 0.42
+        );
+        centerGlow.addColorStop(0, 'rgba(151, 220, 255, 0.46)');
+        centerGlow.addColorStop(0.44, 'rgba(114, 188, 238, 0.16)');
+        centerGlow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = centerGlow;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const horizonBand = ctx.createLinearGradient(0, canvas.height * 0.54, 0, canvas.height * 0.82);
+        horizonBand.addColorStop(0, 'rgba(154, 220, 255, 0)');
+        horizonBand.addColorStop(0.5, 'rgba(154, 220, 255, 0.22)');
+        horizonBand.addColorStop(1, 'rgba(154, 220, 255, 0)');
+        ctx.fillStyle = horizonBand;
+        ctx.fillRect(0, canvas.height * 0.5, canvas.width, canvas.height * 0.36);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    function createFloorSheenTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 1024;
+        const ctx = canvas.getContext('2d');
+        const centerX = canvas.width * 0.5;
+        const centerY = canvas.height * 0.5;
+        const maxRadius = canvas.width * 0.46;
+
+        const glow = ctx.createRadialGradient(centerX, centerY, 26, centerX, centerY, maxRadius);
+        glow.addColorStop(0, 'rgba(176, 230, 255, 0.42)');
+        glow.addColorStop(0.38, 'rgba(126, 205, 245, 0.16)');
+        glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(142, 213, 248, 0.16)';
+        ctx.lineWidth = 2;
+        ctx.arc(centerX, centerY, maxRadius * 0.8, 0, Math.PI * 2);
+        ctx.stroke();
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    function createDustParticleTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+
+        const gradient = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+        gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        gradient.addColorStop(0.44, 'rgba(214, 236, 255, 0.48)');
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    function createContactShadowTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        const centerX = canvas.width * 0.5;
+        const centerY = canvas.height * 0.5;
+
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        ctx.scale(1, 0.62);
+        const gradient = ctx.createRadialGradient(0, 0, 14, 0, 0, 232);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0.62)');
+        gradient.addColorStop(0.38, 'rgba(0, 0, 0, 0.36)');
+        gradient.addColorStop(0.72, 'rgba(0, 0, 0, 0.14)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(0, 0, 236, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    function createSeededRandom(seed = 1) {
+        let state = (Math.floor(seed) || 1) >>> 0;
+        return function nextRandom() {
+            state += 0x6d2b79f5;
+            let t = state;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
     }
 
     function createPreviewVehicle() {
@@ -1014,7 +1387,6 @@ export function createWelcomeModalController({
         onlineNameInputEl.value = safeName;
         preferredOnlinePlayerName = safeName;
         writeStoredOnlinePlayerName(safeName);
-        syncMultiplayerNameInput(safeName);
     }
 
     function readStoredOnlinePlayerName() {
@@ -1033,25 +1405,20 @@ export function createWelcomeModalController({
         }
     }
 
-    function syncMultiplayerNameInput(name) {
-        const mpNameInputEl = document.getElementById('multiplayerNameInput');
-        if (!mpNameInputEl) {
-            return;
-        }
-        mpNameInputEl.value = sanitizeOnlinePlayerNameInput(name);
-    }
-
     function queueCustomCreateCodeAvailabilityLookup() {
         if (!hasOnlineStartFlow) {
             return;
         }
         clearCustomCreateCodeLookup();
         const normalizedCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
-        if (preferredOnlineRoomAction !== 'create') {
+        if (
+            preferredOnlineRoomAction !== 'create' &&
+            preferredOnlineRoomAction !== 'join'
+        ) {
             setCustomCreateCodeStatus('hidden', '');
             return;
         }
-        if (!normalizedCode) {
+        if (preferredOnlineRoomAction === 'create' && !normalizedCode) {
             setCustomCreateCodeStatus('idle', '');
             return;
         }
@@ -1082,7 +1449,8 @@ export function createWelcomeModalController({
             );
             const payload = await response.json().catch(() => ({}));
             if (
-                preferredOnlineRoomAction !== 'create' ||
+                (preferredOnlineRoomAction !== 'create' &&
+                    preferredOnlineRoomAction !== 'join') ||
                 normalizeOnlineRoomCode(preferredOnlineRoomCode) !== roomCode
             ) {
                 return;
@@ -1092,11 +1460,18 @@ export function createWelcomeModalController({
                 updateOnlineFlowState();
                 return;
             }
-            const wasAvailableForCode =
-                customCreateCodeStatus === 'available' && customCreateCodeStatusCode === roomCode;
-            setCustomCreateCodeStatus(payload.available ? 'available' : 'occupied', roomCode);
+            const isCreateAction = preferredOnlineRoomAction === 'create';
+            const nextStatus = payload.available ? 'available' : 'occupied';
+            const wasReadyForCode =
+                customCreateCodeStatusCode === roomCode &&
+                ((isCreateAction && customCreateCodeStatus === 'available') ||
+                    (!isCreateAction && customCreateCodeStatus === 'occupied'));
+            const isReadyForCode =
+                (isCreateAction && nextStatus === 'available') ||
+                (!isCreateAction && nextStatus === 'occupied');
+            setCustomCreateCodeStatus(nextStatus, roomCode);
             updateOnlineFlowState();
-            if (payload.available && !wasAvailableForCode) {
+            if (isReadyForCode && !wasReadyForCode) {
                 triggerContinueButtonGlint();
             }
         } catch (error) {
@@ -1104,7 +1479,8 @@ export function createWelcomeModalController({
                 return;
             }
             if (
-                preferredOnlineRoomAction === 'create' &&
+                (preferredOnlineRoomAction === 'create' ||
+                    preferredOnlineRoomAction === 'join') &&
                 normalizeOnlineRoomCode(preferredOnlineRoomCode) === roomCode
             ) {
                 setCustomCreateCodeStatus('error', roomCode);
@@ -1160,7 +1536,10 @@ export function createWelcomeModalController({
             return;
         }
         if (customCreateCodeStatus === 'idle') {
-            onlineRoomCodeStatusEl.textContent = 'Leave empty to auto-generate a room code.';
+            onlineRoomCodeStatusEl.textContent =
+                preferredOnlineRoomAction === 'join'
+                    ? `Enter ${ONLINE_ROOM_CODE_LENGTH} characters (A-Z, 0-9).`
+                    : 'Leave empty to auto-generate a room code.';
             onlineRoomCodeStatusEl.dataset.tone = 'muted';
             return;
         }
@@ -1170,18 +1549,25 @@ export function createWelcomeModalController({
             return;
         }
         if (customCreateCodeStatus === 'checking') {
-            onlineRoomCodeStatusEl.textContent = 'Checking code availability...';
+            onlineRoomCodeStatusEl.textContent =
+                preferredOnlineRoomAction === 'join'
+                    ? 'Checking room...'
+                    : 'Checking code availability...';
             onlineRoomCodeStatusEl.dataset.tone = 'info';
             return;
         }
         if (customCreateCodeStatus === 'available') {
-            onlineRoomCodeStatusEl.textContent = 'Code available';
-            onlineRoomCodeStatusEl.dataset.tone = 'success';
+            onlineRoomCodeStatusEl.textContent =
+                preferredOnlineRoomAction === 'join' ? 'Room does not exist.' : 'Code available';
+            onlineRoomCodeStatusEl.dataset.tone =
+                preferredOnlineRoomAction === 'join' ? 'error' : 'success';
             return;
         }
         if (customCreateCodeStatus === 'occupied') {
-            onlineRoomCodeStatusEl.textContent = 'Code already in use';
-            onlineRoomCodeStatusEl.dataset.tone = 'error';
+            onlineRoomCodeStatusEl.textContent =
+                preferredOnlineRoomAction === 'join' ? 'Room found.' : 'Code already in use';
+            onlineRoomCodeStatusEl.dataset.tone =
+                preferredOnlineRoomAction === 'join' ? 'success' : 'error';
             return;
         }
         onlineRoomCodeStatusEl.textContent = 'Code check failed. Try again.';

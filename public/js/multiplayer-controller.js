@@ -3,7 +3,6 @@ import { createSkidMarkController } from './skidmarks.js';
 import { createCrashDebrisController } from './crash-debris-system.js';
 
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
-const MP_LAST_ROOM_STORAGE_KEY = 'silentdrift-mp-last-room';
 const DEFAULT_PLAYER_NAME = 'Driver';
 const PLAYER_NAME_MAX_LENGTH = 18;
 const ROOM_CODE_LENGTH = 6;
@@ -40,17 +39,7 @@ export function createMultiplayerController(options = {}) {
     }
 
     const dom = resolveDom();
-    if (
-        !dom.panel ||
-        !dom.status ||
-        !dom.nameInput ||
-        !dom.roomInput ||
-        !dom.createButton ||
-        !dom.joinButton ||
-        !dom.leaveButton ||
-        !dom.roomMeta ||
-        !dom.playerList
-    ) {
+    if (!dom.panel || !dom.leaveButton || !dom.roomMeta || !dom.playerList) {
         return createNoopController();
     }
 
@@ -67,6 +56,7 @@ export function createMultiplayerController(options = {}) {
     let lastStateSentAt = 0;
     let lastProfileSyncedAt = 0;
     let lastProfileSignature = '';
+    let localPlayerName = DEFAULT_PLAYER_NAME;
 
     return {
         initialize,
@@ -94,22 +84,13 @@ export function createMultiplayerController(options = {}) {
         isInitialized = true;
 
         const savedName = readStorage(MP_NAME_STORAGE_KEY);
-        dom.nameInput.value = sanitizePlayerName(savedName || DEFAULT_PLAYER_NAME);
-
-        const savedRoom = normalizeRoomCode(readStorage(MP_LAST_ROOM_STORAGE_KEY) || '');
-        if (savedRoom) {
-            dom.roomInput.value = savedRoom;
-        }
-
-        addListener(dom.createButton, 'click', handleCreateRoomClick);
-        addListener(dom.joinButton, 'click', handleJoinRoomClick);
+        localPlayerName = sanitizePlayerName(savedName || DEFAULT_PLAYER_NAME);
+        writeStorage(MP_NAME_STORAGE_KEY, localPlayerName);
         addListener(dom.leaveButton, 'click', handleLeaveRoomClick);
-        addListener(dom.roomInput, 'keydown', handleRoomInputKeyDown);
-        addListener(dom.nameInput, 'change', handleNameInputChange);
-        addListener(dom.nameInput, 'blur', handleNameInputChange);
 
-        setStatus('Online mode available. Create or join a room.', 'info');
+        setStatus('Not in room. Open Welcome to create or join.', 'info');
         renderPlayerList();
+        updateRoomMeta();
         updatePanel();
     }
 
@@ -287,7 +268,7 @@ export function createMultiplayerController(options = {}) {
     }
 
     function getLocalPlayerName() {
-        return sanitizePlayerName(dom.nameInput.value || DEFAULT_PLAYER_NAME);
+        return sanitizePlayerName(localPlayerName || DEFAULT_PLAYER_NAME);
     }
 
     function startOnlineRoomFlow(startContext = null) {
@@ -295,9 +276,9 @@ export function createMultiplayerController(options = {}) {
             return false;
         }
         const preferredPlayerName = sanitizePlayerName(
-            startContext?.playerName || dom.nameInput.value || DEFAULT_PLAYER_NAME
+            startContext?.playerName || localPlayerName || DEFAULT_PLAYER_NAME
         );
-        dom.nameInput.value = preferredPlayerName;
+        localPlayerName = preferredPlayerName;
         writeStorage(MP_NAME_STORAGE_KEY, preferredPlayerName);
         const action = startContext?.roomAction === 'join' ? 'join' : 'create';
         if (action === 'create') {
@@ -306,9 +287,6 @@ export function createMultiplayerController(options = {}) {
                 setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
                 updatePanel();
                 return false;
-            }
-            if (createRoomCode) {
-                dom.roomInput.value = createRoomCode;
             }
             handleCreateRoomClick(createRoomCode);
             return true;
@@ -319,7 +297,6 @@ export function createMultiplayerController(options = {}) {
             updatePanel();
             return false;
         }
-        dom.roomInput.value = roomCode;
         handleJoinRoomClick(roomCode);
         return true;
     }
@@ -342,14 +319,11 @@ export function createMultiplayerController(options = {}) {
             return;
         }
 
-        const createRoomCode = normalizeOptionalRoomCode(explicitRoomCode || dom.roomInput.value);
+        const createRoomCode = normalizeOptionalRoomCode(explicitRoomCode);
         if (createRoomCode == null) {
             setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
             updatePanel();
             return;
-        }
-        if (createRoomCode) {
-            dom.roomInput.value = createRoomCode;
         }
 
         const activeSocket = ensureSocket();
@@ -382,7 +356,7 @@ export function createMultiplayerController(options = {}) {
                     2200
                 );
                 applyRoomSnapshot(response.room, response.selfId);
-                setStatus(`Room ${response.room?.roomCode || ''} created.`, 'success');
+                setStatus('In room.', 'success');
                 updatePanel();
             }
         );
@@ -393,12 +367,11 @@ export function createMultiplayerController(options = {}) {
             return;
         }
 
-        const roomCode = normalizeRoomCode(explicitRoomCode || dom.roomInput.value);
+        const roomCode = normalizeRoomCode(explicitRoomCode);
         if (!roomCode) {
             setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
             return;
         }
-        dom.roomInput.value = roomCode;
 
         const activeSocket = ensureSocket();
         if (!activeSocket) {
@@ -424,7 +397,7 @@ export function createMultiplayerController(options = {}) {
                 2200
             );
             applyRoomSnapshot(response.room, response.selfId);
-            setStatus(`Connected to room ${roomCode}.`, 'success');
+            setStatus('In room.', 'success');
             updatePanel();
         });
     }
@@ -447,21 +420,6 @@ export function createMultiplayerController(options = {}) {
         });
     }
 
-    function handleRoomInputKeyDown(event) {
-        if (event.key !== 'Enter') {
-            return;
-        }
-        event.preventDefault();
-        handleJoinRoomClick();
-    }
-
-    function handleNameInputChange() {
-        const profile = readProfileFromUi();
-        dom.nameInput.value = profile.name;
-        writeStorage(MP_NAME_STORAGE_KEY, profile.name);
-        maybeSyncProfile(true);
-    }
-
     function ensureSocket() {
         if (socket) {
             return socket;
@@ -482,7 +440,7 @@ export function createMultiplayerController(options = {}) {
 
         socket.on('connect', () => {
             if (!room) {
-                setStatus('Connected. Create or join a room.', 'info');
+                setStatus('Connected. Open Welcome to create or join.', 'info');
             }
             updatePanel();
         });
@@ -505,7 +463,7 @@ export function createMultiplayerController(options = {}) {
             applyRoomSnapshot(snapshot, socket.id);
             const joinedRoomCode = snapshot?.roomCode || '';
             if (joinedRoomCode) {
-                setStatus(`In room ${joinedRoomCode}.`, 'success');
+                setStatus('In room.', 'success');
             }
             updatePanel();
         });
@@ -638,9 +596,10 @@ export function createMultiplayerController(options = {}) {
             onMineSnapshot(snapshot.mines);
         }
 
-        if (snapshot.roomCode) {
-            dom.roomInput.value = snapshot.roomCode;
-            writeStorage(MP_LAST_ROOM_STORAGE_KEY, snapshot.roomCode);
+        const selfPlayer = snapshot.players.find((player) => player?.id === selfId);
+        if (selfPlayer?.name) {
+            localPlayerName = sanitizePlayerName(selfPlayer.name);
+            writeStorage(MP_NAME_STORAGE_KEY, localPlayerName);
         }
 
         const presentRemoteIds = new Set();
@@ -960,19 +919,36 @@ export function createMultiplayerController(options = {}) {
     }
 
     function updateRoomMeta() {
+        const roomCodeValueEl = dom.roomCodeValue || null;
+        const playerCountValueEl = dom.playerCountValue || null;
         if (!room) {
-            dom.roomMeta.textContent = 'Offline';
+            dom.roomMeta.dataset.state = 'offline';
+            if (roomCodeValueEl) {
+                roomCodeValueEl.textContent = '------';
+            }
+            if (playerCountValueEl) {
+                playerCountValueEl.textContent = '0/0 PLAYERS';
+            }
             return;
         }
 
+        dom.roomMeta.dataset.state = 'active';
         const roomCode = room.roomCode || '-';
         const playerCount =
             Number(room.playerCount) || (Array.isArray(room.players) ? room.players.length : 0);
         const maxPlayers = Number(room.maxPlayers) || 0;
-        dom.roomMeta.textContent = `Room ${roomCode} | Players ${playerCount}/${maxPlayers}`;
+        if (roomCodeValueEl) {
+            roomCodeValueEl.textContent = roomCode;
+        }
+        if (playerCountValueEl) {
+            playerCountValueEl.textContent = `${playerCount}/${maxPlayers} PLAYERS`;
+        }
     }
 
     function setStatus(message, tone = 'info') {
+        if (!dom.status) {
+            return;
+        }
         dom.status.textContent = message;
         dom.status.dataset.tone = tone;
     }
@@ -981,11 +957,7 @@ export function createMultiplayerController(options = {}) {
         const hasRoom = Boolean(room?.roomCode);
         const isConnected = Boolean(socket?.connected);
 
-        dom.createButton.disabled = isBusy || hasRoom;
-        dom.joinButton.disabled = isBusy || hasRoom;
         dom.leaveButton.disabled = isBusy || !hasRoom;
-        dom.nameInput.disabled = isBusy;
-        dom.roomInput.disabled = isBusy || hasRoom;
         dom.panel.dataset.connected = isConnected ? 'true' : 'false';
     }
 
@@ -1003,7 +975,7 @@ export function createMultiplayerController(options = {}) {
             updatePanel();
             return;
         }
-        setStatus('Online mode available. Create or join a room.', 'info');
+        setStatus('Not in room. Open Welcome to create or join.', 'info');
         updatePanel();
     }
 
@@ -1022,7 +994,8 @@ export function createMultiplayerController(options = {}) {
     }
 
     function readProfileFromUi() {
-        const safeName = sanitizePlayerName(dom.nameInput.value || DEFAULT_PLAYER_NAME);
+        const safeName = sanitizePlayerName(localPlayerName || DEFAULT_PLAYER_NAME);
+        localPlayerName = safeName;
         const safeColorHex = clampColorHex(getSelectedCarColorHex());
         return {
             name: safeName,
@@ -1050,13 +1023,10 @@ export function createMultiplayerController(options = {}) {
 function resolveDom() {
     return {
         panel: document.getElementById('multiplayerPanel'),
-        status: document.getElementById('multiplayerStatus'),
-        nameInput: document.getElementById('multiplayerNameInput'),
-        roomInput: document.getElementById('multiplayerRoomInput'),
-        createButton: document.getElementById('multiplayerCreateBtn'),
-        joinButton: document.getElementById('multiplayerJoinBtn'),
         leaveButton: document.getElementById('multiplayerLeaveBtn'),
         roomMeta: document.getElementById('multiplayerRoomMeta'),
+        roomCodeValue: document.getElementById('multiplayerRoomCodeValue'),
+        playerCountValue: document.getElementById('multiplayerPlayerCountValue'),
         playerList: document.getElementById('multiplayerPlayerList'),
     };
 }
