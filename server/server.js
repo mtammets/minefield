@@ -21,6 +21,12 @@ const STATE_UPDATE_MIN_INTERVAL_MS = 35;
 const COLLISION_RELAY_MIN_INTERVAL_MS = 60;
 const MAX_DETACHED_PART_IDS = 32;
 const MAX_DEBRIS_PIECES = 64;
+const MAX_ACTIVE_MINES_PER_ROOM = 220;
+const MAX_ACTIVE_MINES_PER_PLAYER = 10;
+const MINE_ID_MAX_LENGTH = 72;
+const MINE_DEFAULT_TRIGGER_RADIUS = 1.5;
+const MINE_DEFAULT_ARM_DELAY_MS = 650;
+const MINE_DEFAULT_TTL_MS = 45_000;
 
 const rooms = new Map();
 
@@ -67,6 +73,7 @@ io.on('connection', (socket) => {
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
                 players: new Map(),
+                mines: new Map(),
             };
             room.players.set(socket.id, createRoomPlayer(socket.id, profile));
             rooms.set(roomCode, room);
@@ -192,6 +199,7 @@ io.on('connection', (socket) => {
         }
 
         const now = Date.now();
+        pruneExpiredMines(room, now);
         if (now - player.lastInboundStateAt < STATE_UPDATE_MIN_INTERVAL_MS) {
             return;
         }
@@ -260,6 +268,91 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('mp:minePlaced', (payload) => {
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            return;
+        }
+
+        const now = Date.now();
+        pruneExpiredMines(room, now);
+        const mine = sanitizeMinePlacement(payload, {
+            ownerId: socket.id,
+            ownerName: player.name,
+            now,
+        });
+        if (!mine) {
+            return;
+        }
+
+        enforceMineLimits(room, mine.ownerId);
+        room.mines.set(mine.id, mine);
+        room.updatedAt = now;
+        io.to(roomCode).emit('mp:minePlaced', {
+            ...serializeMine(mine),
+            serverTime: now,
+        });
+    });
+
+    socket.on('mp:mineDetonated', (payload) => {
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            return;
+        }
+
+        const now = Date.now();
+        pruneExpiredMines(room, now);
+        const detonation = sanitizeMineDetonation(payload, now);
+        if (!detonation) {
+            return;
+        }
+
+        const mine = room.mines.get(detonation.mineId);
+        if (!mine) {
+            return;
+        }
+
+        room.mines.delete(mine.id);
+        room.updatedAt = now;
+        io.to(roomCode).emit('mp:mineDetonated', {
+            mineId: mine.id,
+            ownerId: mine.ownerId,
+            ownerName: mine.ownerName,
+            x: roundTo(clampFinite(detonation.x, -5000, 5000, mine.x), 4),
+            y: roundTo(clampFinite(detonation.y, -500, 2500, mine.y), 4),
+            z: roundTo(clampFinite(detonation.z, -5000, 5000, mine.z), 4),
+            triggerPlayerId: sanitizeOptionalRoomPlayerId(
+                detonation.triggerPlayerId,
+                room,
+                socket.id
+            ),
+            targetPlayerId: sanitizeOptionalRoomPlayerId(detonation.targetPlayerId, room, ''),
+            serverTime: now,
+        });
+    });
+
     socket.on('disconnect', () => {
         leaveCurrentRoom(socket);
     });
@@ -288,6 +381,8 @@ function createRoomPlayer(id, profile) {
 }
 
 function serializeRoom(room) {
+    pruneExpiredMines(room, Date.now());
+    const mineMap = room?.mines instanceof Map ? room.mines : new Map();
     const players = Array.from(room.players.values())
         .sort((a, b) => a.joinedAt - b.joinedAt)
         .map((player) => ({
@@ -305,6 +400,10 @@ function serializeRoom(room) {
         playerCount: players.length,
         maxPlayers: MAX_PLAYERS_PER_ROOM,
         players,
+        mines: Array.from(mineMap.values())
+            .sort((a, b) => a.createdAt - b.createdAt)
+            .map((mine) => serializeMine(mine))
+            .filter(Boolean),
     };
 }
 
@@ -327,6 +426,13 @@ function leaveCurrentRoom(socket) {
     }
 
     room.players.delete(socket.id);
+    if (room.mines?.size) {
+        for (const [mineId, mine] of room.mines.entries()) {
+            if (mine?.ownerId === socket.id) {
+                room.mines.delete(mineId);
+            }
+        }
+    }
     room.updatedAt = Date.now();
 
     if (room.players.size === 0) {
@@ -512,6 +618,163 @@ function sanitizeCollisionRelay(payload) {
         otherVelocityZ: roundTo(clampFinite(payload.otherVelocityZ, -400, 400, 0), 4),
         mass: roundTo(clampFinite(payload.mass, 0.4, 4, 1.6), 4),
     };
+}
+
+function sanitizeMinePlacement(payload, context) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const ownerId = sanitizeSocketLikeId(context?.ownerId);
+    if (!ownerId) {
+        return null;
+    }
+
+    const now = clampFinite(context?.now, 0, Number.MAX_SAFE_INTEGER, Date.now());
+    const mineId =
+        sanitizeMineId(payload.mineId) ||
+        `${ownerId}-${now.toString(36)}-${Math.floor(Math.random() * 1296)
+            .toString(36)
+            .padStart(2, '0')}`;
+    const triggerRadius = clampFinite(payload.triggerRadius, 0.8, 4, MINE_DEFAULT_TRIGGER_RADIUS);
+    const armDelayMs = Math.round(
+        clampFinite(payload.armDelayMs, 0, 4000, MINE_DEFAULT_ARM_DELAY_MS)
+    );
+    const ttlMs = Math.round(clampFinite(payload.ttlMs, 4000, 120000, MINE_DEFAULT_TTL_MS));
+
+    return {
+        id: mineId,
+        ownerId,
+        ownerName: sanitizePlayerName(context?.ownerName, 'Driver'),
+        x: roundTo(clampFinite(payload.x, -5000, 5000, 0), 4),
+        y: roundTo(clampFinite(payload.y, -500, 2500, 0), 4),
+        z: roundTo(clampFinite(payload.z, -5000, 5000, 0), 4),
+        velocityX: roundTo(clampFinite(payload.velocityX, -140, 140, 0), 4),
+        velocityY: roundTo(clampFinite(payload.velocityY, -140, 140, 0), 4),
+        velocityZ: roundTo(clampFinite(payload.velocityZ, -140, 140, 0), 4),
+        triggerRadius: roundTo(triggerRadius, 4),
+        armDelayMs,
+        ttlMs,
+        thrown: Boolean(payload.thrown),
+        createdAt: now,
+        armedAt: now + armDelayMs,
+        expiresAt: now + ttlMs,
+    };
+}
+
+function sanitizeMineDetonation(payload, now = Date.now()) {
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    const mineId = sanitizeMineId(payload.mineId);
+    if (!mineId) {
+        return null;
+    }
+
+    return {
+        mineId,
+        x: clampFinite(payload.x, -5000, 5000, 0),
+        y: clampFinite(payload.y, -500, 2500, 0),
+        z: clampFinite(payload.z, -5000, 5000, 0),
+        triggerPlayerId: sanitizeSocketLikeId(payload.triggerPlayerId),
+        targetPlayerId: sanitizeSocketLikeId(payload.targetPlayerId),
+        serverTime: now,
+    };
+}
+
+function sanitizeMineId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value
+        .trim()
+        .replace(/[^\w\-]/g, '')
+        .slice(0, MINE_ID_MAX_LENGTH);
+}
+
+function sanitizeSocketLikeId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value
+        .trim()
+        .replace(/[^\w\-]/g, '')
+        .slice(0, 128);
+}
+
+function sanitizeOptionalRoomPlayerId(value, room, fallback) {
+    const sanitized = sanitizeSocketLikeId(value);
+    if (!sanitized) {
+        return fallback || '';
+    }
+    if (!room?.players?.has?.(sanitized)) {
+        return fallback || '';
+    }
+    return sanitized;
+}
+
+function serializeMine(mine) {
+    if (!mine || typeof mine !== 'object') {
+        return null;
+    }
+    return {
+        mineId: mine.id,
+        ownerId: mine.ownerId,
+        ownerName: mine.ownerName,
+        x: mine.x,
+        y: mine.y,
+        z: mine.z,
+        velocityX: mine.velocityX,
+        velocityY: mine.velocityY,
+        velocityZ: mine.velocityZ,
+        triggerRadius: mine.triggerRadius,
+        armDelayMs: mine.armDelayMs,
+        ttlMs: mine.ttlMs,
+        thrown: Boolean(mine.thrown),
+        createdAt: mine.createdAt,
+        armedAt: mine.armedAt,
+        expiresAt: mine.expiresAt,
+    };
+}
+
+function pruneExpiredMines(room, now = Date.now()) {
+    if (!room?.mines?.size) {
+        return;
+    }
+    for (const [mineId, mine] of room.mines.entries()) {
+        if (!mine || mine.expiresAt <= now) {
+            room.mines.delete(mineId);
+        }
+    }
+}
+
+function enforceMineLimits(room, ownerId) {
+    if (!room?.mines) {
+        return;
+    }
+
+    pruneExpiredMines(room, Date.now());
+
+    const ownerMines = Array.from(room.mines.values())
+        .filter((mine) => mine.ownerId === ownerId)
+        .sort((a, b) => a.createdAt - b.createdAt);
+    while (ownerMines.length >= MAX_ACTIVE_MINES_PER_PLAYER) {
+        const oldest = ownerMines.shift();
+        if (!oldest) {
+            break;
+        }
+        room.mines.delete(oldest.id);
+    }
+
+    const allMines = Array.from(room.mines.values()).sort((a, b) => a.createdAt - b.createdAt);
+    while (allMines.length >= MAX_ACTIVE_MINES_PER_ROOM) {
+        const oldest = allMines.shift();
+        if (!oldest) {
+            break;
+        }
+        room.mines.delete(oldest.id);
+    }
 }
 
 function sanitizeCrashReplication(value, fallback) {

@@ -33,6 +33,7 @@ export function createInputController(options = {}) {
         onShowObjectiveInfo = () => {},
         onStartNewGame = () => {},
         onShowWelcomeModal = () => {},
+        onDeployMine = () => null,
         cyclePlayerRoofMenu,
         setPlayerRoofMenuMode,
         setPlayerRoofMenuModeFromUv,
@@ -116,6 +117,8 @@ export function createInputController(options = {}) {
                 key === '6' ||
                 key === '7' ||
                 key === 'r' ||
+                key === 'g' ||
+                key === 't' ||
                 key === 'x' ||
                 key === 'c' ||
                 key === '[' ||
@@ -228,6 +231,24 @@ export function createInputController(options = {}) {
                     return;
                 }
                 onRestartGameWithCountdown();
+            },
+            g: () => {
+                if (!isKeyDown || isRaceIntroDriveLocked) {
+                    return;
+                }
+                const result = onDeployMine('drop');
+                if (result?.message) {
+                    onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
+                }
+            },
+            t: () => {
+                if (!isKeyDown || isRaceIntroDriveLocked) {
+                    return;
+                }
+                const result = onDeployMine('throw');
+                if (result?.message) {
+                    onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
+                }
             },
             enter: () => {
                 if (!isKeyDown || !finalScoreboardUi.isVisible() || isRaceIntroDriveLocked) {

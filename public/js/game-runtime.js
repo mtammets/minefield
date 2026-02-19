@@ -107,6 +107,7 @@ import { createGameRuntimeState } from './game-runtime-state.js';
 import { initializeScene, initializeRenderer } from './game-bootstrap.js';
 import { createRuntimeUiControllers } from './game-runtime-ui.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
+import { createMineSystemController } from './mine-system.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
@@ -307,6 +308,74 @@ runtimeState.replayEffectsController = createReplayEffectsController({
     replayEventCrash: REPLAY_EVENT_CRASH,
     obstacleCrashMaxSpeed: OBSTACLE_CRASH_MAX_SPEED,
 });
+runtimeState.mineController = createMineSystemController({
+    scene,
+    car,
+    getGroundHeightAt,
+    getVehicleState,
+    getOtherVehicleTargets: () => {
+        if (runtimeState.gameMode !== 'bots') {
+            return [];
+        }
+        const descriptors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || [];
+        return descriptors.map((entry) => ({
+            id: entry.id,
+            ownerId: entry.id,
+            type: 'bot',
+            label: entry.id,
+            position: entry.position,
+        }));
+    },
+    getLocalPlayerId: () =>
+        runtimeState.gameMode === 'bots'
+            ? 'local-player'
+            : runtimeState.multiplayerController?.getSelfId?.() || '',
+    getLocalPlayerName: () =>
+        runtimeState.gameMode === 'bots'
+            ? 'You'
+            : runtimeState.multiplayerController?.getLocalPlayerName?.() || 'Driver',
+    canUseMines: () =>
+        (runtimeState.gameMode === 'bots' ||
+            (runtimeState.gameMode === 'online' &&
+                runtimeState.multiplayerController?.isInRoom?.())) &&
+        !runtimeState.isCarDestroyed &&
+        !runtimeState.pickupRoundFinished,
+    emitMinePlaced(snapshot) {
+        runtimeState.multiplayerController?.reportMinePlaced?.(snapshot);
+    },
+    emitMineDetonated(snapshot) {
+        runtimeState.multiplayerController?.reportMineDetonated?.(snapshot);
+    },
+    onLocalMineHit({ position, ownerName }) {
+        if (runtimeState.isCarDestroyed || runtimeState.pickupRoundFinished) {
+            return;
+        }
+        const ownerLabel = ownerName ? `${ownerName}'s` : "an opponent's";
+        const vehicleState = getVehicleState();
+        const impactNormal = new THREE.Vector3().subVectors(car.position, position).setY(0);
+        if (impactNormal.lengthSq() < 0.0001) {
+            impactNormal.set(-Math.sin(car.rotation.y), 0, -Math.cos(car.rotation.y));
+        }
+        impactNormal.normalize();
+        runtimeState.gameSessionController?.triggerCarExplosion(position, 0xff8d66, 0xff4f4f, {
+            statusText: `You hit ${ownerLabel} landmine.`,
+            collision: {
+                obstacleCategory: 'landmine',
+                impactSpeed: Math.max(32, Math.min(84, Math.abs(vehicleState?.speed || 0) + 16)),
+                impactNormal,
+            },
+        });
+    },
+    onOtherVehicleMineHit({ target }) {
+        if (target?.type !== 'bot' || runtimeState.gameMode !== 'bots') {
+            return;
+        }
+        const destroyed = runtimeState.botTrafficSystem?.triggerMineHit?.(target.id);
+        if (destroyed) {
+            objectiveUi.showInfo(`Mine hit ${target.label || target.id}.`, 1400);
+        }
+    },
+});
 runtimeState.multiplayerController = createMultiplayerController({
     scene,
     car,
@@ -319,6 +388,15 @@ runtimeState.multiplayerController = createMultiplayerController({
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     objectiveUi,
+    onMineSnapshot(mineSnapshots) {
+        runtimeState.mineController?.applyRoomMineSnapshot?.(mineSnapshots);
+    },
+    onMinePlaced(snapshot) {
+        runtimeState.mineController?.handleRemoteMinePlaced?.(snapshot);
+    },
+    onMineDetonated(snapshot) {
+        runtimeState.mineController?.handleRemoteMineDetonated?.(snapshot);
+    },
 });
 
 runtimeState.gameSessionController = createGameSessionController({
@@ -349,6 +427,7 @@ runtimeState.gameSessionController = createGameSessionController({
     replayController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     crashDebrisController: runtimeState.crashDebrisController,
+    mineController: runtimeState.mineController,
     replayEffectsController: runtimeState.replayEffectsController,
     setPhysicsAccumulator(value) {
         runtimeState.physicsAccumulator = value;
@@ -476,6 +555,9 @@ runtimeState.inputController = createInputController({
     onShowWelcomeModal() {
         runtimeState.gameSessionController?.showWelcomeModal();
     },
+    onDeployMine(mode) {
+        return runtimeState.mineController?.deployMine?.(mode);
+    },
     cyclePlayerRoofMenu,
     setPlayerRoofMenuMode,
     setPlayerRoofMenuModeFromUv,
@@ -515,6 +597,7 @@ runtimeState.gameLoopController = createGameLoopController({
     collectibleSystem,
     replayController,
     multiplayerController: runtimeState.multiplayerController,
+    mineSystemController: runtimeState.mineController,
     getMultiplayerMiniMapMarkers() {
         return runtimeState.multiplayerController?.getMiniMapMarkers?.() || [];
     },
@@ -559,6 +642,7 @@ runtimeState.gameLoopController = createGameLoopController({
     getPickupRoundFinished: () => runtimeState.pickupRoundFinished,
     getTotalCollectedCount: () => runtimeState.totalCollectedCount,
     getBotsEnabled: () => runtimeState.gameMode !== 'online',
+    getLocalPlayerId: () => runtimeState.multiplayerController?.getSelfId?.() || '',
 });
 
 botStatusUi.render(runtimeState.botTrafficSystem.getHudState());

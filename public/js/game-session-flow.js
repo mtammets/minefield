@@ -40,6 +40,7 @@ export function createGameSessionController({
     replayController,
     getBotTrafficSystem,
     crashDebrisController,
+    mineController,
     replayEffectsController,
     setPhysicsAccumulator,
     setMinimapAccumulator,
@@ -402,6 +403,9 @@ export function createGameSessionController({
         chargingProgressHudController.reset();
         skidMarkController.reset();
         crashDebrisController.resetPlayerDamageState();
+        if (normalizeGameMode(getGameMode()) !== 'online') {
+            mineController?.clearAll?.();
+        }
         clearDriveKeys();
         replayEffectsController.clearReplayEffects();
         crashDebrisController.clearDebris();
@@ -420,6 +424,9 @@ export function createGameSessionController({
         clearPendingRespawn();
         replayEffectsController.clearReplayEffects();
         crashDebrisController.clearDebris();
+        if (normalizeGameMode(getGameMode()) !== 'online') {
+            mineController?.clearAll?.();
+        }
 
         objectiveUi.resetStatus();
         finalScoreboardUi.hide();

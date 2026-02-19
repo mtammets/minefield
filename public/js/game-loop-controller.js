@@ -20,6 +20,7 @@ export function createGameLoopController(options = {}) {
         collectibleSystem,
         replayController,
         multiplayerController,
+        mineSystemController,
         getPlayerTopSpeedLimit,
         crashDebrisController,
         replayEffectsController,
@@ -56,6 +57,7 @@ export function createGameLoopController(options = {}) {
         getPickupRoundFinished,
         getTotalCollectedCount,
         getBotsEnabled,
+        getLocalPlayerId,
     } = options;
 
     if (!clock || !renderer || !scene || !camera || !car) {
@@ -86,6 +88,7 @@ export function createGameLoopController(options = {}) {
     const readTotalCollectedCount =
         typeof getTotalCollectedCount === 'function' ? getTotalCollectedCount : () => 0;
     const readBotsEnabled = typeof getBotsEnabled === 'function' ? getBotsEnabled : () => true;
+    const readLocalPlayerId = typeof getLocalPlayerId === 'function' ? getLocalPlayerId : () => '';
 
     let running = false;
     let animationFrameId = null;
@@ -124,6 +127,7 @@ export function createGameLoopController(options = {}) {
         let chargingHudLevel = 0;
         let skidMarksEnabled = false;
         let skidMarkVehicleState = null;
+        let mineCollisionEnabled = false;
 
         welcomeModalUi.update(frameDelta);
         multiplayerController?.update?.(frameDelta);
@@ -154,6 +158,7 @@ export function createGameLoopController(options = {}) {
                 const isBatteryDepleted = readBatteryDepleted();
                 const chargingContextEnabled =
                     !replayActive && !isCarDestroyed && !pickupRoundFinished;
+                mineCollisionEnabled = chargingContextEnabled;
                 const chargingSnapshot = chargingZoneController.update(car.position, frameDelta, {
                     enabled: chargingContextEnabled,
                 });
@@ -359,6 +364,11 @@ export function createGameLoopController(options = {}) {
             enabled: skidMarksEnabled,
             vehicle: car,
             vehicleState: skidMarkVehicleState,
+        });
+        mineSystemController?.update?.(frameDelta, {
+            localCarPosition: car.position,
+            localPlayerId: readLocalPlayerId(),
+            enableLocalCollision: mineCollisionEnabled,
         });
 
         updateSunLightPosition();

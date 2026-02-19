@@ -22,6 +22,9 @@ Open `http://localhost:3000`.
 3. Share the 6-character room code with other players.
 
 - Remote players appear in the world and on the minimap in real time.
+- In an online room, press `G` to drop a landmine behind your car.
+- In an online room, press `T` to throw a landmine forward.
+- Any other player driving over an armed mine explodes into debris.
 
 ## City Builder (Local Per User)
 

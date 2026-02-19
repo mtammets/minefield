@@ -79,6 +79,14 @@ export const CHARGING_BATTERY_GAIN_PER_SEC = 16;
 export const ROUND_TOTAL_PICKUPS = 30;
 export const PLAYER_CAR_POOL_SIZE = 3;
 export const PLAYER_RESPAWN_DELAY_MS = 850;
+export const MINE_DEPLOY_COOLDOWN_MS = 900;
+export const MINE_ARM_DELAY_MS = 650;
+export const MINE_TTL_MS = 45000;
+export const MINE_TRIGGER_RADIUS = 1.5;
+export const MINE_MAX_PER_OWNER = 10;
+export const MINE_THROW_SPEED = 24;
+export const MINE_THROW_VERTICAL_SPEED = 6.8;
+export const MINE_THROW_GRAVITY = 18;
 
 export const REPLAY_EVENT_PICKUP = 'pickup';
 export const REPLAY_EVENT_CRASH = 'crash';

@@ -30,6 +30,9 @@ export function createMultiplayerController(options = {}) {
         getPlayerCollectedCount = () => 0,
         getIsCarDestroyed = () => false,
         objectiveUi = null,
+        onMineSnapshot = () => {},
+        onMinePlaced = () => {},
+        onMineDetonated = () => {},
     } = options;
 
     if (!scene || !car) {
@@ -76,6 +79,11 @@ export function createMultiplayerController(options = {}) {
         getMiniMapMarkers,
         getCollisionSnapshots,
         reportLocalVehicleContacts,
+        reportMinePlaced,
+        reportMineDetonated,
+        isInRoom,
+        getSelfId,
+        getLocalPlayerName,
     };
 
     function initialize() {
@@ -117,6 +125,8 @@ export function createMultiplayerController(options = {}) {
             socket.off('mp:roomState');
             socket.off('mp:playerState');
             socket.off('mp:collision');
+            socket.off('mp:minePlaced');
+            socket.off('mp:mineDetonated');
             socket.disconnect();
             socket = null;
         }
@@ -245,6 +255,40 @@ export function createMultiplayerController(options = {}) {
         }
     }
 
+    function reportMinePlaced(mineSnapshot = null) {
+        if (!isPanelVisible || !socket?.connected || !room) {
+            return false;
+        }
+        if (!mineSnapshot || typeof mineSnapshot !== 'object') {
+            return false;
+        }
+        socket.emit('mp:minePlaced', mineSnapshot);
+        return true;
+    }
+
+    function reportMineDetonated(detonationSnapshot = null) {
+        if (!isPanelVisible || !socket?.connected || !room) {
+            return false;
+        }
+        if (!detonationSnapshot || typeof detonationSnapshot !== 'object') {
+            return false;
+        }
+        socket.emit('mp:mineDetonated', detonationSnapshot);
+        return true;
+    }
+
+    function isInRoom() {
+        return Boolean(isPanelVisible && room?.roomCode && socket?.connected);
+    }
+
+    function getSelfId() {
+        return selfId || socket?.id || '';
+    }
+
+    function getLocalPlayerName() {
+        return sanitizePlayerName(dom.nameInput.value || DEFAULT_PLAYER_NAME);
+    }
+
     function resolveTargetPlayerId(contact = null) {
         if (typeof contact?.playerId === 'string' && contact.playerId.trim()) {
             return contact.playerId.trim();
@@ -282,7 +326,10 @@ export function createMultiplayerController(options = {}) {
                 return;
             }
 
-            objectiveUi?.showInfo?.(`Online room ${response.room?.roomCode || ''} created.`, 1900);
+            objectiveUi?.showInfo?.(
+                `Online room ${response.room?.roomCode || ''} created. G drops, T throws mines.`,
+                2200
+            );
             applyRoomSnapshot(response.room, response.selfId);
             setStatus(`Room ${response.room?.roomCode || ''} created.`, 'success');
             updatePanel();
@@ -319,7 +366,10 @@ export function createMultiplayerController(options = {}) {
                 return;
             }
 
-            objectiveUi?.showInfo?.(`Connected to room ${roomCode}.`, 1900);
+            objectiveUi?.showInfo?.(
+                `Connected to room ${roomCode}. G drops, T throws mines.`,
+                2200
+            );
             applyRoomSnapshot(response.room, response.selfId);
             setStatus(`Connected to room ${roomCode}.`, 'success');
             updatePanel();
@@ -420,6 +470,12 @@ export function createMultiplayerController(options = {}) {
         });
         socket.on('mp:collision', (payload) => {
             applyNetworkCollisionImpulse(payload);
+        });
+        socket.on('mp:minePlaced', (payload) => {
+            onMinePlaced(payload);
+        });
+        socket.on('mp:mineDetonated', (payload) => {
+            onMineDetonated(payload);
         });
 
         return socket;
@@ -525,6 +581,9 @@ export function createMultiplayerController(options = {}) {
 
         room = snapshot;
         selfId = nextSelfId || socket?.id || '';
+        if (Array.isArray(snapshot.mines)) {
+            onMineSnapshot(snapshot.mines);
+        }
 
         if (snapshot.roomCode) {
             dom.roomInput.value = snapshot.roomCode;
@@ -569,6 +628,7 @@ export function createMultiplayerController(options = {}) {
         lastProfileSyncedAt = 0;
         lastProfileSignature = '';
         lastCollisionRelaySentAtByTarget.clear();
+        onMineSnapshot([]);
 
         for (const remote of remotePlayers.values()) {
             removeRemotePlayer(remote);
@@ -927,6 +987,8 @@ export function createMultiplayerController(options = {}) {
         socket.off('mp:roomState');
         socket.off('mp:playerState');
         socket.off('mp:collision');
+        socket.off('mp:minePlaced');
+        socket.off('mp:mineDetonated');
         socket.disconnect();
         socket = null;
     }
@@ -962,6 +1024,21 @@ function createNoopController() {
             return [];
         },
         reportLocalVehicleContacts() {},
+        reportMinePlaced() {
+            return false;
+        },
+        reportMineDetonated() {
+            return false;
+        },
+        isInRoom() {
+            return false;
+        },
+        getSelfId() {
+            return '';
+        },
+        getLocalPlayerName() {
+            return DEFAULT_PLAYER_NAME;
+        },
     };
 }
 
