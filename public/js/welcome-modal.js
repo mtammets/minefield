@@ -14,6 +14,15 @@ const SWAP_TIMING = {
     enterSec: 0.28,
     settleSec: 0.12,
 };
+const WELCOME_TAGLINE_ROTATION_INTERVAL_SEC = 8.5;
+const WELCOME_TAGLINE_TRANSITION_OUT_MS = 180;
+const WELCOME_TAGLINE_TRANSITION_IN_MS = 280;
+const WELCOME_TAGLINE_VARIANTS = [
+    'Master precision driving across high-stakes circuits. Tune your car, out-drift rivals, and climb the online leaderboard.',
+    'Own every corner with elite handling, strategic mine plays, and relentless multiplayer competition.',
+    'Build race-winning momentum, control every drift angle, and push your best lap under pressure.',
+    'Compete in fast tactical races where clean lines, timing, and control decide the podium.',
+];
 
 export function createWelcomeModalController({
     onStart,
@@ -41,6 +50,7 @@ export function createWelcomeModalController({
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
     const selectedColorNameEl = document.getElementById('welcomeSelectedColorName');
+    const taglineEl = document.getElementById('welcomeTagline');
 
     if (!rootEl || !startBtnEl || !previewCanvasEl) {
         const fallbackColorHex = resolveColorHex(initialColorHex);
@@ -109,6 +119,13 @@ export function createWelcomeModalController({
     let selectedColorIndex = resolvePresetIndex(initialColorHex);
     let previewPulseTime = Math.random() * Math.PI * 2;
     let preferredStartMode = 'bots';
+    const taglineRotation = {
+        activeIndex: 0,
+        elapsedSec: 0,
+        isTransitioning: false,
+        transitionTimer: null,
+        queuedIndex: null,
+    };
 
     const previewState = {
         speed: WELCOME_PREVIEW_STATE_SPEED,
@@ -152,6 +169,7 @@ export function createWelcomeModalController({
     previewCamera.position.copy(previewCameraBasePosition);
     previewCamera.lookAt(previewLookAt);
     resetTransitionVisuals();
+    setTaglineByIndex(0);
     applySelectedPreset(selectedColorIndex, false);
     bindVehicleButtons();
 
@@ -168,6 +186,10 @@ export function createWelcomeModalController({
         show() {
             rootEl.hidden = false;
             preferredStartMode = 'bots';
+            taglineRotation.activeIndex = 0;
+            taglineRotation.elapsedSec = 0;
+            resetTaglineTransition();
+            setTaglineByIndex(taglineRotation.activeIndex);
             forceSelectPreset(resolvePresetIndex(currentColorGetter()), false);
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
@@ -175,6 +197,7 @@ export function createWelcomeModalController({
             renderPreview();
         },
         hide() {
+            resetTaglineTransition();
             rootEl.hidden = true;
         },
         resize() {
@@ -191,6 +214,7 @@ export function createWelcomeModalController({
             previewSpinYaw += frameDt * WELCOME_CAR_SPIN_SPEED;
             updateTransition(frameDt);
             updatePreviewVisualState(frameDt);
+            updateTaglineRotation(frameDt);
             applyPreviewPose();
             renderPreview();
         },
@@ -258,6 +282,78 @@ export function createWelcomeModalController({
             previewVehicles[i].rig.setBatteryLevel(0.34 + batteryWave * 0.62);
             previewVehicles[i].rig.updateVisuals(previewState, dt || 1 / 60);
         }
+    }
+
+    function updateTaglineRotation(dt) {
+        if (!taglineEl || WELCOME_TAGLINE_VARIANTS.length <= 1) {
+            return;
+        }
+        taglineRotation.elapsedSec += Math.max(dt || 0, 0);
+        if (taglineRotation.elapsedSec < WELCOME_TAGLINE_ROTATION_INTERVAL_SEC) {
+            return;
+        }
+        taglineRotation.elapsedSec = 0;
+        taglineRotation.activeIndex =
+            (taglineRotation.activeIndex + 1) % WELCOME_TAGLINE_VARIANTS.length;
+        setTaglineByIndex(taglineRotation.activeIndex, { animate: true });
+    }
+
+    function resetTaglineTransition() {
+        if (!taglineEl) {
+            return;
+        }
+        if (taglineRotation.transitionTimer !== null) {
+            window.clearTimeout(taglineRotation.transitionTimer);
+            taglineRotation.transitionTimer = null;
+        }
+        taglineRotation.isTransitioning = false;
+        taglineRotation.queuedIndex = null;
+        taglineEl.classList.remove('tagline-transition-out', 'tagline-transition-in');
+    }
+
+    function setTaglineByIndex(index, options = {}) {
+        if (!taglineEl || !WELCOME_TAGLINE_VARIANTS.length) {
+            return;
+        }
+        const { animate = false } = options;
+        const safeIndex =
+            ((Math.floor(index) % WELCOME_TAGLINE_VARIANTS.length) +
+                WELCOME_TAGLINE_VARIANTS.length) %
+            WELCOME_TAGLINE_VARIANTS.length;
+        const nextText = WELCOME_TAGLINE_VARIANTS[safeIndex];
+        if (!animate) {
+            taglineEl.textContent = nextText;
+            return;
+        }
+        if (taglineRotation.isTransitioning) {
+            taglineRotation.queuedIndex = safeIndex;
+            return;
+        }
+
+        taglineRotation.isTransitioning = true;
+        taglineEl.classList.remove('tagline-transition-in');
+        void taglineEl.offsetWidth;
+        taglineEl.classList.add('tagline-transition-out');
+
+        taglineRotation.transitionTimer = window.setTimeout(() => {
+            taglineEl.textContent = nextText;
+            taglineEl.classList.remove('tagline-transition-out');
+            taglineEl.classList.add('tagline-transition-in');
+
+            taglineRotation.transitionTimer = window.setTimeout(() => {
+                taglineEl.classList.remove('tagline-transition-in');
+                taglineRotation.isTransitioning = false;
+                taglineRotation.transitionTimer = null;
+
+                if (Number.isInteger(taglineRotation.queuedIndex)) {
+                    const queuedIndex = taglineRotation.queuedIndex;
+                    taglineRotation.queuedIndex = null;
+                    if (queuedIndex !== safeIndex) {
+                        setTaglineByIndex(queuedIndex, { animate: true });
+                    }
+                }
+            }, WELCOME_TAGLINE_TRANSITION_IN_MS);
+        }, WELCOME_TAGLINE_TRANSITION_OUT_MS);
     }
 
     function bindVehicleButtons() {

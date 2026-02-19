@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Silent Drift</title>
+        <title>Minefield Drift</title>
         <!-- Stiilide viide -->
         <link rel="stylesheet" href="css/styles.css" />
     </head>
@@ -16,19 +16,28 @@
             <div id="raceIntroCaption">Prepare for launch</div>
         </div>
         <div id="welcomeModal" aria-label="Welcome screen" aria-live="polite">
-            <div class="welcomeFxGrid" aria-hidden="true"></div>
-            <div class="welcomeFxGlow" aria-hidden="true"></div>
-            <div class="welcomeCard">
-                <div class="welcomeKicker">WELCOME TO</div>
-                <h1 id="welcomeGameName">SILENT DRIFT</h1>
-                <div id="welcomeTagline">Your ultimate race game</div>
-                <div class="welcomeMetaRow" aria-hidden="true">
-                    <span class="welcomePill">3D CITY</span>
-                    <span class="welcomePill">360° CAR</span>
-                    <span class="welcomePill">AI OPPONENTS</span>
-                </div>
-                <div id="welcomePreviewShell">
-                    <div class="welcomePreviewLabel">VEHICLE PREVIEW</div>
+            <div class="welcomeNebula" aria-hidden="true"></div>
+            <div class="welcomeScanlines" aria-hidden="true"></div>
+            <div class="welcomeShell">
+                <section class="welcomeCommandDeck">
+                    <div class="welcomeSerial">Quick Start</div>
+                    <h1 id="welcomeGameName">Minefield Drift</h1>
+                    <div class="welcomeTaglineFrame">
+                        <div id="welcomeTagline">
+                            Master precision driving across high-stakes circuits. Tune your car,
+                            out-drift rivals, and climb the online leaderboard.
+                        </div>
+                    </div>
+                    <div class="welcomeStartActions">
+                        <button id="welcomeStartBtn" type="button">
+                            PLAY WITH BOTS <span aria-hidden="true">→</span>
+                        </button>
+                        <button id="welcomeStartOnlineBtn" type="button">
+                            PLAY ONLINE <span aria-hidden="true">↗</span>
+                        </button>
+                    </div>
+                </section>
+                <section id="welcomePreviewShell" class="welcomeShowroomBay">
                     <button
                         id="welcomeVehiclePrevBtn"
                         class="welcomeVehicleNav welcomeVehicleNavPrev"
@@ -52,24 +61,8 @@
                         aria-label="Your car in 360-degree preview"
                     ></canvas>
                     <div class="welcomePreviewSweep" aria-hidden="true"></div>
-                </div>
-                <div class="welcomeVehicleInfo" aria-live="polite">
-                    <span class="welcomeVehicleInfoLabel">SELECTED VEHICLE</span>
-                    <span id="welcomeSelectedColorName">-</span>
-                </div>
-                <div class="welcomeStartActions">
-                    <button id="welcomeStartBtn" type="button">
-                        PLAY WITH BOTS <span aria-hidden="true">→</span>
-                    </button>
-                    <button id="welcomeStartOnlineBtn" type="button">
-                        PLAY ONLINE <span aria-hidden="true">↗</span>
-                    </button>
-                </div>
-                <div id="welcomeHint">
-                    Press Enter to start with bots • Change vehicle with arrows or ← → / A D •
-                    Camera 1-7 (7 = roof display) • E = Edit mode • Online: G drop mine, T throw
-                    mine
-                </div>
+                    <div class="welcomeBayRings" aria-hidden="true"></div>
+                </section>
             </div>
         </div>
         <div id="objectivePanel" aria-label="Collect objective">

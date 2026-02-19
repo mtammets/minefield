@@ -12,6 +12,7 @@ const DEFAULT_WHEEL_POSITIONS = [
     { x: 1.28, z: 1.8 },
 ];
 const ROOF_BRAND_NAME = 'Voltline';
+const REAR_MODEL_NAME = 'Minefield Drift';
 const SUSPENSION_LINK_Y = 0.5;
 const ROOF_MODULE_LIFT = 0.03;
 const TAILLIGHT_RUNNING_LIGHT_FACTOR = 0.28;
@@ -115,6 +116,48 @@ function createAccentChargeFlowTexture() {
     return texture;
 }
 
+function createTaillightSweepTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 88;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const centerX = canvas.width * 0.5;
+    const centerY = canvas.height * 0.5;
+
+    const coreGradient = ctx.createLinearGradient(0, centerY, canvas.width, centerY);
+    coreGradient.addColorStop(0, 'rgba(255, 95, 122, 0)');
+    coreGradient.addColorStop(0.18, 'rgba(255, 111, 136, 0.24)');
+    coreGradient.addColorStop(0.5, 'rgba(255, 194, 208, 0.96)');
+    coreGradient.addColorStop(0.82, 'rgba(255, 111, 136, 0.24)');
+    coreGradient.addColorStop(1, 'rgba(255, 95, 122, 0)');
+    ctx.fillStyle = coreGradient;
+    ctx.fillRect(0, centerY - 18, canvas.width, 36);
+
+    const haloGradient = ctx.createRadialGradient(centerX, centerY, 12, centerX, centerY, 140);
+    haloGradient.addColorStop(0, 'rgba(255, 196, 208, 0.82)');
+    haloGradient.addColorStop(0.4, 'rgba(255, 120, 145, 0.3)');
+    haloGradient.addColorStop(1, 'rgba(255, 95, 122, 0)');
+    ctx.fillStyle = haloGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const verticalFade = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    verticalFade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    verticalFade.addColorStop(0.28, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(0.72, 'rgba(0, 0, 0, 1)');
+    verticalFade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = verticalFade;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    return texture;
+}
+
 // Add headlights and taillights.
 function addLightsToCar(car, lightConfig = {}) {
     const {
@@ -144,11 +187,21 @@ function addLightsToCar(car, lightConfig = {}) {
         taillightDistance = 16,
         taillightDecay = 2.1,
         taillightPositions = [{ position: [-0.3, 0.4, 2] }, { position: [0.3, 0.4, 2] }],
+        taillightSegmentCount = 4,
+        taillightHaloOpacity = 0.085,
+        taillightSweepTravel = 0.44,
+        reverseLightIntensity = 1.45,
+        reverseLightDistance = 12,
+        reverseLightDecay = 2.2,
         enableHeadlightProjectors = true,
         enablePrimaryHeadlightProjectors = true,
         enableNearFillProjectors = true,
         enableFacadeFillProjectors = true,
         enableTaillightPointLights = true,
+        enableLegacyTaillightPods = false,
+        enableTaillightSignature = true,
+        enableTaillightHalo = true,
+        enableReverseLights = true,
         accentLedColor = ACCENT_LED_COLOR,
         accentLedSecondaryColor = ACCENT_LED_SECONDARY_COLOR,
         accentBaseEmissive = 0.95,
@@ -157,11 +210,39 @@ function addLightsToCar(car, lightConfig = {}) {
         accentPulseDepth = 0.12,
         accentGlowOpacity = 0.1,
     } = lightConfig;
+    const normalizedTaillightPositions =
+        Array.isArray(taillightPositions) && taillightPositions.length > 0
+            ? taillightPositions.map((entry, index) => {
+                  const fallbackX = index === 0 ? -0.52 : 0.52;
+                  const source = Array.isArray(entry?.position) ? entry.position : [];
+                  return {
+                      position: [
+                          Number.isFinite(source[0]) ? source[0] : fallbackX,
+                          Number.isFinite(source[1]) ? source[1] : 0.52,
+                          Number.isFinite(source[2]) ? source[2] : 2.04,
+                      ],
+                  };
+              })
+            : [{ position: [-0.52, 0.52, 2.04] }, { position: [0.52, 0.52, 2.04] }];
     const headlightProjectorLights = [];
     const headlightLensMeshes = [];
     const taillightPointLights = [];
     const taillightMeshes = [];
-    const lightState = { brakeLevel: 0, powerBlend: 1 };
+    const taillightCoreMaterials = [];
+    const taillightSignatureSegments = [];
+    const taillightHaloMaterials = [];
+    const taillightPulseMaterials = [];
+    const taillightSweepEntries = [];
+    const reversePointLights = [];
+    const reverseLensMaterials = [];
+    const lightState = {
+        brakeLevel: 0,
+        powerBlend: 1,
+        regenLevel: 0,
+        reverseBlend: 0,
+        tailPhase: Math.random() * Math.PI * 2,
+        tailSweepPhase: Math.random() * Math.PI * 2,
+    };
     const accentStripMaterials = [];
     const accentStripBaseColors = [];
     const accentGlowMaterials = [];
@@ -174,6 +255,13 @@ function addLightsToCar(car, lightConfig = {}) {
     const accentChargeColor = new THREE.Color(0x92f3ff);
     const accentChargeHotColor = new THREE.Color(0xe8feff);
     const accentChargeFlowTexture = createAccentChargeFlowTexture();
+    const taillightFlowTexture = createTaillightSweepTexture();
+    const taillightBaseColor = new THREE.Color(taillightColor);
+    const taillightChargeColor = new THREE.Color(accentLedSecondaryColor).lerp(
+        new THREE.Color(0xff90aa),
+        0.42
+    );
+    const taillightHotColor = new THREE.Color(0xffb4c6);
 
     const createSpot = ({
         color,
@@ -283,7 +371,11 @@ function addLightsToCar(car, lightConfig = {}) {
     });
 
     // Taillights.
-    taillightPositions.forEach(({ position }) => {
+    normalizedTaillightPositions.forEach(({ position }, taillightIndex) => {
+        const sideSign =
+            Math.sign(position[0]) ||
+            (taillightIndex % 2 === 0 ? -1 : 1) ||
+            (taillightIndex === 0 ? -1 : 1);
         if (enableTaillightPointLights) {
             const taillight = createPoint({
                 color: taillightColor,
@@ -294,18 +386,22 @@ function addLightsToCar(car, lightConfig = {}) {
             });
             taillightPointLights.push(taillight);
         }
-        const taillightLens = createLightMesh(
-            createRoundedBoxGeometry(0.2, 0.1, 0.1, 0.018, 4),
-            taillightColor,
-            taillightColor,
-            TAILLIGHT_RUNNING_EMISSIVE,
-            position
-        );
-        taillightMeshes.push(taillightLens);
+        if (enableLegacyTaillightPods) {
+            const taillightLens = createLightMesh(
+                createRoundedBoxGeometry(0.2, 0.095, 0.07, 0.014, 4),
+                0x16070a,
+                taillightColor,
+                TAILLIGHT_RUNNING_EMISSIVE * 0.72,
+                [position[0], position[1], position[2] + 0.006]
+            );
+            taillightLens.material.userData.sideSign = sideSign;
+            taillightMeshes.push(taillightLens);
+        }
     });
+    createRearTaillightSignature();
 
     createAccentLighting();
-    applyBrakeLightLevel(0);
+    applyBrakeLightLevel(0, 1, {}, 0, 0, 0);
     applyAccentLighting({}, 0);
 
     return {
@@ -328,8 +424,57 @@ function addLightsToCar(car, lightConfig = {}) {
                 targetBrakeLevel,
                 blend
             );
+
+            const speedAbs = Math.abs(vehicleState?.speed || 0);
+            const throttleInput = vehicleState?.throttle || 0;
+            const decelRatio = THREE.MathUtils.clamp(-(vehicleState?.acceleration || 0) / 24, 0, 1);
+            const coastRatio = THREE.MathUtils.clamp((speedAbs - 1.5) / 30, 0, 1);
+            const regenIntent = THREE.MathUtils.clamp((0.12 - throttleInput) / 0.62, 0, 1);
+            const targetRegen =
+                decelRatio *
+                coastRatio *
+                regenIntent *
+                (1 - brakeInput * 0.95) *
+                lightState.powerBlend;
+            const regenResponse = targetRegen > lightState.regenLevel ? 14 : 8;
+            const regenBlend = 1 - Math.exp(-regenResponse * dt);
+            lightState.regenLevel = THREE.MathUtils.lerp(
+                lightState.regenLevel,
+                targetRegen,
+                regenBlend
+            );
+
+            const reverseMotionRatio = THREE.MathUtils.clamp(
+                (-(vehicleState?.speed || 0) - 0.2) / 1.6,
+                0,
+                1
+            );
+            const reverseThrottleRatio = THREE.MathUtils.clamp(
+                (-(vehicleState?.throttle || 0) - 0.04) / 0.52,
+                0,
+                1
+            );
+            const reverseTarget =
+                Math.max(reverseMotionRatio, reverseThrottleRatio) *
+                (1 - brakeInput * 0.9) *
+                lightState.powerBlend;
+            const reverseResponse = reverseTarget > lightState.reverseBlend ? 12 : 16;
+            const reverseBlend = 1 - Math.exp(-reverseResponse * dt);
+            lightState.reverseBlend = THREE.MathUtils.lerp(
+                lightState.reverseBlend,
+                reverseTarget,
+                reverseBlend
+            );
+
             applyHeadlightPower(lightState.powerBlend);
-            applyBrakeLightLevel(lightState.brakeLevel, lightState.powerBlend);
+            applyBrakeLightLevel(
+                lightState.brakeLevel,
+                lightState.powerBlend,
+                vehicleState,
+                dt,
+                lightState.regenLevel,
+                lightState.reverseBlend
+            );
             applyAccentLighting(vehicleState, dt, lightState.powerBlend);
         },
     };
@@ -348,36 +493,397 @@ function addLightsToCar(car, lightConfig = {}) {
         });
     }
 
-    function applyBrakeLightLevel(level, powerBlend = 1) {
+    function applyBrakeLightLevel(
+        level,
+        powerBlend = 1,
+        vehicleState = {},
+        dt = 1 / 60,
+        regenLevel = 0,
+        reverseBlend = 0
+    ) {
         const brakeLevel = THREE.MathUtils.clamp(level, 0, 1);
         const clampedPower = THREE.MathUtils.clamp(powerBlend, 0, 1);
+        const regenRatio = THREE.MathUtils.clamp(regenLevel, 0, 1);
+        const reverseRatio = THREE.MathUtils.clamp(reverseBlend, 0, 1);
+        const chargingRatio = THREE.MathUtils.clamp(
+            vehicleState?.chargingLevelNormalized || 0,
+            0,
+            1
+        );
+        const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.speed || 0) / 62, 0, 1);
+        const effectiveBrakeLevel = THREE.MathUtils.clamp(
+            Math.max(brakeLevel, regenRatio * 0.64),
+            0,
+            1
+        );
+
+        lightState.tailPhase += dt * (2.6 + effectiveBrakeLevel * 6.5 + regenRatio * 2.2);
+        lightState.tailSweepPhase +=
+            dt * (1.5 + chargingRatio * 3.8 + regenRatio * 2.6 + speedRatio);
+
         const pointIntensity =
             taillightIntensity *
             THREE.MathUtils.lerp(
                 TAILLIGHT_RUNNING_LIGHT_FACTOR,
                 TAILLIGHT_BRAKE_LIGHT_FACTOR,
-                brakeLevel
+                effectiveBrakeLevel
             ) *
+            (1 + regenRatio * 0.22) *
             clampedPower;
         const pointDistance =
             taillightDistance *
             THREE.MathUtils.lerp(
                 TAILLIGHT_RUNNING_DISTANCE_FACTOR,
                 TAILLIGHT_BRAKE_DISTANCE_FACTOR,
-                brakeLevel
+                effectiveBrakeLevel
             ) *
+            (1 + regenRatio * 0.06) *
             clampedPower;
         const lensEmissive =
-            THREE.MathUtils.lerp(TAILLIGHT_RUNNING_EMISSIVE, TAILLIGHT_BRAKE_EMISSIVE, brakeLevel) *
-            clampedPower;
+            THREE.MathUtils.lerp(
+                TAILLIGHT_RUNNING_EMISSIVE,
+                TAILLIGHT_BRAKE_EMISSIVE,
+                effectiveBrakeLevel
+            ) * clampedPower;
 
         taillightPointLights.forEach((light) => {
             light.intensity = pointIntensity;
             light.distance = pointDistance;
         });
-        taillightMeshes.forEach((mesh) => {
-            mesh.material.emissiveIntensity = lensEmissive;
+        taillightMeshes.forEach((mesh, index) => {
+            const sideSign = Number(mesh?.material?.userData?.sideSign) || (index === 0 ? -1 : 1);
+            const wave =
+                0.5 + 0.5 * Math.sin(lightState.tailPhase * 1.4 + sideSign * 0.9 + index * 0.5);
+            const heat = chargingRatio * (0.18 + wave * 0.24) + regenRatio * 0.2;
+            mesh.material.emissiveIntensity =
+                lensEmissive +
+                (effectiveBrakeLevel * 0.18 + regenRatio * 0.24 + chargingRatio * 0.16) *
+                    wave *
+                    clampedPower;
+            mesh.material.emissive.copy(taillightBaseColor).lerp(taillightHotColor, heat);
         });
+
+        taillightCoreMaterials.forEach((material, index) => {
+            const wave =
+                0.5 +
+                0.5 * Math.sin(lightState.tailPhase * 1.1 + index * 0.62 + chargingRatio * 0.4);
+            const chargeWave = 0.5 + 0.5 * Math.sin(lightState.tailSweepPhase * 1.7 + index * 1.1);
+            material.emissiveIntensity =
+                (0.38 +
+                    effectiveBrakeLevel * 1.72 +
+                    regenRatio * (0.24 + wave * 0.48) +
+                    speedRatio * 0.14 +
+                    chargingRatio * (0.25 + chargeWave * 0.92)) *
+                clampedPower;
+            material.emissive
+                .copy(taillightBaseColor)
+                .lerp(
+                    taillightChargeColor,
+                    chargingRatio * (0.44 + chargeWave * 0.34) + regenRatio * 0.18
+                );
+        });
+
+        taillightSignatureSegments.forEach((entry) => {
+            const segmentNorm =
+                entry.segmentCount <= 1
+                    ? 0
+                    : THREE.MathUtils.clamp(entry.segmentIndex / (entry.segmentCount - 1), 0, 1);
+            const innerBoost = 1 - segmentNorm * 0.5;
+            const sweepWave =
+                0.5 +
+                0.5 *
+                    Math.sin(
+                        lightState.tailPhase * (1.45 + effectiveBrakeLevel * 0.48) +
+                            entry.phaseOffset
+                    );
+            const chargeWave =
+                0.5 +
+                0.5 *
+                    Math.sin(
+                        lightState.tailSweepPhase * 2.2 +
+                            entry.phaseOffset * 1.8 +
+                            entry.sideSign * 0.75
+                    );
+            entry.material.emissiveIntensity =
+                (0.34 +
+                    effectiveBrakeLevel * (1.45 + innerBoost * 0.72) +
+                    regenRatio * (0.34 + sweepWave * 0.82) +
+                    speedRatio * 0.1 +
+                    chargingRatio * (0.26 + chargeWave * 1.18)) *
+                clampedPower;
+            entry.material.emissive
+                .copy(taillightBaseColor)
+                .lerp(
+                    taillightChargeColor,
+                    chargingRatio * (0.36 + chargeWave * 0.44) + regenRatio * 0.2
+                );
+        });
+
+        taillightHaloMaterials.forEach((material, index) => {
+            const wave =
+                0.5 +
+                0.5 * Math.sin(lightState.tailPhase * 0.9 + index * 1.6 + chargingRatio * 0.7);
+            material.opacity =
+                (0.018 +
+                    effectiveBrakeLevel * 0.14 +
+                    regenRatio * 0.09 +
+                    chargingRatio * (0.05 + wave * 0.18)) *
+                clampedPower;
+            material.color
+                .copy(taillightBaseColor)
+                .lerp(taillightChargeColor, chargingRatio * 0.52 + regenRatio * 0.2);
+        });
+
+        taillightPulseMaterials.forEach((entry, index) => {
+            const wave =
+                0.5 +
+                0.5 *
+                    Math.sin(
+                        lightState.tailSweepPhase * (1.75 + chargingRatio * 0.52) +
+                            entry.phaseOffset +
+                            index * 0.6
+                    );
+            entry.material.opacity =
+                (effectiveBrakeLevel * 0.2 +
+                    regenRatio * (0.1 + wave * 0.14) +
+                    chargingRatio * (0.06 + wave * 0.24)) *
+                entry.weight *
+                clampedPower;
+            entry.material.color
+                .copy(taillightHotColor)
+                .lerp(taillightChargeColor, chargingRatio * (0.56 + wave * 0.24));
+        });
+
+        const sweepActivation = Math.max(chargingRatio, regenRatio * 0.52);
+        taillightSweepEntries.forEach((entry, index) => {
+            const chargingDominant = chargingRatio >= regenRatio;
+            const phase =
+                lightState.tailSweepPhase * (chargingDominant ? 1 : 1.45) +
+                entry.phaseOffset +
+                index * 0.35;
+            const sweep = Math.sin(phase);
+            const flowPulse = 0.5 + 0.5 * Math.sin(phase * 1.73);
+            entry.mesh.visible = sweepActivation > 0.03 && clampedPower > 0.01;
+            entry.mesh.position.x =
+                entry.centerX + sweep * entry.travelHalfRange * (chargingDominant ? 1 : -1);
+            entry.mesh.scale.x = 0.72 + sweepActivation * (0.22 + flowPulse * 0.56);
+            entry.mesh.scale.y = 0.9 + sweepActivation * (0.2 + flowPulse * 0.24);
+            entry.material.opacity = sweepActivation * (0.08 + flowPulse * 0.44) * clampedPower;
+            entry.material.color
+                .copy(chargingDominant ? taillightChargeColor : taillightHotColor)
+                .lerp(taillightHotColor, flowPulse * 0.55);
+        });
+
+        const reversePulse = 0.5 + 0.5 * Math.sin(lightState.tailPhase * 2.4 + 0.42);
+        reverseLensMaterials.forEach((material, index) => {
+            const sidePulse = 0.5 + 0.5 * Math.sin(lightState.tailPhase * 2.1 + index * 1.4);
+            material.emissiveIntensity =
+                reverseRatio * (1.18 + reversePulse * 0.52 + sidePulse * 0.28) * clampedPower;
+        });
+        reversePointLights.forEach((light, index) => {
+            const sidePulse = 0.5 + 0.5 * Math.sin(lightState.tailPhase * 2.2 + index * 1.1);
+            light.intensity =
+                reverseLightIntensity * reverseRatio * (0.78 + sidePulse * 0.42) * clampedPower;
+            light.distance = reverseLightDistance * (0.7 + reverseRatio * 0.42);
+        });
+    }
+
+    function createRearTaillightSignature() {
+        if (!enableTaillightSignature || normalizedTaillightPositions.length === 0) {
+            return;
+        }
+
+        let leftEdge = Number.POSITIVE_INFINITY;
+        let rightEdge = Number.NEGATIVE_INFINITY;
+        let centerYSum = 0;
+        let centerZSum = 0;
+        normalizedTaillightPositions.forEach(({ position }) => {
+            leftEdge = Math.min(leftEdge, position[0]);
+            rightEdge = Math.max(rightEdge, position[0]);
+            centerYSum += position[1];
+            centerZSum += position[2];
+        });
+        const count = normalizedTaillightPositions.length;
+        const centerX = (leftEdge + rightEdge) * 0.5;
+        const spanX = Math.max(0.2, rightEdge - leftEdge);
+        const centerY = centerYSum / count + 0.004;
+        const centerZ = centerZSum / count + 0.01;
+        const barWidth = THREE.MathUtils.clamp(spanX + 0.16, 0.86, 1.22);
+        const barMaterial = new THREE.MeshStandardMaterial({
+            color: 0x14070b,
+            emissive: taillightColor,
+            emissiveIntensity: TAILLIGHT_RUNNING_EMISSIVE * 0.75,
+            metalness: 0.5,
+            roughness: 0.16,
+        });
+        const barMesh = new THREE.Mesh(
+            createRoundedBoxGeometry(barWidth, 0.044, 0.048, 0.016, 4),
+            barMaterial
+        );
+        barMesh.position.set(centerX, centerY, centerZ);
+        car.add(barMesh);
+        taillightCoreMaterials.push(barMaterial);
+
+        const divider = new THREE.Mesh(
+            createRoundedBoxGeometry(0.014, 0.038, 0.018, 0.006, 3),
+            new THREE.MeshStandardMaterial({
+                color: 0x11090d,
+                emissive: 0x2a1218,
+                emissiveIntensity: 0.22,
+                metalness: 0.42,
+                roughness: 0.28,
+            })
+        );
+        divider.position.set(centerX, centerY, centerZ + 0.024);
+        car.add(divider);
+
+        const segmentCount = Math.max(3, Math.floor(taillightSegmentCount));
+        const halfWidth = barWidth * 0.5;
+        const edgePadding = Math.max(0.06, Math.min(0.12, halfWidth * 0.18));
+        const segmentRegion = Math.max(0.18, halfWidth - edgePadding);
+        const segmentStep = segmentRegion / segmentCount;
+        const centerOffset = 0.045;
+        for (let sideIndex = 0; sideIndex < 2; sideIndex += 1) {
+            const sideSign = sideIndex === 0 ? -1 : 1;
+            for (let segmentIndex = 0; segmentIndex < segmentCount; segmentIndex += 1) {
+                const segmentWidth = Math.max(0.045, Math.min(0.105, segmentStep * 0.62));
+                const segmentHeight = 0.021 + (segmentCount - segmentIndex) * 0.0015;
+                const segmentDepth = 0.024;
+                const segmentMaterial = new THREE.MeshStandardMaterial({
+                    color: 0x12080c,
+                    emissive: taillightColor,
+                    emissiveIntensity: TAILLIGHT_RUNNING_EMISSIVE * 0.58,
+                    metalness: 0.36,
+                    roughness: 0.22,
+                });
+                const segmentMesh = new THREE.Mesh(
+                    createRoundedBoxGeometry(segmentWidth, segmentHeight, segmentDepth, 0.012, 4),
+                    segmentMaterial
+                );
+                const segmentX =
+                    centerX + sideSign * (centerOffset + segmentStep * (segmentIndex + 0.5));
+                segmentMesh.position.set(
+                    segmentX,
+                    centerY + 0.002 + segmentIndex * 0.0008,
+                    centerZ + 0.033
+                );
+                segmentMesh.rotation.y =
+                    sideSign * THREE.MathUtils.degToRad(2.1 + segmentIndex * 0.9);
+                car.add(segmentMesh);
+
+                taillightSignatureSegments.push({
+                    material: segmentMaterial,
+                    sideSign,
+                    segmentIndex,
+                    segmentCount,
+                    phaseOffset: segmentIndex * 0.34 + (sideSign < 0 ? 0.25 : 1.16),
+                });
+            }
+        }
+
+        if (enableTaillightHalo) {
+            const haloMaterial = new THREE.MeshBasicMaterial({
+                color: taillightColor,
+                transparent: true,
+                opacity: taillightHaloOpacity,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                toneMapped: false,
+            });
+            const haloMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(barWidth * 1.02, 0.12),
+                haloMaterial
+            );
+            haloMesh.position.set(centerX, centerY + 0.0015, centerZ + 0.056);
+            car.add(haloMesh);
+            taillightHaloMaterials.push(haloMaterial);
+        }
+
+        const pulseLayouts = [
+            { width: barWidth * 0.22, height: 0.019, weight: 1, phaseOffset: 0.8 },
+            { width: barWidth * 0.38, height: 0.015, weight: 0.72, phaseOffset: 1.6 },
+        ];
+        pulseLayouts.forEach(({ width, height, weight, phaseOffset }, pulseIndex) => {
+            const pulseMaterial = new THREE.MeshBasicMaterial({
+                color: taillightColor,
+                transparent: true,
+                opacity: 0,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false,
+                toneMapped: false,
+            });
+            const pulseMesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), pulseMaterial);
+            pulseMesh.position.set(centerX, centerY + 0.001, centerZ + 0.057 + pulseIndex * 0.0008);
+            car.add(pulseMesh);
+            taillightPulseMaterials.push({ material: pulseMaterial, weight, phaseOffset });
+        });
+
+        const sweepMaterial = new THREE.MeshBasicMaterial({
+            map: taillightFlowTexture,
+            color: 0xff6f85,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+        });
+        const sweepMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(barWidth * 0.2, 0.078),
+            sweepMaterial
+        );
+        sweepMesh.position.set(centerX, centerY + 0.001, centerZ + 0.058);
+        sweepMesh.visible = false;
+        car.add(sweepMesh);
+        taillightSweepEntries.push({
+            mesh: sweepMesh,
+            material: sweepMaterial,
+            centerX,
+            travelHalfRange:
+                barWidth * 0.5 * THREE.MathUtils.clamp(taillightSweepTravel, 0.18, 0.65),
+            phaseOffset: 0.4,
+        });
+
+        if (!enableReverseLights) {
+            return;
+        }
+        const reverseXOffset = Math.max(
+            0.24,
+            Math.min(0.48, Math.abs(rightEdge - leftEdge) * 0.38 + 0.11)
+        );
+        for (let sideIndex = 0; sideIndex < 2; sideIndex += 1) {
+            const sideSign = sideIndex === 0 ? -1 : 1;
+            const reverseMaterial = createMaterial({
+                color: 0x161c25,
+                emissive: 0xf7fbff,
+                emissiveIntensity: 0,
+                metalness: 0.2,
+                roughness: 0.18,
+                clearcoat: 1,
+                clearcoatRoughness: 0.07,
+            });
+            const reverseMesh = new THREE.Mesh(
+                createRoundedBoxGeometry(0.11, 0.024, 0.024, 0.008, 4),
+                reverseMaterial
+            );
+            reverseMesh.position.set(
+                centerX + sideSign * reverseXOffset,
+                centerY - 0.009,
+                centerZ + 0.035
+            );
+            reverseMesh.rotation.y = sideSign * THREE.MathUtils.degToRad(2.8);
+            car.add(reverseMesh);
+            reverseLensMaterials.push(reverseMaterial);
+
+            const reversePoint = createPoint({
+                color: 0xf4f9ff,
+                intensity: 0,
+                distance: reverseLightDistance,
+                decay: reverseLightDecay,
+                position: [centerX + sideSign * reverseXOffset, centerY - 0.012, centerZ + 0.01],
+            });
+            reversePointLights.push(reversePoint);
+        }
     }
 
     function createAccentLighting() {
@@ -561,6 +1067,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
         bodyDimensions = DEFAULT_BODY_DIMENSIONS,
         wheelPositions = DEFAULT_WHEEL_POSITIONS,
         displayName = 'MAREK',
+        rearModelName = REAR_MODEL_NAME,
     } = bodyConfig;
 
     const bodyShellGroup = new THREE.Group();
@@ -643,8 +1150,12 @@ function addLuxuryBody(car, bodyConfig = {}) {
         displayName
     );
     let nameplateGroup = null;
-    if (displayName) {
-        nameplateGroup = addPlayerNameDisplay(nameplateAssemblyGroup, displayName, bodyDimensions);
+    if (rearModelName) {
+        nameplateGroup = addPlayerNameDisplay(
+            nameplateAssemblyGroup,
+            rearModelName,
+            bodyDimensions
+        );
     }
 
     return {
@@ -1391,84 +1902,47 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
 
 function addPlayerNameDisplay(parent, playerName, bodyDimensions) {
     const plateTexture = createNameplateTexture(playerName);
-    const rearZ = bodyDimensions.depth * 0.5 + 0.045;
-    const plateY = 0.62;
+    const rearZ = bodyDimensions.depth * 0.5 + 0.05;
+    const plateY = 0.666;
 
     const badgeGroup = new THREE.Group();
     badgeGroup.position.set(0, 0, rearZ);
     parent.add(badgeGroup);
 
-    const holder = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyDimensions.width * 0.78, 0.24, 0.05),
-        createMaterial({
-            color: 0x1e2931,
-            metalness: 0.85,
-            roughness: 0.22,
-            clearcoat: 1,
-            clearcoatRoughness: 0.08,
+    const wordmarkWidth = bodyDimensions.width * 0.7;
+    const wordmarkHeight = 0.148;
+    const logoShadow = new THREE.Mesh(
+        new THREE.PlaneGeometry(wordmarkWidth * 1.01, wordmarkHeight * 1.01),
+        new THREE.MeshBasicMaterial({
+            map: plateTexture,
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.18,
+            depthWrite: false,
+            toneMapped: false,
         })
     );
-    holder.position.set(0, plateY, -0.02);
-    badgeGroup.add(holder);
+    logoShadow.position.set(0, plateY - 0.0025, 0.0055);
+    badgeGroup.add(logoShadow);
 
-    const holderInner = new THREE.Mesh(
-        new THREE.BoxGeometry(bodyDimensions.width * 0.72, 0.18, 0.051),
-        createMaterial({
-            color: 0x071419,
-            metalness: 0.4,
-            roughness: 0.45,
-            clearcoat: 0.7,
-            clearcoatRoughness: 0.16,
-        })
-    );
-    holderInner.position.set(0, plateY, -0.016);
-    badgeGroup.add(holderInner);
-
-    const plate = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.66, 0.14),
-        new THREE.MeshStandardMaterial({
+    const wordmark = new THREE.Mesh(
+        new THREE.PlaneGeometry(wordmarkWidth, wordmarkHeight),
+        new THREE.MeshPhysicalMaterial({
             map: plateTexture,
             transparent: true,
-            alphaTest: 0.05,
-            emissive: new THREE.Color(0x53ffe5),
-            emissiveMap: plateTexture,
-            emissiveIntensity: 1.35,
-            metalness: 0.05,
-            roughness: 0.5,
+            alphaTest: 0.08,
+            color: 0xfff7e8,
+            emissive: new THREE.Color(0x7f6346),
+            emissiveIntensity: 0.34,
+            metalness: 0.3,
+            roughness: 0.48,
+            clearcoat: 0.95,
+            clearcoatRoughness: 0.22,
             depthWrite: false,
         })
     );
-    plate.position.set(0, plateY, 0.012);
-    badgeGroup.add(plate);
-
-    const glowPanel = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.74, 0.2),
-        new THREE.MeshBasicMaterial({
-            color: 0x2bf3d9,
-            transparent: true,
-            opacity: 0.2,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-        })
-    );
-    glowPanel.position.set(0, plateY, 0.008);
-    badgeGroup.add(glowPanel);
-
-    const sideAccentMaterial = new THREE.MeshBasicMaterial({
-        color: 0x53ffe5,
-        transparent: true,
-        opacity: 0.9,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-    });
-
-    const sideAccentLeft = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.12), sideAccentMaterial);
-    sideAccentLeft.position.set(-bodyDimensions.width * 0.29, plateY, 0.013);
-    badgeGroup.add(sideAccentLeft);
-
-    const sideAccentRight = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.12), sideAccentMaterial);
-    sideAccentRight.position.set(bodyDimensions.width * 0.29, plateY, 0.013);
-    badgeGroup.add(sideAccentRight);
+    wordmark.position.set(0, plateY, 0.009);
+    badgeGroup.add(wordmark);
 
     return badgeGroup;
 }
@@ -2378,35 +2852,93 @@ function drawRoundedRect(ctx, x, y, width, height, radius) {
 
 function createNameplateTexture(text) {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 200;
+    canvas.width = 2048;
+    canvas.height = 512;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = "900 138px 'Trebuchet MS', 'Arial Black', sans-serif";
-    ctx.shadowColor = 'rgba(52, 255, 226, 0.95)';
-    ctx.shadowBlur = 28;
-    ctx.fillStyle = '#dcfff8';
-    ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 2);
+    const label =
+        String(text || REAR_MODEL_NAME)
+            .trim()
+            .replace(/\s+/g, ' ') || REAR_MODEL_NAME;
+    const fontFamily =
+        "'Brush Script MT', 'Snell Roundhand', 'Apple Chancery', 'Segoe Script', cursive";
+    let fontSize = 248;
 
-    // Adds a digital scanline texture without drawing a full dull plate background.
-    ctx.globalCompositeOperation = 'source-atop';
-    ctx.globalAlpha = 0.17;
-    for (let y = 18; y < canvas.height; y += 6) {
-        ctx.fillStyle = '#34ffe2';
-        ctx.fillRect(0, y, canvas.width, 2);
+    function measureTextWidth(content) {
+        return ctx.measureText(content).width;
     }
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
+
+    while (fontSize > 130) {
+        ctx.font = `700 ${fontSize}px ${fontFamily}`;
+        if (measureTextWidth(label) <= canvas.width * 0.9) {
+            break;
+        }
+        fontSize -= 4;
+    }
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 ${fontSize}px ${fontFamily}`;
+    const centerY = canvas.height * 0.56;
+    const textWidth = measureTextWidth(label);
+    const startX = (canvas.width - textWidth) * 0.5;
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+    ctx.shadowBlur = Math.max(1, fontSize * 0.018);
+    ctx.shadowOffsetY = Math.max(0.4, fontSize * 0.002);
+    ctx.strokeStyle = 'rgba(20, 24, 30, 0.55)';
+    ctx.lineWidth = Math.max(1, fontSize * 0.015);
+    ctx.strokeText(label, startX, centerY);
+
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(71, 255, 225, 0.95)';
-    ctx.lineWidth = 4;
-    ctx.strokeText(text, canvas.width / 2, canvas.height / 2 + 2);
+    ctx.shadowOffsetY = 0;
+    const metallicGradient = ctx.createLinearGradient(0, centerY - fontSize * 0.72, 0, centerY);
+    metallicGradient.addColorStop(0, '#fffdf8');
+    metallicGradient.addColorStop(0.3, '#f8f1df');
+    metallicGradient.addColorStop(0.62, '#e2cfaa');
+    metallicGradient.addColorStop(1, '#b89a69');
+    ctx.fillStyle = metallicGradient;
+    ctx.fillText(label, startX, centerY);
+
+    // Keep all post effects clipped to glyphs so no rectangular background appears.
+    ctx.globalCompositeOperation = 'source-atop';
+    const topGloss = ctx.createLinearGradient(0, centerY - fontSize * 0.62, 0, centerY);
+    topGloss.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+    topGloss.addColorStop(0.44, 'rgba(255, 255, 255, 0.18)');
+    topGloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = topGloss;
+    ctx.fillRect(startX - 2, centerY - fontSize * 0.7, textWidth + 4, fontSize * 0.55);
+
+    const lowerShade = ctx.createLinearGradient(
+        0,
+        centerY - fontSize * 0.08,
+        0,
+        centerY + fontSize * 0.66
+    );
+    lowerShade.addColorStop(0, 'rgba(29, 40, 54, 0)');
+    lowerShade.addColorStop(1, 'rgba(29, 40, 54, 0.24)');
+    ctx.fillStyle = lowerShade;
+    ctx.fillRect(startX - 2, centerY - fontSize * 0.08, textWidth + 4, fontSize * 0.74);
+
+    const pearlStep = 12;
+    for (let x = startX; x <= startX + textWidth; x += pearlStep) {
+        ctx.fillStyle =
+            x % (pearlStep * 2) === 0 ? 'rgba(255, 255, 255, 0.08)' : 'rgba(70, 58, 42, 0.04)';
+        ctx.fillRect(x, centerY - fontSize * 0.6, 1, fontSize * 1.1);
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.strokeStyle = 'rgba(255, 247, 232, 0.42)';
+    ctx.lineWidth = Math.max(0.9, fontSize * 0.014);
+    ctx.strokeText(label, startX, centerY);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.premultiplyAlpha = true;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
     texture.anisotropy = 8;
     return texture;
 }
