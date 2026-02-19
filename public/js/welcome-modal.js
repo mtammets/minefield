@@ -17,6 +17,11 @@ const SWAP_TIMING = {
 const WELCOME_TAGLINE_ROTATION_INTERVAL_SEC = 8.5;
 const WELCOME_TAGLINE_TRANSITION_OUT_MS = 180;
 const WELCOME_TAGLINE_TRANSITION_IN_MS = 280;
+const ONLINE_ROOM_CODE_LENGTH = 6;
+const ONLINE_CODE_LOOKUP_DEBOUNCE_MS = 260;
+const ONLINE_PLAYER_NAME_MAX_LENGTH = 18;
+const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
+const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const WELCOME_TAGLINE_VARIANTS = [
     'Master precision driving across high-stakes circuits. Tune your car, out-drift rivals, and climb the online leaderboard.',
     'Own every corner with elite handling, strategic mine plays, and relentless multiplayer competition.',
@@ -44,8 +49,17 @@ export function createWelcomeModalController({
 
     const rootEl = document.getElementById('welcomeModal');
     const previewShellEl = document.getElementById('welcomePreviewShell');
+    const startActionsEl = rootEl?.querySelector?.('.welcomeStartActions') || null;
     const startBtnEl = document.getElementById('welcomeStartBtn');
     const startOnlineBtnEl = document.getElementById('welcomeStartOnlineBtn');
+    const onlineModeFlowEl = document.getElementById('welcomeOnlineModeFlow');
+    const onlineNameInputEl = document.getElementById('welcomeOnlineNameInput');
+    const onlineCreateChoiceBtnEl = document.getElementById('welcomeOnlineCreateChoiceBtn');
+    const onlineJoinChoiceBtnEl = document.getElementById('welcomeOnlineJoinChoiceBtn');
+    const onlineRoomCodeLabelEl = document.getElementById('welcomeOnlineRoomCodeLabel');
+    const onlineRoomCodeInputEl = document.getElementById('welcomeOnlineRoomCodeInput');
+    const onlineRoomCodeStatusEl = document.getElementById('welcomeOnlineRoomCodeStatus');
+    const onlineContinueBtnEl = document.getElementById('welcomeOnlineContinueBtn');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
@@ -72,6 +86,9 @@ export function createWelcomeModalController({
             selectNeighborColor() {},
             getPreferredStartMode() {
                 return 'bots';
+            },
+            getPreferredStartContext() {
+                return null;
             },
         };
     }
@@ -119,6 +136,23 @@ export function createWelcomeModalController({
     let selectedColorIndex = resolvePresetIndex(initialColorHex);
     let previewPulseTime = Math.random() * Math.PI * 2;
     let preferredStartMode = 'bots';
+    let preferredOnlineRoomAction = '';
+    let preferredOnlineRoomCode = '';
+    let preferredOnlinePlayerName = DEFAULT_ONLINE_PLAYER_NAME;
+    let onlineCodeLookupTimeout = null;
+    let onlineCodeLookupAbortController = null;
+    let onlineContinueGlintTimeout = null;
+    let customCreateCodeStatus = 'idle';
+    let customCreateCodeStatusCode = '';
+    const hasOnlineStartFlow = Boolean(
+        startActionsEl &&
+        onlineModeFlowEl &&
+        onlineCreateChoiceBtnEl &&
+        onlineJoinChoiceBtnEl &&
+        onlineRoomCodeStatusEl &&
+        onlineRoomCodeInputEl &&
+        onlineContinueBtnEl
+    );
     const taglineRotation = {
         activeIndex: 0,
         elapsedSec: 0,
@@ -175,17 +209,71 @@ export function createWelcomeModalController({
 
     startBtnEl.addEventListener('click', () => {
         preferredStartMode = 'bots';
-        onStart?.('bots');
+        onStart?.('bots', null);
     });
     startOnlineBtnEl?.addEventListener('click', () => {
+        if (hasOnlineStartFlow) {
+            if (onlineModeFlowEl.hidden) {
+                openOnlineModeFlow();
+            } else {
+                closeOnlineModeFlow({ clearSelection: true });
+            }
+            return;
+        }
         preferredStartMode = 'online';
-        onStart?.('online');
+        onStart?.('online', null);
     });
+    if (hasOnlineStartFlow) {
+        syncOnlinePlayerNameFromStorage();
+        onlineNameInputEl?.addEventListener('input', () => {
+            const safeName = sanitizeOnlinePlayerNameInput(onlineNameInputEl.value);
+            onlineNameInputEl.value = safeName;
+            preferredOnlinePlayerName = safeName;
+            writeStoredOnlinePlayerName(safeName);
+            syncMultiplayerNameInput(safeName);
+        });
+        onlineNameInputEl?.addEventListener('blur', () => {
+            const safeName = sanitizeOnlinePlayerNameInput(onlineNameInputEl.value);
+            onlineNameInputEl.value = safeName;
+            preferredOnlinePlayerName = safeName;
+            writeStoredOnlinePlayerName(safeName);
+            syncMultiplayerNameInput(safeName);
+        });
+        onlineCreateChoiceBtnEl.addEventListener('click', () => {
+            setOnlineRoomAction('create');
+        });
+        onlineJoinChoiceBtnEl.addEventListener('click', () => {
+            setOnlineRoomAction('join', { focusRoomInput: true });
+        });
+        onlineRoomCodeInputEl.addEventListener('input', () => {
+            const normalizedCode = normalizeOnlineRoomCode(onlineRoomCodeInputEl.value);
+            onlineRoomCodeInputEl.value = normalizedCode;
+            preferredOnlineRoomCode = normalizedCode;
+            queueCustomCreateCodeAvailabilityLookup();
+            updateOnlineFlowState();
+        });
+        onlineRoomCodeInputEl.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+            if (onlineContinueBtnEl.disabled) {
+                return;
+            }
+            event.preventDefault();
+            handleOnlineFlowContinue();
+        });
+        onlineContinueBtnEl.addEventListener('click', () => {
+            handleOnlineFlowContinue();
+        });
+    }
 
     return {
         show() {
             rootEl.hidden = false;
             preferredStartMode = 'bots';
+            if (hasOnlineStartFlow) {
+                closeOnlineModeFlow({ clearSelection: true });
+            }
             taglineRotation.activeIndex = 0;
             taglineRotation.elapsedSec = 0;
             resetTaglineTransition();
@@ -239,7 +327,154 @@ export function createWelcomeModalController({
         getPreferredStartMode() {
             return preferredStartMode;
         },
+        getPreferredStartContext() {
+            if (preferredStartMode !== 'online') {
+                return null;
+            }
+            if (preferredOnlineRoomAction === 'create') {
+                const roomCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
+                if (roomCode.length !== 0 && roomCode.length !== ONLINE_ROOM_CODE_LENGTH) {
+                    return null;
+                }
+                if (
+                    roomCode.length === ONLINE_ROOM_CODE_LENGTH &&
+                    (customCreateCodeStatus !== 'available' ||
+                        customCreateCodeStatusCode !== roomCode)
+                ) {
+                    return null;
+                }
+                return {
+                    roomAction: 'create',
+                    roomCode,
+                    playerName: sanitizeOnlinePlayerNameSubmit(preferredOnlinePlayerName),
+                };
+            }
+            if (preferredOnlineRoomAction === 'join') {
+                const roomCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
+                if (roomCode.length !== ONLINE_ROOM_CODE_LENGTH) {
+                    return null;
+                }
+                return {
+                    roomAction: 'join',
+                    roomCode,
+                    playerName: sanitizeOnlinePlayerNameSubmit(preferredOnlinePlayerName),
+                };
+            }
+            return null;
+        },
     };
+
+    function openOnlineModeFlow() {
+        preferredStartMode = 'online';
+        if (!hasOnlineStartFlow) {
+            return;
+        }
+        syncOnlinePlayerNameFromStorage();
+        onlineModeFlowEl.hidden = false;
+        startOnlineBtnEl?.setAttribute('aria-expanded', 'true');
+        setOnlineRoomAction('create');
+    }
+
+    function closeOnlineModeFlow(options = {}) {
+        if (!hasOnlineStartFlow) {
+            return;
+        }
+        const { clearSelection = false } = options;
+        onlineModeFlowEl.hidden = true;
+        startOnlineBtnEl?.setAttribute('aria-expanded', 'false');
+        if (clearSelection) {
+            clearCustomCreateCodeLookup();
+            clearContinueButtonGlint();
+            preferredOnlineRoomAction = '';
+            preferredOnlineRoomCode = '';
+            syncOnlinePlayerNameFromStorage();
+            onlineRoomCodeInputEl.value = '';
+            onlineRoomCodeInputEl.disabled = true;
+            onlineCreateChoiceBtnEl.dataset.selected = 'false';
+            onlineJoinChoiceBtnEl.dataset.selected = 'false';
+            onlineContinueBtnEl.disabled = true;
+            setCustomCreateCodeStatus('idle', '');
+            preferredStartMode = 'bots';
+        }
+    }
+
+    function setOnlineRoomAction(nextAction, options = {}) {
+        if (!hasOnlineStartFlow) {
+            return;
+        }
+        const { focusRoomInput = false } = options;
+        preferredStartMode = 'online';
+        preferredOnlineRoomAction = nextAction === 'join' ? 'join' : 'create';
+        onlineCreateChoiceBtnEl.dataset.selected =
+            preferredOnlineRoomAction === 'create' ? 'true' : 'false';
+        onlineJoinChoiceBtnEl.dataset.selected =
+            preferredOnlineRoomAction === 'join' ? 'true' : 'false';
+        onlineRoomCodeInputEl.disabled = false;
+        preferredOnlineRoomCode = normalizeOnlineRoomCode(onlineRoomCodeInputEl.value);
+        onlineRoomCodeInputEl.value = preferredOnlineRoomCode;
+        if (onlineRoomCodeLabelEl) {
+            onlineRoomCodeLabelEl.textContent =
+                preferredOnlineRoomAction === 'join'
+                    ? 'ROOM CODE'
+                    : 'ROOM CODE (OPTIONAL FOR CREATE)';
+        }
+        if (focusRoomInput) {
+            onlineRoomCodeInputEl.focus();
+            onlineRoomCodeInputEl.select();
+        }
+        queueCustomCreateCodeAvailabilityLookup();
+        updateOnlineFlowState();
+    }
+
+    function updateOnlineFlowState() {
+        if (!hasOnlineStartFlow) {
+            return;
+        }
+        const normalizedCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
+        const isCustomCreateCodeAvailable =
+            customCreateCodeStatus === 'available' &&
+            customCreateCodeStatusCode === normalizedCode &&
+            normalizedCode.length === ONLINE_ROOM_CODE_LENGTH;
+        const canContinue =
+            (preferredOnlineRoomAction === 'create' &&
+                (normalizedCode.length === 0 || isCustomCreateCodeAvailable)) ||
+            (preferredOnlineRoomAction === 'join' &&
+                normalizedCode.length === ONLINE_ROOM_CODE_LENGTH);
+        onlineContinueBtnEl.disabled = !canContinue;
+    }
+
+    function handleOnlineFlowContinue() {
+        if (!hasOnlineStartFlow) {
+            return;
+        }
+        const startContext =
+            preferredOnlineRoomAction === 'create'
+                ? {
+                      roomAction: 'create',
+                      roomCode: normalizeOnlineRoomCode(preferredOnlineRoomCode),
+                      playerName: sanitizeOnlinePlayerNameSubmit(preferredOnlinePlayerName),
+                  }
+                : {
+                      roomAction: 'join',
+                      roomCode: normalizeOnlineRoomCode(preferredOnlineRoomCode),
+                      playerName: sanitizeOnlinePlayerNameSubmit(preferredOnlinePlayerName),
+                  };
+        if (
+            (startContext.roomAction === 'join' &&
+                startContext.roomCode.length !== ONLINE_ROOM_CODE_LENGTH) ||
+            (startContext.roomAction === 'create' &&
+                startContext.roomCode.length > 0 &&
+                (startContext.roomCode.length !== ONLINE_ROOM_CODE_LENGTH ||
+                    customCreateCodeStatus !== 'available' ||
+                    customCreateCodeStatusCode !== startContext.roomCode))
+        ) {
+            queueCustomCreateCodeAvailabilityLookup();
+            updateOnlineFlowState();
+            onlineRoomCodeInputEl.focus();
+            return;
+        }
+        onStart?.('online', startContext);
+    }
 
     function syncPreviewSize() {
         const width = Math.max(
@@ -741,5 +976,215 @@ export function createWelcomeModalController({
         const c3 = c1 + 1;
         const shifted = value - 1;
         return 1 + c3 * shifted * shifted * shifted + c1 * shifted * shifted;
+    }
+
+    function normalizeOnlineRoomCode(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        return value
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '')
+            .slice(0, ONLINE_ROOM_CODE_LENGTH);
+    }
+
+    function sanitizeOnlinePlayerNameInput(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const normalized = value
+            .trim()
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s\-_]/gu, '')
+            .slice(0, ONLINE_PLAYER_NAME_MAX_LENGTH);
+        return normalized;
+    }
+
+    function sanitizeOnlinePlayerNameSubmit(value) {
+        const normalized = sanitizeOnlinePlayerNameInput(value);
+        return normalized || DEFAULT_ONLINE_PLAYER_NAME;
+    }
+
+    function syncOnlinePlayerNameFromStorage() {
+        if (!onlineNameInputEl) {
+            return;
+        }
+        const safeName = sanitizeOnlinePlayerNameInput(readStoredOnlinePlayerName());
+        onlineNameInputEl.value = safeName;
+        preferredOnlinePlayerName = safeName;
+        writeStoredOnlinePlayerName(safeName);
+        syncMultiplayerNameInput(safeName);
+    }
+
+    function readStoredOnlinePlayerName() {
+        try {
+            return window.localStorage.getItem(MP_NAME_STORAGE_KEY) || '';
+        } catch {
+            return '';
+        }
+    }
+
+    function writeStoredOnlinePlayerName(value) {
+        try {
+            window.localStorage.setItem(MP_NAME_STORAGE_KEY, sanitizeOnlinePlayerNameInput(value));
+        } catch {
+            // localStorage is optional.
+        }
+    }
+
+    function syncMultiplayerNameInput(name) {
+        const mpNameInputEl = document.getElementById('multiplayerNameInput');
+        if (!mpNameInputEl) {
+            return;
+        }
+        mpNameInputEl.value = sanitizeOnlinePlayerNameInput(name);
+    }
+
+    function queueCustomCreateCodeAvailabilityLookup() {
+        if (!hasOnlineStartFlow) {
+            return;
+        }
+        clearCustomCreateCodeLookup();
+        const normalizedCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
+        if (preferredOnlineRoomAction !== 'create') {
+            setCustomCreateCodeStatus('hidden', '');
+            return;
+        }
+        if (!normalizedCode) {
+            setCustomCreateCodeStatus('idle', '');
+            return;
+        }
+        if (normalizedCode.length !== ONLINE_ROOM_CODE_LENGTH) {
+            setCustomCreateCodeStatus('incomplete', normalizedCode);
+            return;
+        }
+        setCustomCreateCodeStatus('checking', normalizedCode);
+        onlineCodeLookupTimeout = window.setTimeout(() => {
+            checkCustomCreateCodeAvailability(normalizedCode);
+        }, ONLINE_CODE_LOOKUP_DEBOUNCE_MS);
+    }
+
+    async function checkCustomCreateCodeAvailability(roomCode) {
+        if (!roomCode || roomCode.length !== ONLINE_ROOM_CODE_LENGTH) {
+            return;
+        }
+        const requestController = new AbortController();
+        onlineCodeLookupAbortController = requestController;
+        try {
+            const response = await window.fetch(
+                `/api/room-code/${encodeURIComponent(roomCode)}/availability`,
+                {
+                    method: 'GET',
+                    cache: 'no-store',
+                    signal: requestController.signal,
+                }
+            );
+            const payload = await response.json().catch(() => ({}));
+            if (
+                preferredOnlineRoomAction !== 'create' ||
+                normalizeOnlineRoomCode(preferredOnlineRoomCode) !== roomCode
+            ) {
+                return;
+            }
+            if (!response.ok || payload?.ok !== true) {
+                setCustomCreateCodeStatus('error', roomCode);
+                updateOnlineFlowState();
+                return;
+            }
+            const wasAvailableForCode =
+                customCreateCodeStatus === 'available' && customCreateCodeStatusCode === roomCode;
+            setCustomCreateCodeStatus(payload.available ? 'available' : 'occupied', roomCode);
+            updateOnlineFlowState();
+            if (payload.available && !wasAvailableForCode) {
+                triggerContinueButtonGlint();
+            }
+        } catch (error) {
+            if (error?.name === 'AbortError') {
+                return;
+            }
+            if (
+                preferredOnlineRoomAction === 'create' &&
+                normalizeOnlineRoomCode(preferredOnlineRoomCode) === roomCode
+            ) {
+                setCustomCreateCodeStatus('error', roomCode);
+                updateOnlineFlowState();
+            }
+        } finally {
+            if (onlineCodeLookupAbortController === requestController) {
+                onlineCodeLookupAbortController = null;
+            }
+        }
+    }
+
+    function clearCustomCreateCodeLookup() {
+        if (onlineCodeLookupTimeout != null) {
+            window.clearTimeout(onlineCodeLookupTimeout);
+            onlineCodeLookupTimeout = null;
+        }
+        if (onlineCodeLookupAbortController) {
+            onlineCodeLookupAbortController.abort();
+            onlineCodeLookupAbortController = null;
+        }
+    }
+
+    function clearContinueButtonGlint() {
+        if (onlineContinueGlintTimeout != null) {
+            window.clearTimeout(onlineContinueGlintTimeout);
+            onlineContinueGlintTimeout = null;
+        }
+        onlineContinueBtnEl?.classList.remove('attention-glint');
+    }
+
+    function triggerContinueButtonGlint() {
+        if (!onlineContinueBtnEl) {
+            return;
+        }
+        clearContinueButtonGlint();
+        onlineContinueBtnEl.classList.add('attention-glint');
+        onlineContinueGlintTimeout = window.setTimeout(() => {
+            onlineContinueBtnEl.classList.remove('attention-glint');
+            onlineContinueGlintTimeout = null;
+        }, 800);
+    }
+
+    function setCustomCreateCodeStatus(status, code = '') {
+        customCreateCodeStatus = status || 'idle';
+        customCreateCodeStatusCode = code || '';
+        if (!onlineRoomCodeStatusEl) {
+            return;
+        }
+        if (customCreateCodeStatus === 'hidden') {
+            onlineRoomCodeStatusEl.textContent = '';
+            onlineRoomCodeStatusEl.dataset.tone = 'muted';
+            return;
+        }
+        if (customCreateCodeStatus === 'idle') {
+            onlineRoomCodeStatusEl.textContent = 'Leave empty to auto-generate a room code.';
+            onlineRoomCodeStatusEl.dataset.tone = 'muted';
+            return;
+        }
+        if (customCreateCodeStatus === 'incomplete') {
+            onlineRoomCodeStatusEl.textContent = `Enter ${ONLINE_ROOM_CODE_LENGTH} characters (A-Z, 0-9).`;
+            onlineRoomCodeStatusEl.dataset.tone = 'muted';
+            return;
+        }
+        if (customCreateCodeStatus === 'checking') {
+            onlineRoomCodeStatusEl.textContent = 'Checking code availability...';
+            onlineRoomCodeStatusEl.dataset.tone = 'info';
+            return;
+        }
+        if (customCreateCodeStatus === 'available') {
+            onlineRoomCodeStatusEl.textContent = 'Code available';
+            onlineRoomCodeStatusEl.dataset.tone = 'success';
+            return;
+        }
+        if (customCreateCodeStatus === 'occupied') {
+            onlineRoomCodeStatusEl.textContent = 'Code already in use';
+            onlineRoomCodeStatusEl.dataset.tone = 'error';
+            return;
+        }
+        onlineRoomCodeStatusEl.textContent = 'Code check failed. Try again.';
+        onlineRoomCodeStatusEl.dataset.tone = 'error';
     }
 }

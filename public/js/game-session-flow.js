@@ -72,6 +72,7 @@ export function createGameSessionController({
     getGameMode = () => 'bots',
     setGameMode = () => {},
     setMultiplayerPanelVisible = () => {},
+    startOnlineRoomFlow = () => {},
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
@@ -126,7 +127,7 @@ export function createGameSessionController({
         pauseMenuUi.hide();
     }
 
-    function dismissWelcomeModal(nextMode = getGameMode()) {
+    function dismissWelcomeModal(nextMode = getGameMode(), startContext = null) {
         if (!getIsWelcomeModalVisible()) {
             return;
         }
@@ -134,6 +135,12 @@ export function createGameSessionController({
         setGameMode(mode);
         getBotSystem()?.setEnabled?.(mode === 'bots');
         setMultiplayerPanelVisible(mode === 'online');
+        if (mode === 'online') {
+            const normalizedOnlineStartContext = normalizeOnlineStartContext(startContext);
+            if (normalizedOnlineStartContext) {
+                startOnlineRoomFlow(normalizedOnlineStartContext);
+            }
+        }
         setIsWelcomeModalVisible(false);
         carEditModeController.setActive(false);
         cityBuilderController?.setActive?.(false);
@@ -477,5 +484,44 @@ export function createGameSessionController({
 
     function normalizeGameMode(mode) {
         return mode === 'online' ? 'online' : 'bots';
+    }
+
+    function normalizeOnlineStartContext(startContext) {
+        if (!startContext || typeof startContext !== 'object') {
+            return null;
+        }
+        const roomAction = startContext.roomAction === 'join' ? 'join' : 'create';
+        const playerName = sanitizeOnlinePlayerName(startContext.playerName);
+        const roomCode =
+            typeof startContext.roomCode === 'string'
+                ? startContext.roomCode
+                      .trim()
+                      .toUpperCase()
+                      .replace(/[^A-Z0-9]/g, '')
+                      .slice(0, 6)
+                : '';
+        if (roomAction === 'join' && roomCode.length !== 6) {
+            return null;
+        }
+        if (roomAction === 'create' && roomCode.length > 0 && roomCode.length !== 6) {
+            return null;
+        }
+        return {
+            roomAction,
+            roomCode: roomCode,
+            playerName,
+        };
+    }
+
+    function sanitizeOnlinePlayerName(value) {
+        if (typeof value !== 'string') {
+            return 'Driver';
+        }
+        const normalized = value
+            .trim()
+            .replace(/\s+/g, ' ')
+            .replace(/[^\p{L}\p{N}\s\-_]/gu, '')
+            .slice(0, 18);
+        return normalized || 'Driver';
     }
 }

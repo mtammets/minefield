@@ -495,6 +495,9 @@ runtimeState.gameSessionController = createGameSessionController({
     setMultiplayerPanelVisible(visible) {
         runtimeState.multiplayerController?.setPanelVisible?.(visible);
     },
+    startOnlineRoomFlow(startContext) {
+        runtimeState.multiplayerController?.startOnlineRoomFlow?.(startContext);
+    },
 });
 
 runtimeState.inputController = createInputController({
@@ -522,8 +525,8 @@ runtimeState.inputController = createInputController({
     onSetPauseState(nextPaused) {
         runtimeState.gameSessionController?.setPauseState(nextPaused);
     },
-    onDismissWelcomeModal(mode) {
-        runtimeState.gameSessionController?.dismissWelcomeModal(mode);
+    onDismissWelcomeModal(mode, startContext = null) {
+        runtimeState.gameSessionController?.dismissWelcomeModal(mode, startContext);
     },
     onRestartGameWithCountdown() {
         runtimeState.gameSessionController?.restartGameWithCountdown();

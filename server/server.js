@@ -39,6 +39,23 @@ app.get('/api/ping', (req, res) => {
     });
 });
 
+app.get('/api/room-code/:roomCode/availability', (req, res) => {
+    const roomCode = sanitizeRoomCode(req.params?.roomCode);
+    if (!roomCode) {
+        res.status(400).json({
+            ok: false,
+            error: `Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`,
+        });
+        return;
+    }
+
+    res.json({
+        ok: true,
+        roomCode,
+        available: !rooms.has(roomCode),
+    });
+});
+
 io.on('connection', (socket) => {
     socket.data.profile = createDefaultProfile(socket.id);
     socket.data.roomCode = null;
@@ -58,7 +75,26 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const roomCode = generateRoomCode();
+            const payloadRoomCodeRaw =
+                typeof payload?.roomCode === 'string' ? payload.roomCode : undefined;
+            const requestedRoomCode =
+                payloadRoomCodeRaw == null ? '' : sanitizeRoomCode(payloadRoomCodeRaw);
+            if (payloadRoomCodeRaw != null && !requestedRoomCode) {
+                safeAck(ack, {
+                    ok: false,
+                    error: `Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`,
+                });
+                return;
+            }
+            if (requestedRoomCode && rooms.has(requestedRoomCode)) {
+                safeAck(ack, {
+                    ok: false,
+                    error: `Room ${requestedRoomCode} already exists.`,
+                });
+                return;
+            }
+
+            const roomCode = requestedRoomCode || generateRoomCode();
             if (!roomCode) {
                 safeAck(ack, {
                     ok: false,

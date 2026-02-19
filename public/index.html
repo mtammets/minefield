@@ -36,6 +36,72 @@
                             PLAY ONLINE <span aria-hidden="true">↗</span>
                         </button>
                     </div>
+                    <div id="welcomeOnlineModeFlow" class="welcomeOnlineModeFlow" hidden>
+                        <div class="welcomeOnlineModeTitle">ONLINE SESSION</div>
+                        <label class="welcomeOnlineModeLabel" for="welcomeOnlineNameInput">
+                            PLAYER NAME
+                        </label>
+                        <input
+                            id="welcomeOnlineNameInput"
+                            class="welcomeOnlineModeInput welcomeOnlineModeNameInput"
+                            type="text"
+                            maxlength="18"
+                            autocomplete="nickname"
+                            placeholder="Driver"
+                        />
+                        <div class="welcomeOnlineModeChoiceRow">
+                            <button
+                                id="welcomeOnlineCreateChoiceBtn"
+                                class="welcomeOnlineModeChoiceBtn"
+                                type="button"
+                                data-selected="false"
+                            >
+                                CREATE ROOM
+                            </button>
+                            <button
+                                id="welcomeOnlineJoinChoiceBtn"
+                                class="welcomeOnlineModeChoiceBtn"
+                                type="button"
+                                data-selected="false"
+                            >
+                                JOIN ROOM
+                            </button>
+                        </div>
+                        <label
+                            id="welcomeOnlineRoomCodeLabel"
+                            class="welcomeOnlineModeLabel"
+                            for="welcomeOnlineRoomCodeInput"
+                        >
+                            ROOM CODE (OPTIONAL FOR CREATE)
+                        </label>
+                        <input
+                            id="welcomeOnlineRoomCodeInput"
+                            class="welcomeOnlineModeInput welcomeOnlineModeRoomInput"
+                            type="text"
+                            maxlength="6"
+                            inputmode="latin"
+                            autocapitalize="characters"
+                            spellcheck="false"
+                            placeholder="ABC123"
+                            disabled
+                        />
+                        <div
+                            id="welcomeOnlineRoomCodeStatus"
+                            class="welcomeOnlineCodeStatus"
+                            data-tone="info"
+                            aria-live="polite"
+                        ></div>
+                        <div class="welcomeOnlineModeActions">
+                            <button
+                                id="welcomeOnlineContinueBtn"
+                                class="welcomeOnlineModeContinueBtn"
+                                type="button"
+                                disabled
+                            >
+                                START ONLINE
+                            </button>
+                        </div>
+                    </div>
                 </section>
                 <section id="welcomePreviewShell" class="welcomeShowroomBay">
                     <button

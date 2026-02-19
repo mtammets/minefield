@@ -51,8 +51,8 @@ export function createRuntimeUiControllers({
         onColorChange(colorHex) {
             getGameSessionController()?.setSelectedPlayerCarColor(colorHex);
         },
-        onStart(mode) {
-            getGameSessionController()?.dismissWelcomeModal(mode);
+        onStart(mode, startContext = null) {
+            getGameSessionController()?.dismissWelcomeModal(mode, startContext);
         },
     });
 

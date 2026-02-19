@@ -84,6 +84,7 @@ export function createMultiplayerController(options = {}) {
         isInRoom,
         getSelfId,
         getLocalPlayerName,
+        startOnlineRoomFlow,
     };
 
     function initialize() {
@@ -289,6 +290,40 @@ export function createMultiplayerController(options = {}) {
         return sanitizePlayerName(dom.nameInput.value || DEFAULT_PLAYER_NAME);
     }
 
+    function startOnlineRoomFlow(startContext = null) {
+        if (!isPanelVisible || isBusy || room?.roomCode) {
+            return false;
+        }
+        const preferredPlayerName = sanitizePlayerName(
+            startContext?.playerName || dom.nameInput.value || DEFAULT_PLAYER_NAME
+        );
+        dom.nameInput.value = preferredPlayerName;
+        writeStorage(MP_NAME_STORAGE_KEY, preferredPlayerName);
+        const action = startContext?.roomAction === 'join' ? 'join' : 'create';
+        if (action === 'create') {
+            const createRoomCode = normalizeOptionalRoomCode(startContext?.roomCode);
+            if (createRoomCode == null) {
+                setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
+                updatePanel();
+                return false;
+            }
+            if (createRoomCode) {
+                dom.roomInput.value = createRoomCode;
+            }
+            handleCreateRoomClick(createRoomCode);
+            return true;
+        }
+        const roomCode = normalizeRoomCode(startContext?.roomCode || '');
+        if (!roomCode) {
+            setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
+            updatePanel();
+            return false;
+        }
+        dom.roomInput.value = roomCode;
+        handleJoinRoomClick(roomCode);
+        return true;
+    }
+
     function resolveTargetPlayerId(contact = null) {
         if (typeof contact?.playerId === 'string' && contact.playerId.trim()) {
             return contact.playerId.trim();
@@ -302,9 +337,19 @@ export function createMultiplayerController(options = {}) {
         return '';
     }
 
-    function handleCreateRoomClick() {
+    function handleCreateRoomClick(explicitRoomCode = '') {
         if (isBusy) {
             return;
+        }
+
+        const createRoomCode = normalizeOptionalRoomCode(explicitRoomCode || dom.roomInput.value);
+        if (createRoomCode == null) {
+            setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
+            updatePanel();
+            return;
+        }
+        if (createRoomCode) {
+            dom.roomInput.value = createRoomCode;
         }
 
         const activeSocket = ensureSocket();
@@ -318,34 +363,42 @@ export function createMultiplayerController(options = {}) {
         setStatus('Creating room...', 'pending');
         updatePanel();
 
-        activeSocket.emit('mp:createRoom', { profile }, (response) => {
-            isBusy = false;
-            if (!response?.ok) {
-                setStatus(response?.error || 'Failed to create room.', 'error');
-                updatePanel();
-                return;
-            }
+        activeSocket.emit(
+            'mp:createRoom',
+            {
+                profile,
+                roomCode: createRoomCode || undefined,
+            },
+            (response) => {
+                isBusy = false;
+                if (!response?.ok) {
+                    setStatus(response?.error || 'Failed to create room.', 'error');
+                    updatePanel();
+                    return;
+                }
 
-            objectiveUi?.showInfo?.(
-                `Online room ${response.room?.roomCode || ''} created. G drops, T throws mines.`,
-                2200
-            );
-            applyRoomSnapshot(response.room, response.selfId);
-            setStatus(`Room ${response.room?.roomCode || ''} created.`, 'success');
-            updatePanel();
-        });
+                objectiveUi?.showInfo?.(
+                    `Online room ${response.room?.roomCode || ''} created. G drops, T throws mines.`,
+                    2200
+                );
+                applyRoomSnapshot(response.room, response.selfId);
+                setStatus(`Room ${response.room?.roomCode || ''} created.`, 'success');
+                updatePanel();
+            }
+        );
     }
 
-    function handleJoinRoomClick() {
+    function handleJoinRoomClick(explicitRoomCode = '') {
         if (isBusy) {
             return;
         }
 
-        const roomCode = normalizeRoomCode(dom.roomInput.value);
+        const roomCode = normalizeRoomCode(explicitRoomCode || dom.roomInput.value);
         if (!roomCode) {
             setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
             return;
         }
+        dom.roomInput.value = roomCode;
 
         const activeSocket = ensureSocket();
         if (!activeSocket) {
@@ -1039,6 +1092,9 @@ function createNoopController() {
         getLocalPlayerName() {
             return DEFAULT_PLAYER_NAME;
         },
+        startOnlineRoomFlow() {
+            return false;
+        },
     };
 }
 
@@ -1084,6 +1140,24 @@ function normalizeRoomCode(value) {
 
     if (normalized.length !== ROOM_CODE_LENGTH) {
         return '';
+    }
+    return normalized;
+}
+
+function normalizeOptionalRoomCode(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+
+    const normalized = value
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '');
+    if (!normalized) {
+        return '';
+    }
+    if (normalized.length !== ROOM_CODE_LENGTH) {
+        return null;
     }
     return normalized;
 }

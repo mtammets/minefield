@@ -96,6 +96,12 @@ export function createInputController(options = {}) {
     function handleKey(event, isKeyDown) {
         const rawKey = event.key.toLowerCase();
         const key = rawKey === ' ' || rawKey === 'spacebar' ? 'space' : rawKey;
+
+        // While welcome modal is visible, disable gameplay/editor shortcuts so text inputs work naturally.
+        if (getIsWelcomeModalVisible()) {
+            return;
+        }
+
         if (
             isKeyDown &&
             event.repeat &&
@@ -152,22 +158,6 @@ export function createInputController(options = {}) {
             !finalScoreboardUi.isVisible();
         const shouldRouteToEditMode = carEditModeController.isActive() || canEnterEditMode;
         if (shouldRouteToEditMode && carEditModeController.handleKey(event, isKeyDown)) {
-            return;
-        }
-
-        if (getIsWelcomeModalVisible()) {
-            if (isKeyDown && (key === 'arrowleft' || key === 'a')) {
-                event.preventDefault();
-                welcomeModalUi.selectNeighborColor(-1);
-            }
-            if (isKeyDown && (key === 'arrowright' || key === 'd')) {
-                event.preventDefault();
-                welcomeModalUi.selectNeighborColor(1);
-            }
-            if (key === 'enter' && isKeyDown) {
-                event.preventDefault();
-                onDismissWelcomeModal(welcomeModalUi.getPreferredStartMode?.() || 'bots');
-            }
             return;
         }
 
