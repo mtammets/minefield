@@ -7,6 +7,7 @@ const CELL_MARGIN = 4;
 const CELL_PICKUP_CHANCE = 0.18;
 const ACTIVE_CELL_RADIUS = 6;
 const PICKUP_HEIGHT_ABOVE_GROUND = 1.35;
+const PICKUP_SPAWN_ATTEMPTS = 4;
 
 const shapeGeometries = [
     new THREE.IcosahedronGeometry(0.92, 1),
@@ -105,6 +106,10 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         pickupRespawnJitterSec = 1.8,
         pickupBlinkWindowSec = 2.2,
         getGroundHeightAt = null,
+        staticObstacles = null,
+        avoidObstacleCategories = ['building'],
+        obstaclePadding = 0,
+        spawnAttempts = PICKUP_SPAWN_ATTEMPTS,
     } = options;
 
     const resolvedIdPrefix = typeof idPrefix === 'string' && idPrefix ? idPrefix : 'pickup';
@@ -148,6 +153,14 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         normalizePositiveNumber(pickupBlinkWindowSec, 2.2),
         0.3,
         10
+    );
+    const resolvedStaticObstacles = Array.isArray(staticObstacles) ? staticObstacles : null;
+    const resolvedAvoidObstacleCategories = normalizeObstacleCategories(avoidObstacleCategories);
+    const resolvedObstaclePadding = Math.max(0, normalizePositiveNumber(obstaclePadding, 0));
+    const resolvedSpawnAttempts = THREE.MathUtils.clamp(
+        Math.floor(normalizePositiveNumber(spawnAttempts, PICKUP_SPAWN_ATTEMPTS)),
+        1,
+        12
     );
     const initialResolvedTargetColorIndex = resolvedSingleType
         ? resolvedSingleShapeIndex
@@ -448,9 +461,19 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 resolvedSeedOffset + queueItem.seedOffset,
                 resolvedSingleType,
                 resolvedSingleShapeIndex,
-                getGroundHeightAt
+                getGroundHeightAt,
+                resolvedStaticObstacles,
+                resolvedAvoidObstacleCategories,
+                resolvedObstaclePadding,
+                resolvedSpawnAttempts
             );
             if (!pickup) {
+                const retryCount = (queueItem.retryCount || 0) + 1;
+                if (retryCount <= resolvedSpawnAttempts) {
+                    queueItem.retryCount = retryCount;
+                    queueItem.seedOffset = (queueItem.seedOffset || 0) + 271;
+                    finiteSpawnQueue.push(queueItem);
+                }
                 continue;
             }
 
@@ -558,7 +581,11 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                         seedOffset,
                         singleType,
                         singleShapeIndex,
-                        getGroundHeightAt
+                        getGroundHeightAt,
+                        resolvedStaticObstacles,
+                        resolvedAvoidObstacleCategories,
+                        resolvedObstaclePadding,
+                        resolvedSpawnAttempts
                     );
                     if (!pickup) {
                         continue;
@@ -750,22 +777,49 @@ function createPickupForCell(
     seedOffset = 0,
     singleType = false,
     singleShapeIndex = 0,
-    getGroundHeightAt = null
+    getGroundHeightAt = null,
+    staticObstacles = null,
+    avoidObstacleCategories = null,
+    obstaclePadding = 0,
+    spawnAttempts = 1
 ) {
     const span = CELL_SIZE - CELL_MARGIN * 2;
-    const x = cellX * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 11, seedOffset) * span;
-    const z = cellZ * CELL_SIZE + CELL_MARGIN + randomFromCell(cellX, cellZ, 12, seedOffset) * span;
-    if (worldBounds && !isInsideWorldBounds(x, z, worldBounds)) {
-        return null;
-    }
-    const groundHeight = typeof getGroundHeightAt === 'function' ? getGroundHeightAt(x, z) : 0;
-    const y = groundHeight + PICKUP_HEIGHT_ABOVE_GROUND;
     const shapeIndex = singleType
         ? normalizeColorIndex(singleShapeIndex)
         : Math.floor(randomFromCell(cellX, cellZ, 14, seedOffset) * shapeGeometries.length) %
           shapeGeometries.length;
+    const rotYFactor = randomFromCell(cellX, cellZ, 22, seedOffset);
+    const attempts = Math.max(1, Math.floor(normalizePositiveNumber(spawnAttempts, 1)));
 
-    return createPickup(x, y, z, shapeIndex, randomFromCell(cellX, cellZ, 22, seedOffset));
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const attemptSeedOffset = seedOffset + attempt * 131;
+        const x =
+            cellX * CELL_SIZE +
+            CELL_MARGIN +
+            randomFromCell(cellX, cellZ, 11, attemptSeedOffset) * span;
+        const z =
+            cellZ * CELL_SIZE +
+            CELL_MARGIN +
+            randomFromCell(cellX, cellZ, 12, attemptSeedOffset) * span;
+
+        if (worldBounds && !isInsideWorldBounds(x, z, worldBounds)) {
+            continue;
+        }
+        if (
+            staticObstacles &&
+            avoidObstacleCategories &&
+            avoidObstacleCategories.size > 0 &&
+            isBlockedByObstacles(x, z, staticObstacles, avoidObstacleCategories, obstaclePadding)
+        ) {
+            continue;
+        }
+
+        const groundHeight = typeof getGroundHeightAt === 'function' ? getGroundHeightAt(x, z) : 0;
+        const y = groundHeight + PICKUP_HEIGHT_ABOVE_GROUND;
+        return createPickup(x, y, z, shapeIndex, rotYFactor);
+    }
+
+    return null;
 }
 
 function getWorldCellBounds(worldBounds) {
@@ -784,6 +838,38 @@ function isInsideWorldBounds(x, z, worldBounds) {
         z >= worldBounds.minZ &&
         z <= worldBounds.maxZ
     );
+}
+
+function isBlockedByObstacles(x, z, staticObstacles, avoidObstacleCategories, padding = 0) {
+    for (let i = 0; i < staticObstacles.length; i += 1) {
+        const obstacle = staticObstacles[i];
+        if (!obstacle || !avoidObstacleCategories.has(obstacle.category)) {
+            continue;
+        }
+
+        if (obstacle.type === 'circle') {
+            const radius = (Number(obstacle.radius) || 0) + padding;
+            const dx = x - (Number(obstacle.x) || 0);
+            const dz = z - (Number(obstacle.z) || 0);
+            if (dx * dx + dz * dz <= radius * radius) {
+                return true;
+            }
+            continue;
+        }
+
+        if (obstacle.type === 'aabb') {
+            if (
+                x >= (Number(obstacle.minX) || 0) - padding &&
+                x <= (Number(obstacle.maxX) || 0) + padding &&
+                z >= (Number(obstacle.minZ) || 0) - padding &&
+                z <= (Number(obstacle.maxZ) || 0) + padding
+            ) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 function cellShouldHavePickup(cellX, cellZ, seedOffset = 0) {
@@ -958,4 +1044,19 @@ function getNextTargetColorIndex(currentIndex) {
 
 function normalizePositiveNumber(value, fallback) {
     return Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeObstacleCategories(value) {
+    if (!value) {
+        return new Set();
+    }
+    const entries = Array.isArray(value) ? value : [value];
+    const result = new Set();
+    for (let i = 0; i < entries.length; i += 1) {
+        const entry = entries[i];
+        if (typeof entry === 'string' && entry.trim()) {
+            result.add(entry.trim());
+        }
+    }
+    return result;
 }

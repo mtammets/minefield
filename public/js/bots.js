@@ -47,6 +47,14 @@ const BOT_DRIFT_STEER_BIAS = 0.42;
 const BOT_DRIFT_YAW_BOOST = 1.45;
 const BOT_DRIFT_LATERAL_SLIP = 5.2;
 const BOT_DRIFT_SPEED_SCALE = 0.8;
+const BOT_BUILDING_AVOID_RADIUS = 9.5;
+const BOT_BUILDING_AVOID_FORCE = 2.4;
+const BOT_LOS_BUILDING_PADDING = 1.2;
+const BOT_ROAD_ON_MARGIN = 1.4;
+const BOT_ROAD_TARGET_MARGIN = 2.4;
+const BOT_ROAD_TARGET_REACH = 6;
+const BOT_DETOUR_CLEARANCE = BOT_RADIUS + 3.2;
+const BOT_DETOUR_REACH_RADIUS = 6;
 const BOT_DEBRIS_GRAVITY = 24;
 const BOT_DEBRIS_DRAG = 1.7;
 const BOT_DEBRIS_BOUNCE = 0.3;
@@ -67,6 +75,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         botCount = DEFAULT_BOT_COUNT,
         sharedTargetColorHex = 0x7cf9ff,
         getGroundHeightAt = null,
+        cityMapLayout = null,
         onPartDetached = null,
     } = options;
     const handlePartDetached = typeof onPartDetached === 'function' ? onPartDetached : null;
@@ -85,6 +94,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             i,
             resolvedSharedTargetColorHex,
             getGroundHeightAt,
+            cityMapLayout,
             ({ bot, part, crashContext }) => {
                 const handledExternally = handlePartDetached?.({ bot, part, crashContext }) === true;
                 if (!handledExternally) {
@@ -116,7 +126,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     dt,
                     worldBounds,
                     staticObstacles,
-                    getGroundHeightAt
+                    getGroundHeightAt,
+                    cityMapLayout
                 );
             }
         },
@@ -510,6 +521,7 @@ function createBot(
     index,
     sharedTargetColorHex,
     getGroundHeightAt,
+    cityMapLayout,
     onPartDetached
 ) {
     const name = BOT_NAMES[index] || `BOT-${index + 1}`;
@@ -575,9 +587,14 @@ function createBot(
             intensity: 0,
             cooldown: randomRange(BOT_DRIFT_COOLDOWN_MIN * 0.5, BOT_DRIFT_COOLDOWN_MAX),
         },
-        wanderTarget: pickWanderTarget(worldBounds),
+        wanderTarget: pickWanderTarget(worldBounds, cityMapLayout),
         collectedCount: 0,
         targetColorHex: sharedTargetColorHex,
+        detourTarget: null,
+        roadTarget: null,
+        roadPath: null,
+        roadPathIndex: 0,
+        roadPathKey: null,
     };
 
     initializeBotPartBaselines(bot);
@@ -592,22 +609,28 @@ function updateBot(
     dt,
     worldBounds,
     staticObstacles,
-    getGroundHeightAt
+    getGroundHeightAt,
+    cityMapLayout
 ) {
     const damageDynamics = getBotDamageDynamics(bot.damageState);
-    const targetPickup = findNearestPickup(bot.car.position, visiblePickups);
+    const targetPickup = findNearestPickup(bot.car.position, visiblePickups, staticObstacles);
 
     if (!targetPickup) {
         const wanderDistanceSq = distanceSqXZ(bot.car.position, bot.wanderTarget);
         if (wanderDistanceSq <= BOT_WANDER_REACH_RADIUS * BOT_WANDER_REACH_RADIUS) {
-            bot.wanderTarget = pickWanderTarget(worldBounds);
+            bot.wanderTarget = pickWanderTarget(worldBounds, cityMapLayout);
         }
     }
 
     const targetX = targetPickup ? targetPickup.x : bot.wanderTarget.x;
     const targetZ = targetPickup ? targetPickup.z : bot.wanderTarget.z;
+    const baseTarget = { x: targetX, z: targetZ };
+    const roadTarget = resolveRoadTarget(bot, baseTarget, worldBounds, cityMapLayout);
+    const navTarget = roadTarget || baseTarget;
+    const detourTarget = resolveDetourTarget(bot, navTarget, worldBounds, staticObstacles);
+    const resolvedTarget = detourTarget || navTarget;
 
-    targetDir2.set(targetX - bot.car.position.x, targetZ - bot.car.position.z);
+    targetDir2.set(resolvedTarget.x - bot.car.position.x, resolvedTarget.z - bot.car.position.z);
     if (targetDir2.lengthSq() < 0.001) {
         targetDir2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
     }
@@ -1365,22 +1388,66 @@ function hexToRgba(colorHex, alpha = 1) {
     return `rgba(${r}, ${g}, ${b}, ${THREE.MathUtils.clamp(alpha, 0, 1)})`;
 }
 
-function findNearestPickup(position, pickups) {
+function findNearestPickup(position, pickups, staticObstacles = null) {
     let nearest = null;
     let nearestDistanceSq = Infinity;
+    let blockedNearest = null;
+    let blockedDistanceSq = Infinity;
 
     for (let i = 0; i < pickups.length; i += 1) {
         const pickup = pickups[i];
         const dx = pickup.x - position.x;
         const dz = pickup.z - position.z;
         const distanceSq = dx * dx + dz * dz;
+        if (
+            staticObstacles &&
+            isLineBlockedByBuildings(
+                position.x,
+                position.z,
+                pickup.x,
+                pickup.z,
+                staticObstacles,
+                BOT_LOS_BUILDING_PADDING
+            )
+        ) {
+            if (distanceSq < blockedDistanceSq) {
+                blockedDistanceSq = distanceSq;
+                blockedNearest = pickup;
+            }
+            continue;
+        }
         if (distanceSq < nearestDistanceSq) {
             nearestDistanceSq = distanceSq;
             nearest = pickup;
         }
     }
 
-    return nearest;
+    return nearest || blockedNearest;
+}
+
+function isLineBlockedByBuildings(ax, az, bx, bz, staticObstacles, padding = 0) {
+    for (let i = 0; i < staticObstacles.length; i += 1) {
+        const obstacle = staticObstacles[i];
+        if (!obstacle || obstacle.type !== 'aabb' || obstacle.category !== 'building') {
+            continue;
+        }
+
+        const hit = segmentIntersectsAabb2D(
+            ax,
+            az,
+            bx,
+            bz,
+            obstacle.minX - padding,
+            obstacle.maxX + padding,
+            obstacle.minZ - padding,
+            obstacle.maxZ + padding
+        );
+        if (hit) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots) {
@@ -1422,7 +1489,26 @@ function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots) {
     };
 }
 
-function pickWanderTarget(worldBounds) {
+function pickWanderTarget(worldBounds, cityMapLayout) {
+    const xLines = Array.isArray(cityMapLayout?.roadAxisLinesX)
+        ? cityMapLayout.roadAxisLinesX
+        : [];
+    const zLines = Array.isArray(cityMapLayout?.roadAxisLinesZ)
+        ? cityMapLayout.roadAxisLinesZ
+        : [];
+
+    if (xLines.length > 0 && zLines.length > 0) {
+        const xLine = xLines[Math.floor(Math.random() * xLines.length)];
+        const zLine = zLines[Math.floor(Math.random() * zLines.length)];
+        const baseX = Number.isFinite(xLine?.coord) ? xLine.coord : 0;
+        const baseZ = Number.isFinite(zLine?.coord) ? zLine.coord : 0;
+        const roadWidthX = Math.max(0, Number(xLine?.roadWidth) || 0);
+        const roadWidthZ = Math.max(0, Number(zLine?.roadWidth) || 0);
+        const jitterX = (Math.random() - 0.5) * Math.min(roadWidthX * 0.6, 6);
+        const jitterZ = (Math.random() - 0.5) * Math.min(roadWidthZ * 0.6, 6);
+        return clampPointToWorld({ x: baseX + jitterX, z: baseZ + jitterZ }, worldBounds);
+    }
+
     const margin = 12;
     return {
         x: THREE.MathUtils.lerp(
@@ -1479,14 +1565,16 @@ function addObstacleAvoidance(outVec, position, staticObstacles) {
         const closestZ = THREE.MathUtils.clamp(position.z, obstacle.minZ, obstacle.maxZ);
         scratch2.set(position.x - closestX, position.z - closestZ);
         const distanceSq = scratch2.lengthSq();
-        const safeRadius = 4.8;
+        const isBuilding = obstacle.category === 'building';
+        const safeRadius = isBuilding ? BOT_BUILDING_AVOID_RADIUS : 4.8;
         if (distanceSq > safeRadius * safeRadius || distanceSq < 0.0001) {
             continue;
         }
 
         const distance = Math.sqrt(distanceSq);
         const force = (safeRadius - distance) / safeRadius;
-        outVec.addScaledVector(scratch2.multiplyScalar(1 / distance), force * 1.6);
+        const strength = isBuilding ? BOT_BUILDING_AVOID_FORCE : 1.6;
+        outVec.addScaledVector(scratch2.multiplyScalar(1 / distance), force * strength);
     }
 }
 
@@ -1502,6 +1590,418 @@ function addEntityAvoidance(outVec, position, entityPosition, radius, strength) 
     const force = (radius - distance) / radius;
     outVec.x += (dx / distance) * force * strength;
     outVec.y += (dz / distance) * force * strength;
+}
+
+function resolveRoadTarget(bot, target, worldBounds, cityMapLayout) {
+    if (!bot || !target || !cityMapLayout) {
+        if (bot) {
+            bot.roadTarget = null;
+            bot.roadPath = null;
+            bot.roadPathIndex = 0;
+            bot.roadPathKey = null;
+        }
+        return null;
+    }
+
+    const targetKey = buildTargetKey(target);
+    if (bot.roadPathKey !== targetKey) {
+        bot.roadPath = buildRoadPath(bot.car.position, target, worldBounds, cityMapLayout);
+        bot.roadPathIndex = 0;
+        bot.roadPathKey = targetKey;
+    }
+
+    if (!bot.roadPath || bot.roadPath.length === 0) {
+        bot.roadTarget = null;
+        return null;
+    }
+
+    while (bot.roadPathIndex < bot.roadPath.length) {
+        const waypoint = bot.roadPath[bot.roadPathIndex];
+        const distSq = distanceSqXY(
+            bot.car.position.x,
+            bot.car.position.z,
+            waypoint.x,
+            waypoint.z
+        );
+        if (distSq > BOT_ROAD_TARGET_REACH * BOT_ROAD_TARGET_REACH) {
+            bot.roadTarget = waypoint;
+            return waypoint;
+        }
+        bot.roadPathIndex += 1;
+    }
+
+    bot.roadTarget = null;
+    bot.roadPath = null;
+    bot.roadPathIndex = 0;
+    return null;
+}
+
+function buildRoadPath(position, target, worldBounds, cityMapLayout) {
+    const xLines = Array.isArray(cityMapLayout.roadAxisLinesX)
+        ? cityMapLayout.roadAxisLinesX
+        : [];
+    const zLines = Array.isArray(cityMapLayout.roadAxisLinesZ)
+        ? cityMapLayout.roadAxisLinesZ
+        : [];
+    if (xLines.length === 0 || zLines.length === 0) {
+        return null;
+    }
+
+    const botXLine = findNearestRoadLine(position.x, xLines);
+    const botZLine = findNearestRoadLine(position.z, zLines);
+    const targetXLine = findNearestRoadLine(target.x, xLines);
+    const targetZLine = findNearestRoadLine(target.z, zLines);
+
+    if (!botXLine || !botZLine || !targetXLine || !targetZLine) {
+        return null;
+    }
+
+    const botOnVertical = isOnRoad(position.x, botXLine, BOT_ROAD_ON_MARGIN);
+    const botOnHorizontal = isOnRoad(position.z, botZLine, BOT_ROAD_ON_MARGIN);
+    const targetOnVertical = isOnRoad(target.x, targetXLine, BOT_ROAD_TARGET_MARGIN);
+    const targetOnHorizontal = isOnRoad(target.z, targetZLine, BOT_ROAD_TARGET_MARGIN);
+
+    const startCandidates = [];
+    if (botOnVertical) {
+        startCandidates.push({
+            orientation: 'vertical',
+            coord: botXLine.coord,
+            point: { x: botXLine.coord, z: position.z },
+            entryDistance: 0,
+        });
+    }
+    if (botOnHorizontal) {
+        startCandidates.push({
+            orientation: 'horizontal',
+            coord: botZLine.coord,
+            point: { x: position.x, z: botZLine.coord },
+            entryDistance: 0,
+        });
+    }
+    if (startCandidates.length === 0) {
+        const preferVertical = botXLine.distance <= botZLine.distance;
+        startCandidates.push({
+            orientation: preferVertical ? 'vertical' : 'horizontal',
+            coord: preferVertical ? botXLine.coord : botZLine.coord,
+            point: preferVertical
+                ? { x: botXLine.coord, z: position.z }
+                : { x: position.x, z: botZLine.coord },
+            entryDistance: preferVertical ? botXLine.distance : botZLine.distance,
+        });
+    }
+
+    const endCandidates = [];
+    if (targetOnVertical) {
+        endCandidates.push({
+            orientation: 'vertical',
+            coord: targetXLine.coord,
+            point: { x: target.x, z: target.z },
+            exitDistance: 0,
+        });
+    }
+    if (targetOnHorizontal) {
+        endCandidates.push({
+            orientation: 'horizontal',
+            coord: targetZLine.coord,
+            point: { x: target.x, z: target.z },
+            exitDistance: 0,
+        });
+    }
+    if (endCandidates.length === 0) {
+        const preferVertical = targetXLine.distance <= targetZLine.distance;
+        endCandidates.push({
+            orientation: preferVertical ? 'vertical' : 'horizontal',
+            coord: preferVertical ? targetXLine.coord : targetZLine.coord,
+            point: preferVertical
+                ? { x: targetXLine.coord, z: target.z }
+                : { x: target.x, z: targetZLine.coord },
+            exitDistance: preferVertical ? targetXLine.distance : targetZLine.distance,
+        });
+    }
+
+    let bestPath = null;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < startCandidates.length; i += 1) {
+        const start = startCandidates[i];
+        for (let j = 0; j < endCandidates.length; j += 1) {
+            const end = endCandidates[j];
+            const points = [];
+            if (start.entryDistance > 0.001) {
+                points.push(start.point);
+            }
+
+            if (start.orientation !== end.orientation) {
+                const intersection =
+                    start.orientation === 'vertical'
+                        ? { x: start.coord, z: end.coord }
+                        : { x: end.coord, z: start.coord };
+                points.push(intersection);
+            }
+
+            points.push(end.point);
+
+            const cleaned = dedupeWaypoints(points);
+            const cost = pathCost(position, cleaned);
+            if (cost < bestScore) {
+                bestScore = cost;
+                bestPath = cleaned;
+            }
+        }
+    }
+
+    if (!bestPath || bestPath.length === 0) {
+        return null;
+    }
+
+    return bestPath.map((point) => clampPointToWorld(point, worldBounds));
+}
+
+function dedupeWaypoints(points) {
+    const result = [];
+    let last = null;
+    for (let i = 0; i < points.length; i += 1) {
+        const point = points[i];
+        if (!last || distanceSqXY(point.x, point.z, last.x, last.z) > 0.04) {
+            result.push(point);
+            last = point;
+        }
+    }
+    return result;
+}
+
+function pathCost(origin, points) {
+    let cost = 0;
+    let prev = origin;
+    for (let i = 0; i < points.length; i += 1) {
+        const point = points[i];
+        cost += Math.hypot(point.x - prev.x, point.z - prev.z);
+        prev = point;
+    }
+    return cost;
+}
+
+function buildTargetKey(target) {
+    const x = Number.isFinite(target?.x) ? Math.round(target.x / 6) : 0;
+    const z = Number.isFinite(target?.z) ? Math.round(target.z / 6) : 0;
+    return `${x}:${z}`;
+}
+
+function findNearestRoadLine(value, lines) {
+    let best = null;
+    let bestDist = Infinity;
+
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        const coord = Number(line?.coord);
+        if (!Number.isFinite(coord)) {
+            continue;
+        }
+        const dist = Math.abs(value - coord);
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = line;
+        }
+    }
+
+    if (!best) {
+        return null;
+    }
+
+    return {
+        coord: Number(best.coord) || 0,
+        roadWidth: Number(best.roadWidth) || 0,
+        distance: bestDist,
+    };
+}
+
+function isOnRoad(value, roadLine, margin = 0) {
+    if (!roadLine) {
+        return false;
+    }
+    const halfWidth = Math.max(0, (roadLine.roadWidth || 0) * 0.5 + margin);
+    return Math.abs(value - roadLine.coord) <= halfWidth;
+}
+
+function clampPointToWorld(point, worldBounds) {
+    if (!worldBounds) {
+        return { x: point.x, z: point.z };
+    }
+    return {
+        x: THREE.MathUtils.clamp(point.x, worldBounds.minX + 2, worldBounds.maxX - 2),
+        z: THREE.MathUtils.clamp(point.z, worldBounds.minZ + 2, worldBounds.maxZ - 2),
+    };
+}
+
+function resolveDetourTarget(bot, target, worldBounds, staticObstacles) {
+    if (!bot || !target || !Array.isArray(staticObstacles) || staticObstacles.length === 0) {
+        bot.detourTarget = null;
+        return null;
+    }
+
+    const blocking = findBlockingBuilding(bot.car.position, target, staticObstacles, BOT_DETOUR_CLEARANCE);
+    if (!blocking) {
+        bot.detourTarget = null;
+        return null;
+    }
+
+    if (bot.detourTarget) {
+        const detourDistanceSq = distanceSqXY(
+            bot.car.position.x,
+            bot.car.position.z,
+            bot.detourTarget.x,
+            bot.detourTarget.z
+        );
+        if (detourDistanceSq <= BOT_DETOUR_REACH_RADIUS * BOT_DETOUR_REACH_RADIUS) {
+            bot.detourTarget = null;
+        } else if (bot.detourTarget.obstacle === blocking.obstacle) {
+            return bot.detourTarget;
+        }
+    }
+
+    const detourPoint = computeDetourPoint(
+        bot.car.position,
+        target,
+        blocking.bounds,
+        worldBounds
+    );
+    if (!detourPoint) {
+        bot.detourTarget = null;
+        return null;
+    }
+
+    bot.detourTarget = {
+        x: detourPoint.x,
+        z: detourPoint.z,
+        obstacle: blocking.obstacle,
+    };
+    return bot.detourTarget;
+}
+
+function findBlockingBuilding(position, target, staticObstacles, padding) {
+    let best = null;
+    let bestT = Infinity;
+
+    for (let i = 0; i < staticObstacles.length; i += 1) {
+        const obstacle = staticObstacles[i];
+        if (!obstacle || obstacle.type !== 'aabb' || obstacle.category !== 'building') {
+            continue;
+        }
+
+        const bounds = {
+            minX: obstacle.minX - padding,
+            maxX: obstacle.maxX + padding,
+            minZ: obstacle.minZ - padding,
+            maxZ: obstacle.maxZ + padding,
+        };
+
+        const hit = segmentIntersectsAabb2D(
+            position.x,
+            position.z,
+            target.x,
+            target.z,
+            bounds.minX,
+            bounds.maxX,
+            bounds.minZ,
+            bounds.maxZ
+        );
+        if (!hit) {
+            continue;
+        }
+
+        if (hit.tEnter < bestT) {
+            bestT = hit.tEnter;
+            best = {
+                obstacle,
+                bounds,
+            };
+        }
+    }
+
+    return best;
+}
+
+function computeDetourPoint(position, target, bounds, worldBounds) {
+    const clampedZ = THREE.MathUtils.clamp(target.z, bounds.minZ, bounds.maxZ);
+    const clampedX = THREE.MathUtils.clamp(target.x, bounds.minX, bounds.maxX);
+    const candidates = [
+        { x: bounds.minX, z: clampedZ },
+        { x: bounds.maxX, z: clampedZ },
+        { x: clampedX, z: bounds.minZ },
+        { x: clampedX, z: bounds.maxZ },
+    ];
+
+    let best = null;
+    let bestScore = Infinity;
+
+    for (let i = 0; i < candidates.length; i += 1) {
+        const candidate = candidates[i];
+        let x = candidate.x;
+        let z = candidate.z;
+        if (worldBounds) {
+            x = THREE.MathUtils.clamp(x, worldBounds.minX + 2, worldBounds.maxX - 2);
+            z = THREE.MathUtils.clamp(z, worldBounds.minZ + 2, worldBounds.maxZ - 2);
+        }
+
+        const toCandidate = Math.hypot(position.x - x, position.z - z);
+        const toTarget = Math.hypot(target.x - x, target.z - z);
+        const score = toCandidate + toTarget;
+        if (score < bestScore) {
+            bestScore = score;
+            best = { x, z };
+        }
+    }
+
+    return best;
+}
+
+function segmentIntersectsAabb2D(ax, az, bx, bz, minX, maxX, minZ, maxZ) {
+    const dx = bx - ax;
+    const dz = bz - az;
+    let tmin = 0;
+    let tmax = 1;
+
+    if (Math.abs(dx) < 0.000001) {
+        if (ax < minX || ax > maxX) {
+            return null;
+        }
+    } else {
+        const inv = 1 / dx;
+        let t1 = (minX - ax) * inv;
+        let t2 = (maxX - ax) * inv;
+        if (t1 > t2) {
+            const tmp = t1;
+            t1 = t2;
+            t2 = tmp;
+        }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+        if (tmin > tmax) {
+            return null;
+        }
+    }
+
+    if (Math.abs(dz) < 0.000001) {
+        if (az < minZ || az > maxZ) {
+            return null;
+        }
+    } else {
+        const inv = 1 / dz;
+        let t1 = (minZ - az) * inv;
+        let t2 = (maxZ - az) * inv;
+        if (t1 > t2) {
+            const tmp = t1;
+            t1 = t2;
+            t2 = tmp;
+        }
+        tmin = Math.max(tmin, t1);
+        tmax = Math.min(tmax, t2);
+        if (tmin > tmax) {
+            return null;
+        }
+    }
+
+    return { tEnter: tmin, tExit: tmax };
 }
 
 function constrainToWorld(position, state, worldBounds) {

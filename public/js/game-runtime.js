@@ -277,11 +277,13 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     pickupRespawnJitterSec: 1.4,
     pickupBlinkWindowSec: 2,
     getGroundHeightAt,
+    staticObstacles,
 });
 runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
     botCount: 3,
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
     getGroundHeightAt,
+    cityMapLayout,
 });
 const miniMapController = createMiniMapController(worldBounds, {
     staticObstacles,
