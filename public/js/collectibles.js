@@ -89,7 +89,6 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     const {
         onTargetColorChanged = () => {},
         onCorrectPickup = () => {},
-        onWrongPickup = () => {},
         onExhausted = () => {},
         initialTargetColorIndex = Math.floor(Math.random() * shapeColors.length),
         idPrefix = 'pickup',
@@ -281,47 +280,28 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 }
 
                 const pickupPosition = pickup.mesh.position.clone();
-                const isCorrectPickup =
-                    resolvedSingleType || pickup.shapeIndex === targetColorIndex;
-                const effectColor = isCorrectPickup ? pickup.color : 0xff4b4b;
 
                 if (resolvedEnableEffects) {
-                    createCollectEffect(effectGroup, effects, pickupPosition, effectColor);
+                    createCollectEffect(effectGroup, effects, pickupPosition, pickup.color);
                 }
 
                 removePickup(pickupId, pickup, true);
 
-                if (isCorrectPickup) {
-                    onCorrectPickup({
-                        pickupId,
-                        pickupColorIndex: pickup.shapeIndex,
-                        pickupColorHex: pickup.color,
-                        position: pickupPosition,
-                        collectorId: collector.id,
-                    });
-                    if (finiteMode) {
-                        finiteRoundState.collected += 1;
-                    }
-
-                    if (!resolvedSingleType) {
-                        targetColorIndex = getNextTargetColorIndex(targetColorIndex);
-                        emitTargetColorChanged();
-                    }
-                    continue;
-                }
-
-                enabled = false;
-                onWrongPickup({
+                onCorrectPickup({
                     pickupId,
                     pickupColorIndex: pickup.shapeIndex,
                     pickupColorHex: pickup.color,
-                    targetColorIndex,
-                    targetColorHex: shapeColors[targetColorIndex],
                     position: pickupPosition,
                     collectorId: collector.id,
                 });
-                clearPickups(false);
-                break;
+                if (finiteMode) {
+                    finiteRoundState.collected += 1;
+                }
+
+                if (!resolvedSingleType) {
+                    targetColorIndex = getNextTargetColorIndex(targetColorIndex);
+                    emitTargetColorChanged();
+                }
             }
 
             if (finiteMode) {

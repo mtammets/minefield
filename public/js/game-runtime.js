@@ -258,23 +258,6 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             runtimeState.botTrafficSystem?.registerCollected(collectorId);
         }
     },
-    onWrongPickup: ({ pickupColorHex, targetColorHex, position, collectorId }) => {
-        if (collectorId !== 'player') {
-            return;
-        }
-        replayController.recordEvent(REPLAY_EVENT_PICKUP, {
-            x: position.x,
-            y: position.y,
-            z: position.z,
-            colorHex: pickupColorHex,
-            wrong: true,
-        });
-        runtimeState.gameSessionController.triggerCarExplosion(
-            position,
-            pickupColorHex,
-            targetColorHex
-        );
-    },
     onExhausted: ({ totalPickups, collectedPickups }) => {
         if (
             runtimeState.gameMode === 'online' &&
