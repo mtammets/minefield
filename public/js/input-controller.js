@@ -1,4 +1,5 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { INPUT_CONTEXTS } from './input-context.js';
 
 export function createInputController(options = {}) {
     const {
@@ -34,6 +35,7 @@ export function createInputController(options = {}) {
         onDeployMine = () => null,
         toggleWorldMap = () => ({ open: false, message: null }),
         isWorldMapVisible = () => false,
+        getInputContext = () => INPUT_CONTEXTS.gameplay,
         cyclePlayerRoofMenu,
         setPlayerRoofMenuMode,
         setPlayerRoofMenuModeFromUv,
@@ -139,13 +141,16 @@ export function createInputController(options = {}) {
         const isRaceIntroActive = raceIntroController.isActive();
         const isRaceIntroDriveLocked =
             isRaceIntroActive && !raceIntroController.isDrivingUnlocked();
+        const inputContext = getInputContext();
+        const worldMapVisible =
+            inputContext === INPUT_CONTEXTS.fullMap || Boolean(isWorldMapVisible());
 
         if (key === 'escape') {
             event.preventDefault();
             if (isRaceIntroActive) {
                 return;
             }
-            if (isKeyDown && isWorldMapVisible()) {
+            if (isKeyDown && worldMapVisible) {
                 const result = toggleWorldMap(false);
                 if (result?.message) {
                     onShowObjectiveInfo(result.message, 1100);
@@ -162,10 +167,11 @@ export function createInputController(options = {}) {
             return;
         }
 
-        if (getIsGamePaused()) {
+        const allowMapToggleWhilePaused = inputContext === INPUT_CONTEXTS.fullMap && key === 'm';
+        if (getIsGamePaused() && !allowMapToggleWhilePaused) {
             return;
         }
-        if (isWorldMapVisible() && isKeyDown && key !== 'm') {
+        if (inputContext === INPUT_CONTEXTS.fullMap && key !== 'm' && key !== 'escape') {
             return;
         }
 
@@ -382,6 +388,7 @@ export function createInputController(options = {}) {
         if (
             getIsWelcomeModalVisible() ||
             getIsGamePaused() ||
+            getInputContext() === INPUT_CONTEXTS.fullMap ||
             raceIntroController.isActive() ||
             getIsCarDestroyed() ||
             carEditModeController.isActive()

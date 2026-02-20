@@ -106,6 +106,12 @@ import { createRuntimeUiControllers } from './game-runtime-ui.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
 import { createMapUiController } from './map-ui.js';
+import {
+    INPUT_CONTEXTS,
+    WORLD_MAP_DRIVE_LOCK_MODES,
+    resolveGameplayInputContext,
+    resolveWorldMapDriveLockMode,
+} from './input-context.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
@@ -137,15 +143,7 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         getGameSessionController: () => runtimeState.gameSessionController,
         getInputController: () => runtimeState.inputController,
     });
-const mapUiController = createMapUiController({
-    worldBounds,
-    cityMapLayout,
-    staticObstacles,
-    chargingZones,
-    onStatus(messageText, timeoutMs = 1800) {
-        objectiveUi.showInfo(messageText, timeoutMs);
-    },
-});
+let mapUiController = null;
 
 car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
 const playerSpawnState = {
@@ -548,6 +546,102 @@ runtimeState.gameSessionController = createGameSessionController({
     },
 });
 
+function syncRuntimeInputContext() {
+    runtimeState.inputContext = resolveGameplayInputContext({
+        welcomeVisible: runtimeState.isWelcomeModalVisible,
+        mapOpen: runtimeState.isWorldMapOpen,
+        paused: runtimeState.isGamePaused,
+        editModeActive: carEditModeController.isActive(),
+        raceIntroDriveLocked:
+            raceIntroController.isActive() && !raceIntroController.isDrivingUnlocked(),
+        replayPlaybackActive: replayController.isPlaybackActive(),
+    });
+    return runtimeState.inputContext;
+}
+
+function resolveCurrentWorldMapDriveLockMode() {
+    return resolveWorldMapDriveLockMode({
+        gameMode: runtimeState.gameMode,
+        inOnlineRoom: Boolean(runtimeState.multiplayerController?.isInRoom?.()),
+    });
+}
+
+function applyWorldMapVisibilityPolicy(expanded) {
+    const nextOpen = Boolean(expanded);
+    if (runtimeState.isWorldMapOpen === nextOpen) {
+        syncRuntimeInputContext();
+        return;
+    }
+
+    runtimeState.isWorldMapOpen = nextOpen;
+
+    if (nextOpen) {
+        runtimeState.worldMapDriveLockMode = resolveCurrentWorldMapDriveLockMode();
+        runtimeState.gameSessionController?.clearDriveKeys();
+
+        if (runtimeState.worldMapDriveLockMode === WORLD_MAP_DRIVE_LOCK_MODES.pause) {
+            const wasPausedBeforeOpen = runtimeState.isGamePaused;
+            runtimeState.gameSessionController?.setPauseState(true, {
+                showPauseMenu: false,
+            });
+            runtimeState.isWorldMapPauseOwned = !wasPausedBeforeOpen && runtimeState.isGamePaused;
+        } else {
+            runtimeState.isWorldMapPauseOwned = false;
+        }
+    } else {
+        runtimeState.worldMapDriveLockMode = WORLD_MAP_DRIVE_LOCK_MODES.none;
+        runtimeState.gameSessionController?.clearDriveKeys();
+        if (runtimeState.isWorldMapPauseOwned) {
+            runtimeState.gameSessionController?.setPauseState(false);
+        }
+        runtimeState.isWorldMapPauseOwned = false;
+    }
+
+    syncRuntimeInputContext();
+}
+
+function toggleWorldMapWithPolicy(forceOpen) {
+    const result = mapUiController?.toggleExpanded(forceOpen);
+    if (!result || typeof result !== 'object') {
+        return {
+            open: false,
+            message: 'Map UI unavailable.',
+            driveLockMode: WORLD_MAP_DRIVE_LOCK_MODES.none,
+        };
+    }
+
+    if (result.open) {
+        const modeMessage =
+            runtimeState.worldMapDriveLockMode === WORLD_MAP_DRIVE_LOCK_MODES.autobrake
+                ? 'Autobrake engaged.'
+                : 'Time paused.';
+        return {
+            ...result,
+            driveLockMode: runtimeState.worldMapDriveLockMode,
+            message: result.message ? `${result.message} ${modeMessage}` : modeMessage,
+        };
+    }
+
+    return {
+        ...result,
+        driveLockMode: runtimeState.worldMapDriveLockMode,
+    };
+}
+
+mapUiController = createMapUiController({
+    worldBounds,
+    cityMapLayout,
+    staticObstacles,
+    chargingZones,
+    onStatus(messageText, timeoutMs = 1800) {
+        objectiveUi.showInfo(messageText, timeoutMs);
+    },
+    onExpandedChanged(expanded) {
+        applyWorldMapVisibilityPolicy(expanded);
+    },
+});
+syncRuntimeInputContext();
+
 runtimeState.inputController = createInputController({
     renderer,
     camera,
@@ -608,10 +702,13 @@ runtimeState.inputController = createInputController({
         return runtimeState.mineController?.deployMine?.(mode);
     },
     toggleWorldMap(forceOpen) {
-        return mapUiController.toggleExpanded(forceOpen);
+        return toggleWorldMapWithPolicy(forceOpen);
     },
     isWorldMapVisible() {
         return mapUiController.isExpanded();
+    },
+    getInputContext() {
+        return syncRuntimeInputContext() || INPUT_CONTEXTS.gameplay;
     },
     cyclePlayerRoofMenu,
     setPlayerRoofMenuMode,
@@ -691,6 +788,7 @@ runtimeState.gameLoopController = createGameLoopController({
     getGameMode: () => runtimeState.gameMode,
     getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
     getLocalPlayerId: () => runtimeState.multiplayerController?.getSelfId?.() || '',
+    getWorldMapDriveLockMode: () => runtimeState.worldMapDriveLockMode,
 });
 
 botStatusUi.render(runtimeState.botTrafficSystem.getHudState());

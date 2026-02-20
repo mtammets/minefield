@@ -11,6 +11,7 @@ import {
     ROUND_TOTAL_PICKUPS,
     SHARED_PICKUP_COLOR_HEX,
 } from './constants.js';
+import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 
 export function createGameSessionController({
     keys,
@@ -75,6 +76,7 @@ export function createGameSessionController({
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
     return {
         clearDriveKeys,
+        enforceDriveLockMode,
         setPauseState,
         dismissWelcomeModal,
         showWelcomeModal,
@@ -102,8 +104,24 @@ export function createGameSessionController({
         keys.handbrake = false;
     }
 
-    function setPauseState(nextPaused) {
+    function enforceDriveLockMode(mode = WORLD_MAP_DRIVE_LOCK_MODES.none) {
+        if (mode === WORLD_MAP_DRIVE_LOCK_MODES.none) {
+            return;
+        }
+        if (mode === WORLD_MAP_DRIVE_LOCK_MODES.autobrake) {
+            keys.forward = false;
+            keys.backward = false;
+            keys.left = false;
+            keys.right = false;
+            keys.handbrake = true;
+            return;
+        }
+        clearDriveKeys();
+    }
+
+    function setPauseState(nextPaused, options = {}) {
         const shouldPause = Boolean(nextPaused);
+        const showPauseMenu = options.showPauseMenu !== false;
         if (shouldPause && raceIntroController.isActive()) {
             return;
         }
@@ -114,7 +132,7 @@ export function createGameSessionController({
         setIsGamePaused(shouldPause);
         if (getIsGamePaused()) {
             clearDriveKeys();
-            if (getIsWelcomeModalVisible()) {
+            if (getIsWelcomeModalVisible() || !showPauseMenu) {
                 pauseMenuUi.hide();
                 return;
             }

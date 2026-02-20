@@ -30,6 +30,10 @@ Open `http://localhost:3000`.
 
 - Minimap is shown in the lower-left during gameplay.
 - Press `M` to open/close the full tactical map.
+- While full map is open, driving inputs are locked.
+- In Bots mode, opening the full map pauses simulation time until the map is closed.
+- In Online mode (while in-room), opening the full map keeps world simulation running and engages
+  autobrake.
 - Full map controls:
     - Left click: set waypoint
     - Left drag: pan

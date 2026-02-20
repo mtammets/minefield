@@ -1,3 +1,5 @@
+import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
+
 export function createGameLoopController(options = {}) {
     const {
         clock,
@@ -55,6 +57,7 @@ export function createGameLoopController(options = {}) {
         getGameMode,
         getIsWelcomeModalVisible,
         getLocalPlayerId,
+        getWorldMapDriveLockMode,
     } = options;
 
     if (!clock || !renderer || !scene || !camera || !car) {
@@ -85,6 +88,10 @@ export function createGameLoopController(options = {}) {
     const readWelcomeModalVisible =
         typeof getIsWelcomeModalVisible === 'function' ? getIsWelcomeModalVisible : () => false;
     const readLocalPlayerId = typeof getLocalPlayerId === 'function' ? getLocalPlayerId : () => '';
+    const readWorldMapDriveLockMode =
+        typeof getWorldMapDriveLockMode === 'function'
+            ? getWorldMapDriveLockMode
+            : () => WORLD_MAP_DRIVE_LOCK_MODES.none;
 
     let running = false;
     let animationFrameId = null;
@@ -117,6 +124,7 @@ export function createGameLoopController(options = {}) {
 
         const frameDelta = Math.min(clock.getDelta(), 0.05);
         const isEditModeActive = carEditModeController.isActive();
+        const worldMapDriveLockMode = readWorldMapDriveLockMode();
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;
@@ -128,6 +136,9 @@ export function createGameLoopController(options = {}) {
         multiplayerController?.update?.(frameDelta);
 
         if (!readGamePaused() && !isEditModeActive) {
+            if (worldMapDriveLockMode === WORLD_MAP_DRIVE_LOCK_MODES.autobrake) {
+                gameSessionController?.enforceDriveLockMode?.(WORLD_MAP_DRIVE_LOCK_MODES.autobrake);
+            }
             if (raceIntroController.isActive()) {
                 writePhysicsAccumulator(0);
                 chargingZoneController.update(car.position, frameDelta, { enabled: false });

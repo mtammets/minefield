@@ -23,6 +23,8 @@ export function createMapUiController(options = {}) {
     );
     const chargingZones = normalizeChargingZones(options.chargingZones);
     const onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
+    const onExpandedChanged =
+        typeof options.onExpandedChanged === 'function' ? options.onExpandedChanged : () => {};
 
     const state = {
         expanded: false,
@@ -173,6 +175,7 @@ export function createMapUiController(options = {}) {
         state.expanded = expanded;
         dom.worldMapOverlay.hidden = !expanded;
         document.body.classList.toggle('world-map-open', expanded);
+        onExpandedChanged(expanded);
 
         if (expanded) {
             refreshCanvasSizes(true);
