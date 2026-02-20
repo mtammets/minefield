@@ -17,6 +17,7 @@ const MINE_THROW_UP_OFFSET = 0.8;
 const MINE_DETONATION_LIGHT_LIFE = 0.28;
 const MINE_DETONATION_RING_LIFE = 0.34;
 const RECENT_DETONATION_RETENTION_MS = 5000;
+const MAX_POOLED_DETONATION_EFFECTS = 48;
 
 const mineForward = new THREE.Vector3();
 const mineThrowVelocity = new THREE.Vector3();
@@ -45,6 +46,8 @@ export function createMineSystemController(options = {}) {
 
     const minesById = new Map();
     const detonationEffects = [];
+    const detonationEffectPool = [];
+    const detonationRingGeometry = new THREE.RingGeometry(0.42, 1.08, 24);
     const recentDetonations = new Map();
     let lastDeployAtMs = -100_000;
     let localMineSequence = 0;
@@ -476,8 +479,7 @@ export function createMineSystemController(options = {}) {
             const effect = detonationEffects.pop();
             scene.remove(effect.ring);
             scene.remove(effect.light);
-            effect.ring.geometry.dispose();
-            effect.ring.material.dispose();
+            recycleDetonationEffect(effect);
         }
         recentDetonations.clear();
         lastDeployAtMs = -100_000;
@@ -494,31 +496,23 @@ export function createMineSystemController(options = {}) {
     }
 
     function spawnDetonationEffect(position) {
-        const light = new THREE.PointLight(0xff7c52, 4.2, 26, 2);
-        light.position.copy(position);
-        light.position.y += 0.42;
-        light.userData.life = MINE_DETONATION_LIGHT_LIFE;
-        light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
-        scene.add(light);
+        const effect = acquireDetonationEffect();
+        effect.light.position.copy(position);
+        effect.light.position.y += 0.42;
+        effect.light.userData.life = MINE_DETONATION_LIGHT_LIFE;
+        effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
+        effect.light.intensity = 4.2;
+        scene.add(effect.light);
 
-        const ringGeometry = new THREE.RingGeometry(0.42, 1.08, 24);
-        const ringMaterial = new THREE.MeshBasicMaterial({
-            color: 0xff855f,
-            transparent: true,
-            opacity: 0.78,
-            side: THREE.DoubleSide,
-            depthWrite: false,
-        });
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        ring.position.copy(position);
-        ring.position.y += 0.04;
-        ring.rotation.x = -Math.PI / 2;
-        ring.scale.setScalar(1);
-        ring.userData.life = MINE_DETONATION_RING_LIFE;
-        ring.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        scene.add(ring);
+        effect.ring.position.copy(position);
+        effect.ring.position.y += 0.04;
+        effect.ring.scale.setScalar(1);
+        effect.ring.userData.life = MINE_DETONATION_RING_LIFE;
+        effect.ring.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.ring.material.opacity = 0.78;
+        scene.add(effect.ring);
 
-        detonationEffects.push({ light, ring });
+        detonationEffects.push(effect);
     }
 
     function updateDetonationEffects(dt) {
@@ -549,9 +543,46 @@ export function createMineSystemController(options = {}) {
 
             scene.remove(effect.light);
             scene.remove(effect.ring);
-            effect.ring.geometry.dispose();
-            effect.ring.material.dispose();
+            recycleDetonationEffect(effect);
             detonationEffects.splice(index, 1);
+        }
+    }
+
+    function acquireDetonationEffect() {
+        if (detonationEffectPool.length > 0) {
+            return detonationEffectPool.pop();
+        }
+        const light = new THREE.PointLight(0xff7c52, 4.2, 26, 2);
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff855f,
+            transparent: true,
+            opacity: 0.78,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+        });
+        const ring = new THREE.Mesh(detonationRingGeometry, ringMaterial);
+        ring.rotation.x = -Math.PI / 2;
+        return { light, ring };
+    }
+
+    function recycleDetonationEffect(effect) {
+        if (!effect) {
+            return;
+        }
+        effect.light.userData.life = 0;
+        effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
+        effect.light.intensity = 0;
+        effect.light.position.set(0, -1000, 0);
+        effect.ring.userData.life = 0;
+        effect.ring.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.ring.material.opacity = 0;
+        effect.ring.scale.setScalar(0.0001);
+        effect.ring.position.set(0, -1000, 0);
+
+        if (detonationEffectPool.length < MAX_POOLED_DETONATION_EFFECTS) {
+            detonationEffectPool.push(effect);
+        } else {
+            effect.ring.material.dispose();
         }
     }
 

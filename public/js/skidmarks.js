@@ -64,6 +64,7 @@ export function createSkidMarkController(scene, options = {}) {
         previousRightWheel: new THREE.Vector3(),
     };
     const smokeParticles = [];
+    const smokeParticlePool = [];
     const localRearLeft = new THREE.Vector3(
         -SKID_MARK_REAR_WHEEL_OFFSET_X,
         0,
@@ -237,7 +238,7 @@ export function createSkidMarkController(scene, options = {}) {
             if (particle?.mesh?.parent) {
                 particle.mesh.parent.remove(particle.mesh);
             }
-            particle?.mesh?.material?.dispose?.();
+            recycleSmokeParticle(particle);
         }
         smokeParticles.length = 0;
     }
@@ -283,38 +284,28 @@ export function createSkidMarkController(scene, options = {}) {
             removeSmokeParticle(0);
         }
 
-        const material = new THREE.SpriteMaterial({
-            map: smokeTexture,
-            color: new THREE.Color().setScalar(THREE.MathUtils.lerp(0.28, 0.16, intensity)),
-            transparent: true,
-            opacity: 0,
-            depthWrite: false,
-            depthTest: true,
-            toneMapped: false,
-        });
-        const sprite = new THREE.Sprite(material);
+        const particle = acquireSmokeParticle();
+        const sprite = particle.mesh;
+        sprite.material.color.setScalar(THREE.MathUtils.lerp(0.28, 0.16, intensity));
+        sprite.material.opacity = 0;
         const startScale =
             THREE.MathUtils.lerp(0.42, 0.82, intensity) * (0.86 + Math.random() * 0.7);
         sprite.position.copy(position);
         sprite.scale.setScalar(startScale);
         layer.add(sprite);
 
-        smokeParticles.push({
-            mesh: sprite,
-            velocity: new THREE.Vector3(
-                (Math.random() - 0.5) * 1.05 + velocityX * 0.03,
-                0.65 + Math.random() * 0.92 + intensity * 0.4,
-                (Math.random() - 0.5) * 1.05 + velocityZ * 0.03
-            ),
-            life:
-                THREE.MathUtils.lerp(DRIFT_SMOKE_LIFE_MIN, DRIFT_SMOKE_LIFE_MAX, Math.random()) *
-                (0.9 + intensity * 0.48),
-            maxLife: 1,
-            growthRate: 0.74 + Math.random() * 0.76 + intensity * 0.4,
-            baseOpacity: THREE.MathUtils.lerp(0.38, 0.82, intensity),
-        });
-        const particle = smokeParticles[smokeParticles.length - 1];
+        particle.velocity.set(
+            (Math.random() - 0.5) * 1.05 + velocityX * 0.03,
+            0.65 + Math.random() * 0.92 + intensity * 0.4,
+            (Math.random() - 0.5) * 1.05 + velocityZ * 0.03
+        );
+        particle.life =
+            THREE.MathUtils.lerp(DRIFT_SMOKE_LIFE_MIN, DRIFT_SMOKE_LIFE_MAX, Math.random()) *
+            (0.9 + intensity * 0.48);
         particle.maxLife = particle.life;
+        particle.growthRate = 0.74 + Math.random() * 0.76 + intensity * 0.4;
+        particle.baseOpacity = THREE.MathUtils.lerp(0.38, 0.82, intensity);
+        smokeParticles.push(particle);
     }
 
     function updateSmokeParticles(dt) {
@@ -352,8 +343,51 @@ export function createSkidMarkController(scene, options = {}) {
         if (particle.mesh?.parent) {
             particle.mesh.parent.remove(particle.mesh);
         }
-        particle.mesh?.material?.dispose?.();
         smokeParticles.splice(index, 1);
+        recycleSmokeParticle(particle);
+    }
+
+    function acquireSmokeParticle() {
+        if (smokeParticlePool.length > 0) {
+            return smokeParticlePool.pop();
+        }
+        const material = new THREE.SpriteMaterial({
+            map: smokeTexture,
+            color: new THREE.Color().setScalar(0.22),
+            transparent: true,
+            opacity: 0,
+            depthWrite: false,
+            depthTest: true,
+            toneMapped: false,
+        });
+        const sprite = new THREE.Sprite(material);
+        return {
+            mesh: sprite,
+            velocity: new THREE.Vector3(),
+            life: 0,
+            maxLife: 1,
+            growthRate: 0,
+            baseOpacity: 0,
+        };
+    }
+
+    function recycleSmokeParticle(particle) {
+        if (!particle || !particle.mesh) {
+            return;
+        }
+        particle.life = 0;
+        particle.maxLife = 1;
+        particle.growthRate = 0;
+        particle.baseOpacity = 0;
+        particle.velocity.set(0, 0, 0);
+        particle.mesh.position.set(0, -1000, 0);
+        particle.mesh.scale.setScalar(0.0001);
+        particle.mesh.material.opacity = 0;
+        if (smokeParticlePool.length < DRIFT_SMOKE_MAX_PARTICLES) {
+            smokeParticlePool.push(particle);
+        } else {
+            particle.mesh.material.dispose();
+        }
     }
 
     function getLateralSpeed(vehicleStateSnapshot, headingYaw) {

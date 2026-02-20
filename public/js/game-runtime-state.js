@@ -1,7 +1,6 @@
 export function createGameRuntimeState({ selectedCarColorHex, batteryMax, playerCarPoolSize }) {
     return {
         physicsAccumulator: 0,
-        minimapAccumulator: 0,
         selectedCarColorHex: selectedCarColorHex >>> 0,
         isCarDestroyed: false,
         botTrafficSystem: null,

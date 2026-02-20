@@ -43,7 +43,6 @@ import {
     resetCameraTrackingState,
 } from './camera.js';
 import { createCarEditModeController } from './editmode.js';
-import { createCityBuilderController } from './city-builder.js';
 import {
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
@@ -61,12 +60,10 @@ import {
 } from './carphysics.js';
 import { addStars } from './stars.js';
 import { createCollectibleSystem } from './collectibles.js';
-import { createMiniMapController } from './minimap.js';
 import { createBotTrafficSystem } from './bots.js';
 import { createReplayController } from './replay.js';
 import {
     MAX_PHYSICS_STEPS_PER_FRAME,
-    MINIMAP_UPDATE_INTERVAL,
     PLAYER_RIDE_HEIGHT,
     OBSTACLE_CRASH_MAX_SPEED,
     STATUS_DEFAULT_TEXT,
@@ -176,7 +173,6 @@ const skidMarkController = createSkidMarkController(scene, {
     sampleGroundHeight: getGroundHeightAt,
     keys,
 });
-let cityBuilderController = null;
 const carEditModeController = createCarEditModeController({
     camera,
     car,
@@ -187,29 +183,9 @@ const carEditModeController = createCarEditModeController({
     captureEditablePartVisibility: capturePlayerCarPartVisibility,
     restoreEditablePartVisibility: restorePlayerCarPartVisibility,
     onEditModeChanged(isActive) {
-        setCameraKeyboardControlsEnabled(!(isActive || cityBuilderController?.isActive?.()));
+        setCameraKeyboardControlsEnabled(!isActive);
         runtimeState.gameSessionController?.clearDriveKeys();
         if (isActive) {
-            cityBuilderController?.setActive(false);
-            runtimeState.gameSessionController?.setPauseState(false);
-        }
-    },
-    onStatus(messageText) {
-        objectiveUi.showInfo(messageText, 1800);
-    },
-});
-cityBuilderController = createCityBuilderController({
-    scene,
-    camera,
-    canvas: renderer.domElement,
-    cityScenery,
-    staticObstacles,
-    cityMapLayout,
-    onModeChanged(isActive) {
-        setCameraKeyboardControlsEnabled(!(isActive || carEditModeController.isActive()));
-        runtimeState.gameSessionController?.clearDriveKeys();
-        if (isActive) {
-            carEditModeController.setActive(false);
             runtimeState.gameSessionController?.setPauseState(false);
         }
     },
@@ -229,7 +205,6 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         runtimeState.botTrafficSystem?.setSharedTargetColor(targetColorHex);
     },
     onCorrectPickup: ({ pickupColorHex, collectorId, position }) => {
-        runtimeState.totalCollectedCount += 1;
         replayController.recordEvent(REPLAY_EVENT_PICKUP, {
             x: position.x,
             y: position.y,
@@ -239,12 +214,41 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         });
 
         if (collectorId === 'player') {
+            const onlineAuthoritativeRoundActive =
+                runtimeState.gameMode === 'online' &&
+                runtimeState.multiplayerController?.isInRoom?.();
+            if (onlineAuthoritativeRoundActive) {
+                runtimeState.multiplayerController?.reportPickupCollected?.(
+                    {
+                        x: position.x,
+                        y: position.y,
+                        z: position.z,
+                        pickupColorHex,
+                    },
+                    (response) => {
+                        if (!response?.ok) {
+                            return;
+                        }
+                        runtimeState.gameSessionController.addBattery(BATTERY_PICKUP_GAIN);
+                        objectiveUi.flashCorrect(
+                            pickupColorHex,
+                            Math.round(runtimeState.playerBattery)
+                        );
+                    }
+                );
+                return;
+            }
+
             runtimeState.playerCollectedCount += 1;
+            runtimeState.totalCollectedCount += 1;
             runtimeState.gameSessionController.addBattery(BATTERY_PICKUP_GAIN);
             objectiveUi.flashCorrect(pickupColorHex, Math.round(runtimeState.playerBattery));
             return;
         }
-        runtimeState.botTrafficSystem?.registerCollected(collectorId);
+        if (runtimeState.gameMode === 'bots') {
+            runtimeState.totalCollectedCount += 1;
+            runtimeState.botTrafficSystem?.registerCollected(collectorId);
+        }
     },
     onWrongPickup: ({ pickupColorHex, targetColorHex, position, collectorId }) => {
         if (collectorId !== 'player') {
@@ -264,6 +268,12 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         );
     },
     onExhausted: ({ totalPickups, collectedPickups }) => {
+        if (
+            runtimeState.gameMode === 'online' &&
+            runtimeState.multiplayerController?.isInRoom?.()
+        ) {
+            return;
+        }
         runtimeState.gameSessionController.finalizePickupRound(totalPickups, collectedPickups);
     },
     singleType: true,
@@ -283,10 +293,6 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
     botCount: 3,
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
     getGroundHeightAt,
-    cityMapLayout,
-});
-const miniMapController = createMiniMapController(worldBounds, {
-    staticObstacles,
     cityMapLayout,
 });
 const replayController = createReplayController(car, camera);
@@ -399,6 +405,41 @@ runtimeState.multiplayerController = createMultiplayerController({
     onMineDetonated(snapshot) {
         runtimeState.mineController?.handleRemoteMineDetonated?.(snapshot);
     },
+    onAuthoritativeRoundState(authoritativeState) {
+        if (!authoritativeState?.inRoom) {
+            if (runtimeState.gameMode === 'online') {
+                runtimeState.playerCollectedCount = 0;
+                runtimeState.totalCollectedCount = 0;
+            }
+            return;
+        }
+
+        runtimeState.playerCollectedCount = Math.max(
+            0,
+            Math.round(Number(authoritativeState.playerCollectedCount) || 0)
+        );
+        runtimeState.totalCollectedCount = Math.max(
+            0,
+            Math.round(Number(authoritativeState.totalCollectedCount) || 0)
+        );
+
+        const roundState = authoritativeState.roundState;
+        if (
+            runtimeState.gameMode === 'online' &&
+            roundState?.finished &&
+            Number.isFinite(roundState.totalPickups)
+        ) {
+            runtimeState.gameSessionController?.finalizePickupRound(
+                roundState.totalPickups,
+                roundState.totalCollected,
+                {
+                    scoreboardEntries: Array.isArray(authoritativeState.scoreboard)
+                        ? authoritativeState.scoreboard
+                        : [],
+                }
+            );
+        }
+    },
 });
 
 runtimeState.gameSessionController = createGameSessionController({
@@ -421,7 +462,6 @@ runtimeState.gameSessionController = createGameSessionController({
     welcomeModalUi,
     raceIntroController,
     carEditModeController,
-    cityBuilderController,
     chargingZoneController,
     chargingProgressHudController,
     skidMarkController,
@@ -434,10 +474,6 @@ runtimeState.gameSessionController = createGameSessionController({
     setPhysicsAccumulator(value) {
         runtimeState.physicsAccumulator = value;
     },
-    setMinimapAccumulator(value) {
-        runtimeState.minimapAccumulator = value;
-    },
-    minimapUpdateInterval: MINIMAP_UPDATE_INTERVAL,
     replayEventCrash: REPLAY_EVENT_CRASH,
     colorNameFromHex,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
@@ -508,11 +544,9 @@ runtimeState.inputController = createInputController({
     car,
     keys,
     renderSettings,
-    miniMapController,
     welcomeModalUi,
     finalScoreboardUi,
     carEditModeController,
-    cityBuilderController,
     raceIntroController,
     replayController,
     getVehicleState,
@@ -589,12 +623,10 @@ runtimeState.gameLoopController = createGameLoopController({
     car,
     sunLight,
     carEditModeController,
-    cityBuilderController,
     raceIntroController,
     chargingZoneController,
     chargingProgressHudController,
     skidMarkController,
-    miniMapController,
     welcomeModalUi,
     starsController,
     objectiveUi,
@@ -603,9 +635,6 @@ runtimeState.gameLoopController = createGameLoopController({
     replayController,
     multiplayerController: runtimeState.multiplayerController,
     mineSystemController: runtimeState.mineController,
-    getMultiplayerMiniMapMarkers() {
-        return runtimeState.multiplayerController?.getMiniMapMarkers?.() || [];
-    },
     getMultiplayerCollisionSnapshots() {
         return runtimeState.multiplayerController?.getCollisionSnapshots?.() || [];
     },
@@ -630,16 +659,11 @@ runtimeState.gameLoopController = createGameLoopController({
     staticObstacles,
     physicsStep,
     maxPhysicsStepsPerFrame: MAX_PHYSICS_STEPS_PER_FRAME,
-    minimapUpdateInterval: MINIMAP_UPDATE_INTERVAL,
     roundTotalPickups: ROUND_TOTAL_PICKUPS,
     chargingBatteryGainPerSec: CHARGING_BATTERY_GAIN_PER_SEC,
     getPhysicsAccumulator: () => runtimeState.physicsAccumulator,
     setPhysicsAccumulator(value) {
         runtimeState.physicsAccumulator = value;
-    },
-    getMinimapAccumulator: () => runtimeState.minimapAccumulator,
-    setMinimapAccumulator(value) {
-        runtimeState.minimapAccumulator = value;
     },
     getIsGamePaused: () => runtimeState.isGamePaused,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,

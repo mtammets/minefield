@@ -1205,7 +1205,12 @@ export function createWelcomeModalController({
         ctx.fillStyle = centerGlow;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        const horizonBand = ctx.createLinearGradient(0, canvas.height * 0.54, 0, canvas.height * 0.82);
+        const horizonBand = ctx.createLinearGradient(
+            0,
+            canvas.height * 0.54,
+            0,
+            canvas.height * 0.82
+        );
         horizonBand.addColorStop(0, 'rgba(154, 220, 255, 0)');
         horizonBand.addColorStop(0.5, 'rgba(154, 220, 255, 0.22)');
         horizonBand.addColorStop(1, 'rgba(154, 220, 255, 0)');
@@ -1411,10 +1416,7 @@ export function createWelcomeModalController({
         }
         clearCustomCreateCodeLookup();
         const normalizedCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
-        if (
-            preferredOnlineRoomAction !== 'create' &&
-            preferredOnlineRoomAction !== 'join'
-        ) {
+        if (preferredOnlineRoomAction !== 'create' && preferredOnlineRoomAction !== 'join') {
             setCustomCreateCodeStatus('hidden', '');
             return;
         }
@@ -1449,8 +1451,7 @@ export function createWelcomeModalController({
             );
             const payload = await response.json().catch(() => ({}));
             if (
-                (preferredOnlineRoomAction !== 'create' &&
-                    preferredOnlineRoomAction !== 'join') ||
+                (preferredOnlineRoomAction !== 'create' && preferredOnlineRoomAction !== 'join') ||
                 normalizeOnlineRoomCode(preferredOnlineRoomCode) !== roomCode
             ) {
                 return;
@@ -1479,8 +1480,7 @@ export function createWelcomeModalController({
                 return;
             }
             if (
-                (preferredOnlineRoomAction === 'create' ||
-                    preferredOnlineRoomAction === 'join') &&
+                (preferredOnlineRoomAction === 'create' || preferredOnlineRoomAction === 'join') &&
                 normalizeOnlineRoomCode(preferredOnlineRoomCode) === roomCode
             ) {
                 setCustomCreateCodeStatus('error', roomCode);

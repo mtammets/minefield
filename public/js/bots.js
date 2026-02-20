@@ -224,19 +224,6 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             }
             applyEnabledVisibility();
         },
-        getMiniMapMarkers() {
-            if (!enabled) {
-                return [];
-            }
-            return bots
-                .filter((bot) => !bot.destroyed)
-                .map((bot) => ({
-                    x: bot.car.position.x,
-                    z: bot.car.position.z,
-                    rotationY: bot.car.rotation.y,
-                    colorHex: bot.bodyColor,
-                }));
-        },
         getHudState() {
             if (!enabled) {
                 return [];

@@ -7,12 +7,10 @@ export function createGameLoopController(options = {}) {
         car,
         sunLight,
         carEditModeController,
-        cityBuilderController,
         raceIntroController,
         chargingZoneController,
         chargingProgressHudController,
         skidMarkController,
-        miniMapController,
         welcomeModalUi,
         starsController,
         objectiveUi,
@@ -26,7 +24,6 @@ export function createGameLoopController(options = {}) {
         replayEffectsController,
         gameSessionController,
         getBotTrafficSystem,
-        getMultiplayerMiniMapMarkers,
         getMultiplayerCollisionSnapshots,
         getVehicleState,
         getGroundHeightAt,
@@ -44,13 +41,10 @@ export function createGameLoopController(options = {}) {
         staticObstacles,
         physicsStep = 1 / 120,
         maxPhysicsStepsPerFrame = 6,
-        minimapUpdateInterval = 1 / 12,
         roundTotalPickups = 30,
         chargingBatteryGainPerSec = 16,
         getPhysicsAccumulator,
         setPhysicsAccumulator,
-        getMinimapAccumulator,
-        setMinimapAccumulator,
         getIsGamePaused,
         getIsCarDestroyed,
         getIsBatteryDepleted,
@@ -74,10 +68,6 @@ export function createGameLoopController(options = {}) {
         typeof getPhysicsAccumulator === 'function' ? getPhysicsAccumulator : () => 0;
     const writePhysicsAccumulator =
         typeof setPhysicsAccumulator === 'function' ? setPhysicsAccumulator : () => {};
-    const readMinimapAccumulator =
-        typeof getMinimapAccumulator === 'function' ? getMinimapAccumulator : () => 0;
-    const writeMinimapAccumulator =
-        typeof setMinimapAccumulator === 'function' ? setMinimapAccumulator : () => {};
     const readGamePaused = typeof getIsGamePaused === 'function' ? getIsGamePaused : () => false;
     const readCarDestroyed =
         typeof getIsCarDestroyed === 'function' ? getIsCarDestroyed : () => false;
@@ -121,7 +111,6 @@ export function createGameLoopController(options = {}) {
 
         const frameDelta = Math.min(clock.getDelta(), 0.05);
         const isEditModeActive = carEditModeController.isActive();
-        const isBuilderModeActive = cityBuilderController?.isActive?.() || false;
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;
@@ -132,7 +121,7 @@ export function createGameLoopController(options = {}) {
         welcomeModalUi.update(frameDelta);
         multiplayerController?.update?.(frameDelta);
 
-        if (!readGamePaused() && !isEditModeActive && !isBuilderModeActive) {
+        if (!readGamePaused() && !isEditModeActive) {
             if (raceIntroController.isActive()) {
                 writePhysicsAccumulator(0);
                 chargingZoneController.update(car.position, frameDelta, { enabled: false });
@@ -299,6 +288,7 @@ export function createGameLoopController(options = {}) {
                         : [{ id: 'player', position: car.position }];
                     collectibleSystem.updateForCollectors(collectors, frameDelta);
                     if (
+                        readBotsEnabled() &&
                         !readPickupRoundFinished() &&
                         readTotalCollectedCount() >= roundTotalPickups
                     ) {
@@ -307,29 +297,7 @@ export function createGameLoopController(options = {}) {
                             readTotalCollectedCount()
                         );
                     }
-                    let minimapAccumulator = readMinimapAccumulator() + frameDelta;
-                    if (minimapAccumulator >= minimapUpdateInterval) {
-                        const visiblePickups = collectibleSystem.getVisiblePickups();
-                        const botMarkers = botsEnabled
-                            ? botTrafficSystem?.getMiniMapMarkers?.() || []
-                            : [];
-                        const multiplayerMarkers =
-                            typeof getMultiplayerMiniMapMarkers === 'function'
-                                ? getMultiplayerMiniMapMarkers()
-                                : [];
-                        miniMapController.update(
-                            car.position,
-                            car.rotation.y,
-                            visiblePickups,
-                            botMarkers.concat(multiplayerMarkers),
-                            { hidePlayer: readCarDestroyed() }
-                        );
-                        botStatusUi.render(
-                            botsEnabled ? botTrafficSystem?.getHudState?.() || [] : []
-                        );
-                        minimapAccumulator = 0;
-                    }
-                    writeMinimapAccumulator(minimapAccumulator);
+                    botStatusUi.render(botsEnabled ? botTrafficSystem?.getHudState?.() || [] : []);
                 }
 
                 replayEffectsController.updateReplayEffects(frameDelta);
@@ -340,7 +308,7 @@ export function createGameLoopController(options = {}) {
                     crashDebrisController.updateDebris(frameDelta);
                 }
             }
-        } else if (isEditModeActive || isBuilderModeActive) {
+        } else if (isEditModeActive) {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
             const inspectionVehicleState = getVehicleState();
             inspectionVehicleState.chargingLevelNormalized = 0;
@@ -348,9 +316,6 @@ export function createGameLoopController(options = {}) {
             updateCarVisuals(inspectionVehicleState, frameDelta);
             if (isEditModeActive) {
                 carEditModeController.update(frameDelta);
-            }
-            if (isBuilderModeActive) {
-                cityBuilderController?.update?.(frameDelta);
             }
             starsController.update(frameDelta);
             updateGroundMotion(car.position, 0);

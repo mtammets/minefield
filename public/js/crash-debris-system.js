@@ -28,6 +28,7 @@ import {
 } from './constants.js';
 
 const EXPLOSION_LIGHT_MAX_LIFE = 0.7;
+const MAX_DEBRIS_MESH_POOL_PER_PART = 18;
 
 export function createCrashDebrisController({
     scene,
@@ -51,6 +52,7 @@ export function createCrashDebrisController({
 
     const debrisPieces = [];
     const debrisPieceById = new Map();
+    const debrisMeshPoolByPartId = new Map();
     const detachedCrashPartIds = new Set();
     const crashPartById = new Map();
     const playerDamageState = createEmptyDamageState();
@@ -61,6 +63,7 @@ export function createCrashDebrisController({
 
     let explosionLight = null;
     let explosionLightLife = 0;
+    let explosionLightAttached = false;
     let vehicleImpactStatusCooldown = 0;
 
     return {
@@ -79,7 +82,7 @@ export function createCrashDebrisController({
         updateDebris,
         clearDebris,
         hasActiveDebrisOrExplosion() {
-            return debrisPieces.length > 0 || Boolean(explosionLight);
+            return debrisPieces.length > 0 || (explosionLightAttached && explosionLightLife > 0);
         },
     };
 
@@ -458,11 +461,10 @@ export function createCrashDebrisController({
         });
         applyDetachedPartVisibility();
 
-        explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
-        explosionLight.position.copy(crashContext.origin);
-        explosionLight.position.y += 1.2;
+        const activeExplosionLight = ensureExplosionLightAttached();
+        activeExplosionLight.position.copy(crashContext.origin);
+        activeExplosionLight.position.y += 1.2;
         explosionLightLife = EXPLOSION_LIGHT_MAX_LIFE;
-        scene.add(explosionLight);
     }
 
     function getReplicationState() {
@@ -494,14 +496,15 @@ export function createCrashDebrisController({
         return {
             detachedPartIds,
             debrisPieces: debrisPiecesSnapshot,
-            explosion: explosionLight
-                ? {
-                      x: explosionLight.position.x,
-                      y: explosionLight.position.y,
-                      z: explosionLight.position.z,
-                      life: explosionLightLife,
-                  }
-                : null,
+            explosion:
+                explosionLightAttached && explosionLight
+                    ? {
+                          x: explosionLight.position.x,
+                          y: explosionLight.position.y,
+                          z: explosionLight.position.z,
+                          life: explosionLightLife,
+                      }
+                    : null,
         };
     }
 
@@ -531,7 +534,7 @@ export function createCrashDebrisController({
             if (!piece) {
                 const source = part.source;
                 source.updateWorldMatrix(true, true);
-                const debrisMesh = cloneCrashPartSource(source);
+                const debrisMesh = acquireDebrisMesh(partId, source);
                 source.matrixWorld.decompose(
                     debrisMesh.position,
                     debrisMesh.quaternion,
@@ -758,7 +761,8 @@ export function createCrashDebrisController({
 
         const source = part.source;
         source.updateWorldMatrix(true, true);
-        const debrisMesh = cloneCrashPartSource(source);
+        const partId = part.id || '';
+        const debrisMesh = acquireDebrisMesh(partId, source);
         source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
         scene.add(debrisMesh);
 
@@ -857,7 +861,7 @@ export function createCrashDebrisController({
 
         const debrisGroundOffset = estimateDebrisGroundOffset(debrisMesh);
         addDebrisPiece({
-            partId: part.id || '',
+            partId,
             mesh: debrisMesh,
             velocity,
             angularVelocity,
@@ -868,6 +872,17 @@ export function createCrashDebrisController({
             wheelRoll,
             bodyRest,
         });
+    }
+
+    function acquireDebrisMesh(partId, source) {
+        const key = typeof partId === 'string' ? partId : '';
+        const pool = debrisMeshPoolByPartId.get(key);
+        if (pool && pool.length > 0) {
+            const mesh = pool.pop();
+            mesh.visible = true;
+            return mesh;
+        }
+        return cloneCrashPartSource(source);
     }
 
     function cloneCrashPartSource(source) {
@@ -888,6 +903,27 @@ export function createCrashDebrisController({
             node.matrixAutoUpdate = true;
         });
         return clone;
+    }
+
+    function recycleDebrisMesh(partId, mesh) {
+        if (!mesh) {
+            return;
+        }
+        const key = typeof partId === 'string' ? partId : '';
+        const pool = debrisMeshPoolByPartId.get(key) || [];
+        if (!debrisMeshPoolByPartId.has(key)) {
+            debrisMeshPoolByPartId.set(key, pool);
+        }
+
+        mesh.visible = false;
+        mesh.position.set(0, -1000, 0);
+        mesh.rotation.set(0, 0, 0);
+        mesh.scale.set(1, 1, 1);
+        if (pool.length < MAX_DEBRIS_MESH_POOL_PER_PART) {
+            pool.push(mesh);
+            return;
+        }
+        disposeDebrisObject(mesh);
     }
 
     function estimateDebrisGroundOffset(object3D) {
@@ -1111,14 +1147,13 @@ export function createCrashDebrisController({
             }
         }
 
-        if (explosionLight) {
+        if (explosionLightAttached && explosionLight) {
             explosionLightLife -= dt;
             const lifeRatio = Math.max(explosionLightLife / EXPLOSION_LIGHT_MAX_LIFE, 0);
             explosionLight.intensity = 4.8 * lifeRatio;
             explosionLight.distance = 28 + lifeRatio * 22;
             if (explosionLightLife <= 0) {
-                scene.remove(explosionLight);
-                explosionLight = null;
+                detachExplosionLight();
             }
         }
     }
@@ -1130,11 +1165,7 @@ export function createCrashDebrisController({
         debrisPieces.length = 0;
         debrisPieceById.clear();
 
-        if (explosionLight) {
-            scene.remove(explosionLight);
-            explosionLight = null;
-            explosionLightLife = 0;
-        }
+        detachExplosionLight();
     }
 
     function removeDebrisPieceAtIndex(index) {
@@ -1143,36 +1174,54 @@ export function createCrashDebrisController({
             return;
         }
         scene.remove(piece.mesh);
-        disposeDebrisObject(piece.mesh);
+        recycleDebrisMesh(piece.partId, piece.mesh);
         debrisPieceById.delete(piece.id);
         debrisPieces.splice(index, 1);
     }
 
+    function ensureExplosionLightAttached() {
+        if (!explosionLight) {
+            explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
+        }
+        if (!explosionLightAttached) {
+            scene.add(explosionLight);
+            explosionLightAttached = true;
+        }
+        return explosionLight;
+    }
+
+    function detachExplosionLight() {
+        if (explosionLightAttached && explosionLight) {
+            scene.remove(explosionLight);
+        }
+        explosionLightAttached = false;
+        explosionLightLife = 0;
+    }
+
     function applyExplosionSnapshot(snapshot) {
         if (!snapshot || typeof snapshot !== 'object') {
-            if (explosionLight) {
-                scene.remove(explosionLight);
-                explosionLight = null;
-                explosionLightLife = 0;
-            }
+            detachExplosionLight();
             return;
         }
 
-        if (!explosionLight) {
-            explosionLight = new THREE.PointLight(0xff7a4f, 4.8, 50, 2);
-            scene.add(explosionLight);
-        }
+        const activeExplosionLight = ensureExplosionLightAttached();
 
-        explosionLight.position.set(
-            coerceFinite(snapshot.x, explosionLight.position.x),
-            coerceFinite(snapshot.y, explosionLight.position.y),
-            coerceFinite(snapshot.z, explosionLight.position.z)
+        activeExplosionLight.position.set(
+            coerceFinite(snapshot.x, activeExplosionLight.position.x),
+            coerceFinite(snapshot.y, activeExplosionLight.position.y),
+            coerceFinite(snapshot.z, activeExplosionLight.position.z)
         );
         explosionLightLife = THREE.MathUtils.clamp(
             coerceFinite(snapshot.life, EXPLOSION_LIGHT_MAX_LIFE),
             0,
             EXPLOSION_LIGHT_MAX_LIFE
         );
+        if (explosionLightLife <= 0) {
+            detachExplosionLight();
+            return;
+        }
+        activeExplosionLight.intensity = 4.8;
+        activeExplosionLight.distance = 50;
     }
 
     function ensureCrashPartIndex() {

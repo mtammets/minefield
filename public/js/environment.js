@@ -30,8 +30,6 @@ const ROAD_STYLE_CONFIGS = {
     boulevard: {
         key: 'boulevard',
         sidewalkMode: 'both',
-        minimapRoadColor: 'rgba(53, 76, 102, 0.98)',
-        minimapEdgeColor: 'rgba(95, 124, 154, 0.9)',
         texture: {
             top: '#24374a',
             bottom: '#1b2a39',
@@ -50,8 +48,6 @@ const ROAD_STYLE_CONFIGS = {
     avenue: {
         key: 'avenue',
         sidewalkMode: 'both',
-        minimapRoadColor: 'rgba(47, 65, 88, 0.96)',
-        minimapEdgeColor: 'rgba(84, 113, 145, 0.88)',
         texture: {
             top: '#1f2c3a',
             bottom: '#182431',
@@ -69,8 +65,6 @@ const ROAD_STYLE_CONFIGS = {
     service: {
         key: 'service',
         sidewalkMode: 'none',
-        minimapRoadColor: 'rgba(39, 56, 77, 0.94)',
-        minimapEdgeColor: 'rgba(75, 104, 132, 0.82)',
         texture: {
             top: '#1a2531',
             bottom: '#15202b',
@@ -377,15 +371,17 @@ function createRoadSurfaceTexture(styleTextureConfig = ROAD_STYLE_CONFIGS.avenue
 
     const centerX = canvas.width * 0.5;
     if (styleTextureConfig.centerMode === 'dashed') {
-        drawDashedVerticalLine(ctx, centerX, styleTextureConfig.centerColor, 5, 32, 24, canvas.height);
-    } else if (styleTextureConfig.centerMode === 'double-solid') {
-        drawSolidVerticalLine(
+        drawDashedVerticalLine(
             ctx,
-            centerX - 6,
+            centerX,
             styleTextureConfig.centerColor,
-            4,
+            5,
+            32,
+            24,
             canvas.height
         );
+    } else if (styleTextureConfig.centerMode === 'double-solid') {
+        drawSolidVerticalLine(ctx, centerX - 6, styleTextureConfig.centerColor, 4, canvas.height);
         drawSolidVerticalLine(
             ctx,
             centerX + 6,
@@ -467,11 +463,43 @@ function createIntersectionTexture({ variant = 'standard' } = {}) {
         drawDashedHorizontalLine(ctx, center, 'rgba(179, 236, 255, 0.46)', 3, 24, 20, canvas.width);
         drawChargingIntersectionMarkings(ctx, canvas.width, center);
     } else if (variant === 'standard') {
-        drawDashedVerticalLine(ctx, center, 'rgba(230, 241, 252, 0.52)', 3.2, 26, 20, canvas.height);
-        drawDashedHorizontalLine(ctx, center, 'rgba(230, 241, 252, 0.52)', 3.2, 26, 20, canvas.width);
+        drawDashedVerticalLine(
+            ctx,
+            center,
+            'rgba(230, 241, 252, 0.52)',
+            3.2,
+            26,
+            20,
+            canvas.height
+        );
+        drawDashedHorizontalLine(
+            ctx,
+            center,
+            'rgba(230, 241, 252, 0.52)',
+            3.2,
+            26,
+            20,
+            canvas.width
+        );
     } else {
-        drawDashedVerticalLine(ctx, center, 'rgba(207, 223, 241, 0.38)', 2.6, 20, 24, canvas.height);
-        drawDashedHorizontalLine(ctx, center, 'rgba(207, 223, 241, 0.38)', 2.6, 20, 24, canvas.width);
+        drawDashedVerticalLine(
+            ctx,
+            center,
+            'rgba(207, 223, 241, 0.38)',
+            2.6,
+            20,
+            24,
+            canvas.height
+        );
+        drawDashedHorizontalLine(
+            ctx,
+            center,
+            'rgba(207, 223, 241, 0.38)',
+            2.6,
+            20,
+            24,
+            canvas.width
+        );
     }
 
     const shouldDrawCrosswalks = variant === 'boulevard' || variant === 'standard';
@@ -564,7 +592,11 @@ function drawIntersectionCrosswalks(
     const stripeStart = laneInset + 4;
     const stripeEnd = laneOuter - 4;
 
-    for (let axisOffset = stripeStart; axisOffset <= stripeEnd; axisOffset += stripeWidth + stripeGap) {
+    for (
+        let axisOffset = stripeStart;
+        axisOffset <= stripeEnd;
+        axisOffset += stripeWidth + stripeGap
+    ) {
         ctx.fillRect(axisOffset, inset, stripeWidth, stripeLength);
         ctx.fillRect(axisOffset, size - inset - stripeLength, stripeWidth, stripeLength);
         ctx.fillRect(inset, axisOffset, stripeLength, stripeWidth);
@@ -986,13 +1018,20 @@ function createRoadLayer() {
 
     xLineDescriptors.forEach((xLineDescriptor) => {
         zLineDescriptors.forEach((zLineDescriptor) => {
-            const intersectionVariant = resolveIntersectionVariant(xLineDescriptor, zLineDescriptor);
+            const intersectionVariant = resolveIntersectionVariant(
+                xLineDescriptor,
+                zLineDescriptor
+            );
             const patch = new THREE.Mesh(
                 intersectionGeometry,
                 intersectionMaterialSet[intersectionVariant]
             );
             patch.rotation.x = -Math.PI / 2;
-            patch.position.set(xLineDescriptor.coordinate, roadY + 0.004, zLineDescriptor.coordinate);
+            patch.position.set(
+                xLineDescriptor.coordinate,
+                roadY + 0.004,
+                zLineDescriptor.coordinate
+            );
             layer.add(patch);
         });
     });
@@ -1042,7 +1081,6 @@ function resolveRoadStyleKeyForAxisLine(gridIndex, _axisSalt) {
 }
 
 function toCityMapLineDescriptor(lineDescriptor) {
-    const style = ROAD_STYLE_CONFIGS[lineDescriptor.styleKey] || ROAD_STYLE_CONFIGS.avenue;
     const hasSidewalks = lineDescriptor.sidewalkMode !== 'none';
     return {
         gridIndex: lineDescriptor.gridIndex,
@@ -1050,8 +1088,6 @@ function toCityMapLineDescriptor(lineDescriptor) {
         styleKey: lineDescriptor.styleKey,
         roadWidth: ROAD_WIDTH,
         sidewalkWidth: hasSidewalks ? SIDEWALK_WIDTH : 0,
-        minimapRoadColor: style.minimapRoadColor,
-        minimapEdgeColor: style.minimapEdgeColor,
     };
 }
 
@@ -1106,8 +1142,7 @@ function createIntersectionMaterialSet() {
         const texture = createIntersectionTexture({ variant });
         const emissiveColor =
             variant === 'charging' ? 0x1a4858 : variant === 'boulevard' ? 0x203249 : 0x152536;
-        const emissiveIntensity =
-            variant === 'charging' ? 0.36 : variant === 'minor' ? 0.24 : 0.31;
+        const emissiveIntensity = variant === 'charging' ? 0.36 : variant === 'minor' ? 0.24 : 0.31;
         materialSet[variant] = new THREE.MeshStandardMaterial({
             color: 0xffffff,
             map: texture,
@@ -1161,7 +1196,10 @@ function addBoulevardMedians(layer, lineDescriptors, intervals, orientation, y, 
 function resolveIntersectionVariant(xLineDescriptor, zLineDescriptor) {
     const xStyle = xLineDescriptor.styleKey;
     const zStyle = zLineDescriptor.styleKey;
-    const intersectionKey = toIntersectionKey(xLineDescriptor.coordinate, zLineDescriptor.coordinate);
+    const intersectionKey = toIntersectionKey(
+        xLineDescriptor.coordinate,
+        zLineDescriptor.coordinate
+    );
 
     if (chargingZoneIntersectionKeys.has(intersectionKey)) {
         return 'charging';

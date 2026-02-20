@@ -2,6 +2,16 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+const { consumeRateLimit } = require('./rate-limit');
+const { validateCollisionRelay } = require('./collision-guard');
+const { resolveAuthoritativeMineDetonation } = require('./mine-guard');
+const {
+    ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT,
+    createRoomRoundState,
+    applyPlayerPickupScore,
+    recalculateRoomRoundStateFromPlayers,
+    serializeRoomRoundState,
+} = require('./room-round-state');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +37,26 @@ const MINE_ID_MAX_LENGTH = 72;
 const MINE_DEFAULT_TRIGGER_RADIUS = 1.5;
 const MINE_DEFAULT_ARM_DELAY_MS = 650;
 const MINE_DEFAULT_TTL_MS = 45_000;
+const MINE_SERVER_PLACE_COOLDOWN_MS = 450;
+const CRASH_REPLICATION_MIN_INTERVAL_MS = 180;
+const VEHICLE_STATUS_MIN_INTERVAL_MS = 140;
+
+const GLOBAL_RATE_WINDOW_MS = 1000;
+const GLOBAL_RATE_MAX_EVENTS = 150;
+
+const EVENT_RATE_LIMITS = {
+    'mp:createRoom': { windowMs: 10_000, max: 8 },
+    'mp:joinRoom': { windowMs: 10_000, max: 10 },
+    'mp:leaveRoom': { windowMs: 5_000, max: 10 },
+    'mp:updateProfile': { windowMs: 10_000, max: 25 },
+    'mp:state': { windowMs: 1000, max: 40 },
+    'mp:collision': { windowMs: 1000, max: 18 },
+    'mp:minePlaced': { windowMs: 1000, max: 8 },
+    'mp:mineDetonated': { windowMs: 1000, max: 12 },
+    'mp:pickupCollected': { windowMs: 1000, max: 10 },
+    'mp:crashReplication': { windowMs: 1000, max: 8 },
+    'mp:vehicleStatus': { windowMs: 1000, max: 12 },
+};
 
 const rooms = new Map();
 
@@ -60,8 +90,16 @@ io.on('connection', (socket) => {
     socket.data.profile = createDefaultProfile(socket.id);
     socket.data.roomCode = null;
     socket.data.lastCollisionRelays = new Map();
+    socket.data.rateLimitStore = new Map();
 
     socket.on('mp:createRoom', (payload, ack) => {
+        if (!consumeInboundEventQuota(socket, 'mp:createRoom')) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Too many requests. Slow down and try again.',
+            });
+            return;
+        }
         try {
             const profile = resolveProfile(payload?.profile, socket.data.profile, socket.id);
             socket.data.profile = profile;
@@ -110,8 +148,10 @@ io.on('connection', (socket) => {
                 updatedAt: Date.now(),
                 players: new Map(),
                 mines: new Map(),
+                roundState: createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT),
             };
             room.players.set(socket.id, createRoomPlayer(socket.id, profile));
+            recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
             rooms.set(roomCode, room);
 
             socket.join(roomCode);
@@ -132,6 +172,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mp:joinRoom', (payload, ack) => {
+        if (!consumeInboundEventQuota(socket, 'mp:joinRoom')) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Too many requests. Slow down and try again.',
+            });
+            return;
+        }
         try {
             const roomCode = sanitizeRoomCode(payload?.roomCode);
             if (!roomCode) {
@@ -164,6 +211,11 @@ io.on('connection', (socket) => {
             leaveCurrentRoom(socket);
 
             room.players.set(socket.id, createRoomPlayer(socket.id, profile));
+            room.roundState =
+                room.roundState && typeof room.roundState === 'object'
+                    ? room.roundState
+                    : createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT);
+            recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
             room.updatedAt = Date.now();
             socket.join(roomCode);
             socket.data.roomCode = roomCode;
@@ -183,6 +235,13 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mp:leaveRoom', (payload, ack) => {
+        if (!consumeInboundEventQuota(socket, 'mp:leaveRoom')) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Too many requests. Slow down and try again.',
+            });
+            return;
+        }
         const roomCode = socket.data.roomCode;
         leaveCurrentRoom(socket);
         safeAck(ack, {
@@ -192,6 +251,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mp:updateProfile', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:updateProfile')) {
+            return;
+        }
         const profile = resolveProfile(payload, socket.data.profile, socket.id);
         socket.data.profile = profile;
 
@@ -218,6 +280,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mp:state', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:state')) {
+            return;
+        }
         const roomCode = socket.data.roomCode;
         if (!roomCode) {
             return;
@@ -244,6 +309,8 @@ io.on('connection', (socket) => {
         if (!sanitizedState) {
             return;
         }
+        sanitizedState.collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
+        sanitizedState.isDestroyed = Boolean(player.isDestroyed);
 
         player.lastState = sanitizedState;
         player.lastStateAt = now;
@@ -258,6 +325,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mp:collision', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:collision')) {
+            return;
+        }
         const roomCode = socket.data.roomCode;
         if (!roomCode) {
             return;
@@ -278,7 +348,11 @@ io.on('connection', (socket) => {
         if (!relay) {
             return;
         }
-        if (relay.targetId === socket.id || !room.players.has(relay.targetId)) {
+        if (relay.targetId === socket.id) {
+            return;
+        }
+        const targetPlayer = room.players.get(relay.targetId);
+        if (!targetPlayer) {
             return;
         }
 
@@ -291,20 +365,35 @@ io.on('connection', (socket) => {
         }
         lastByTarget.set(key, now);
 
+        const validatedRelay = validateCollisionRelay({
+            relay,
+            sourceState: sourcePlayer.lastState,
+            sourceStateAt: sourcePlayer.lastStateAt,
+            targetState: targetPlayer.lastState,
+            targetStateAt: targetPlayer.lastStateAt,
+            nowMs: now,
+        });
+        if (!validatedRelay.ok) {
+            return;
+        }
+
         io.to(relay.targetId).emit('mp:collision', {
             sourcePlayerId: socket.id,
-            normalX: relay.normalX,
-            normalZ: relay.normalZ,
-            penetration: relay.penetration,
-            impactSpeed: relay.impactSpeed,
-            otherVelocityX: relay.otherVelocityX,
-            otherVelocityZ: relay.otherVelocityZ,
-            mass: relay.mass,
+            normalX: validatedRelay.relay.normalX,
+            normalZ: validatedRelay.relay.normalZ,
+            penetration: validatedRelay.relay.penetration,
+            impactSpeed: validatedRelay.relay.impactSpeed,
+            otherVelocityX: validatedRelay.relay.otherVelocityX,
+            otherVelocityZ: validatedRelay.relay.otherVelocityZ,
+            mass: validatedRelay.relay.mass,
             serverTime: now,
         });
     });
 
     socket.on('mp:minePlaced', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:minePlaced')) {
+            return;
+        }
         const roomCode = socket.data.roomCode;
         if (!roomCode) {
             return;
@@ -322,6 +411,9 @@ io.on('connection', (socket) => {
         }
 
         const now = Date.now();
+        if (now - (player.lastMinePlacedAt || 0) < MINE_SERVER_PLACE_COOLDOWN_MS) {
+            return;
+        }
         pruneExpiredMines(room, now);
         const mine = sanitizeMinePlacement(payload, {
             ownerId: socket.id,
@@ -334,6 +426,7 @@ io.on('connection', (socket) => {
 
         enforceMineLimits(room, mine.ownerId);
         room.mines.set(mine.id, mine);
+        player.lastMinePlacedAt = now;
         room.updatedAt = now;
         io.to(roomCode).emit('mp:minePlaced', {
             ...serializeMine(mine),
@@ -342,6 +435,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('mp:mineDetonated', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:mineDetonated')) {
+            return;
+        }
         const roomCode = socket.data.roomCode;
         if (!roomCode) {
             return;
@@ -370,23 +466,168 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const resolvedDetonation = resolveAuthoritativeMineDetonation({
+            room,
+            mine,
+            reportingPlayerId: socket.id,
+            detonation,
+            nowMs: now,
+        });
+        if (!resolvedDetonation.ok) {
+            return;
+        }
+
         room.mines.delete(mine.id);
         room.updatedAt = now;
         io.to(roomCode).emit('mp:mineDetonated', {
-            mineId: mine.id,
-            ownerId: mine.ownerId,
-            ownerName: mine.ownerName,
-            x: roundTo(clampFinite(detonation.x, -5000, 5000, mine.x), 4),
-            y: roundTo(clampFinite(detonation.y, -500, 2500, mine.y), 4),
-            z: roundTo(clampFinite(detonation.z, -5000, 5000, mine.z), 4),
-            triggerPlayerId: sanitizeOptionalRoomPlayerId(
-                detonation.triggerPlayerId,
-                room,
-                socket.id
-            ),
-            targetPlayerId: sanitizeOptionalRoomPlayerId(detonation.targetPlayerId, room, ''),
+            mineId: resolvedDetonation.detonation.mineId,
+            ownerId: resolvedDetonation.detonation.ownerId,
+            ownerName: resolvedDetonation.detonation.ownerName,
+            x: roundTo(clampFinite(resolvedDetonation.detonation.x, -5000, 5000, mine.x), 4),
+            y: roundTo(clampFinite(resolvedDetonation.detonation.y, -500, 2500, mine.y), 4),
+            z: roundTo(clampFinite(resolvedDetonation.detonation.z, -5000, 5000, mine.z), 4),
+            triggerPlayerId: resolvedDetonation.detonation.triggerPlayerId,
+            targetPlayerId: resolvedDetonation.detonation.targetPlayerId,
             serverTime: now,
         });
+    });
+
+    socket.on('mp:pickupCollected', (payload, ack) => {
+        if (!consumeInboundEventQuota(socket, 'mp:pickupCollected')) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Rate limited',
+            });
+            return;
+        }
+
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Not in room',
+            });
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            safeAck(ack, {
+                ok: false,
+                error: 'Room missing',
+            });
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Player missing',
+            });
+            return;
+        }
+
+        const now = Date.now();
+        const scoreApplied = applyPlayerPickupScore({
+            room,
+            playerId: socket.id,
+            nowMs: now,
+        });
+        if (!scoreApplied.ok) {
+            safeAck(ack, {
+                ok: false,
+                error: scoreApplied.reason,
+                roundState: serializeRoomRoundState(room.roundState),
+                playerCollectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
+            });
+            return;
+        }
+
+        room.updatedAt = now;
+        emitRoomState(room);
+        safeAck(ack, {
+            ok: true,
+            playerCollectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
+            roundState: serializeRoomRoundState(room.roundState),
+        });
+    });
+
+    socket.on('mp:crashReplication', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:crashReplication')) {
+            return;
+        }
+
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - (player.lastCrashReplicationAt || 0) < CRASH_REPLICATION_MIN_INTERVAL_MS) {
+            return;
+        }
+
+        const snapshot = sanitizeCrashReplication(payload, player.lastCrashReplication);
+        player.lastCrashReplication = snapshot;
+        player.lastCrashReplicationAt = now;
+        room.updatedAt = now;
+        socket.to(roomCode).emit('mp:crashReplication', {
+            id: socket.id,
+            crashReplication: snapshot,
+            serverTime: now,
+        });
+    });
+
+    socket.on('mp:vehicleStatus', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:vehicleStatus')) {
+            return;
+        }
+
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - (player.lastVehicleStatusAt || 0) < VEHICLE_STATUS_MIN_INTERVAL_MS) {
+            return;
+        }
+        player.lastVehicleStatusAt = now;
+
+        const nextDestroyed = Boolean(payload?.isDestroyed);
+        if (nextDestroyed === Boolean(player.isDestroyed)) {
+            return;
+        }
+        player.isDestroyed = nextDestroyed;
+        if (player.lastState && typeof player.lastState === 'object') {
+            player.lastState.isDestroyed = nextDestroyed;
+        }
+        room.updatedAt = now;
+        emitRoomState(room);
     });
 
     socket.on('disconnect', () => {
@@ -404,37 +645,96 @@ function safeAck(ack, payload) {
     }
 }
 
+function consumeInboundEventQuota(socket, eventName) {
+    const store = socket?.data?.rateLimitStore;
+    if (!(store instanceof Map)) {
+        return false;
+    }
+
+    const now = Date.now();
+    const globalAllowed = consumeRateLimit(
+        store,
+        '__global__',
+        now,
+        GLOBAL_RATE_WINDOW_MS,
+        GLOBAL_RATE_MAX_EVENTS
+    );
+    if (!globalAllowed) {
+        return false;
+    }
+
+    const eventRule = EVENT_RATE_LIMITS[eventName] || { windowMs: 1000, max: 20 };
+    return consumeRateLimit(store, `event:${eventName}`, now, eventRule.windowMs, eventRule.max);
+}
+
 function createRoomPlayer(id, profile) {
     return {
         id,
         name: profile.name,
         colorHex: profile.colorHex,
+        collectedCount: 0,
+        isDestroyed: false,
         joinedAt: Date.now(),
         lastState: null,
         lastStateAt: 0,
         lastInboundStateAt: 0,
+        lastMinePlacedAt: 0,
+        lastPickupAt: 0,
+        pickupWindowStartedAt: 0,
+        pickupWindowCount: 0,
+        lastCrashReplication: {
+            detachedPartIds: [],
+            debrisPieces: [],
+            explosion: null,
+        },
+        lastCrashReplicationAt: 0,
+        lastVehicleStatusAt: 0,
     };
 }
 
 function serializeRoom(room) {
     pruneExpiredMines(room, Date.now());
+    room.roundState =
+        room.roundState && typeof room.roundState === 'object'
+            ? room.roundState
+            : createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT);
+    recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
     const mineMap = room?.mines instanceof Map ? room.mines : new Map();
     const players = Array.from(room.players.values())
         .sort((a, b) => a.joinedAt - b.joinedAt)
-        .map((player) => ({
-            id: player.id,
-            name: player.name,
-            colorHex: player.colorHex,
-            isHost: player.id === room.hostId,
-            state: player.lastState,
-            stateUpdatedAt: player.lastStateAt,
-        }));
+        .map((player) => {
+            const collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
+            const isDestroyed = Boolean(player.isDestroyed);
+            const baseState =
+                player.lastState && typeof player.lastState === 'object'
+                    ? {
+                          ...player.lastState,
+                          collectedCount,
+                          isDestroyed,
+                      }
+                    : null;
+            if (baseState && player.lastCrashReplication) {
+                baseState.crashReplication = player.lastCrashReplication;
+            }
+
+            return {
+                id: player.id,
+                name: player.name,
+                colorHex: player.colorHex,
+                collectedCount,
+                isDestroyed,
+                isHost: player.id === room.hostId,
+                state: baseState,
+                stateUpdatedAt: player.lastStateAt,
+            };
+        });
 
     return {
         roomCode: room.code,
         hostId: room.hostId,
         playerCount: players.length,
         maxPlayers: MAX_PLAYERS_PER_ROOM,
+        roundState: serializeRoomRoundState(room.roundState),
         players,
         mines: Array.from(mineMap.values())
             .sort((a, b) => a.createdAt - b.createdAt)
@@ -470,6 +770,11 @@ function leaveCurrentRoom(socket) {
         }
     }
     room.updatedAt = Date.now();
+    room.roundState =
+        room.roundState && typeof room.roundState === 'object'
+            ? room.roundState
+            : createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT);
+    recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
 
     if (room.players.size === 0) {
         rooms.delete(roomCode);
@@ -571,17 +876,11 @@ function sanitizePlayerState(payload, fallback) {
     const yawRate = clampFinite(payload?.yawRate, -24, 24, fallback?.yawRate ?? 0);
     const velocityX = clampFinite(payload?.velocityX, -400, 400, fallback?.velocityX ?? 0);
     const velocityZ = clampFinite(payload?.velocityZ, -400, 400, fallback?.velocityZ ?? 0);
-    const collectedCount = clampFinite(payload?.collectedCount, 0, 9999, 0);
-    const isDestroyed = Boolean(payload?.isDestroyed);
     const inputForward = Boolean(payload?.inputForward);
     const inputBackward = Boolean(payload?.inputBackward);
     const inputLeft = Boolean(payload?.inputLeft);
     const inputRight = Boolean(payload?.inputRight);
     const inputHandbrake = Boolean(payload?.inputHandbrake);
-    const crashReplication = sanitizeCrashReplication(
-        payload?.crashReplication,
-        fallback?.crashReplication
-    );
 
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
         return null;
@@ -605,9 +904,6 @@ function sanitizePlayerState(payload, fallback) {
         inputLeft,
         inputRight,
         inputHandbrake,
-        crashReplication,
-        collectedCount: Math.round(collectedCount),
-        isDestroyed,
     };
 }
 
@@ -737,17 +1033,6 @@ function sanitizeSocketLikeId(value) {
         .trim()
         .replace(/[^\w\-]/g, '')
         .slice(0, 128);
-}
-
-function sanitizeOptionalRoomPlayerId(value, room, fallback) {
-    const sanitized = sanitizeSocketLikeId(value);
-    if (!sanitized) {
-        return fallback || '';
-    }
-    if (!room?.players?.has?.(sanitized)) {
-        return fallback || '';
-    }
-    return sanitized;
 }
 
 function serializeMine(mine) {

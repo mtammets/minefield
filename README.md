@@ -21,22 +21,10 @@ Open `http://localhost:3000`.
 2. Click `CREATE ROOM` (host) or enter a code and click `JOIN`.
 3. Share the 6-character room code with other players.
 
-- Remote players appear in the world and on the minimap in real time.
+- Remote players appear in the world in real time.
 - In an online room, press `G` to drop a landmine behind your car.
 - In an online room, press `T` to throw a landmine forward.
 - Any other player driving over an armed mine explodes into debris.
-
-## City Builder (Local Per User)
-
-- Press `B` to open/close the 2D map editor.
-- Drag piece icons from the palette onto the map (or paint with left click/drag).
-- Erase with right click/drag.
-- Press `R` to rotate the selected piece.
-- Press `X` to toggle erase mode.
-- Press `[` / `]` to switch piece type quickly.
-- Press number keys `1-7` to pick a piece directly.
-- Layout is saved in browser `localStorage` per user/device/browser profile.
-- Use `CLEAR` in the panel to remove your custom map and return to default city.
 
 ## Quality Workflow
 

@@ -15,6 +15,8 @@ const MP_COLLISION_HALF_WIDTH = 1.45;
 const MP_COLLISION_HALF_LENGTH = 2.3;
 const MP_COLLISION_MASS = 1.6;
 const COLLISION_RELAY_INTERVAL_MS = 90;
+const CRASH_REPLICATION_SEND_INTERVAL_MS = 190;
+const VEHICLE_STATUS_SEND_INTERVAL_MS = 140;
 
 export function createMultiplayerController(options = {}) {
     const {
@@ -32,6 +34,7 @@ export function createMultiplayerController(options = {}) {
         onMineSnapshot = () => {},
         onMinePlaced = () => {},
         onMineDetonated = () => {},
+        onAuthoritativeRoundState = () => {},
     } = options;
 
     if (!scene || !car) {
@@ -54,6 +57,9 @@ export function createMultiplayerController(options = {}) {
     let isInitialized = false;
     let isPanelVisible = true;
     let lastStateSentAt = 0;
+    let lastCrashReplicationSentAt = 0;
+    let lastVehicleStatusSentAt = 0;
+    let lastVehicleStatusValue = null;
     let lastProfileSyncedAt = 0;
     let lastProfileSignature = '';
     let localPlayerName = DEFAULT_PLAYER_NAME;
@@ -66,15 +72,17 @@ export function createMultiplayerController(options = {}) {
         isPanelVisible() {
             return isPanelVisible;
         },
-        getMiniMapMarkers,
         getCollisionSnapshots,
         reportLocalVehicleContacts,
         reportMinePlaced,
         reportMineDetonated,
+        reportPickupCollected,
         isInRoom,
         getSelfId,
         getLocalPlayerName,
         startOnlineRoomFlow,
+        getRoundStateSnapshot,
+        getScoreboardEntries,
     };
 
     function initialize() {
@@ -107,6 +115,7 @@ export function createMultiplayerController(options = {}) {
             socket.off('mp:roomState');
             socket.off('mp:playerState');
             socket.off('mp:collision');
+            socket.off('mp:crashReplication');
             socket.off('mp:minePlaced');
             socket.off('mp:mineDetonated');
             socket.disconnect();
@@ -134,29 +143,8 @@ export function createMultiplayerController(options = {}) {
 
         maybeSyncProfile();
         maybeSendPlayerState();
-    }
-
-    function getMiniMapMarkers() {
-        if (!isPanelVisible) {
-            return [];
-        }
-        const markers = [];
-        const now = performance.now();
-        for (const remote of remotePlayers.values()) {
-            if (!remote.car.visible) {
-                continue;
-            }
-            if (now - remote.lastStateAt > REMOTE_STATE_TIMEOUT_MS) {
-                continue;
-            }
-            markers.push({
-                x: remote.car.position.x,
-                z: remote.car.position.z,
-                rotationY: remote.car.rotation.y,
-                colorHex: remote.colorHex,
-            });
-        }
-        return markers;
+        maybeSendCrashReplication();
+        maybeSendVehicleStatus();
     }
 
     function getCollisionSnapshots() {
@@ -256,6 +244,40 @@ export function createMultiplayerController(options = {}) {
             return false;
         }
         socket.emit('mp:mineDetonated', detonationSnapshot);
+        return true;
+    }
+
+    function reportPickupCollected(payload = null, ack = null) {
+        if (!isPanelVisible || !socket?.connected || !room) {
+            if (typeof ack === 'function') {
+                ack({
+                    ok: false,
+                    error: 'Offline',
+                });
+            }
+            return false;
+        }
+        const message = payload && typeof payload === 'object' ? payload : {};
+        socket.emit('mp:pickupCollected', message, (response) => {
+            if (response?.ok && room && Array.isArray(room.players)) {
+                const selfPlayer = room.players.find((entry) => entry?.id === selfId);
+                if (selfPlayer && Number.isFinite(response.playerCollectedCount)) {
+                    selfPlayer.collectedCount = Math.max(
+                        0,
+                        Math.round(Number(response.playerCollectedCount) || 0)
+                    );
+                }
+                if (response.roundState && typeof response.roundState === 'object') {
+                    room.roundState = response.roundState;
+                }
+                emitAuthoritativeRoundState(room);
+                renderPlayerList(room.players, selfId);
+                updateRoomMeta();
+            }
+            if (typeof ack === 'function') {
+                ack(response);
+            }
+        });
         return true;
     }
 
@@ -482,6 +504,17 @@ export function createMultiplayerController(options = {}) {
         socket.on('mp:collision', (payload) => {
             applyNetworkCollisionImpulse(payload);
         });
+        socket.on('mp:crashReplication', (payload) => {
+            const playerId = payload?.id;
+            if (!playerId || playerId === selfId) {
+                return;
+            }
+            const remote = getOrCreateRemotePlayer(playerId);
+            if (!remote) {
+                return;
+            }
+            applyRemoteCrashReplication(remote, payload.crashReplication);
+        });
         socket.on('mp:minePlaced', (payload) => {
             onMinePlaced(payload);
         });
@@ -522,7 +555,6 @@ export function createMultiplayerController(options = {}) {
 
         const vehicleState = getVehicleState() || {};
         const inputState = getInputState() || {};
-        const crashReplicationState = getCrashReplicationState?.() || null;
         socket.emit('mp:state', {
             x: car.position.x,
             y: car.position.y,
@@ -541,9 +573,53 @@ export function createMultiplayerController(options = {}) {
             inputLeft: Boolean(inputState.left),
             inputRight: Boolean(inputState.right),
             inputHandbrake: Boolean(inputState.handbrake),
-            crashReplication: crashReplicationState,
-            collectedCount: Math.max(0, Number(getPlayerCollectedCount()) || 0),
-            isDestroyed: Boolean(getIsCarDestroyed()),
+        });
+    }
+
+    function maybeSendCrashReplication() {
+        if (!room || !socket?.connected) {
+            return;
+        }
+        const now = performance.now();
+        if (now - lastCrashReplicationSentAt < CRASH_REPLICATION_SEND_INTERVAL_MS) {
+            return;
+        }
+        lastCrashReplicationSentAt = now;
+
+        const crashReplicationState = getCrashReplicationState?.() || null;
+        if (!crashReplicationState || typeof crashReplicationState !== 'object') {
+            return;
+        }
+        const hasCrashState =
+            (Array.isArray(crashReplicationState.detachedPartIds) &&
+                crashReplicationState.detachedPartIds.length > 0) ||
+            (Array.isArray(crashReplicationState.debrisPieces) &&
+                crashReplicationState.debrisPieces.length > 0) ||
+            Boolean(crashReplicationState.explosion);
+        if (!hasCrashState && !Boolean(getIsCarDestroyed())) {
+            return;
+        }
+        socket.emit('mp:crashReplication', crashReplicationState);
+    }
+
+    function maybeSendVehicleStatus() {
+        if (!room || !socket?.connected) {
+            return;
+        }
+        const nextDestroyed = Boolean(getIsCarDestroyed());
+        if (nextDestroyed === lastVehicleStatusValue) {
+            return;
+        }
+
+        const now = performance.now();
+        if (now - lastVehicleStatusSentAt < VEHICLE_STATUS_SEND_INTERVAL_MS) {
+            return;
+        }
+
+        lastVehicleStatusSentAt = now;
+        lastVehicleStatusValue = nextDestroyed;
+        socket.emit('mp:vehicleStatus', {
+            isDestroyed: nextDestroyed,
         });
     }
 
@@ -590,8 +666,15 @@ export function createMultiplayerController(options = {}) {
             return;
         }
 
+        const previousRoomCode = room?.roomCode || '';
+        const previousSelfId = selfId;
         room = snapshot;
         selfId = nextSelfId || socket?.id || '';
+        if (snapshot.roomCode !== previousRoomCode || selfId !== previousSelfId) {
+            lastVehicleStatusValue = null;
+            lastVehicleStatusSentAt = 0;
+            lastCrashReplicationSentAt = 0;
+        }
         if (Array.isArray(snapshot.mines)) {
             onMineSnapshot(snapshot.mines);
         }
@@ -631,12 +714,16 @@ export function createMultiplayerController(options = {}) {
 
         renderPlayerList(snapshot.players, selfId);
         updateRoomMeta();
+        emitAuthoritativeRoundState(snapshot);
     }
 
     function clearRoomState() {
         room = null;
         selfId = '';
         lastStateSentAt = 0;
+        lastCrashReplicationSentAt = 0;
+        lastVehicleStatusSentAt = 0;
+        lastVehicleStatusValue = null;
         lastProfileSyncedAt = 0;
         lastProfileSignature = '';
         lastCollisionRelaySentAtByTarget.clear();
@@ -649,6 +736,7 @@ export function createMultiplayerController(options = {}) {
 
         renderPlayerList();
         updateRoomMeta();
+        emitAuthoritativeRoundState(null);
     }
 
     function getOrCreateRemotePlayer(playerId, playerSnapshot = null) {
@@ -874,11 +962,7 @@ export function createMultiplayerController(options = {}) {
                   (Math.abs(remote.visualState.yawRate) > 0.85 && Math.abs(nextSpeed) > 1.6);
         const wasDestroyed = Boolean(remote.isDestroyed);
         remote.isDestroyed = Boolean(state.isDestroyed);
-        const hasCrashReplicationState =
-            state.crashReplication && typeof state.crashReplication === 'object';
-        if (hasCrashReplicationState) {
-            remote.crashDebrisController?.applyReplicationState?.(state.crashReplication);
-        } else if (!wasDestroyed && remote.isDestroyed) {
+        if (!wasDestroyed && remote.isDestroyed) {
             remote.crashDebrisController?.clearDebris?.();
             remote.crashDebrisController?.resetPlayerDamageState?.();
             remote.crashDebrisController?.spawnCarDebris?.(remote.targetPosition.clone(), null);
@@ -896,6 +980,67 @@ export function createMultiplayerController(options = {}) {
             remote.car.position.copy(remote.targetPosition);
             remote.car.rotation.y = remote.targetRotationY;
         }
+    }
+
+    function applyRemoteCrashReplication(remote, crashReplicationState) {
+        if (!remote || !crashReplicationState || typeof crashReplicationState !== 'object') {
+            return;
+        }
+        remote.crashDebrisController?.applyReplicationState?.(crashReplicationState);
+    }
+
+    function emitAuthoritativeRoundState(snapshot = room) {
+        if (typeof onAuthoritativeRoundState !== 'function') {
+            return;
+        }
+        if (!snapshot || !Array.isArray(snapshot.players)) {
+            onAuthoritativeRoundState({
+                inRoom: false,
+                roomCode: '',
+                roundState: null,
+                playerCollectedCount: 0,
+                totalCollectedCount: 0,
+                scoreboard: [],
+                selfId: selfId || '',
+            });
+            return;
+        }
+
+        const scoreboard = buildScoreboardEntries(snapshot.players, selfId);
+        const roundState = sanitizeRoundStateSnapshot(snapshot.roundState, scoreboard);
+        const totalCollectedFromPlayers = scoreboard.reduce(
+            (sum, entry) => sum + (entry.collectedCount || 0),
+            0
+        );
+        const resolvedTotalCollected = roundState
+            ? roundState.totalCollected
+            : Math.max(0, totalCollectedFromPlayers);
+        const selfEntry = scoreboard.find((entry) => entry.id === selfId);
+
+        onAuthoritativeRoundState({
+            inRoom: true,
+            roomCode: String(snapshot.roomCode || ''),
+            roundState,
+            playerCollectedCount: selfEntry?.collectedCount || 0,
+            totalCollectedCount: resolvedTotalCollected,
+            scoreboard,
+            selfId: selfId || '',
+        });
+    }
+
+    function getRoundStateSnapshot() {
+        if (!room || !Array.isArray(room.players)) {
+            return null;
+        }
+        const scoreboard = buildScoreboardEntries(room.players, selfId);
+        return sanitizeRoundStateSnapshot(room.roundState, scoreboard);
+    }
+
+    function getScoreboardEntries() {
+        if (!room || !Array.isArray(room.players)) {
+            return [];
+        }
+        return buildScoreboardEntries(room.players, selfId);
     }
 
     function renderPlayerList(players = [], localPlayerId = selfId) {
@@ -1013,6 +1158,7 @@ export function createMultiplayerController(options = {}) {
         socket.off('mp:roomState');
         socket.off('mp:playerState');
         socket.off('mp:collision');
+        socket.off('mp:crashReplication');
         socket.off('mp:minePlaced');
         socket.off('mp:mineDetonated');
         socket.disconnect();
@@ -1040,9 +1186,6 @@ function createNoopController() {
         isPanelVisible() {
             return false;
         },
-        getMiniMapMarkers() {
-            return [];
-        },
         getCollisionSnapshots() {
             return [];
         },
@@ -1051,6 +1194,15 @@ function createNoopController() {
             return false;
         },
         reportMineDetonated() {
+            return false;
+        },
+        reportPickupCollected(payload = null, ack = null) {
+            if (typeof ack === 'function') {
+                ack({
+                    ok: false,
+                    error: 'Offline',
+                });
+            }
             return false;
         },
         isInRoom() {
@@ -1065,6 +1217,57 @@ function createNoopController() {
         startOnlineRoomFlow() {
             return false;
         },
+        getRoundStateSnapshot() {
+            return null;
+        },
+        getScoreboardEntries() {
+            return [];
+        },
+    };
+}
+
+function buildScoreboardEntries(players = [], selfId = '') {
+    return players
+        .filter((player) => player && typeof player === 'object')
+        .map((player) => ({
+            id: String(player.id || ''),
+            name:
+                typeof player.name === 'string' && player.name.trim()
+                    ? player.name.trim()
+                    : 'Player',
+            collectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
+            isSelf: Boolean(player.id && player.id === selfId),
+        }))
+        .sort((a, b) => {
+            const delta = (b.collectedCount || 0) - (a.collectedCount || 0);
+            if (delta !== 0) {
+                return delta;
+            }
+            return a.name.localeCompare(b.name);
+        });
+}
+
+function sanitizeRoundStateSnapshot(roundState, scoreboard = []) {
+    if (!roundState || typeof roundState !== 'object') {
+        return null;
+    }
+    const totalPickups = clampNumber(roundState.totalPickups, 1, 5000, 30);
+    const totalCollectedByPlayers = scoreboard.reduce(
+        (sum, entry) => sum + Math.max(0, Number(entry?.collectedCount) || 0),
+        0
+    );
+    const totalCollected = clampNumber(
+        roundState.totalCollected,
+        0,
+        totalPickups,
+        Math.min(totalPickups, totalCollectedByPlayers)
+    );
+    const finished = Boolean(roundState.finished) || totalCollected >= totalPickups;
+    return {
+        totalPickups,
+        totalCollected,
+        finished,
+        finishedAt: clampNumber(roundState.finishedAt, 0, Number.MAX_SAFE_INTEGER, 0),
     };
 }
 

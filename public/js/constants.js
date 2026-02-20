@@ -1,5 +1,4 @@
 export const MAX_PHYSICS_STEPS_PER_FRAME = 6;
-export const MINIMAP_UPDATE_INTERVAL = 1 / 12;
 
 export const COLOR_NAMES = {
     [0x7cf9ff]: 'Neo Turquoise',
@@ -13,7 +12,6 @@ export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
 export const PLAYER_TOP_SPEED_LIMIT_STEP_KPH = 5;
 export const PLAYER_TOP_SPEED_LIMIT_MIN_KPH = 50;
 export const PLAYER_TOP_SPEED_LIMIT_MAX_KPH = 100;
-export const CITY_LAYOUT_STORAGE_KEY = 'silentdrift-city-layout-v1';
 export const CAR_COLOR_PRESETS = [
     { hex: 0x2d67a6, name: 'Cobalt Blue' },
     { hex: 0xd34545, name: 'Racing Red' },

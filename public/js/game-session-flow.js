@@ -32,7 +32,6 @@ export function createGameSessionController({
     welcomeModalUi,
     raceIntroController,
     carEditModeController,
-    cityBuilderController,
     chargingZoneController,
     chargingProgressHudController,
     skidMarkController,
@@ -43,8 +42,6 @@ export function createGameSessionController({
     mineController,
     replayEffectsController,
     setPhysicsAccumulator,
-    setMinimapAccumulator,
-    minimapUpdateInterval,
     replayEventCrash,
     colorNameFromHex,
     getIsCarDestroyed,
@@ -144,14 +141,12 @@ export function createGameSessionController({
         }
         setIsWelcomeModalVisible(false);
         carEditModeController.setActive(false);
-        cityBuilderController?.setActive?.(false);
         welcomeModalUi.hide();
         restartGameWithCountdown();
     }
 
     function showWelcomeModal() {
         carEditModeController.setActive(false);
-        cityBuilderController?.setActive?.(false);
         raceIntroController.stop();
         setIsWelcomeModalVisible(true);
         setIsGamePaused(true);
@@ -267,7 +262,7 @@ export function createGameSessionController({
         }
     }
 
-    function finalizePickupRound(totalPickups, collectedPickups) {
+    function finalizePickupRound(totalPickups, collectedPickups, options = {}) {
         if (getPickupRoundFinished()) {
             return;
         }
@@ -278,13 +273,23 @@ export function createGameSessionController({
         clearDriveKeys();
         botStatusUi.render(getBotSystem()?.getHudState?.() || []);
 
-        const scoreboard = [
-            { name: 'You', collectedCount: getPlayerCollectedCount() },
-            ...(getBotSystem()?.getHudState?.() || []).map((bot) => ({
-                name: bot.name,
-                collectedCount: bot.collectedCount || 0,
-            })),
-        ];
+        const providedScoreboard = normalizeScoreboardEntries(options?.scoreboardEntries);
+        const scoreboard =
+            providedScoreboard.length > 0
+                ? providedScoreboard
+                : [
+                      { name: 'You', collectedCount: getPlayerCollectedCount() },
+                      ...(getBotSystem()?.getHudState?.() || []).map((bot) => ({
+                          name: bot.name,
+                          collectedCount: bot.collectedCount || 0,
+                      })),
+                  ];
+        if (scoreboard.length === 0) {
+            scoreboard.push({
+                name: 'You',
+                collectedCount: 0,
+            });
+        }
         scoreboard.sort((a, b) => (b.collectedCount || 0) - (a.collectedCount || 0));
 
         let topScore = 0;
@@ -292,7 +297,7 @@ export function createGameSessionController({
             topScore = Math.max(topScore, scoreboard[i].collectedCount || 0);
         }
         const winners = scoreboard.filter((entry) => (entry.collectedCount || 0) === topScore);
-        const winnerLabel = winners.map((entry) => entry.name).join(', ');
+        const winnerLabel = winners.map((entry) => entry.name).join(', ') || 'Nobody';
         const resolvedTotal = Number.isFinite(totalPickups) ? totalPickups : ROUND_TOTAL_PICKUPS;
         const resolvedCollectedRaw = Number.isFinite(collectedPickups)
             ? collectedPickups
@@ -388,7 +393,6 @@ export function createGameSessionController({
     }
 
     function resetRunStateForReplay() {
-        cityBuilderController?.setActive?.(false);
         raceIntroController.stop();
         setCameraKeyboardControlsEnabled(true);
         clearPendingRespawn();
@@ -422,7 +426,6 @@ export function createGameSessionController({
     function startNewGame() {
         raceIntroController.stop();
         carEditModeController.setActive(false);
-        cityBuilderController?.setActive?.(false);
         setCameraKeyboardControlsEnabled(true);
         setPauseState(false);
         replayController.stopRecording();
@@ -470,7 +473,6 @@ export function createGameSessionController({
         clearDriveKeys();
         initializePlayerPhysics(car);
         setPhysicsAccumulator(0);
-        setMinimapAccumulator(minimapUpdateInterval);
     }
 
     function setSelectedPlayerCarColor(colorHex, options = {}) {
@@ -525,6 +527,21 @@ export function createGameSessionController({
             roomCode: roomCode,
             playerName,
         };
+    }
+
+    function normalizeScoreboardEntries(entries) {
+        if (!Array.isArray(entries)) {
+            return [];
+        }
+        return entries
+            .map((entry) => ({
+                name:
+                    typeof entry?.name === 'string' && entry.name.trim()
+                        ? entry.name.trim()
+                        : 'Player',
+                collectedCount: Math.max(0, Math.round(Number(entry?.collectedCount) || 0)),
+            }))
+            .filter((entry) => entry.name);
     }
 
     function sanitizeOnlinePlayerName(value) {

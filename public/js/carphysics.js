@@ -1294,8 +1294,8 @@ function constrainToWorld(position, worldBounds) {
 function updateDriverInputs(dt) {
     const steerDirection = (keys.left ? 1 : 0) - (keys.right ? 1 : 0);
     const speedAbs = vehicleState.velocity.length();
-    const lowSpeedSteerWeight = 1 -
-        THREE.MathUtils.clamp(speedAbs / TUNING.lowSpeedSteerWeightFadeSpeed, 0, 1);
+    const lowSpeedSteerWeight =
+        1 - THREE.MathUtils.clamp(speedAbs / TUNING.lowSpeedSteerWeightFadeSpeed, 0, 1);
     const lowSpeedInputScale = THREE.MathUtils.lerp(
         1,
         TUNING.lowSpeedSteerInputScale,
@@ -1417,11 +1417,13 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
         const forwardDriveScale = getAutomaticForwardDriveScale();
         const throttleForward = THREE.MathUtils.clamp(vehicleState.throttle, 0, 1);
         const lowSpeedLaunchWeight =
-            1 - THREE.MathUtils.clamp(Math.abs(longitudinalSpeed) / TUNING.lowSpeedLaunchFadeSpeed, 0, 1);
-        const easedThrottleForward = Math.pow(
-            throttleForward,
-            TUNING.lowSpeedLaunchThrottleCurve
-        );
+            1 -
+            THREE.MathUtils.clamp(
+                Math.abs(longitudinalSpeed) / TUNING.lowSpeedLaunchFadeSpeed,
+                0,
+                1
+            );
+        const easedThrottleForward = Math.pow(throttleForward, TUNING.lowSpeedLaunchThrottleCurve);
         const effectiveThrottleForward = THREE.MathUtils.lerp(
             throttleForward,
             easedThrottleForward,
@@ -1503,15 +1505,10 @@ function calculateTireForces(
         steerAngle * driveDirection * steerForceScale;
     const rearSlip = Math.atan2(lateralSpeed - TUNING.rearAxleDistance * yawRate, forwardForSlip);
 
-    const handbrakeRearGripLoss =
-        keys.handbrake
-            ? TUNING.handbrakeRearGripLoss *
-              THREE.MathUtils.lerp(
-                  1,
-                  TUNING.handbrakeDriftRearGripLossScale,
-                  handbrakeDriftIntent
-              )
-            : 0;
+    const handbrakeRearGripLoss = keys.handbrake
+        ? TUNING.handbrakeRearGripLoss *
+          THREE.MathUtils.lerp(1, TUNING.handbrakeDriftRearGripLossScale, handbrakeDriftIntent)
+        : 0;
     const rearGripLoss =
         Math.abs(vehicleState.throttle) * TUNING.throttleRearGripLoss +
         vehicleState.brake * TUNING.brakeRearGripLoss +
@@ -1898,7 +1895,11 @@ function updateAutomaticTransmission(dt) {
 
     const gearTopSpeeds = AUTOMATIC_TRANSMISSION.gearTopSpeedsKph;
     const maxGearIndex = gearTopSpeeds.length - 1;
-    let gearIndex = THREE.MathUtils.clamp(Math.floor(vehicleState.autoGearIndex || 0), 0, maxGearIndex);
+    let gearIndex = THREE.MathUtils.clamp(
+        Math.floor(vehicleState.autoGearIndex || 0),
+        0,
+        maxGearIndex
+    );
     const speedKph = Math.abs(vehicleState.speed || 0) * 3.6;
     const forwardThrottle = THREE.MathUtils.clamp(vehicleState.throttle || 0, 0, 1);
     const isForwardDriveIntent =
@@ -1966,7 +1967,11 @@ function getAutomaticForwardDriveScale() {
     }
     const scales = AUTOMATIC_TRANSMISSION.gearForceScales;
     const maxGearIndex = scales.length - 1;
-    const gearIndex = THREE.MathUtils.clamp(Math.floor(vehicleState.autoGearIndex || 0), 0, maxGearIndex);
+    const gearIndex = THREE.MathUtils.clamp(
+        Math.floor(vehicleState.autoGearIndex || 0),
+        0,
+        maxGearIndex
+    );
     return scales[gearIndex] ?? 1;
 }
 
