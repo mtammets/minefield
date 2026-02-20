@@ -26,6 +26,18 @@ Open `http://localhost:3000`.
 - In an online room, press `T` to throw a landmine forward.
 - Any other player driving over an armed mine explodes into debris.
 
+## Map & Navigation
+
+- Minimap is shown in the lower-left during gameplay.
+- Press `M` to open/close the full tactical map.
+- Full map controls:
+    - Left click: set waypoint
+    - Left drag: pan
+    - Mouse wheel: zoom
+    - Right click: clear waypoint
+    - `ESC`: close map
+- The map supports layer filters (roads, buildings, pickups, vehicles, mines, charging zones).
+
 ## Quality Workflow
 
 ```bash

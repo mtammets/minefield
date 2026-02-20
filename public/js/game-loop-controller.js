@@ -19,6 +19,7 @@ export function createGameLoopController(options = {}) {
         replayController,
         multiplayerController,
         mineSystemController,
+        mapUiController,
         getPlayerTopSpeedLimit,
         crashDebrisController,
         replayEffectsController,
@@ -51,6 +52,8 @@ export function createGameLoopController(options = {}) {
         getPickupRoundFinished,
         getTotalCollectedCount,
         getBotsEnabled,
+        getGameMode,
+        getIsWelcomeModalVisible,
         getLocalPlayerId,
     } = options;
 
@@ -78,6 +81,9 @@ export function createGameLoopController(options = {}) {
     const readTotalCollectedCount =
         typeof getTotalCollectedCount === 'function' ? getTotalCollectedCount : () => 0;
     const readBotsEnabled = typeof getBotsEnabled === 'function' ? getBotsEnabled : () => true;
+    const readGameMode = typeof getGameMode === 'function' ? getGameMode : () => 'bots';
+    const readWelcomeModalVisible =
+        typeof getIsWelcomeModalVisible === 'function' ? getIsWelcomeModalVisible : () => false;
     const readLocalPlayerId = typeof getLocalPlayerId === 'function' ? getLocalPlayerId : () => '';
 
     let running = false;
@@ -338,6 +344,21 @@ export function createGameLoopController(options = {}) {
             localCarPosition: car.position,
             localPlayerId: readLocalPlayerId(),
             enableLocalCollision: mineCollisionEnabled,
+        });
+        mapUiController?.update?.(frameDelta, {
+            playerPosition: car.position,
+            playerHeading: car.rotation.y,
+            playerSpeedKph: Math.abs(getVehicleState()?.speed || 0),
+            pickups: collectibleSystem.getVisiblePickups(),
+            botDescriptors: readBotsEnabled()
+                ? getBotTrafficSystem()?.getCollectorDescriptors?.() || []
+                : [],
+            remotePlayers: multiplayerController?.getCollisionSnapshots?.() || [],
+            mines: mineSystemController?.getMineMarkers?.() || [],
+            gameMode: readGameMode(),
+            welcomeVisible: readWelcomeModalVisible(),
+            raceIntroActive: raceIntroController.isActive(),
+            editModeActive: isEditModeActive,
         });
 
         updateSunLightPosition();

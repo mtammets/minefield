@@ -105,6 +105,7 @@ import { initializeScene, initializeRenderer } from './game-bootstrap.js';
 import { createRuntimeUiControllers } from './game-runtime-ui.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
+import { createMapUiController } from './map-ui.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
@@ -136,6 +137,15 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         getGameSessionController: () => runtimeState.gameSessionController,
         getInputController: () => runtimeState.inputController,
     });
+const mapUiController = createMapUiController({
+    worldBounds,
+    cityMapLayout,
+    staticObstacles,
+    chargingZones,
+    onStatus(messageText, timeoutMs = 1800) {
+        objectiveUi.showInfo(messageText, timeoutMs);
+    },
+});
 
 car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
 const playerSpawnState = {
@@ -597,6 +607,12 @@ runtimeState.inputController = createInputController({
     onDeployMine(mode) {
         return runtimeState.mineController?.deployMine?.(mode);
     },
+    toggleWorldMap(forceOpen) {
+        return mapUiController.toggleExpanded(forceOpen);
+    },
+    isWorldMapVisible() {
+        return mapUiController.isExpanded();
+    },
     cyclePlayerRoofMenu,
     setPlayerRoofMenuMode,
     setPlayerRoofMenuModeFromUv,
@@ -640,6 +656,7 @@ runtimeState.gameLoopController = createGameLoopController({
     },
     crashDebrisController: runtimeState.crashDebrisController,
     replayEffectsController: runtimeState.replayEffectsController,
+    mapUiController,
     gameSessionController: runtimeState.gameSessionController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getVehicleState,
@@ -671,6 +688,8 @@ runtimeState.gameLoopController = createGameLoopController({
     getPickupRoundFinished: () => runtimeState.pickupRoundFinished,
     getTotalCollectedCount: () => runtimeState.totalCollectedCount,
     getBotsEnabled: () => runtimeState.gameMode !== 'online',
+    getGameMode: () => runtimeState.gameMode,
+    getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
     getLocalPlayerId: () => runtimeState.multiplayerController?.getSelfId?.() || '',
 });
 

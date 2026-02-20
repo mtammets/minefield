@@ -32,6 +32,8 @@ export function createInputController(options = {}) {
         onStartNewGame = () => {},
         onShowWelcomeModal = () => {},
         onDeployMine = () => null,
+        toggleWorldMap = () => ({ open: false, message: null }),
+        isWorldMapVisible = () => false,
         cyclePlayerRoofMenu,
         setPlayerRoofMenuMode,
         setPlayerRoofMenuModeFromUv,
@@ -143,6 +145,13 @@ export function createInputController(options = {}) {
             if (isRaceIntroActive) {
                 return;
             }
+            if (isKeyDown && isWorldMapVisible()) {
+                const result = toggleWorldMap(false);
+                if (result?.message) {
+                    onShowObjectiveInfo(result.message, 1100);
+                }
+                return;
+            }
             if (isKeyDown) {
                 lastEscapeKeyDownAtMs = performance.now();
             }
@@ -154,6 +163,9 @@ export function createInputController(options = {}) {
         }
 
         if (getIsGamePaused()) {
+            return;
+        }
+        if (isWorldMapVisible() && isKeyDown && key !== 'm') {
             return;
         }
 
@@ -306,8 +318,14 @@ export function createInputController(options = {}) {
                 if (!isKeyDown || isRaceIntroDriveLocked) {
                     return;
                 }
-                const modeKey = cyclePlayerRoofMenu(1);
-                showRoofMenuStatus(modeKey);
+                event.preventDefault();
+                const result = toggleWorldMap();
+                if (result?.open) {
+                    onClearDriveKeys();
+                }
+                if (result?.message) {
+                    onShowObjectiveInfo(result.message, 1300);
+                }
             },
             1: () => {
                 if (!isKeyDown || isRaceIntroDriveLocked) {

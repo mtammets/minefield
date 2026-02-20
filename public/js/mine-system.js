@@ -55,6 +55,7 @@ export function createMineSystemController(options = {}) {
     return {
         deployMine,
         update,
+        getMineMarkers,
         applyRoomMineSnapshot,
         handleRemoteMinePlaced,
         handleRemoteMineDetonated,
@@ -485,6 +486,24 @@ export function createMineSystemController(options = {}) {
         lastDeployAtMs = -100_000;
     }
 
+    function getMineMarkers() {
+        const now = Date.now();
+        const markers = [];
+        for (const mine of minesById.values()) {
+            if (!mine || mine.expiresAt <= now) {
+                continue;
+            }
+            markers.push({
+                id: mine.id,
+                x: mine.mesh.position.x,
+                z: mine.mesh.position.z,
+                armed: now >= mine.armedAt && mine.landed,
+                ownerId: mine.ownerId,
+            });
+        }
+        return markers;
+    }
+
     function countOwnerMines(ownerId) {
         let count = 0;
         for (const mine of minesById.values()) {
@@ -759,6 +778,9 @@ function createNoopMineSystemController() {
             };
         },
         update() {},
+        getMineMarkers() {
+            return [];
+        },
         applyRoomMineSnapshot() {},
         handleRemoteMinePlaced() {},
         handleRemoteMineDetonated() {},

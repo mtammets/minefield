@@ -144,6 +144,80 @@
             <div id="botTitle">AI COLLECT</div>
             <div id="botList"></div>
         </div>
+        <aside id="miniMapHud" aria-label="Minimap">
+            <canvas id="miniMapCanvas" width="280" height="280"></canvas>
+            <div class="miniMapMeta">
+                <span id="miniMapModeLabel">BOTS</span>
+                <span id="miniMapRangeLabel">RANGE 0m</span>
+            </div>
+        </aside>
+        <div id="worldMapOverlay" aria-label="World map" hidden>
+            <div class="worldMapShell">
+                <div class="worldMapHeader">
+                    <div class="worldMapTitleWrap">
+                        <div class="worldMapKicker">TACTICAL MAP</div>
+                        <div class="worldMapTitle">CITY OVERVIEW</div>
+                    </div>
+                    <div class="worldMapHeaderActions">
+                        <button id="worldMapCenterBtn" class="worldMapBtn" type="button">
+                            FIT MAP
+                        </button>
+                        <button id="worldMapClearWaypointBtn" class="worldMapBtn" type="button">
+                            CLEAR WAYPOINT
+                        </button>
+                        <button id="worldMapCloseBtn" class="worldMapBtn close" type="button">
+                            CLOSE
+                        </button>
+                    </div>
+                </div>
+                <div class="worldMapBody">
+                    <canvas id="worldMapCanvas" width="1280" height="860"></canvas>
+                    <aside class="worldMapSidebar">
+                        <div class="worldMapSectionTitle">Layers</div>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterRoads" type="checkbox" checked />
+                            <span>Roads</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterBuildings" type="checkbox" checked />
+                            <span>Buildings</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterPickups" type="checkbox" checked />
+                            <span>Pickups</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterVehicles" type="checkbox" checked />
+                            <span>Vehicles</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterMines" type="checkbox" checked />
+                            <span>Mines</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterCharging" type="checkbox" checked />
+                            <span>Charging</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterTrees" type="checkbox" />
+                            <span>Trees</span>
+                        </label>
+                        <label class="worldMapFilterRow">
+                            <input id="worldMapFilterLamps" type="checkbox" />
+                            <span>Lamps</span>
+                        </label>
+                        <div class="worldMapSectionTitle compact">Status</div>
+                        <div id="worldMapLegend" class="worldMapLegend"></div>
+                        <div id="worldMapCoordReadout" class="worldMapCoordReadout">X 0 | Z 0</div>
+                        <div class="worldMapHint">
+                            <div>LMB click: set waypoint</div>
+                            <div>Drag / wheel: overview locked</div>
+                            <div>RMB / ESC: clear or close</div>
+                        </div>
+                    </aside>
+                </div>
+            </div>
+        </div>
         <div id="finalLeaderboard" aria-label="Final leaderboard" aria-live="polite" hidden>
             <div class="leaderboardCard">
                 <div id="leaderboardTitle">GAME OVER</div>
