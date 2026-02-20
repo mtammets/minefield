@@ -5,6 +5,7 @@ import {
     PLAYER_TOP_SPEED_LIMIT_MIN_KPH,
     PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
 } from './constants.js';
+import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
 
 export const keys = {
     forward: false,
@@ -212,6 +213,7 @@ const vehicleState = {
     autoShiftTimerSec: 0,
     autoTransmissionSpeedCapKph: AUTOMATIC_TRANSMISSION.gearTopSpeedsKph[0],
 };
+const crashDamageTuning = createDefaultCrashDamageTuning();
 
 const forward = new THREE.Vector2();
 const right = new THREE.Vector2();
@@ -274,6 +276,23 @@ export function adjustPlayerTopSpeedLimit(direction = 0) {
         return createTopSpeedLimitSnapshot();
     }
     return setPlayerTopSpeedLimitKph(vehicleState.topSpeedLimitKph + delta);
+}
+
+export function getCrashDamageTuning() {
+    return { ...crashDamageTuning };
+}
+
+export function setCrashDamageTuning(nextTuning = {}) {
+    const merged = mergeCrashDamageTuning(crashDamageTuning, nextTuning);
+    Object.assign(crashDamageTuning, merged);
+    TUNING.crashSpeedThreshold = crashDamageTuning.obstacleCrashMinSpeed;
+    return getCrashDamageTuning();
+}
+
+export function resetCrashDamageTuning() {
+    Object.assign(crashDamageTuning, createDefaultCrashDamageTuning());
+    TUNING.crashSpeedThreshold = crashDamageTuning.obstacleCrashMinSpeed;
+    return getCrashDamageTuning();
 }
 
 export function consumeCrashCollision() {

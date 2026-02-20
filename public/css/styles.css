@@ -1758,7 +1758,8 @@ body.race-intro-active #botPanel {
 }
 
 .editModeViewGrid button,
-.editModeTools button {
+.editModeTools button,
+.editModeTuneTools button {
     border: 1px solid rgba(160, 210, 255, 0.4);
     border-radius: 8px;
     padding: 7px 8px;
@@ -1777,6 +1778,7 @@ body.race-intro-active #botPanel {
 
 .editModeViewGrid button:hover,
 .editModeTools button:hover,
+.editModeTuneTools button:hover,
 .editModeCloseBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.07);
@@ -1792,6 +1794,14 @@ body.race-intro-active #botPanel {
     grid-template-columns: 1fr 1fr;
     gap: 6px;
     margin-bottom: 7px;
+}
+
+.editModeTuneTools {
+    margin-bottom: 8px;
+}
+
+.editModeTuneTools button {
+    width: 100%;
 }
 
 .editModeSearch {
@@ -1814,6 +1824,75 @@ body.race-intro-active #botPanel {
     max-height: min(48vh, 420px);
     overflow: auto;
     padding-right: 4px;
+}
+
+.editModeTuneList {
+    max-height: min(42vh, 360px);
+    overflow: auto;
+    padding-right: 4px;
+}
+
+.editModeTuneGroup + .editModeTuneGroup {
+    margin-top: 10px;
+}
+
+.editModeTuneGroupTitle {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: rgba(168, 208, 239, 0.9);
+    margin-bottom: 6px;
+}
+
+.editModeTuneRow {
+    display: block;
+    padding: 6px 0;
+}
+
+.editModeTuneRow + .editModeTuneRow {
+    border-top: 1px solid rgba(143, 191, 234, 0.16);
+}
+
+.editModeTuneRowHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.editModeTuneLabel {
+    font-size: 11px;
+    color: rgba(227, 243, 255, 0.95);
+}
+
+.editModeTuneValue {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    color: rgba(191, 236, 255, 0.95);
+}
+
+.editModeTuneRowInputs {
+    display: grid;
+    grid-template-columns: 1fr 76px;
+    gap: 8px;
+}
+
+.editModeTuneRowInputs input[type='range'] {
+    width: 100%;
+}
+
+.editModeTuneRowInputs input[type='number'] {
+    width: 100%;
+    border: 1px solid rgba(149, 201, 255, 0.46);
+    border-radius: 7px;
+    padding: 6px 7px;
+    background: rgba(11, 23, 40, 0.82);
+    color: #ecf7ff;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
 }
 
 .editModePartSection + .editModePartSection {
@@ -1954,6 +2033,10 @@ body.race-intro-active #botPanel {
 
     .editModePartList {
         max-height: min(42vh, 300px);
+    }
+
+    .editModeTuneList {
+        max-height: min(34vh, 220px);
     }
 
     #multiplayerPanel {

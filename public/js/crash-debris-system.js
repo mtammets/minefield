@@ -1,31 +1,17 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import {
-    DEBRIS_GRAVITY,
-    DEBRIS_DRAG,
-    DEBRIS_BOUNCE_DAMPING,
     DEBRIS_GROUND_CLEARANCE,
-    DEBRIS_BASE_VERTICAL_BOOST,
     DEBRIS_SETTLE_VERTICAL_SPEED,
     DEBRIS_SETTLE_HORIZONTAL_SPEED,
     DEBRIS_SETTLE_ANGULAR_SPEED,
-    PART_BASE_LATERAL_BOOST,
-    PART_BASE_BLAST_BOOST,
-    PART_BASE_FORWARD_CARRY_BOOST,
-    PART_BASE_IMPACT_INERTIA_SCALE,
     PART_BASE_ANGULAR_BOOST,
     WHEEL_ROLL_RANDOM_BOOST,
     WHEEL_ROLL_DRIVE_MIN,
     WHEEL_ROLL_DRIVE_MAX,
     WHEEL_ORIENTATION_ALIGN_RATE,
     BODY_PANEL_ORIENTATION_ALIGN_RATE,
-    OBSTACLE_CRASH_MIN_SPEED,
-    OBSTACLE_CRASH_MAX_SPEED,
-    VEHICLE_DAMAGE_COLLISION_MIN,
-    VEHICLE_DAMAGE_COLLISION_HIGH,
-    VEHICLE_WHEEL_DETACH_SPEED,
-    VEHICLE_SECOND_WHEEL_DETACH_SPEED,
-    VEHICLE_DENT_MAX,
 } from './constants.js';
+import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
 
 const EXPLOSION_LIGHT_MAX_LIFE = 0.7;
 const MAX_DEBRIS_MESH_POOL_PER_PART = 18;
@@ -58,6 +44,7 @@ export function createCrashDebrisController({
     const playerDamageState = createEmptyDamageState();
     const bodyDamageVisual = { left: 0, right: 0, front: 0, rear: 0 };
     const bodyPartBaselines = new Map();
+    const crashDamageTuning = createDefaultCrashDamageTuning();
     const debrisBottomProbeBox = new THREE.Box3();
     let nextDebrisPieceId = 1;
 
@@ -77,6 +64,18 @@ export function createCrashDebrisController({
         },
         processVehicleCollisionContacts,
         spawnCarDebris,
+        getCrashDamageTuning() {
+            return { ...crashDamageTuning };
+        },
+        setCrashDamageTuning(nextTuning = {}) {
+            const merged = mergeCrashDamageTuning(crashDamageTuning, nextTuning);
+            Object.assign(crashDamageTuning, merged);
+            return { ...crashDamageTuning };
+        },
+        resetCrashDamageTuning() {
+            Object.assign(crashDamageTuning, createDefaultCrashDamageTuning());
+            return { ...crashDamageTuning };
+        },
         getReplicationState,
         applyReplicationState,
         updateDebris,
@@ -262,12 +261,15 @@ export function createCrashDebrisController({
             applyLocalizedVehicleDamage(contact);
         }
 
-        if (strongestImpact >= VEHICLE_DAMAGE_COLLISION_MIN && vehicleImpactStatusCooldown <= 0) {
+        if (
+            strongestImpact >= crashDamageTuning.vehicleDamageCollisionMin &&
+            vehicleImpactStatusCooldown <= 0
+        ) {
             objectiveUi?.showInfo?.(
-                strongestImpact >= VEHICLE_WHEEL_DETACH_SPEED
+                strongestImpact >= crashDamageTuning.vehicleWheelDetachSpeed
                     ? `Heavy collision (${Math.round(strongestImpact)}): possible wheel damage.`
                     : `Contact with another car (${Math.round(strongestImpact)}).`,
-                strongestImpact >= VEHICLE_DAMAGE_COLLISION_HIGH ? 1400 : 900
+                strongestImpact >= crashDamageTuning.vehicleDamageCollisionHigh ? 1400 : 900
             );
             vehicleImpactStatusCooldown = 0.85;
         }
@@ -288,7 +290,7 @@ export function createCrashDebrisController({
 
     function applyLocalizedVehicleDamage(contact) {
         const impactSpeed = contact?.impactSpeed || 0;
-        if (impactSpeed < VEHICLE_DAMAGE_COLLISION_MIN) {
+        if (impactSpeed < crashDamageTuning.vehicleDamageCollisionMin) {
             return;
         }
 
@@ -305,14 +307,14 @@ export function createCrashDebrisController({
         applyPersistentHandlingDamage(crashContext, impactSpeed);
         addBodyDentFromImpact(crashContext, impactSpeed);
 
-        if (impactSpeed >= VEHICLE_WHEEL_DETACH_SPEED) {
+        if (impactSpeed >= crashDamageTuning.vehicleWheelDetachSpeed) {
             tryDetachCrashPart(
                 (part) => part.type === 'wheel' && part.side === hitSide && part.zone === hitZone,
                 crashContext
             );
         }
 
-        if (impactSpeed >= VEHICLE_SECOND_WHEEL_DETACH_SPEED) {
+        if (impactSpeed >= crashDamageTuning.vehicleSecondWheelDetachSpeed) {
             tryDetachCrashPart(
                 (part) =>
                     part.type === 'wheel' && part.side === hitSide && part.zone === oppositeZone,
@@ -323,8 +325,9 @@ export function createCrashDebrisController({
 
     function applyPersistentHandlingDamage(crashContext, impactSpeed) {
         const damageNorm = THREE.MathUtils.clamp(
-            (impactSpeed - VEHICLE_DAMAGE_COLLISION_MIN) /
-                (VEHICLE_WHEEL_DETACH_SPEED - VEHICLE_DAMAGE_COLLISION_MIN),
+            (impactSpeed - crashDamageTuning.vehicleDamageCollisionMin) /
+                (crashDamageTuning.vehicleWheelDetachSpeed -
+                    crashDamageTuning.vehicleDamageCollisionMin),
             0,
             1.25
         );
@@ -354,8 +357,9 @@ export function createCrashDebrisController({
 
     function addBodyDentFromImpact(crashContext, impactSpeed) {
         const dentNorm = THREE.MathUtils.clamp(
-            (impactSpeed - VEHICLE_DAMAGE_COLLISION_MIN) /
-                (VEHICLE_DAMAGE_COLLISION_HIGH - VEHICLE_DAMAGE_COLLISION_MIN),
+            (impactSpeed - crashDamageTuning.vehicleDamageCollisionMin) /
+                (crashDamageTuning.vehicleDamageCollisionHigh -
+                    crashDamageTuning.vehicleDamageCollisionMin),
             0,
             1.2
         );
@@ -368,13 +372,13 @@ export function createCrashDebrisController({
             bodyDamageVisual.left = THREE.MathUtils.clamp(
                 bodyDamageVisual.left + dentGain,
                 0,
-                VEHICLE_DENT_MAX
+                crashDamageTuning.vehicleDentMax
             );
         } else if (crashContext.hitSide === 'right') {
             bodyDamageVisual.right = THREE.MathUtils.clamp(
                 bodyDamageVisual.right + dentGain,
                 0,
-                VEHICLE_DENT_MAX
+                crashDamageTuning.vehicleDentMax
             );
         }
 
@@ -382,13 +386,13 @@ export function createCrashDebrisController({
             bodyDamageVisual.front = THREE.MathUtils.clamp(
                 bodyDamageVisual.front + dentGain * 0.94,
                 0,
-                VEHICLE_DENT_MAX
+                crashDamageTuning.vehicleDentMax
             );
         } else if (crashContext.hitZone === 'rear') {
             bodyDamageVisual.rear = THREE.MathUtils.clamp(
                 bodyDamageVisual.rear + dentGain * 0.94,
                 0,
-                VEHICLE_DENT_MAX
+                crashDamageTuning.vehicleDentMax
             );
         }
 
@@ -616,10 +620,10 @@ export function createCrashDebrisController({
         }
         impactNormal.normalize();
 
-        const impactSpeed = collision?.impactSpeed || OBSTACLE_CRASH_MAX_SPEED;
+        const impactSpeed = collision?.impactSpeed || crashDamageTuning.obstacleCrashMaxSpeed;
         const impactNorm = THREE.MathUtils.clamp(
-            (impactSpeed - OBSTACLE_CRASH_MIN_SPEED) /
-                (OBSTACLE_CRASH_MAX_SPEED - OBSTACLE_CRASH_MIN_SPEED),
+            (impactSpeed - crashDamageTuning.obstacleCrashMinSpeed) /
+                (crashDamageTuning.obstacleCrashMaxSpeed - crashDamageTuning.obstacleCrashMinSpeed),
             0,
             1
         );
@@ -789,14 +793,22 @@ export function createCrashDebrisController({
             lampPostFrontBoost *
             (0.8 + Math.random() * 0.45);
         const inertiaCarryBoost =
-            crashContext.impactTravelSpeed * PART_BASE_IMPACT_INERTIA_SCALE * inertiaCarryScale;
+            crashContext.impactTravelSpeed *
+            crashDamageTuning.debrisImpactInertiaScale *
+            inertiaCarryScale;
 
         const velocity = new THREE.Vector3()
-            .addScaledVector(radialDirection, PART_BASE_LATERAL_BOOST * reducedBlastScale)
-            .addScaledVector(crashContext.impactNormal, PART_BASE_BLAST_BOOST * reducedBlastScale)
+            .addScaledVector(
+                radialDirection,
+                crashDamageTuning.debrisLateralBoost * reducedBlastScale
+            )
+            .addScaledVector(
+                crashContext.impactNormal,
+                crashDamageTuning.debrisBlastBoost * reducedBlastScale
+            )
             .addScaledVector(
                 crashContext.carForward,
-                PART_BASE_FORWARD_CARRY_BOOST * forwardCarryScale
+                crashDamageTuning.debrisForwardCarryBoost * forwardCarryScale
             )
             .addScaledVector(crashContext.impactTravelDirection, inertiaCarryBoost)
             .addScaledVector(crashContext.carRight, partSideSign * (0.6 + Math.random() * 1.24));
@@ -807,21 +819,24 @@ export function createCrashDebrisController({
                 (crashContext.hitZone === 'front' ? 3.1 : 1.65) * forwardCarryScale
             );
             velocity.y +=
-                DEBRIS_BASE_VERTICAL_BOOST * (0.6 + Math.random() * 0.66 + frontalImpact * 0.55);
+                crashDamageTuning.debrisVerticalBoost *
+                (0.6 + Math.random() * 0.66 + frontalImpact * 0.55);
         } else if (part.type === 'suspension_link') {
             velocity.addScaledVector(
                 crashContext.carForward,
                 (crashContext.hitZone === 'front' ? 2.1 : 1.32) * forwardCarryScale
             );
             velocity.y +=
-                DEBRIS_BASE_VERTICAL_BOOST * (0.46 + Math.random() * 0.48 + frontalImpact * 0.3);
+                crashDamageTuning.debrisVerticalBoost *
+                (0.46 + Math.random() * 0.48 + frontalImpact * 0.3);
         } else {
             velocity.addScaledVector(
                 crashContext.carForward,
                 partZoneSign * (0.2 + Math.random() * 0.62)
             );
             velocity.y +=
-                DEBRIS_BASE_VERTICAL_BOOST * (0.52 + Math.random() * 0.62 + frontalImpact * 0.36);
+                crashDamageTuning.debrisVerticalBoost *
+                (0.52 + Math.random() * 0.62 + frontalImpact * 0.36);
         }
 
         const angularVelocity = new THREE.Vector3(
@@ -867,8 +882,14 @@ export function createCrashDebrisController({
             angularVelocity,
             life: Number.POSITIVE_INFINITY,
             groundOffset: debrisGroundOffset,
-            drag: part.type === 'wheel' ? DEBRIS_DRAG * 0.78 : DEBRIS_DRAG,
-            bounce: part.type === 'wheel' ? DEBRIS_BOUNCE_DAMPING * 0.78 : DEBRIS_BOUNCE_DAMPING,
+            drag:
+                part.type === 'wheel'
+                    ? crashDamageTuning.debrisDrag * 0.78
+                    : crashDamageTuning.debrisDrag,
+            bounce:
+                part.type === 'wheel'
+                    ? crashDamageTuning.debrisBounceDamping * 0.78
+                    : crashDamageTuning.debrisBounceDamping,
             wheelRoll,
             bodyRest,
         });
@@ -1031,8 +1052,8 @@ export function createCrashDebrisController({
         angularVelocity,
         life,
         groundOffset = 0.14,
-        drag = DEBRIS_DRAG,
-        bounce = DEBRIS_BOUNCE_DAMPING,
+        drag = crashDamageTuning.debrisDrag,
+        bounce = crashDamageTuning.debrisBounceDamping,
         wheelRoll = null,
         bodyRest = null,
     }) {
@@ -1075,8 +1096,11 @@ export function createCrashDebrisController({
                 continue;
             }
 
-            piece.velocity.y -= DEBRIS_GRAVITY * dt;
-            piece.velocity.multiplyScalar(Math.exp(-(piece.drag || DEBRIS_DRAG) * dt));
+            piece.velocity.y -= crashDamageTuning.debrisGravity * dt;
+            const pieceDrag = Number.isFinite(piece.drag)
+                ? piece.drag
+                : crashDamageTuning.debrisDrag;
+            piece.velocity.multiplyScalar(Math.exp(-pieceDrag * dt));
             piece.mesh.position.addScaledVector(piece.velocity, dt);
             piece.mesh.rotation.x += piece.angularVelocity.x * dt;
             piece.mesh.rotation.y += piece.angularVelocity.y * dt;
@@ -1091,7 +1115,10 @@ export function createCrashDebrisController({
             }
             if (nearGroundContact) {
                 if (piece.velocity.y < 0) {
-                    piece.velocity.y = -piece.velocity.y * (piece.bounce || DEBRIS_BOUNCE_DAMPING);
+                    const pieceBounce = Number.isFinite(piece.bounce)
+                        ? piece.bounce
+                        : crashDamageTuning.debrisBounceDamping;
+                    piece.velocity.y = -piece.velocity.y * pieceBounce;
                 }
                 piece.velocity.x *= 0.88;
                 piece.velocity.z *= 0.88;

@@ -1,4 +1,10 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import {
+    CRASH_DAMAGE_TUNING_FIELDS,
+    createDefaultCrashDamageTuning,
+    formatCrashDamageTuningValue,
+    sanitizeCrashDamageTuning,
+} from './crash-damage-tuning.js';
 
 const DEFAULT_CAMERA_FOV = 42;
 const MIN_DISTANCE = 0.55;
@@ -32,6 +38,9 @@ export function createCarEditModeController({
     restoreEditablePartVisibility,
     onEditModeChanged,
     onStatus,
+    getCrashDamageTuning,
+    onSetCrashDamageTuningValue,
+    onResetCrashDamageTuning,
 } = {}) {
     if (!camera || !car || !canvas) {
         return createNoopController();
@@ -47,6 +56,15 @@ export function createCarEditModeController({
     const panOffset = new THREE.Vector3();
     const localDirection = new THREE.Vector3();
     const localUpDirection = new THREE.Vector3();
+    const defaultCrashDamageTuning = createDefaultCrashDamageTuning();
+    const readCrashDamageTuning =
+        typeof getCrashDamageTuning === 'function'
+            ? getCrashDamageTuning
+            : () => defaultCrashDamageTuning;
+    const applyCrashDamageTuningValue =
+        typeof onSetCrashDamageTuningValue === 'function' ? onSetCrashDamageTuningValue : null;
+    const resetCrashDamageTuning =
+        typeof onResetCrashDamageTuning === 'function' ? onResetCrashDamageTuning : null;
     const pointerState = {
         active: false,
         id: null,
@@ -71,6 +89,20 @@ export function createCarEditModeController({
             setEditablePartVisibility?.(partId, isVisible);
             renderPartList();
         },
+        onSetCrashDamageTuningValue: (fieldKey, value) => {
+            if (!applyCrashDamageTuningValue) {
+                return;
+            }
+            const resolved = applyCrashDamageTuningValue(fieldKey, value);
+            refreshCrashDamageTuning(resolved);
+        },
+        onResetCrashDamageTuning: () => {
+            if (!resetCrashDamageTuning) {
+                return;
+            }
+            const resolved = resetCrashDamageTuning();
+            refreshCrashDamageTuning(resolved);
+        },
     });
 
     let active = false;
@@ -79,6 +111,7 @@ export function createCarEditModeController({
     let distance = 4.2;
     let savedPartVisibility = null;
     let targetFov = DEFAULT_CAMERA_FOV;
+    let currentCrashDamageTuning = defaultCrashDamageTuning;
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
@@ -159,6 +192,7 @@ export function createCarEditModeController({
             applyViewPreset('iso', false);
             targetFov = DEFAULT_CAMERA_FOV;
             renderPartList();
+            refreshCrashDamageTuning();
             onStatus?.('Edit mode active. Mouse: left rotate, right pan, wheel zoom.');
         } else {
             restoreEditablePartVisibility?.(savedPartVisibility);
@@ -183,6 +217,15 @@ export function createCarEditModeController({
               )
             : allParts;
         ui.renderParts(filteredParts);
+    }
+
+    function refreshCrashDamageTuning(preferredSnapshot = null) {
+        const source =
+            preferredSnapshot && typeof preferredSnapshot === 'object'
+                ? preferredSnapshot
+                : readCrashDamageTuning();
+        currentCrashDamageTuning = sanitizeCrashDamageTuning(source, currentCrashDamageTuning);
+        ui.renderCrashDamageTuning(CRASH_DAMAGE_TUNING_FIELDS, currentCrashDamageTuning);
     }
 
     function focusOnCar(resetPan = false) {
@@ -343,6 +386,8 @@ function createEditModeUi({
     onSelectPreset,
     onSearch,
     onTogglePart,
+    onSetCrashDamageTuningValue,
+    onResetCrashDamageTuning,
 } = {}) {
     const root = document.createElement('section');
     root.id = 'editModePanel';
@@ -374,6 +419,13 @@ function createEditModeUi({
             />
             <div class="editModePartList" data-role="part-list"></div>
         </div>
+        <div class="editModeBlock">
+            <div class="editModeBlockTitle">CRASH & DAMAGE</div>
+            <div class="editModeTuneTools">
+                <button type="button" data-action="reset-crash-tuning">RESET DEFAULTS</button>
+            </div>
+            <div class="editModeTuneList" data-role="crash-tuning-list"></div>
+        </div>
     `;
     document.body.appendChild(root);
 
@@ -383,12 +435,17 @@ function createEditModeUi({
     const searchInput = root.querySelector('[data-role="search"]');
     const partList = root.querySelector('[data-role="part-list"]');
     const viewGrid = root.querySelector('[data-role="view-grid"]');
+    const crashTuningList = root.querySelector('[data-role="crash-tuning-list"]');
+    const crashTuningResetBtn = root.querySelector('[data-action="reset-crash-tuning"]');
     const presetButtons = new Map();
+    const tuningControlsByKey = new Map();
+    let tuningFieldSignature = '';
 
     closeBtn?.addEventListener('click', () => onClose?.());
     showAllBtn?.addEventListener('click', () => onShowAll?.());
     hideAllBtn?.addEventListener('click', () => onHideAll?.());
     searchInput?.addEventListener('input', () => onSearch?.());
+    crashTuningResetBtn?.addEventListener('click', () => onResetCrashDamageTuning?.());
 
     for (let i = 0; i < VIEW_PRESETS.length; i += 1) {
         const preset = VIEW_PRESETS[i];
@@ -492,6 +549,131 @@ function createEditModeUi({
                 }
 
                 partList.appendChild(section);
+            }
+        },
+        renderCrashDamageTuning(fields = [], tuning = {}) {
+            if (!crashTuningList) {
+                return;
+            }
+
+            const normalizedFields = Array.isArray(fields)
+                ? fields.filter((field) => field && typeof field === 'object' && field.key)
+                : [];
+            const nextSignature = normalizedFields
+                .map((field) => `${field.group || ''}:${field.key}`)
+                .join('|');
+
+            if (nextSignature !== tuningFieldSignature) {
+                tuningFieldSignature = nextSignature;
+                tuningControlsByKey.clear();
+                crashTuningList.innerHTML = '';
+
+                const groups = new Map();
+                for (let i = 0; i < normalizedFields.length; i += 1) {
+                    const field = normalizedFields[i];
+                    const groupName = String(field.group || 'General');
+                    if (!groups.has(groupName)) {
+                        groups.set(groupName, []);
+                    }
+                    groups.get(groupName).push(field);
+                }
+
+                for (const [groupName, groupFields] of groups.entries()) {
+                    const groupSection = document.createElement('section');
+                    groupSection.className = 'editModeTuneGroup';
+
+                    const groupTitle = document.createElement('div');
+                    groupTitle.className = 'editModeTuneGroupTitle';
+                    groupTitle.textContent = groupName;
+                    groupSection.appendChild(groupTitle);
+
+                    for (let i = 0; i < groupFields.length; i += 1) {
+                        const field = groupFields[i];
+                        const row = document.createElement('label');
+                        row.className = 'editModeTuneRow';
+
+                        const rowHead = document.createElement('div');
+                        rowHead.className = 'editModeTuneRowHead';
+
+                        const label = document.createElement('span');
+                        label.className = 'editModeTuneLabel';
+                        label.textContent = field.label || field.key;
+
+                        const valueLabel = document.createElement('span');
+                        valueLabel.className = 'editModeTuneValue';
+                        valueLabel.textContent = '--';
+
+                        rowHead.append(label, valueLabel);
+
+                        const rowInputs = document.createElement('div');
+                        rowInputs.className = 'editModeTuneRowInputs';
+
+                        const rangeInput = document.createElement('input');
+                        rangeInput.type = 'range';
+                        rangeInput.min = String(field.min);
+                        rangeInput.max = String(field.max);
+                        rangeInput.step = String(field.step || 1);
+
+                        const numberInput = document.createElement('input');
+                        numberInput.type = 'number';
+                        numberInput.min = String(field.min);
+                        numberInput.max = String(field.max);
+                        numberInput.step = String(field.step || 1);
+
+                        const commitValue = (rawValue) => {
+                            const numeric = Number(rawValue);
+                            if (!Number.isFinite(numeric)) {
+                                return;
+                            }
+                            onSetCrashDamageTuningValue?.(field.key, numeric);
+                        };
+
+                        rangeInput.addEventListener('input', () => {
+                            const liveValue = Number(rangeInput.value);
+                            if (!Number.isFinite(liveValue)) {
+                                return;
+                            }
+                            numberInput.value = String(liveValue);
+                            valueLabel.textContent = formatCrashDamageTuningValue(
+                                field.key,
+                                liveValue
+                            );
+                            commitValue(liveValue);
+                        });
+                        rangeInput.addEventListener('change', () => commitValue(rangeInput.value));
+                        numberInput.addEventListener('change', () =>
+                            commitValue(numberInput.value)
+                        );
+                        numberInput.addEventListener('blur', () => commitValue(numberInput.value));
+
+                        rowInputs.append(rangeInput, numberInput);
+                        row.append(rowHead, rowInputs);
+                        groupSection.appendChild(row);
+
+                        tuningControlsByKey.set(field.key, {
+                            rangeInput,
+                            numberInput,
+                            valueLabel,
+                        });
+                    }
+
+                    crashTuningList.appendChild(groupSection);
+                }
+            }
+
+            for (let i = 0; i < normalizedFields.length; i += 1) {
+                const field = normalizedFields[i];
+                const controls = tuningControlsByKey.get(field.key);
+                if (!controls) {
+                    continue;
+                }
+                const numeric = Number(tuning?.[field.key]);
+                if (!Number.isFinite(numeric)) {
+                    continue;
+                }
+                controls.rangeInput.value = String(numeric);
+                controls.numberInput.value = String(numeric);
+                controls.valueLabel.textContent = formatCrashDamageTuningValue(field.key, numeric);
             }
         },
     };

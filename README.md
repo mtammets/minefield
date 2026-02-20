@@ -42,6 +42,14 @@ Open `http://localhost:3000`.
     - `ESC`: close map
 - The map supports layer filters (roads, buildings, pickups, vehicles, mines, charging zones).
 
+## Edit Mode
+
+- Press `E` to open Edit Mode (`Esc` closes it, `R` resets camera view).
+- In Edit Mode you can:
+    - toggle visible car parts/modules
+    - change crash/damage tuning values (explosion intensity, collision thresholds, wheel detach speeds)
+- Crash/damage tuning values are persisted to `localStorage` and re-applied on next launch.
+
 ## Quality Workflow
 
 ```bash

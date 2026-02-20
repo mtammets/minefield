@@ -52,6 +52,9 @@ import {
     getPlayerTopSpeedLimit,
     getPlayerTopSpeedLimitBounds,
     setPlayerTopSpeedLimitKph,
+    getCrashDamageTuning,
+    setCrashDamageTuning,
+    resetCrashDamageTuning,
     consumeCrashCollision,
     consumeVehicleCollisionContacts,
     applyNetworkVehicleCollisionImpulse,
@@ -89,6 +92,7 @@ import {
     readPersistedPlayerCarColorHex,
     persistPlayerCarColorHex,
 } from './player-persistence.js';
+import { readPersistedCrashDamageTuning, persistCrashDamageTuning } from './crash-damage-tuning.js';
 import { createRaceIntroController } from './race-intro.js';
 import {
     createChargingProgressHudController,
@@ -200,6 +204,36 @@ const carEditModeController = createCarEditModeController({
     onStatus(messageText) {
         objectiveUi.showInfo(messageText, 1800);
     },
+    getCrashDamageTuning() {
+        const physicsTuning = getCrashDamageTuning();
+        const debrisTuning =
+            runtimeState.crashDebrisController?.getCrashDamageTuning?.() || physicsTuning;
+        return {
+            ...physicsTuning,
+            ...debrisTuning,
+        };
+    },
+    onSetCrashDamageTuningValue(fieldKey, value) {
+        if (!fieldKey) {
+            return getCrashDamageTuning();
+        }
+        const patch = {
+            [fieldKey]: value,
+        };
+        const physicsTuning = setCrashDamageTuning(patch);
+        const nextTuning =
+            runtimeState.crashDebrisController?.setCrashDamageTuning?.(patch) || physicsTuning;
+        persistCrashDamageTuning(nextTuning);
+        return nextTuning;
+    },
+    onResetCrashDamageTuning() {
+        const physicsDefaults = resetCrashDamageTuning();
+        const defaults =
+            runtimeState.crashDebrisController?.resetCrashDamageTuning?.() || physicsDefaults;
+        persistCrashDamageTuning(defaults);
+        objectiveUi.showInfo('Crash tuning reset to defaults.', 1400);
+        return defaults;
+    },
 });
 const raceIntroController = createRaceIntroController({
     camera,
@@ -299,6 +333,12 @@ runtimeState.crashDebrisController = createCrashDebrisController({
     isCarDestroyed: () => runtimeState.isCarDestroyed,
 });
 runtimeState.crashDebrisController.initializeBodyPartBaselines();
+const persistedCrashDamageTuning = readPersistedCrashDamageTuning(getCrashDamageTuning());
+const physicsCrashDamageTuning = setCrashDamageTuning(persistedCrashDamageTuning);
+const appliedCrashDamageTuning =
+    runtimeState.crashDebrisController.setCrashDamageTuning(persistedCrashDamageTuning) ||
+    physicsCrashDamageTuning;
+persistCrashDamageTuning(appliedCrashDamageTuning);
 runtimeState.replayEffectsController = createReplayEffectsController({
     scene,
     car,
