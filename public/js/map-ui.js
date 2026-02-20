@@ -8,7 +8,7 @@ const WORLD_MAP_ZOOM_MAX_FACTOR = 8;
 const WORLD_MAP_ZOOM_STEP = 1.12;
 const WORLD_MAP_LOCK_OVERVIEW = true;
 const WORLD_MAP_OVERVIEW_UNIT_PADDING = 12;
-const WORLD_MAP_OVERVIEW_VIEWPORT_FILL = 0.84;
+const WORLD_MAP_OVERVIEW_VIEWPORT_FILL = 0.98;
 
 export function createMapUiController(options = {}) {
     const dom = resolveDom();
@@ -22,12 +22,6 @@ export function createMapUiController(options = {}) {
         Array.isArray(options.staticObstacles) ? options.staticObstacles : []
     );
     const chargingZones = normalizeChargingZones(options.chargingZones);
-    const overviewBounds = resolveOverviewBounds({
-        worldBounds,
-        cityMapLayout,
-        staticFeatures,
-        chargingZones,
-    });
     const onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
 
     const state = {
@@ -404,10 +398,22 @@ export function createMapUiController(options = {}) {
         const height = canvas.height;
         const centerScreenX = width * 0.5;
         const centerScreenY = height * 0.5;
+        const worldMinX = centerScreenX + (worldBounds.minX - state.centerX) * state.zoom;
+        const worldMaxX = centerScreenX + (worldBounds.maxX - state.centerX) * state.zoom;
+        const worldMinY = centerScreenY + (worldBounds.minZ - state.centerZ) * state.zoom;
+        const worldMaxY = centerScreenY + (worldBounds.maxZ - state.centerZ) * state.zoom;
+        const worldDrawWidth = Math.max(1, worldMaxX - worldMinX);
+        const worldDrawHeight = Math.max(1, worldMaxY - worldMinY);
 
         ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = 'rgba(6, 13, 24, 0.96)';
+        ctx.fillRect(0, 0, width, height);
 
         const gridAlpha = Math.max(0.05, Math.min(0.22, state.zoom * 0.04));
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(worldMinX, worldMinY, worldDrawWidth, worldDrawHeight);
+        ctx.clip();
         drawWorldBackgroundGrid(ctx, {
             width,
             height,
@@ -543,6 +549,7 @@ export function createMapUiController(options = {}) {
                 strokeColor: 'rgba(130, 216, 255, 0.95)',
             }
         );
+        ctx.restore();
         ctx.restore();
 
         drawWorldFrame(ctx, {
@@ -1139,7 +1146,7 @@ export function createMapUiController(options = {}) {
         const worldChanged = resizeCanvasToDisplaySize(dom.worldMapCanvas, WORLD_MAP_MAX_DPR);
 
         if (worldChanged || force) {
-            const fitTargetBounds = WORLD_MAP_LOCK_OVERVIEW ? overviewBounds : worldBounds;
+            const fitTargetBounds = worldBounds;
             const fitZoom = resolveFitZoom(
                 dom.worldMapCanvas.width,
                 dom.worldMapCanvas.height,
@@ -1229,9 +1236,10 @@ export function createMapUiController(options = {}) {
 
     function fitWorldOverview() {
         state.followPlayer = false;
-        state.centerX = (overviewBounds.minX + overviewBounds.maxX) * 0.5;
-        state.centerZ = (overviewBounds.minZ + overviewBounds.maxZ) * 0.5;
+        state.centerX = (worldBounds.minX + worldBounds.maxX) * 0.5;
+        state.centerZ = (worldBounds.minZ + worldBounds.maxZ) * 0.5;
         state.zoom = state.fitZoom;
+        clampCenterToWorld();
     }
 }
 

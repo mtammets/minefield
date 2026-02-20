@@ -1012,8 +1012,9 @@ canvas#gameCanvas {
 }
 
 .worldMapShell {
-    width: min(1320px, calc(100vw - 22px));
-    height: min(840px, calc(100vh - 22px));
+    --world-map-shell-side: min(1320px, calc(100vw - 22px), calc(100vh - 22px));
+    width: var(--world-map-shell-side);
+    height: var(--world-map-shell-side);
     border: 1px solid rgba(164, 216, 255, 0.48);
     border-radius: 16px;
     background: linear-gradient(164deg, rgba(8, 17, 30, 0.95), rgba(5, 12, 22, 0.95));
@@ -1992,8 +1993,9 @@ body.race-intro-active #botPanel {
 
 @media (max-width: 980px) {
     .worldMapShell {
-        width: calc(100vw - 14px);
-        height: calc(100vh - 14px);
+        --world-map-shell-side: min(calc(100vw - 14px), calc(100vh - 14px));
+        width: var(--world-map-shell-side);
+        height: var(--world-map-shell-side);
         border-radius: 12px;
     }
 
