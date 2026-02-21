@@ -2147,7 +2147,7 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
     const linkY = config.linkY ?? SUSPENSION_LINK_Y;
     const DRAG_MIN_SPEED = 4.5;
     const DRAG_MAX_TRAIL = 0.62;
-    const DRAG_GROUND_CLEARANCE = 0.022;
+    const DRAG_GROUND_CLEARANCE = 0.014;
     const SCRAPE_MIN_SPEED = 7.2;
     const SCRAPE_MIN_STEER = 0.15;
 
@@ -2274,10 +2274,15 @@ function createSuspensionLinkage(carRoot, bodyRig, wheelRig, config = {}) {
                     0,
                     0.045
                 );
+                const dragTargetY = THREE.MathUtils.clamp(
+                    groundLocalY + 0.001 - dragDrop - speedNorm * 0.014 - steerAbs * 0.008,
+                    groundLocalY - 0.05,
+                    groundLocalY + 0.01
+                );
 
                 link.dragTargetLocal.set(
                     link.wheelAnchorLocal.x * 0.92,
-                    groundLocalY + 0.01 - dragDrop,
+                    dragTargetY,
                     link.wheelAnchorLocal.z + trail + steerSweep + zoneBias
                 );
                 const dragBlend = 1 - Math.exp(-11.5 * dt);
