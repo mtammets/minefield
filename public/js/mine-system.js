@@ -14,10 +14,21 @@ const MINE_SURFACE_OFFSET = 0.06;
 const MINE_DROP_BACK_OFFSET = 2.8;
 const MINE_THROW_FORWARD_OFFSET = 1.6;
 const MINE_THROW_UP_OFFSET = 0.8;
-const MINE_DETONATION_LIGHT_LIFE = 0.28;
-const MINE_DETONATION_RING_LIFE = 0.34;
+const MINE_DETONATION_LIGHT_LIFE = 0.5;
+const MINE_DETONATION_RING_LIFE = 0.5;
 const RECENT_DETONATION_RETENTION_MS = 5000;
 const MAX_POOLED_DETONATION_EFFECTS = 48;
+const MINE_DETONATION_LIGHT_INTENSITY = 7.2;
+const MINE_DETONATION_LIGHT_DISTANCE = 44;
+const MINE_DETONATION_SHOCKWAVE_BASE_OPACITY = 0.66;
+const MINE_DETONATION_CORE_BASE_OPACITY = 0.96;
+const MINE_DETONATION_HALO_BASE_OPACITY = 0.64;
+const MINE_DETONATION_CORE_BASE_SCALE = 1.05;
+const MINE_DETONATION_HALO_BASE_SCALE = 1.7;
+const MINE_DETONATION_SHOCKWAVE_BASE_SCALE = 0.2;
+const MINE_DETONATION_HOT_COLOR = new THREE.Color(0xffcf89);
+const MINE_DETONATION_WARM_COLOR = new THREE.Color(0xff8d4f);
+const MINE_DETONATION_COOL_COLOR = new THREE.Color(0xff4a32);
 
 const mineForward = new THREE.Vector3();
 const mineThrowVelocity = new THREE.Vector3();
@@ -47,7 +58,10 @@ export function createMineSystemController(options = {}) {
     const minesById = new Map();
     const detonationEffects = [];
     const detonationEffectPool = [];
-    const detonationRingGeometry = new THREE.RingGeometry(0.42, 1.08, 24);
+    const detonationShockwaveGeometry = new THREE.PlaneGeometry(1, 1);
+    const detonationShockwaveTexture = createDetonationShockwaveTexture();
+    const detonationCoreTexture = createDetonationCoreTexture();
+    const detonationHaloTexture = createDetonationHaloTexture();
     const recentDetonations = new Map();
     let lastDeployAtMs = -100_000;
     let localMineSequence = 0;
@@ -478,7 +492,9 @@ export function createMineSystemController(options = {}) {
         }
         while (detonationEffects.length > 0) {
             const effect = detonationEffects.pop();
-            scene.remove(effect.ring);
+            scene.remove(effect.shockwave);
+            scene.remove(effect.coreSprite);
+            scene.remove(effect.haloSprite);
             scene.remove(effect.light);
             recycleDetonationEffect(effect);
         }
@@ -520,16 +536,39 @@ export function createMineSystemController(options = {}) {
         effect.light.position.y += 0.42;
         effect.light.userData.life = MINE_DETONATION_LIGHT_LIFE;
         effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
-        effect.light.intensity = 4.2;
+        effect.light.intensity = MINE_DETONATION_LIGHT_INTENSITY;
+        effect.light.distance = MINE_DETONATION_LIGHT_DISTANCE;
         scene.add(effect.light);
 
-        effect.ring.position.copy(position);
-        effect.ring.position.y += 0.04;
-        effect.ring.scale.setScalar(1);
-        effect.ring.userData.life = MINE_DETONATION_RING_LIFE;
-        effect.ring.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.ring.material.opacity = 0.78;
-        scene.add(effect.ring);
+        effect.shockwave.position.copy(position);
+        effect.shockwave.position.y += 0.05;
+        effect.shockwave.rotation.z = Math.random() * Math.PI * 2;
+        effect.shockwave.scale.setScalar(MINE_DETONATION_SHOCKWAVE_BASE_SCALE);
+        effect.shockwave.userData.life = MINE_DETONATION_RING_LIFE;
+        effect.shockwave.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.shockwave.material.opacity = MINE_DETONATION_SHOCKWAVE_BASE_OPACITY;
+        effect.shockwave.material.color.copy(MINE_DETONATION_HOT_COLOR);
+        scene.add(effect.shockwave);
+
+        effect.coreSprite.position.copy(position);
+        effect.coreSprite.position.y += 0.28;
+        effect.coreSprite.scale.setScalar(MINE_DETONATION_CORE_BASE_SCALE);
+        effect.coreSprite.material.rotation = Math.random() * Math.PI * 2;
+        effect.coreSprite.userData.life = MINE_DETONATION_RING_LIFE;
+        effect.coreSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.coreSprite.material.opacity = MINE_DETONATION_CORE_BASE_OPACITY;
+        effect.coreSprite.material.color.copy(MINE_DETONATION_HOT_COLOR);
+        scene.add(effect.coreSprite);
+
+        effect.haloSprite.position.copy(position);
+        effect.haloSprite.position.y += 0.16;
+        effect.haloSprite.scale.setScalar(MINE_DETONATION_HALO_BASE_SCALE);
+        effect.haloSprite.material.rotation = Math.random() * Math.PI * 2;
+        effect.haloSprite.userData.life = MINE_DETONATION_RING_LIFE;
+        effect.haloSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.haloSprite.material.opacity = MINE_DETONATION_HALO_BASE_OPACITY;
+        effect.haloSprite.material.color.copy(MINE_DETONATION_WARM_COLOR);
+        scene.add(effect.haloSprite);
 
         detonationEffects.push(effect);
     }
@@ -539,29 +578,79 @@ export function createMineSystemController(options = {}) {
             const effect = detonationEffects[index];
 
             effect.light.userData.life -= dt;
-            effect.ring.userData.life -= dt;
+            effect.shockwave.userData.life -= dt;
+            effect.coreSprite.userData.life -= dt;
+            effect.haloSprite.userData.life -= dt;
 
             const lightLifeNorm = THREE.MathUtils.clamp(
                 effect.light.userData.life / effect.light.userData.maxLife,
                 0,
                 1
             );
-            const ringLifeNorm = THREE.MathUtils.clamp(
-                effect.ring.userData.life / effect.ring.userData.maxLife,
+            const shockwaveLifeNorm = THREE.MathUtils.clamp(
+                effect.shockwave.userData.life / effect.shockwave.userData.maxLife,
                 0,
                 1
             );
+            const coreLifeNorm = THREE.MathUtils.clamp(
+                effect.coreSprite.userData.life / effect.coreSprite.userData.maxLife,
+                0,
+                1
+            );
+            const haloLifeNorm = THREE.MathUtils.clamp(
+                effect.haloSprite.userData.life / effect.haloSprite.userData.maxLife,
+                0,
+                1
+            );
+            const progress = 1 - shockwaveLifeNorm;
+            const easeOutQuad = 1 - Math.pow(1 - progress, 2);
+            const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+            const flashPulse = Math.exp(-progress * 5.4);
+            const emberTail = Math.pow(Math.max(0, 1 - progress), 1.3);
 
-            effect.light.intensity = lightLifeNorm * 4.2;
-            effect.ring.material.opacity = ringLifeNorm * 0.78;
-            effect.ring.scale.setScalar(1 + (1 - ringLifeNorm) * 4.3);
+            effect.light.intensity =
+                MINE_DETONATION_LIGHT_INTENSITY * (0.2 + flashPulse * 0.8) * Math.pow(lightLifeNorm, 1.22);
+            effect.light.distance =
+                MINE_DETONATION_LIGHT_DISTANCE * (0.52 + flashPulse * 0.48);
 
-            if (effect.light.userData.life > 0 || effect.ring.userData.life > 0) {
+            effect.shockwave.material.opacity =
+                MINE_DETONATION_SHOCKWAVE_BASE_OPACITY * Math.pow(shockwaveLifeNorm, 1.34);
+            effect.shockwave.material.color
+                .copy(MINE_DETONATION_COOL_COLOR)
+                .lerp(MINE_DETONATION_HOT_COLOR, shockwaveLifeNorm);
+            effect.shockwave.scale.setScalar(
+                MINE_DETONATION_SHOCKWAVE_BASE_SCALE + easeOutCubic * 8.8
+            );
+
+            effect.coreSprite.material.opacity =
+                MINE_DETONATION_CORE_BASE_OPACITY * Math.pow(coreLifeNorm, 1.18) * flashPulse;
+            effect.coreSprite.material.color
+                .copy(MINE_DETONATION_WARM_COLOR)
+                .lerp(MINE_DETONATION_HOT_COLOR, coreLifeNorm);
+            effect.coreSprite.scale.setScalar(MINE_DETONATION_CORE_BASE_SCALE + easeOutQuad * 4.6);
+            effect.coreSprite.material.rotation += dt * 2.8;
+
+            effect.haloSprite.material.opacity =
+                MINE_DETONATION_HALO_BASE_OPACITY * Math.pow(haloLifeNorm, 1.85) * (0.35 + emberTail * 0.65);
+            effect.haloSprite.material.color
+                .copy(MINE_DETONATION_COOL_COLOR)
+                .lerp(MINE_DETONATION_WARM_COLOR, Math.pow(haloLifeNorm, 0.72));
+            effect.haloSprite.scale.setScalar(MINE_DETONATION_HALO_BASE_SCALE + easeOutCubic * 10.4);
+            effect.haloSprite.material.rotation -= dt * 0.9;
+
+            if (
+                effect.light.userData.life > 0 ||
+                effect.shockwave.userData.life > 0 ||
+                effect.coreSprite.userData.life > 0 ||
+                effect.haloSprite.userData.life > 0
+            ) {
                 continue;
             }
 
             scene.remove(effect.light);
-            scene.remove(effect.ring);
+            scene.remove(effect.shockwave);
+            scene.remove(effect.coreSprite);
+            scene.remove(effect.haloSprite);
             recycleDetonationEffect(effect);
             detonationEffects.splice(index, 1);
         }
@@ -571,17 +660,40 @@ export function createMineSystemController(options = {}) {
         if (detonationEffectPool.length > 0) {
             return detonationEffectPool.pop();
         }
-        const light = new THREE.PointLight(0xff7c52, 4.2, 26, 2);
-        const ringMaterial = new THREE.MeshBasicMaterial({
-            color: 0xff855f,
+        const light = new THREE.PointLight(0xffab6c, MINE_DETONATION_LIGHT_INTENSITY, 48, 2);
+        const shockwaveMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff9560,
+            map: detonationShockwaveTexture,
             transparent: true,
-            opacity: 0.78,
+            opacity: MINE_DETONATION_SHOCKWAVE_BASE_OPACITY,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
             side: THREE.DoubleSide,
             depthWrite: false,
         });
-        const ring = new THREE.Mesh(detonationRingGeometry, ringMaterial);
-        ring.rotation.x = -Math.PI / 2;
-        return { light, ring };
+        const shockwave = new THREE.Mesh(detonationShockwaveGeometry, shockwaveMaterial);
+        shockwave.rotation.x = -Math.PI / 2;
+        const coreMaterial = new THREE.SpriteMaterial({
+            map: detonationCoreTexture,
+            color: MINE_DETONATION_HOT_COLOR,
+            transparent: true,
+            opacity: MINE_DETONATION_CORE_BASE_OPACITY,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+            depthWrite: false,
+        });
+        const coreSprite = new THREE.Sprite(coreMaterial);
+        const haloMaterial = new THREE.SpriteMaterial({
+            map: detonationHaloTexture,
+            color: MINE_DETONATION_WARM_COLOR,
+            transparent: true,
+            opacity: MINE_DETONATION_HALO_BASE_OPACITY,
+            blending: THREE.AdditiveBlending,
+            toneMapped: false,
+            depthWrite: false,
+        });
+        const haloSprite = new THREE.Sprite(haloMaterial);
+        return { light, shockwave, coreSprite, haloSprite };
     }
 
     function recycleDetonationEffect(effect) {
@@ -592,16 +704,29 @@ export function createMineSystemController(options = {}) {
         effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
         effect.light.intensity = 0;
         effect.light.position.set(0, -1000, 0);
-        effect.ring.userData.life = 0;
-        effect.ring.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.ring.material.opacity = 0;
-        effect.ring.scale.setScalar(0.0001);
-        effect.ring.position.set(0, -1000, 0);
+        effect.light.distance = 0;
+        effect.shockwave.userData.life = 0;
+        effect.shockwave.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.shockwave.material.opacity = 0;
+        effect.shockwave.scale.setScalar(0.0001);
+        effect.shockwave.position.set(0, -1000, 0);
+        effect.coreSprite.userData.life = 0;
+        effect.coreSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.coreSprite.material.opacity = 0;
+        effect.coreSprite.scale.setScalar(0.0001);
+        effect.coreSprite.position.set(0, -1000, 0);
+        effect.haloSprite.userData.life = 0;
+        effect.haloSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.haloSprite.material.opacity = 0;
+        effect.haloSprite.scale.setScalar(0.0001);
+        effect.haloSprite.position.set(0, -1000, 0);
 
         if (detonationEffectPool.length < MAX_POOLED_DETONATION_EFFECTS) {
             detonationEffectPool.push(effect);
         } else {
-            effect.ring.material.dispose();
+            effect.shockwave.material.dispose();
+            effect.coreSprite.material.dispose();
+            effect.haloSprite.material.dispose();
         }
     }
 
@@ -612,6 +737,127 @@ export function createMineSystemController(options = {}) {
             }
         }
     }
+}
+
+function createDetonationCoreTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const center = canvas.width * 0.5;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const coreGradient = ctx.createRadialGradient(center, center, 0, center, center, 120);
+    coreGradient.addColorStop(0, 'rgba(255, 250, 220, 1)');
+    coreGradient.addColorStop(0.22, 'rgba(255, 218, 148, 0.95)');
+    coreGradient.addColorStop(0.52, 'rgba(255, 142, 79, 0.62)');
+    coreGradient.addColorStop(1, 'rgba(255, 92, 52, 0)');
+    ctx.fillStyle = coreGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(center, center);
+    for (let i = 0; i < 12; i += 1) {
+        ctx.rotate((Math.PI * 2) / 12);
+        const beam = ctx.createLinearGradient(0, -5, 92, 5);
+        beam.addColorStop(0, 'rgba(255, 255, 230, 0.42)');
+        beam.addColorStop(0.7, 'rgba(255, 176, 108, 0.12)');
+        beam.addColorStop(1, 'rgba(255, 176, 108, 0)');
+        ctx.fillStyle = beam;
+        ctx.beginPath();
+        ctx.moveTo(0, -5);
+        ctx.lineTo(96, -2);
+        ctx.lineTo(96, 2);
+        ctx.lineTo(0, 5);
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+}
+
+function createDetonationShockwaveTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const center = canvas.width * 0.5;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const ringGradient = ctx.createRadialGradient(center, center, 0, center, center, 126);
+    ringGradient.addColorStop(0, 'rgba(255, 220, 170, 0)');
+    ringGradient.addColorStop(0.34, 'rgba(255, 220, 170, 0)');
+    ringGradient.addColorStop(0.48, 'rgba(255, 194, 140, 0.34)');
+    ringGradient.addColorStop(0.56, 'rgba(255, 176, 118, 0.72)');
+    ringGradient.addColorStop(0.66, 'rgba(255, 148, 96, 0.28)');
+    ringGradient.addColorStop(0.78, 'rgba(255, 124, 84, 0.08)');
+    ringGradient.addColorStop(1, 'rgba(255, 100, 72, 0)');
+    ctx.fillStyle = ringGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const haloGradient = ctx.createRadialGradient(center, center, 42, center, center, 126);
+    haloGradient.addColorStop(0, 'rgba(255, 150, 95, 0)');
+    haloGradient.addColorStop(0.58, 'rgba(255, 150, 95, 0.08)');
+    haloGradient.addColorStop(1, 'rgba(255, 150, 95, 0)');
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = haloGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.globalCompositeOperation = 'source-over';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+}
+
+function createDetonationHaloTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    const center = canvas.width * 0.5;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const haloGradient = ctx.createRadialGradient(center, center, 38, center, center, 126);
+    haloGradient.addColorStop(0, 'rgba(255, 170, 112, 0)');
+    haloGradient.addColorStop(0.34, 'rgba(255, 170, 112, 0.26)');
+    haloGradient.addColorStop(0.68, 'rgba(255, 102, 66, 0.18)');
+    haloGradient.addColorStop(1, 'rgba(255, 72, 50, 0)');
+    ctx.fillStyle = haloGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 18; i += 1) {
+        const angle = (i / 18) * Math.PI * 2;
+        const px = center + Math.cos(angle) * 88;
+        const py = center + Math.sin(angle) * 88;
+        const dot = ctx.createRadialGradient(px, py, 0, px, py, 18);
+        dot.addColorStop(0, 'rgba(255, 196, 138, 0.22)');
+        dot.addColorStop(1, 'rgba(255, 196, 138, 0)');
+        ctx.fillStyle = dot;
+        ctx.beginPath();
+        ctx.arc(px, py, 18, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
 }
 
 function createMineMeshBundle() {

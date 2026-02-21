@@ -150,7 +150,7 @@ export function createCrashDebrisController({
             part.source.scale.set(
                 base.scale.x * (1 - sideMagnitude * 0.2),
                 base.scale.y * (1 - (sideMagnitude + zoneMagnitude) * 0.08),
-                base.scale.z * (1 - zoneMagnitude * 0.26)
+                base.scale.z
             );
             part.source.rotation.set(
                 base.rotation.x + zoneBias * 0.05,
