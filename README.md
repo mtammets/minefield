@@ -50,6 +50,30 @@ Open `http://localhost:3000`.
     - change crash/damage tuning values (explosion intensity, collision thresholds, wheel detach speeds)
 - Crash/damage tuning values are persisted to `localStorage` and re-applied on next launch.
 
+## Audio System
+
+- The game now includes a modular Web Audio mixer (`public/js/audio-system.js`) with:
+    - separate buses (`master`, `vehicles`, `effects`, `ambience`, `ui`)
+    - dynamic runtime mixing (engine layers, skid, wind, charging, ambience)
+    - event-driven one-shots (pickup, collisions, mines, explosions, round end, UI)
+    - persistent user preferences in `localStorage` (`silentdrift-audio-prefs-v1`)
+- A compact Audio Mixer panel appears in the lower-right during gameplay.
+- Browsers require user interaction before audio starts; click/tap any key/button to unlock audio.
+- Audio assets are organized under `public/audio/` and are loaded by stable file names.
+
+### Audio Asset Catalog
+
+- `public/audio/ui/*.mp3`: UI clicks/toggles/confirm
+- `public/audio/vehicles/player/*.mp3`: engine layers, skid, wind, suspension
+- `public/audio/gameplay/*.mp3`: countdown, pickup, charging, battery, round end, respawn
+- `public/audio/weapons/mines/*.mp3`: mine deploy/arm/detonation
+- `public/audio/impacts/*.mp3`: collision and obstacle impacts
+- `public/audio/explosions/*.mp3`: major explosion tails
+- `public/audio/ambience/*.mp3`: city/crowd bed loops
+
+All files are included as placeholder MP3s with production-ready naming; replace file contents while
+keeping names/paths to activate final audio.
+
 ## Quality Workflow
 
 ```bash

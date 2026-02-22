@@ -49,6 +49,8 @@ export function createMineSystemController(options = {}) {
         emitMineDetonated = () => {},
         onLocalMineHit = () => {},
         onOtherVehicleMineHit = () => {},
+        onMineDeployed = () => {},
+        onMineDetonated = () => {},
     } = options;
 
     if (!scene || !car) {
@@ -155,6 +157,10 @@ export function createMineSystemController(options = {}) {
         upsertMine(snapshot, { preferIncomingPosition: true });
         lastDeployAtMs = now;
         emitMinePlaced(snapshot);
+        onMineDeployed({
+            mineSnapshot: snapshot,
+            mode: useThrowMode ? 'throw' : 'drop',
+        });
 
         return {
             ok: true,
@@ -396,6 +402,15 @@ export function createMineSystemController(options = {}) {
 
         recentDetonations.set(mineId, now);
         spawnDetonationEffect(detonationPosition);
+        onMineDetonated({
+            mineId,
+            position: detonationPosition.clone(),
+            localHit: Boolean(context.localHit),
+            ownerId: resolvedOwnerId,
+            ownerName: resolvedOwnerName,
+            triggerPlayerId: sanitizePlayerId(context.triggerPlayerId),
+            targetPlayerId: sanitizePlayerId(context.targetPlayerId),
+        });
 
         if (context.emitNetworkEvent) {
             emitMineDetonated({
@@ -609,9 +624,10 @@ export function createMineSystemController(options = {}) {
             const emberTail = Math.pow(Math.max(0, 1 - progress), 1.3);
 
             effect.light.intensity =
-                MINE_DETONATION_LIGHT_INTENSITY * (0.2 + flashPulse * 0.8) * Math.pow(lightLifeNorm, 1.22);
-            effect.light.distance =
-                MINE_DETONATION_LIGHT_DISTANCE * (0.52 + flashPulse * 0.48);
+                MINE_DETONATION_LIGHT_INTENSITY *
+                (0.2 + flashPulse * 0.8) *
+                Math.pow(lightLifeNorm, 1.22);
+            effect.light.distance = MINE_DETONATION_LIGHT_DISTANCE * (0.52 + flashPulse * 0.48);
 
             effect.shockwave.material.opacity =
                 MINE_DETONATION_SHOCKWAVE_BASE_OPACITY * Math.pow(shockwaveLifeNorm, 1.34);
@@ -631,11 +647,15 @@ export function createMineSystemController(options = {}) {
             effect.coreSprite.material.rotation += dt * 2.8;
 
             effect.haloSprite.material.opacity =
-                MINE_DETONATION_HALO_BASE_OPACITY * Math.pow(haloLifeNorm, 1.85) * (0.35 + emberTail * 0.65);
+                MINE_DETONATION_HALO_BASE_OPACITY *
+                Math.pow(haloLifeNorm, 1.85) *
+                (0.35 + emberTail * 0.65);
             effect.haloSprite.material.color
                 .copy(MINE_DETONATION_COOL_COLOR)
                 .lerp(MINE_DETONATION_WARM_COLOR, Math.pow(haloLifeNorm, 0.72));
-            effect.haloSprite.scale.setScalar(MINE_DETONATION_HALO_BASE_SCALE + easeOutCubic * 10.4);
+            effect.haloSprite.scale.setScalar(
+                MINE_DETONATION_HALO_BASE_SCALE + easeOutCubic * 10.4
+            );
             effect.haloSprite.material.rotation -= dt * 0.9;
 
             if (

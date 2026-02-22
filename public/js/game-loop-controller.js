@@ -25,6 +25,7 @@ export function createGameLoopController(options = {}) {
         getPlayerTopSpeedLimit,
         crashDebrisController,
         replayEffectsController,
+        audioController,
         gameSessionController,
         getBotTrafficSystem,
         getMultiplayerCollisionSnapshots,
@@ -58,6 +59,7 @@ export function createGameLoopController(options = {}) {
         getIsWelcomeModalVisible,
         getLocalPlayerId,
         getWorldMapDriveLockMode,
+        getIsWorldMapOpen,
     } = options;
 
     if (!clock || !renderer || !scene || !camera || !car) {
@@ -92,6 +94,8 @@ export function createGameLoopController(options = {}) {
         typeof getWorldMapDriveLockMode === 'function'
             ? getWorldMapDriveLockMode
             : () => WORLD_MAP_DRIVE_LOCK_MODES.none;
+    const readWorldMapOpen =
+        typeof getIsWorldMapOpen === 'function' ? getIsWorldMapOpen : () => false;
 
     let running = false;
     let animationFrameId = null;
@@ -254,6 +258,7 @@ export function createGameLoopController(options = {}) {
                     const vehicleContacts = consumeVehicleCollisionContacts();
                     if (vehicleContacts.length > 0) {
                         crashDebrisController.processVehicleCollisionContacts(vehicleContacts);
+                        audioController?.onVehicleCollisionContacts?.(vehicleContacts);
                         multiplayerController?.reportLocalVehicleContacts?.(
                             vehicleContacts,
                             vehicleState
@@ -262,6 +267,7 @@ export function createGameLoopController(options = {}) {
 
                     const crashCollision = consumeCrashCollision();
                     if (crashCollision && !readCarDestroyed()) {
+                        audioController?.onObstacleCrash?.(crashCollision);
                         gameSessionController.triggerObstacleCrash(crashCollision);
                     }
 
@@ -370,6 +376,20 @@ export function createGameLoopController(options = {}) {
             welcomeVisible: readWelcomeModalVisible(),
             raceIntroActive: raceIntroController.isActive(),
             editModeActive: isEditModeActive,
+        });
+        audioController?.update?.(frameDelta, {
+            vehicleState: getVehicleState(),
+            isPaused: readGamePaused(),
+            welcomeVisible: readWelcomeModalVisible(),
+            editModeActive: isEditModeActive,
+            raceIntroActive: raceIntroController.isActive(),
+            replayActive: replayController.isPlaybackActive(),
+            isCarDestroyed: readCarDestroyed(),
+            isBatteryDepleted: readBatteryDepleted(),
+            isChargingActive: chargingHudActive,
+            chargingLevel: chargingHudLevel,
+            worldMapVisible: readWorldMapOpen(),
+            gameMode: readGameMode(),
         });
 
         updateSunLightPosition();

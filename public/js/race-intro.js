@@ -1,6 +1,14 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 
-export function createRaceIntroController({ camera, vehicle, durationSec = 4.2 } = {}) {
+export function createRaceIntroController({
+    camera,
+    vehicle,
+    durationSec = 4.2,
+    onStepChanged = null,
+    onGoTriggered = null,
+} = {}) {
+    const emitStepChanged = typeof onStepChanged === 'function' ? onStepChanged : () => {};
+    const emitGoTriggered = typeof onGoTriggered === 'function' ? onGoTriggered : () => {};
     const rootEl = document.getElementById('raceIntroOverlay');
     const countEl = document.getElementById('raceIntroCount');
     const captionEl = document.getElementById('raceIntroCaption');
@@ -133,6 +141,12 @@ export function createRaceIntroController({ camera, vehicle, durationSec = 4.2 }
         rootEl.classList.remove('pulse', 'go');
         void rootEl.offsetWidth;
         rootEl.classList.add(step.mode === 'go' ? 'go' : 'pulse');
+        emitStepChanged({
+            ...step,
+            stepIndex,
+            elapsedSec: state.elapsed,
+            durationSec: state.duration,
+        });
     }
 
     function hideOverlay() {
@@ -217,6 +231,7 @@ export function createRaceIntroController({ camera, vehicle, durationSec = 4.2 }
         state.elapsed = 0;
         state.stepIndex = -1;
         state.drivingUnlocked = true;
+        emitGoTriggered();
         scheduleOverlayHide(520);
     }
 

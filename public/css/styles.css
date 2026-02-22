@@ -3060,3 +3060,114 @@ body.race-intro-active #botPanel {
         filter: blur(0);
     }
 }
+
+.audioControlPanel {
+    position: fixed;
+    right: 18px;
+    bottom: 18px;
+    width: min(360px, calc(100vw - 24px));
+    padding: 12px 12px 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(138, 198, 237, 0.34);
+    background: linear-gradient(145deg, rgba(9, 22, 38, 0.94), rgba(8, 18, 31, 0.92));
+    box-shadow:
+        0 12px 30px rgba(0, 0, 0, 0.38),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(8px);
+    z-index: 60;
+    display: grid;
+    gap: 8px;
+    color: rgba(221, 242, 255, 0.95);
+    font-family: 'Orbitron', 'Trebuchet MS', sans-serif;
+}
+
+.audioControlPanel[hidden] {
+    display: none;
+}
+
+.audioControlPanel[data-tone='ready'] {
+    border-color: rgba(124, 235, 184, 0.42);
+}
+
+.audioControlPanelHeading {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: rgba(192, 230, 255, 0.88);
+}
+
+.audioControlPanelStatus {
+    font-size: 10px;
+    line-height: 1.35;
+    color: rgba(169, 207, 235, 0.88);
+    min-height: 15px;
+}
+
+.audioControlPanelControls {
+    display: flex;
+    gap: 8px;
+}
+
+.audioControlButton {
+    border: 1px solid rgba(143, 205, 244, 0.36);
+    border-radius: 9px;
+    background: linear-gradient(145deg, rgba(26, 54, 82, 0.88), rgba(18, 40, 64, 0.9));
+    color: rgba(227, 245, 255, 0.96);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 6px 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition:
+        transform 0.16s ease,
+        border-color 0.16s ease,
+        box-shadow 0.16s ease;
+}
+
+.audioControlButton:hover {
+    transform: translateY(-1px);
+    border-color: rgba(162, 228, 255, 0.62);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.26);
+}
+
+.audioControlPanelSliders {
+    display: grid;
+    gap: 5px;
+}
+
+.audioControlSliderRow {
+    display: grid;
+    grid-template-columns: 66px minmax(0, 1fr) 40px;
+    gap: 8px;
+    align-items: center;
+}
+
+.audioControlSliderLabel {
+    font-size: 10px;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: rgba(179, 221, 250, 0.9);
+}
+
+.audioControlSliderInput {
+    width: 100%;
+    accent-color: #8ad4ff;
+}
+
+.audioControlSliderValue {
+    text-align: right;
+    font-size: 10px;
+    color: rgba(216, 241, 255, 0.9);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+    .audioControlPanel {
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+        width: auto;
+    }
+}

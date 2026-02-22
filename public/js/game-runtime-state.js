@@ -21,6 +21,7 @@ export function createGameRuntimeState({ selectedCarColorHex, batteryMax, player
         inputController: null,
         crashDebrisController: null,
         mineController: null,
+        audioController: null,
         replayEffectsController: null,
         multiplayerController: null,
         gameSessionController: null,

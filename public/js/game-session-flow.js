@@ -71,6 +71,7 @@ export function createGameSessionController({
     setGameMode = () => {},
     setMultiplayerPanelVisible = () => {},
     startOnlineRoomFlow = () => {},
+    audioController = null,
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
@@ -130,6 +131,7 @@ export function createGameSessionController({
         }
 
         setIsGamePaused(shouldPause);
+        audioController?.onPauseChanged?.(getIsGamePaused());
         if (getIsGamePaused()) {
             clearDriveKeys();
             if (getIsWelcomeModalVisible() || !showPauseMenu) {
@@ -160,6 +162,7 @@ export function createGameSessionController({
         setIsWelcomeModalVisible(false);
         carEditModeController.setActive(false);
         welcomeModalUi.hide();
+        audioController?.onWelcomeVisibilityChanged?.(false);
         restartGameWithCountdown();
     }
 
@@ -172,6 +175,7 @@ export function createGameSessionController({
         pauseMenuUi.hide();
         setCameraKeyboardControlsEnabled(true);
         welcomeModalUi.show();
+        audioController?.onWelcomeVisibilityChanged?.(true);
     }
 
     function startRaceIntroSequence() {
@@ -228,6 +232,7 @@ export function createGameSessionController({
             `New car on track. Cars left: ${getPlayerCarsRemaining()}/${PLAYER_CAR_POOL_SIZE}.`,
             2300
         );
+        audioController?.onPlayerRespawn?.();
     }
 
     function setBatteryDepletedState(nextDepleted, options = {}) {
@@ -239,6 +244,7 @@ export function createGameSessionController({
         setIsBatteryDepleted(depleted);
         setPlayerBatteryDepleted(getIsBatteryDepleted());
         if (getIsBatteryDepleted()) {
+            audioController?.onBatteryDepleted?.();
             clearDriveKeys();
             if (options.showStatus !== false) {
                 objectiveUi.showInfo(
@@ -247,6 +253,7 @@ export function createGameSessionController({
                 );
             }
         } else if (options.showStatus !== false) {
+            audioController?.onBatteryRestored?.();
             objectiveUi.showInfo('Battery restored. Drive systems online.', 1600);
         }
         return getIsBatteryDepleted();
@@ -335,6 +342,12 @@ export function createGameSessionController({
             entries: scoreboard,
             topScore,
         });
+        audioController?.onRoundFinished?.({
+            scoreboardEntries: scoreboard,
+            topScore,
+            totalPickups: resolvedTotal,
+            totalCollected: resolvedCollected,
+        });
     }
 
     function triggerCarExplosion(hitPosition, pickupColorHex, targetColorHex, options = {}) {
@@ -376,6 +389,11 @@ export function createGameSessionController({
             options.statusText ||
             `Wrong (${colorNameFromHex(pickupColorHex)})! Correct was ${colorNameFromHex(targetColorHex)}.`;
         crashDebrisController.spawnCarDebris(hitPosition, options.collision || null);
+        audioController?.onPlayerExplosion?.({
+            impactSpeed: Number(options?.collision?.impactSpeed) || 0,
+            obstacleCategory: options?.collision?.obstacleCategory || 'generic',
+            position: hitPosition?.clone?.() || hitPosition,
+        });
 
         if (getPlayerCarsRemaining() > 0) {
             objectiveUi.showCrash(

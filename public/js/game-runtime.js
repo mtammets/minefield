@@ -110,6 +110,7 @@ import { createRuntimeUiControllers } from './game-runtime-ui.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
 import { createMapUiController } from './map-ui.js';
+import { createAudioSystem } from './audio-system.js';
 import {
     INPUT_CONTEXTS,
     WORLD_MAP_DRIVE_LOCK_MODES,
@@ -167,6 +168,8 @@ const scene = initializeScene({
     worldBoundary,
 });
 const renderer = initializeRenderer({ renderSettings });
+runtimeState.audioController = createAudioSystem({ camera });
+runtimeState.audioController.initialize();
 
 const chargingZoneController = createChargingZoneController(scene, chargingZones, {
     activationDelaySec: CHARGING_ZONE_ACTIVATION_DELAY_SEC,
@@ -239,6 +242,12 @@ const raceIntroController = createRaceIntroController({
     camera,
     vehicle: car,
     durationSec: RACE_INTRO_DURATION_SEC,
+    onStepChanged(step) {
+        runtimeState.audioController?.onRaceIntroStep?.(step);
+    },
+    onGoTriggered() {
+        runtimeState.audioController?.onRaceIntroGo?.();
+    },
 });
 const starsController = addStars(scene);
 const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
@@ -272,6 +281,10 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                             return;
                         }
                         runtimeState.gameSessionController.addBattery(BATTERY_PICKUP_GAIN);
+                        runtimeState.audioController?.onPickupCollected?.({
+                            collectorId: 'player',
+                            onlineAuthoritative: true,
+                        });
                         objectiveUi.flashCorrect(
                             pickupColorHex,
                             Math.round(runtimeState.playerBattery)
@@ -284,6 +297,10 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             runtimeState.playerCollectedCount += 1;
             runtimeState.totalCollectedCount += 1;
             runtimeState.gameSessionController.addBattery(BATTERY_PICKUP_GAIN);
+            runtimeState.audioController?.onPickupCollected?.({
+                collectorId: 'player',
+                onlineAuthoritative: false,
+            });
             objectiveUi.flashCorrect(pickupColorHex, Math.round(runtimeState.playerBattery));
             return;
         }
@@ -384,6 +401,18 @@ runtimeState.mineController = createMineSystemController({
     },
     emitMineDetonated(snapshot) {
         runtimeState.multiplayerController?.reportMineDetonated?.(snapshot);
+    },
+    onMineDeployed({ mineSnapshot, mode }) {
+        runtimeState.audioController?.onMineDeployed?.({
+            thrown: mode === 'throw' || Boolean(mineSnapshot?.thrown),
+        });
+    },
+    onMineDetonated({ localHit, position }) {
+        const distanceMeters = position?.distanceTo?.(car.position) || 0;
+        runtimeState.audioController?.onMineDetonated?.({
+            localHit: Boolean(localHit),
+            distanceMeters,
+        });
     },
     onLocalMineHit({ position, ownerName }) {
         if (runtimeState.isCarDestroyed || runtimeState.pickupRoundFinished) {
@@ -567,6 +596,7 @@ runtimeState.gameSessionController = createGameSessionController({
     startOnlineRoomFlow(startContext) {
         runtimeState.multiplayerController?.startOnlineRoomFlow?.(startContext);
     },
+    audioController: runtimeState.audioController,
 });
 
 function syncRuntimeInputContext() {
@@ -597,6 +627,7 @@ function applyWorldMapVisibilityPolicy(expanded) {
     }
 
     runtimeState.isWorldMapOpen = nextOpen;
+    runtimeState.audioController?.onWorldMapVisibilityChanged?.(nextOpen);
 
     if (nextOpen) {
         runtimeState.worldMapDriveLockMode = resolveCurrentWorldMapDriveLockMode();
@@ -776,6 +807,7 @@ runtimeState.gameLoopController = createGameLoopController({
     },
     crashDebrisController: runtimeState.crashDebrisController,
     replayEffectsController: runtimeState.replayEffectsController,
+    audioController: runtimeState.audioController,
     mapUiController,
     gameSessionController: runtimeState.gameSessionController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
@@ -812,6 +844,7 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
     getLocalPlayerId: () => runtimeState.multiplayerController?.getSelfId?.() || '',
     getWorldMapDriveLockMode: () => runtimeState.worldMapDriveLockMode,
+    getIsWorldMapOpen: () => runtimeState.isWorldMapOpen,
 });
 
 botStatusUi.render(runtimeState.botTrafficSystem.getHudState());
