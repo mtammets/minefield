@@ -633,12 +633,19 @@ export function createAudioSystem({ camera = null } = {}) {
         const isPaused = Boolean(frameState.isPaused);
         const welcomeVisible = Boolean(frameState.welcomeVisible);
         const isCarDestroyed = Boolean(frameState.isCarDestroyed);
+        const pickupRoundFinished = Boolean(
+            frameState.pickupRoundFinished ?? frameState.roundFinished
+        );
         const batteryDepleted = Boolean(frameState.isBatteryDepleted);
         const isChargingActive = Boolean(frameState.isChargingActive);
         const chargingLevel = clampNumber(frameState.chargingLevel, 0, 1, 0);
 
         const driveAudioEnabled =
-            !isPaused && !welcomeVisible && !editModeActive && !isCarDestroyed;
+            !isPaused &&
+            !welcomeVisible &&
+            !editModeActive &&
+            !isCarDestroyed &&
+            !pickupRoundFinished;
         const speedNorm = clampNumber(speedAbs / 42, 0, 1, 0);
         const throttleNorm = clampNumber(throttle, 0, 1, 0);
         const brakeNorm = clampNumber(brake, 0, 1, 0);

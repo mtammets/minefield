@@ -31,6 +31,9 @@ export function createRuntimeUiControllers({
         onRestart() {
             getGameSessionController()?.restartGameWithCountdown();
         },
+        onExit() {
+            getInputController()?.returnToWelcomeFromPauseMenu();
+        },
     });
 
     const pauseMenuUi = createPauseMenuController({

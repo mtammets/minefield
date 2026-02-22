@@ -1,8 +1,9 @@
-export function createFinalScoreboardController({ onRestart } = {}) {
+export function createFinalScoreboardController({ onRestart, onExit } = {}) {
     const rootEl = document.getElementById('finalLeaderboard');
     const summaryEl = document.getElementById('leaderboardSummary');
     const listEl = document.getElementById('leaderboardList');
     const restartBtnEl = document.getElementById('leaderboardRestartBtn');
+    const exitBtnEl = document.getElementById('leaderboardExitBtn');
 
     if (!rootEl || !summaryEl || !listEl) {
         return {
@@ -15,6 +16,9 @@ export function createFinalScoreboardController({ onRestart } = {}) {
     }
     restartBtnEl?.addEventListener('click', () => {
         onRestart?.();
+    });
+    exitBtnEl?.addEventListener('click', () => {
+        onExit?.();
     });
 
     return {

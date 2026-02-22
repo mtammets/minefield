@@ -1344,14 +1344,17 @@ body.race-intro-active #miniMapHud {
     text-align: right;
 }
 
-#leaderboardRestartBtn {
+.leaderboardActions {
     margin-top: 12px;
-    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.leaderboardBtn {
     border: 1px solid rgba(255, 223, 120, 0.68);
     border-radius: 9px;
     padding: 10px 12px;
-    background: linear-gradient(180deg, rgba(255, 214, 110, 0.25), rgba(255, 186, 76, 0.15));
-    color: #fff4d2;
     font-family: 'Sora', sans-serif;
     font-size: 13px;
     font-weight: 800;
@@ -1363,12 +1366,23 @@ body.race-intro-active #miniMapHud {
         background 120ms ease;
 }
 
-#leaderboardRestartBtn:hover {
+.leaderboardBtn.restart {
+    background: linear-gradient(180deg, rgba(255, 214, 110, 0.25), rgba(255, 186, 76, 0.15));
+    color: #fff4d2;
+}
+
+.leaderboardBtn.exit {
+    border-color: rgba(255, 160, 160, 0.72);
+    background: rgba(103, 39, 47, 0.62);
+    color: #ffe5e5;
+}
+
+.leaderboardBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.08);
 }
 
-#leaderboardRestartBtn:active {
+.leaderboardBtn:active {
     transform: translateY(0);
     filter: brightness(0.96);
 }

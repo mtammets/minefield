@@ -385,6 +385,7 @@ export function createGameLoopController(options = {}) {
             raceIntroActive: raceIntroController.isActive(),
             replayActive: replayController.isPlaybackActive(),
             isCarDestroyed: readCarDestroyed(),
+            pickupRoundFinished: readPickupRoundFinished(),
             isBatteryDepleted: readBatteryDepleted(),
             isChargingActive: chargingHudActive,
             chargingLevel: chargingHudLevel,
