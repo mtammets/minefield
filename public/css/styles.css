@@ -1201,13 +1201,26 @@ body.race-intro-active #miniMapHud {
 
 .botRow {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto auto auto;
     align-items: center;
     gap: 10px;
     padding: 4px 6px;
     border-radius: 8px;
     background: rgba(19, 35, 58, 0.5);
     border: 1px solid rgba(137, 186, 238, 0.16);
+}
+
+.botRespawning {
+    opacity: 0.78;
+}
+
+.botRowPlayer {
+    background: rgba(48, 38, 16, 0.58);
+    border-color: rgba(255, 208, 117, 0.36);
+}
+
+.botRowPlayer .botName {
+    color: rgba(255, 236, 176, 0.98);
 }
 
 .botName {
@@ -1230,6 +1243,44 @@ body.race-intro-active #miniMapHud {
     border: 1px solid rgba(230, 242, 255, 0.72);
     box-shadow: 0 0 10px rgba(255, 255, 255, 0.19);
     flex: 0 0 auto;
+}
+
+.botLivesWrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 110px;
+}
+
+.botLivesPips {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.botLifePip {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 1px solid rgba(228, 243, 255, 0.5);
+}
+
+.botLifePip.active {
+    background: rgba(255, 97, 97, 0.98);
+    box-shadow: 0 0 8px rgba(255, 90, 90, 0.46);
+}
+
+.botLifePip.empty {
+    background: rgba(177, 202, 232, 0.2);
+    border-color: rgba(191, 213, 238, 0.28);
+}
+
+.botLivesLabel {
+    color: rgba(221, 237, 255, 0.9);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.24px;
+    min-width: 74px;
 }
 
 .botScore {

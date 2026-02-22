@@ -75,6 +75,24 @@ export function createGameSessionController({
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
+    function createPlayerHudState() {
+        if (normalizeGameMode(getGameMode()) !== 'bots') {
+            return null;
+        }
+        const collectedCount = Math.max(0, Math.floor(Number(getPlayerCollectedCount()) || 0));
+        const livesRemaining = Math.max(0, Math.floor(Number(getPlayerCarsRemaining()) || 0));
+        return {
+            name: 'YOU',
+            targetLabel: 'PLAYER',
+            showSwatch: false,
+            collectedCount,
+            livesRemaining,
+            maxLives: PLAYER_CAR_POOL_SIZE,
+            respawning: getIsCarDestroyed() && livesRemaining > 0,
+            respawnMsRemaining: 0,
+            isPlayer: true,
+        };
+    }
     return {
         clearDriveKeys,
         enforceDriveLockMode,
@@ -296,7 +314,7 @@ export function createGameSessionController({
         clearPendingRespawn();
         collectibleSystem.setEnabled(false);
         clearDriveKeys();
-        botStatusUi.render(getBotSystem()?.getHudState?.() || []);
+        botStatusUi.render(getBotSystem()?.getHudState?.() || [], createPlayerHudState());
 
         const providedScoreboard = normalizeScoreboardEntries(options?.scoreboardEntries);
         const scoreboard =
@@ -503,7 +521,7 @@ export function createGameSessionController({
         if (botsEnabled) {
             getBotSystem()?.reset?.({ sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX });
         }
-        botStatusUi.render(getBotSystem()?.getHudState?.() || []);
+        botStatusUi.render(getBotSystem()?.getHudState?.() || [], createPlayerHudState());
 
         crashDebrisController.resetPlayerDamageState();
         clearDriveKeys();

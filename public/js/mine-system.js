@@ -65,11 +65,12 @@ export function createMineSystemController(options = {}) {
     const detonationCoreTexture = createDetonationCoreTexture();
     const detonationHaloTexture = createDetonationHaloTexture();
     const recentDetonations = new Map();
-    let lastDeployAtMs = -100_000;
-    let localMineSequence = 0;
+    const ownerLastDeployAtMs = new Map();
+    let mineSequence = 0;
 
     return {
         deployMine,
+        deployMineForOwner,
         update,
         getMineMarkers,
         applyRoomMineSnapshot,
@@ -79,32 +80,73 @@ export function createMineSystemController(options = {}) {
     };
 
     function deployMine(mode = 'drop') {
-        const useThrowMode = mode === 'throw';
         const localPlayerId = sanitizePlayerId(getLocalPlayerId());
         const localPlayerName = sanitizeOwnerName(getLocalPlayerName());
-        if (!canUseMines()) {
+        const vehicleState = getVehicleState() || {};
+        return deployMineForOwner({
+            ownerId: localPlayerId,
+            ownerName: localPlayerName,
+            sourcePosition: car.position,
+            sourceHeading: car.rotation.y,
+            sourceVelocityX: Number(vehicleState?.velocity?.x) || 0,
+            sourceVelocityZ: Number(vehicleState?.velocity?.y) || 0,
+            mode,
+            requireCanUseMines: true,
+            emitPlacedEvent: true,
+            notifyMineDeployed: true,
+            includePlayerMessages: true,
+        });
+    }
+
+    function deployMineForOwner(options = {}) {
+        const {
+            ownerId: rawOwnerId = '',
+            ownerName: rawOwnerName = 'Driver',
+            sourcePosition = null,
+            sourceHeading = 0,
+            sourceVelocityX = 0,
+            sourceVelocityZ = 0,
+            mode = 'drop',
+            requireCanUseMines = false,
+            emitPlacedEvent = false,
+            notifyMineDeployed = true,
+            includePlayerMessages = false,
+        } = options;
+
+        const useThrowMode = mode === 'throw';
+        const ownerId = sanitizePlayerId(rawOwnerId);
+        const ownerName = sanitizeOwnerName(rawOwnerName);
+
+        if (requireCanUseMines && !canUseMines()) {
             return {
                 ok: false,
-                message: 'Landmines can only be used in an active online room.',
+                message: includePlayerMessages
+                    ? 'Landmines can only be used in an active online room.'
+                    : 'Mine deployment is currently disabled.',
             };
         }
-        if (!localPlayerId) {
+        if (!ownerId) {
             return {
                 ok: false,
-                message: 'Landmine unavailable while online identity is syncing.',
+                message: includePlayerMessages
+                    ? 'Landmine unavailable while online identity is syncing.'
+                    : 'Mine deployment owner is invalid.',
             };
         }
 
         const now = Date.now();
+        const lastDeployAtMs = ownerLastDeployAtMs.get(ownerId) ?? -100_000;
         const cooldownRemainingMs = lastDeployAtMs + MINE_DEPLOY_COOLDOWN_MS - now;
         if (cooldownRemainingMs > 0) {
             return {
                 ok: false,
-                message: `Landmine reloading (${(cooldownRemainingMs / 1000).toFixed(1)}s).`,
+                message: includePlayerMessages
+                    ? `Landmine reloading (${(cooldownRemainingMs / 1000).toFixed(1)}s).`
+                    : 'Mine deployment cooldown active.',
             };
         }
 
-        const ownerMineCount = countOwnerMines(localPlayerId);
+        const ownerMineCount = countOwnerMines(ownerId);
         if (ownerMineCount >= MINE_MAX_PER_OWNER) {
             return {
                 ok: false,
@@ -112,7 +154,13 @@ export function createMineSystemController(options = {}) {
             };
         }
 
-        const spawnData = resolveLocalMineSpawnData(useThrowMode);
+        const spawnData = resolveMineSpawnData({
+            useThrowMode,
+            sourcePosition,
+            sourceHeading,
+            sourceVelocityX,
+            sourceVelocityZ,
+        });
         if (!spawnData) {
             return {
                 ok: false,
@@ -120,13 +168,13 @@ export function createMineSystemController(options = {}) {
             };
         }
 
-        localMineSequence += 1;
-        const mineId = `${localPlayerId}-${now.toString(36)}-${localMineSequence.toString(36)}`;
+        mineSequence += 1;
+        const mineId = `${ownerId}-${now.toString(36)}-${mineSequence.toString(36)}`;
         const snapshot = sanitizeMineSnapshot(
             {
                 mineId,
-                ownerId: localPlayerId,
-                ownerName: localPlayerName,
+                ownerId,
+                ownerName,
                 x: spawnData.position.x,
                 y: spawnData.position.y,
                 z: spawnData.position.z,
@@ -142,8 +190,8 @@ export function createMineSystemController(options = {}) {
                 expiresAt: now + MINE_TTL_MS,
             },
             {
-                ownerIdFallback: localPlayerId,
-                ownerNameFallback: localPlayerName,
+                ownerIdFallback: ownerId,
+                ownerNameFallback: ownerName,
                 timeFallback: now,
             }
         );
@@ -155,44 +203,73 @@ export function createMineSystemController(options = {}) {
         }
 
         upsertMine(snapshot, { preferIncomingPosition: true });
-        lastDeployAtMs = now;
-        emitMinePlaced(snapshot);
-        onMineDeployed({
-            mineSnapshot: snapshot,
-            mode: useThrowMode ? 'throw' : 'drop',
-        });
+        ownerLastDeployAtMs.set(ownerId, now);
+        if (emitPlacedEvent) {
+            emitMinePlaced(snapshot);
+        }
+        if (notifyMineDeployed) {
+            onMineDeployed({
+                mineSnapshot: snapshot,
+                mode: useThrowMode ? 'throw' : 'drop',
+            });
+        }
 
         return {
             ok: true,
-            message: useThrowMode
-                ? 'Mine thrown ahead. It arms shortly after landing.'
-                : 'Mine dropped behind your car.',
+            mineSnapshot: snapshot,
+            mode: useThrowMode ? 'throw' : 'drop',
+            message: includePlayerMessages
+                ? useThrowMode
+                    ? 'Mine thrown ahead. It arms shortly after landing.'
+                    : 'Mine dropped behind your car.'
+                : '',
         };
     }
 
-    function resolveLocalMineSpawnData(useThrowMode = false) {
-        mineForward.set(-Math.sin(car.rotation.y), 0, -Math.cos(car.rotation.y)).normalize();
+    function resolveMineSpawnData({
+        useThrowMode = false,
+        sourcePosition = null,
+        sourceHeading = 0,
+        sourceVelocityX = 0,
+        sourceVelocityZ = 0,
+    } = {}) {
+        if (!sourcePosition || typeof sourcePosition !== 'object') {
+            return null;
+        }
+
+        const sourceX = Number(sourcePosition.x);
+        const sourceY = Number(sourcePosition.y);
+        const sourceZ = Number(sourcePosition.z);
+        if (!Number.isFinite(sourceX) || !Number.isFinite(sourceZ)) {
+            return null;
+        }
+
+        const fallbackGroundY = getGroundHeightAt(sourceX, sourceZ);
+        const resolvedSourceY = Number.isFinite(sourceY) ? sourceY : fallbackGroundY;
+        const heading = Number.isFinite(sourceHeading) ? sourceHeading : 0;
+
+        mineForward.set(-Math.sin(heading), 0, -Math.cos(heading)).normalize();
         if (mineForward.lengthSq() < 0.0001) {
             mineForward.set(0, 0, -1);
         }
 
         const spawnOffset = useThrowMode ? MINE_THROW_FORWARD_OFFSET : -MINE_DROP_BACK_OFFSET;
-        mineGroundPosition.copy(car.position).addScaledVector(mineForward, spawnOffset);
+        mineGroundPosition
+            .set(sourceX, resolvedSourceY, sourceZ)
+            .addScaledVector(mineForward, spawnOffset);
         const groundHeight = getGroundHeightAt(mineGroundPosition.x, mineGroundPosition.z);
         const spawnY = useThrowMode
-            ? car.position.y + MINE_THROW_UP_OFFSET
+            ? resolvedSourceY + MINE_THROW_UP_OFFSET
             : groundHeight + MINE_SURFACE_OFFSET;
         mineGroundPosition.y = spawnY;
 
+        const carryX = Number(sourceVelocityX) || 0;
+        const carryZ = Number(sourceVelocityZ) || 0;
         mineThrowVelocity.set(0, 0, 0);
         if (useThrowMode) {
-            const vehicleState = getVehicleState() || {};
-            const carryX = Number(vehicleState?.velocity?.x) || 0;
-            const carryZ = Number(vehicleState?.velocity?.y) || 0;
-            mineThrowVelocity
-                .copy(mineForward)
-                .multiplyScalar(MINE_THROW_SPEED)
-                .add(new THREE.Vector3(carryX * 0.28, 0, carryZ * 0.28));
+            mineThrowVelocity.copy(mineForward).multiplyScalar(MINE_THROW_SPEED);
+            mineThrowVelocity.x += carryX * 0.28;
+            mineThrowVelocity.z += carryZ * 0.28;
             mineThrowVelocity.y = MINE_THROW_VERTICAL_SPEED;
         }
 
@@ -277,6 +354,9 @@ export function createMineSystemController(options = {}) {
             for (let targetIndex = 0; targetIndex < otherVehicleTargets.length; targetIndex += 1) {
                 const target = otherVehicleTargets[targetIndex];
                 if (!target?.position || typeof target.position !== 'object') {
+                    continue;
+                }
+                if (Boolean(target.mineImmune)) {
                     continue;
                 }
                 if (!armed) {
@@ -514,7 +594,7 @@ export function createMineSystemController(options = {}) {
             recycleDetonationEffect(effect);
         }
         recentDetonations.clear();
-        lastDeployAtMs = -100_000;
+        ownerLastDeployAtMs.clear();
     }
 
     function getMineMarkers() {
@@ -1038,6 +1118,12 @@ function disposeObject3d(object) {
 function createNoopMineSystemController() {
     return {
         deployMine() {
+            return {
+                ok: false,
+                message: 'Landmines are unavailable in this context.',
+            };
+        },
+        deployMineForOwner() {
             return {
                 ok: false,
                 message: 'Landmines are unavailable in this context.',

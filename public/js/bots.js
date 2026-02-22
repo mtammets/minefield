@@ -70,6 +70,10 @@ const BOT_DEBRIS_DRAG = 1.7;
 const BOT_DEBRIS_BOUNCE = 0.3;
 const BOT_DEBRIS_GROUND_OFFSET = 0.04;
 const BOT_DEBRIS_MAX_PIECES = 420;
+const BOT_LIVES_PER_ROUND = 2;
+const BOT_RESPAWN_DELAY_MIN_MS = 3000;
+const BOT_RESPAWN_DELAY_MAX_MS = 4000;
+const BOT_RESPAWN_PROTECTION_MS = 1000;
 
 const BOT_BODY_COLORS = [0x6cb3ff, 0xff8f7d, 0x9cf89c, 0xe9a3ff, 0xffd86b];
 const BOT_NAMES = ['NOVA-1', 'AXIS-2', 'RIFT-3', 'PULSE-4', 'ORBIT-5'];
@@ -121,16 +125,19 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     return {
         update(playerPosition, visiblePickups = [], deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
+            const nowMs = Date.now();
             updateDetachedDebris(dt);
             if (!enabled) {
                 return;
             }
             for (let i = 0; i < bots.length; i += 1) {
-                if (bots[i].destroyed) {
+                const bot = bots[i];
+                if (bot.destroyed) {
+                    tryRespawnBot(bot, nowMs);
                     continue;
                 }
                 updateBot(
-                    bots[i],
+                    bot,
                     bots,
                     playerPosition,
                     visiblePickups,
@@ -146,8 +153,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!enabled) {
                 return [];
             }
+            const nowMs = Date.now();
             return bots
-                .filter((bot) => !bot.destroyed)
+                .filter((bot) => !bot.destroyed && !isBotSpawnProtected(bot, nowMs))
                 .map((bot) => ({
                     id: bot.collectorId,
                     sourceType: 'bot',
@@ -183,11 +191,13 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!enabled) {
                 return [];
             }
+            const nowMs = Date.now();
             return bots
                 .filter((bot) => !bot.destroyed)
                 .map((bot) => ({
                     id: bot.collectorId,
                     position: bot.car.position,
+                    mineImmune: isBotSpawnProtected(bot, nowMs),
                 }));
         },
         registerCollected(collectorId) {
@@ -208,6 +218,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         reset({ sharedTargetColorHex: nextTargetColorHex = resolvedSharedTargetColorHex } = {}) {
             resolvedSharedTargetColorHex = nextTargetColorHex;
             clearDetachedDebris();
+            const nowMs = Date.now();
             const placedBots = [];
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
@@ -218,7 +229,13 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     staticObstacles,
                     placedBots,
                     resolvedSharedTargetColorHex,
-                    getGroundHeightAt
+                    getGroundHeightAt,
+                    {
+                        resetCollectedCount: true,
+                        resetLives: true,
+                        nowMs,
+                        respawnProtectionMs: 0,
+                    }
                 );
                 placedBots.push(bot);
             }
@@ -228,10 +245,18 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!enabled) {
                 return [];
             }
+            const nowMs = Date.now();
             return bots.map((bot) => ({
                 name: bot.name,
                 collectedCount: bot.collectedCount,
                 targetColorHex: bot.targetColorHex,
+                livesRemaining: bot.livesRemaining,
+                maxLives: BOT_LIVES_PER_ROUND,
+                respawning: bot.destroyed && bot.livesRemaining > 0,
+                respawnMsRemaining:
+                    bot.destroyed && bot.livesRemaining > 0
+                        ? Math.max(0, (Number(bot.respawnAtMs) || 0) - nowMs)
+                        : 0,
             }));
         },
         setEnabled(nextEnabled = true) {
@@ -249,7 +274,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 return false;
             }
             const bot = botsByCollectorId.get(collectorId);
-            if (!bot || bot.destroyed) {
+            if (!bot || bot.destroyed || isBotSpawnProtected(bot)) {
                 return false;
             }
 
@@ -265,6 +290,40 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             return true;
         },
     };
+
+    function tryRespawnBot(bot, nowMs) {
+        if (!bot || !bot.destroyed || bot.livesRemaining <= 0) {
+            return;
+        }
+        if (!Number.isFinite(bot.respawnAtMs) || bot.respawnAtMs <= 0 || nowMs < bot.respawnAtMs) {
+            return;
+        }
+
+        const placedBots = [];
+        for (let i = 0; i < bots.length; i += 1) {
+            const candidate = bots[i];
+            if (!candidate || candidate === bot || candidate.destroyed) {
+                continue;
+            }
+            placedBots.push(candidate);
+        }
+
+        resetBot(
+            bot,
+            bot.botIndex,
+            worldBounds,
+            staticObstacles,
+            placedBots,
+            resolvedSharedTargetColorHex,
+            getGroundHeightAt,
+            {
+                resetCollectedCount: false,
+                resetLives: false,
+                nowMs,
+                respawnProtectionMs: BOT_RESPAWN_PROTECTION_MS,
+            }
+        );
+    }
 
     function applyEnabledVisibility() {
         for (let i = 0; i < bots.length; i += 1) {
@@ -437,8 +496,15 @@ function resetBot(
     staticObstacles,
     placedBots,
     sharedTargetColorHex,
-    getGroundHeightAt
+    getGroundHeightAt,
+    options = {}
 ) {
+    const {
+        resetCollectedCount = true,
+        resetLives = true,
+        nowMs = Date.now(),
+        respawnProtectionMs = 0,
+    } = options;
     const spawnPosition = findSpawnPoint(index, worldBounds, staticObstacles, placedBots);
     bot.car.position.x = spawnPosition.x;
     bot.car.position.z = spawnPosition.z;
@@ -455,6 +521,12 @@ function resetBot(
     }
 
     bot.destroyed = false;
+    bot.respawnAtMs = 0;
+    bot.spawnProtectionEndsAtMs =
+        respawnProtectionMs > 0 ? nowMs + Math.max(0, respawnProtectionMs) : 0;
+    if (resetLives) {
+        bot.livesRemaining = BOT_LIVES_PER_ROUND;
+    }
     bot.state.speed = 0;
     bot.state.acceleration = 0;
     bot.state.steerInput = 0;
@@ -470,7 +542,9 @@ function resetBot(
     bot.drift.intensity = 0;
     bot.drift.cooldown = randomRange(BOT_DRIFT_COOLDOWN_MIN * 0.5, BOT_DRIFT_COOLDOWN_MAX * 0.9);
     bot.wanderTarget = pickWanderTarget(worldBounds);
-    bot.collectedCount = 0;
+    if (resetCollectedCount) {
+        bot.collectedCount = 0;
+    }
     bot.targetColorHex = sharedTargetColorHex;
     bot.lastDamageAtMs = 0;
     bot.detachedPartIds.clear();
@@ -569,6 +643,7 @@ function createBot(
         velocity: new THREE.Vector2(0, 0),
     };
     const bot = {
+        botIndex: index,
         collectorId,
         name,
         bodyColor,
@@ -583,6 +658,9 @@ function createBot(
         onPartDetached,
         lastDamageAtMs: 0,
         destroyed: false,
+        livesRemaining: BOT_LIVES_PER_ROUND,
+        respawnAtMs: 0,
+        spawnProtectionEndsAtMs: 0,
         state,
         drift: {
             active: false,
@@ -921,6 +999,9 @@ function getBotDamageDynamics(damageState) {
 }
 
 function applyBotCollisionDamage(bot, contact) {
+    if (isBotSpawnProtected(bot)) {
+        return;
+    }
     const impactSpeed = Math.max(0, contact?.impactSpeed || 0);
     if (impactSpeed < BOT_DAMAGE_COLLISION_MIN) {
         return;
@@ -1258,7 +1339,14 @@ function destroyBot(bot) {
     if (bot.destroyed) {
         return;
     }
+    const nowMs = Date.now();
     bot.destroyed = true;
+    bot.livesRemaining = Math.max(0, (Number(bot.livesRemaining) || 0) - 1);
+    bot.respawnAtMs =
+        bot.livesRemaining > 0
+            ? nowMs + randomRange(BOT_RESPAWN_DELAY_MIN_MS, BOT_RESPAWN_DELAY_MAX_MS)
+            : 0;
+    bot.spawnProtectionEndsAtMs = 0;
     bot.state.speed = 0;
     bot.state.acceleration = 0;
     bot.state.throttle = 0;
@@ -1274,6 +1362,13 @@ function destroyBot(bot) {
     if (bot.indicator?.root) {
         bot.indicator.root.visible = false;
     }
+}
+
+function isBotSpawnProtected(bot, nowMs = Date.now()) {
+    if (!bot || bot.destroyed) {
+        return false;
+    }
+    return Number(bot.spawnProtectionEndsAtMs) > nowMs;
 }
 
 function createBotIndicator(name, colorHex) {

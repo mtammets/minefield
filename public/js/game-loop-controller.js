@@ -1,5 +1,15 @@
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 
+const BOT_MINE_DEPLOY_MIN_SPEED = 8;
+const BOT_MINE_DEPLOY_MAX_DISTANCE = 24;
+const BOT_MINE_THROW_MAX_DISTANCE = 13.5;
+const BOT_MINE_DROP_DOT_THRESHOLD = -0.2;
+const BOT_MINE_THROW_DOT_THRESHOLD = 0.45;
+const BOT_MINE_DECISION_MIN_INTERVAL_MS = 900;
+const BOT_MINE_DECISION_MAX_INTERVAL_MS = 1700;
+const BOT_MINE_POST_DEPLOY_MIN_INTERVAL_MS = 2400;
+const BOT_MINE_POST_DEPLOY_MAX_INTERVAL_MS = 3800;
+
 export function createGameLoopController(options = {}) {
     const {
         clock,
@@ -47,11 +57,14 @@ export function createGameLoopController(options = {}) {
         maxPhysicsStepsPerFrame = 6,
         roundTotalPickups = 30,
         chargingBatteryGainPerSec = 16,
+        playerCarPoolSize = 3,
         getPhysicsAccumulator,
         setPhysicsAccumulator,
         getIsGamePaused,
         getIsCarDestroyed,
         getIsBatteryDepleted,
+        getPlayerCollectedCount,
+        getPlayerCarsRemaining,
         getPickupRoundFinished,
         getTotalCollectedCount,
         getBotsEnabled,
@@ -81,6 +94,10 @@ export function createGameLoopController(options = {}) {
         typeof getIsCarDestroyed === 'function' ? getIsCarDestroyed : () => false;
     const readBatteryDepleted =
         typeof getIsBatteryDepleted === 'function' ? getIsBatteryDepleted : () => false;
+    const readPlayerCollectedCount =
+        typeof getPlayerCollectedCount === 'function' ? getPlayerCollectedCount : () => 0;
+    const readPlayerCarsRemaining =
+        typeof getPlayerCarsRemaining === 'function' ? getPlayerCarsRemaining : () => 0;
     const readPickupRoundFinished =
         typeof getPickupRoundFinished === 'function' ? getPickupRoundFinished : () => false;
     const readTotalCollectedCount =
@@ -99,6 +116,7 @@ export function createGameLoopController(options = {}) {
 
     let running = false;
     let animationFrameId = null;
+    const botMineDecisionById = new Map();
 
     return {
         start() {
@@ -302,6 +320,9 @@ export function createGameLoopController(options = {}) {
                     const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
                     if (botsEnabled) {
                         botTrafficSystem?.update?.(car.position, visiblePickupsForBots, frameDelta);
+                        updateBotMineDeployment(botTrafficSystem, frameDelta);
+                    } else {
+                        botMineDecisionById.clear();
                     }
                     const collectors = botsEnabled
                         ? [
@@ -320,7 +341,10 @@ export function createGameLoopController(options = {}) {
                             readTotalCollectedCount()
                         );
                     }
-                    botStatusUi.render(botsEnabled ? botTrafficSystem?.getHudState?.() || [] : []);
+                    const botHudEntries = botsEnabled
+                        ? botTrafficSystem?.getHudState?.() || []
+                        : [];
+                    botStatusUi.render(botHudEntries, createPlayerHudState());
                 }
 
                 replayEffectsController.updateReplayEffects(frameDelta);
@@ -396,6 +420,154 @@ export function createGameLoopController(options = {}) {
         updateSunLightPosition();
         renderer.render(scene, camera);
     }
+
+    function updateBotMineDeployment(botTrafficSystem, frameDelta) {
+        if (
+            !botTrafficSystem ||
+            readGameMode() !== 'bots' ||
+            readCarDestroyed() ||
+            readPickupRoundFinished() ||
+            frameDelta <= 0
+        ) {
+            botMineDecisionById.clear();
+            return;
+        }
+
+        const snapshots = botTrafficSystem.getCollisionSnapshots?.() || [];
+        if (!Array.isArray(snapshots) || snapshots.length === 0) {
+            botMineDecisionById.clear();
+            return;
+        }
+
+        const now = Date.now();
+        const activeBotIds = new Set();
+
+        for (let i = 0; i < snapshots.length; i += 1) {
+            const snapshot = snapshots[i];
+            const ownerId = typeof snapshot?.id === 'string' ? snapshot.id : '';
+            if (!ownerId) {
+                continue;
+            }
+            activeBotIds.add(ownerId);
+
+            let decisionState = botMineDecisionById.get(ownerId);
+            if (!decisionState) {
+                decisionState = {
+                    nextAttemptAtMs: now + randomRangeMs(320, 1200),
+                };
+                botMineDecisionById.set(ownerId, decisionState);
+            }
+            if (now < decisionState.nextAttemptAtMs) {
+                continue;
+            }
+            decisionState.nextAttemptAtMs =
+                now +
+                randomRangeMs(BOT_MINE_DECISION_MIN_INTERVAL_MS, BOT_MINE_DECISION_MAX_INTERVAL_MS);
+
+            const botX = Number(snapshot?.x);
+            const botZ = Number(snapshot?.z);
+            const botHeading = Number(snapshot?.heading);
+            if (!Number.isFinite(botX) || !Number.isFinite(botZ) || !Number.isFinite(botHeading)) {
+                continue;
+            }
+
+            const dx = car.position.x - botX;
+            const dz = car.position.z - botZ;
+            const distanceSq = dx * dx + dz * dz;
+            if (!Number.isFinite(distanceSq) || distanceSq < 0.0001) {
+                continue;
+            }
+            const distance = Math.sqrt(distanceSq);
+            if (distance > BOT_MINE_DEPLOY_MAX_DISTANCE) {
+                continue;
+            }
+
+            const velocityX = Number(snapshot?.velocityX) || 0;
+            const velocityZ = Number(snapshot?.velocityZ) || 0;
+            const botSpeed = Math.hypot(velocityX, velocityZ);
+            if (botSpeed < BOT_MINE_DEPLOY_MIN_SPEED) {
+                continue;
+            }
+
+            const toPlayerX = dx / distance;
+            const toPlayerZ = dz / distance;
+            const forwardX = -Math.sin(botHeading);
+            const forwardZ = -Math.cos(botHeading);
+            const forwardDot = forwardX * toPlayerX + forwardZ * toPlayerZ;
+
+            let deployMode = '';
+            if (forwardDot <= BOT_MINE_DROP_DOT_THRESHOLD) {
+                deployMode = 'drop';
+            } else if (
+                forwardDot >= BOT_MINE_THROW_DOT_THRESHOLD &&
+                distance <= BOT_MINE_THROW_MAX_DISTANCE
+            ) {
+                deployMode = 'throw';
+            }
+            if (!deployMode) {
+                continue;
+            }
+
+            const sourceY = Number(getGroundHeightAt(botX, botZ));
+            const deployResult = mineSystemController?.deployMineForOwner?.({
+                ownerId,
+                ownerName: ownerId,
+                sourcePosition: {
+                    x: botX,
+                    y: Number.isFinite(sourceY) ? sourceY : car.position.y,
+                    z: botZ,
+                },
+                sourceHeading: botHeading,
+                sourceVelocityX: velocityX,
+                sourceVelocityZ: velocityZ,
+                mode: deployMode,
+                requireCanUseMines: true,
+                emitPlacedEvent: false,
+                notifyMineDeployed: false,
+                includePlayerMessages: false,
+            });
+
+            if (deployResult?.ok) {
+                decisionState.nextAttemptAtMs =
+                    now +
+                    randomRangeMs(
+                        BOT_MINE_POST_DEPLOY_MIN_INTERVAL_MS,
+                        BOT_MINE_POST_DEPLOY_MAX_INTERVAL_MS
+                    );
+            }
+        }
+
+        for (const botId of Array.from(botMineDecisionById.keys())) {
+            if (!activeBotIds.has(botId)) {
+                botMineDecisionById.delete(botId);
+            }
+        }
+    }
+
+    function randomRangeMs(min, max) {
+        return min + Math.random() * (max - min);
+    }
+
+    function createPlayerHudState() {
+        if (readGameMode() !== 'bots') {
+            return null;
+        }
+        const collectedCount = Math.max(0, Math.floor(Number(readPlayerCollectedCount()) || 0));
+        const livesRemaining = Math.max(0, Math.floor(Number(readPlayerCarsRemaining()) || 0));
+        const maxLives = Math.max(1, Math.floor(Number(playerCarPoolSize) || 3));
+        return {
+            name: 'YOU',
+            targetLabel: 'PLAYER',
+            showSwatch: false,
+            collectedCount,
+            livesRemaining,
+            maxLives,
+            respawning: readCarDestroyed() && livesRemaining > 0,
+            respawnMsRemaining: 0,
+            isPlayer: true,
+        };
+    }
+
     function updateSunLightPosition() {
         if (!sunLight) {
             return;

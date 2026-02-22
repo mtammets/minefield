@@ -380,6 +380,7 @@ runtimeState.mineController = createMineSystemController({
             type: 'bot',
             label: entry.id,
             position: entry.position,
+            mineImmune: Boolean(entry.mineImmune),
         }));
     },
     getLocalPlayerId: () =>
@@ -830,6 +831,7 @@ runtimeState.gameLoopController = createGameLoopController({
     maxPhysicsStepsPerFrame: MAX_PHYSICS_STEPS_PER_FRAME,
     roundTotalPickups: ROUND_TOTAL_PICKUPS,
     chargingBatteryGainPerSec: CHARGING_BATTERY_GAIN_PER_SEC,
+    playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
     getPhysicsAccumulator: () => runtimeState.physicsAccumulator,
     setPhysicsAccumulator(value) {
         runtimeState.physicsAccumulator = value;
@@ -837,6 +839,8 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsGamePaused: () => runtimeState.isGamePaused,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getIsBatteryDepleted: () => runtimeState.isBatteryDepleted,
+    getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
+    getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
     getPickupRoundFinished: () => runtimeState.pickupRoundFinished,
     getTotalCollectedCount: () => runtimeState.totalCollectedCount,
     getBotsEnabled: () => runtimeState.gameMode !== 'online',
@@ -847,7 +851,21 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsWorldMapOpen: () => runtimeState.isWorldMapOpen,
 });
 
-botStatusUi.render(runtimeState.botTrafficSystem.getHudState());
+const initialPlayerHudState =
+    runtimeState.gameMode === 'bots'
+        ? {
+              name: 'YOU',
+              targetLabel: 'PLAYER',
+              showSwatch: false,
+              collectedCount: runtimeState.playerCollectedCount,
+              livesRemaining: runtimeState.playerCarsRemaining,
+              maxLives: PLAYER_CAR_POOL_SIZE,
+              respawning: false,
+              respawnMsRemaining: 0,
+              isPlayer: true,
+          }
+        : null;
+botStatusUi.render(runtimeState.botTrafficSystem.getHudState(), initialPlayerHudState);
 initializePlayerPhysics(car);
 runtimeState.crashDebrisController.resetPlayerDamageState();
 setPlayerBatteryLevel(1);
