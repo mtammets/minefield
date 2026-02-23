@@ -17,42 +17,47 @@ const shapeGeometries = [
 ];
 
 const shapeColors = [0x7cf9ff, 0xff85f8, 0x8dff9a, 0xffd86b];
+const whiteColor = new THREE.Color(0xffffff);
+const pickupGlowTexture = createPickupGlowTexture();
+const pickupHaloTexture = createPickupHaloTexture();
 
-const pickupMaterials = shapeColors.map(
-    (color) =>
-        new THREE.MeshStandardMaterial({
-            color,
-            emissive: color,
-            emissiveIntensity: 0.95,
-            metalness: 0.16,
-            roughness: 0.18,
-        })
-);
+const pickupMaterials = shapeColors.map((color) => {
+    const tint = new THREE.Color(color);
+    return new THREE.MeshStandardMaterial({
+        color: tint.clone().lerp(whiteColor, 0.15),
+        emissive: tint,
+        emissiveIntensity: 0.78,
+        metalness: 0.12,
+        roughness: 0.2,
+    });
+});
 
 const pickupShellGeometry = new THREE.IcosahedronGeometry(1.36, 2);
-const shellMaterials = shapeColors.map(
-    (color) =>
-        new THREE.MeshStandardMaterial({
-            color,
-            emissive: color,
-            emissiveIntensity: 0.22,
-            roughness: 0.24,
-            metalness: 0.14,
-            transparent: true,
-            opacity: 0.23,
-            depthWrite: false,
-        })
-);
+const shellMaterials = shapeColors.map((color) => {
+    const tint = new THREE.Color(color);
+    return new THREE.MeshStandardMaterial({
+        color: tint.clone().lerp(whiteColor, 0.24),
+        emissive: tint,
+        emissiveIntensity: 0.2,
+        roughness: 0.22,
+        metalness: 0.1,
+        transparent: true,
+        opacity: 0.2,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+});
 
-const pickupAccentGeometry = new THREE.OctahedronGeometry(0.34, 0);
 const accentMaterials = shapeColors.map((color) => {
-    const accentColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.42);
-    return new THREE.MeshBasicMaterial({
+    const accentColor = new THREE.Color(color).lerp(whiteColor, 0.46);
+    return new THREE.SpriteMaterial({
+        map: pickupGlowTexture,
         color: accentColor,
         transparent: true,
-        opacity: 0.9,
+        opacity: 0.66,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
+        toneMapped: false,
     });
 });
 
@@ -60,12 +65,13 @@ const orbitGeometry = new THREE.TorusGeometry(1.14, 0.07, 12, 56);
 const orbitMaterials = shapeColors.map(
     (color) =>
         new THREE.MeshBasicMaterial({
-            color,
+            color: new THREE.Color(color).lerp(whiteColor, 0.22),
             transparent: true,
-            opacity: 0.34,
+            opacity: 0.31,
             side: THREE.DoubleSide,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
+            toneMapped: false,
         })
 );
 
@@ -73,12 +79,15 @@ const haloGeometry = new THREE.RingGeometry(1.78, 2.52, 40);
 const haloMaterials = shapeColors.map(
     (color) =>
         new THREE.MeshBasicMaterial({
-            color,
+            color: new THREE.Color(color).lerp(whiteColor, 0.18),
+            map: pickupHaloTexture,
+            alphaMap: pickupHaloTexture,
             transparent: true,
-            opacity: 0.4,
+            opacity: 0.56,
             side: THREE.DoubleSide,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
+            toneMapped: false,
         })
 );
 
@@ -729,6 +738,10 @@ function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {
     pickup.mesh.position.y = pickup.baseY + liftWave * 0.2 + microLift * 0.04;
 
     pickup.mesh.rotation.y = pickup.baseRotationY + elapsedTime * pickup.spinSpeed;
+    pickup.mesh.rotation.x =
+        Math.sin(elapsedTime * pickup.meshTiltSpeedX + pickup.floatOffset * 0.8) * 0.055;
+    pickup.mesh.rotation.z =
+        Math.sin(elapsedTime * pickup.meshTiltSpeedZ + pickup.floatOffset * 1.2) * 0.045;
     pickup.core.rotation.x = elapsedTime * pickup.coreSpinX + pickup.floatOffset * 0.4;
     pickup.core.rotation.z = elapsedTime * pickup.coreSpinZ;
     pickup.shell.rotation.x = elapsedTime * pickup.shellSpinX + pickup.floatOffset * 0.35;
@@ -737,8 +750,9 @@ function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {
     pickup.orbit.rotation.x =
         Math.PI * 0.5 +
         Math.sin(elapsedTime * pickup.orbitTiltSpeed + pickup.floatOffset * 1.2) * 0.28;
+    pickup.halo.rotation.z = elapsedTime * pickup.haloSpinSpeed + pickup.floatOffset * 0.24;
 
-    const idlePulse = 0.96 + (0.5 + Math.sin(elapsedTime * 2.8 + pickup.pulseOffset) * 0.5) * 0.09;
+    const idlePulse = 0.95 + (0.5 + Math.sin(elapsedTime * 2.8 + pickup.pulseOffset) * 0.5) * 0.1;
     let blinkScale = 1;
 
     if (timeLeft < blinkWindowSec) {
@@ -749,9 +763,14 @@ function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {
 
     const coreScale = idlePulse * blinkScale;
     pickup.core.scale.setScalar(coreScale);
-    pickup.accent.scale.setScalar(0.9 + coreScale * 0.25);
-    pickup.halo.scale.setScalar(0.95 + coreScale * 0.12);
-    pickup.orbit.scale.setScalar(0.96 + coreScale * 0.08);
+    pickup.shell.scale.setScalar(0.98 + coreScale * 0.08);
+    pickup.halo.scale.setScalar(0.92 + coreScale * 0.17);
+    pickup.orbit.scale.setScalar(0.95 + coreScale * 0.1);
+
+    const glowScale = 1.35 + coreScale * 0.58;
+    pickup.accent.scale.set(glowScale, glowScale, 1);
+    pickup.accent.position.y =
+        0.06 + Math.sin(elapsedTime * pickup.glowDriftSpeed + pickup.floatOffset * 1.8) * 0.05;
 }
 
 function createPickupForCell(
@@ -892,9 +911,9 @@ function createPickup(x, y, z, shapeIndex, rotYFactor = 0) {
     core.receiveShadow = false;
     mesh.add(core);
 
-    const accent = new THREE.Mesh(pickupAccentGeometry, accentMaterials[shapeIndex]);
-    accent.castShadow = false;
-    accent.receiveShadow = false;
+    const accent = new THREE.Sprite(accentMaterials[shapeIndex]);
+    accent.scale.set(1.78, 1.78, 1);
+    accent.position.y = 0.06;
     mesh.add(accent);
 
     const orbit = new THREE.Mesh(orbitGeometry, orbitMaterials[shapeIndex]);
@@ -931,6 +950,10 @@ function createPickup(x, y, z, shapeIndex, rotYFactor = 0) {
         shellSpinY: -0.26 - speedVarianceA * 0.22,
         orbitSpinY: 1.5 + speedVarianceB * 1.25,
         orbitTiltSpeed: 1.85 + speedVarianceA * 0.9,
+        meshTiltSpeedX: 0.58 + speedVarianceA * 0.72,
+        meshTiltSpeedZ: 0.64 + speedVarianceB * 0.68,
+        haloSpinSpeed: 0.22 + speedVarianceA * 0.3,
+        glowDriftSpeed: 1.28 + speedVarianceB * 1.08,
         pulseOffset: phase * 0.7,
     };
 }
@@ -1007,6 +1030,90 @@ function updateEffects(effects, effectGroup, dt) {
             effects.splice(i, 1);
         }
     }
+}
+
+function createPickupGlowTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 128;
+    const context = canvas.getContext('2d');
+    if (!context) {
+        return null;
+    }
+
+    const center = canvas.width * 0.5;
+    const radius = canvas.width * 0.5;
+    const glowGradient = context.createRadialGradient(
+        center,
+        center,
+        canvas.width * 0.05,
+        center,
+        center,
+        radius
+    );
+    glowGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    glowGradient.addColorStop(0.28, 'rgba(227, 244, 255, 0.95)');
+    glowGradient.addColorStop(0.56, 'rgba(152, 210, 255, 0.34)');
+    glowGradient.addColorStop(1, 'rgba(152, 210, 255, 0)');
+    context.fillStyle = glowGradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    return texture;
+}
+
+function createPickupHaloTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext('2d');
+    if (!context) {
+        return null;
+    }
+
+    const center = canvas.width * 0.5;
+    const outerRadius = canvas.width * 0.5;
+    const ringGradient = context.createRadialGradient(
+        center,
+        center,
+        canvas.width * 0.24,
+        center,
+        center,
+        outerRadius
+    );
+    ringGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    ringGradient.addColorStop(0.58, 'rgba(255, 255, 255, 0)');
+    ringGradient.addColorStop(0.74, 'rgba(255, 255, 255, 0.82)');
+    ringGradient.addColorStop(0.9, 'rgba(255, 255, 255, 0.14)');
+    ringGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    context.fillStyle = ringGradient;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    context.strokeStyle = 'rgba(255, 255, 255, 0.34)';
+    context.lineWidth = 2.3;
+    context.setLineDash([11, 16]);
+    context.beginPath();
+    context.arc(center, center, canvas.width * 0.33, 0, Math.PI * 2);
+    context.stroke();
+
+    context.strokeStyle = 'rgba(255, 255, 255, 0.21)';
+    context.lineWidth = 1.8;
+    context.setLineDash([3, 15]);
+    context.beginPath();
+    context.arc(center, center, canvas.width * 0.385, 0, Math.PI * 2);
+    context.stroke();
+    context.setLineDash([]);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = true;
+    return texture;
 }
 
 function normalizeColorIndex(index) {

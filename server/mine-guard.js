@@ -6,6 +6,10 @@ function clampFinite(value, min, max, fallback = 0) {
     return Math.max(min, Math.min(max, numeric));
 }
 
+const TARGET_COLLISION_RADIUS_DEFAULT = 1.34;
+const DETONATION_VALIDATION_TOLERANCE = 0.3;
+const SEGMENT_STATE_MAX_AGE_MS = 480;
+
 function resolveAuthoritativeMineDetonation({
     room,
     mine,
@@ -42,12 +46,44 @@ function resolveAuthoritativeMineDetonation({
         return { ok: false, reason: 'missing-target-state' };
     }
 
-    const dx = clampFinite(targetState.x, -5000, 5000, 0) - mine.x;
-    const dz = clampFinite(targetState.z, -5000, 5000, 0) - mine.z;
-    const distanceSq = dx * dx + dz * dz;
+    const targetPosition = sanitizeStatePosition(targetState);
+    if (!targetPosition) {
+        return { ok: false, reason: 'missing-target-state' };
+    }
+    const previousTargetPosition = sanitizeStatePosition(targetPlayer?.previousState || null);
+    const targetCollisionRadius = Math.max(
+        0.6,
+        clampFinite(targetState?.collisionRadius, 0.6, 4, TARGET_COLLISION_RADIUS_DEFAULT)
+    );
     const triggerRadius = Math.max(0.8, clampFinite(mine.triggerRadius, 0.8, 4, 1.5));
-    const allowedRadius = triggerRadius + 1.05;
-    if (distanceSq > allowedRadius * allowedRadius) {
+    const allowedRadius = triggerRadius + targetCollisionRadius + DETONATION_VALIDATION_TOLERANCE;
+    const allowedDistanceSq = allowedRadius * allowedRadius;
+    let minDistanceSq = distanceSq(targetPosition.x - mine.x, targetPosition.z - mine.z);
+
+    const targetStateAt = Number(targetPlayer?.lastStateAt);
+    const previousStateAt = Number(targetPlayer?.previousStateAt);
+    const canUseSegmentDistance =
+        previousTargetPosition &&
+        Number.isFinite(targetStateAt) &&
+        Number.isFinite(previousStateAt) &&
+        targetStateAt >= previousStateAt &&
+        now - targetStateAt <= SEGMENT_STATE_MAX_AGE_MS &&
+        now - previousStateAt <= SEGMENT_STATE_MAX_AGE_MS * 2;
+    if (canUseSegmentDistance) {
+        minDistanceSq = Math.min(
+            minDistanceSq,
+            distancePointToSegmentSq(
+                mine.x,
+                mine.z,
+                previousTargetPosition.x,
+                previousTargetPosition.z,
+                targetPosition.x,
+                targetPosition.z
+            )
+        );
+    }
+
+    if (minDistanceSq > allowedDistanceSq) {
         return { ok: false, reason: 'target-too-far' };
     }
 
@@ -69,6 +105,39 @@ function resolveAuthoritativeMineDetonation({
             targetPlayerId,
         },
     };
+}
+
+function sanitizeStatePosition(state) {
+    if (!state || typeof state !== 'object') {
+        return null;
+    }
+    const x = clampFinite(state.x, -5000, 5000, Number.NaN);
+    const z = clampFinite(state.z, -5000, 5000, Number.NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        return null;
+    }
+    return { x, z };
+}
+
+function distanceSq(x, z) {
+    return x * x + z * z;
+}
+
+function distancePointToSegmentSq(pointX, pointZ, startX, startZ, endX, endZ) {
+    const segX = endX - startX;
+    const segZ = endZ - startZ;
+    const segLenSq = segX * segX + segZ * segZ;
+    if (segLenSq <= 1e-8) {
+        return distanceSq(pointX - startX, pointZ - startZ);
+    }
+
+    const toPointX = pointX - startX;
+    const toPointZ = pointZ - startZ;
+    const projection = (toPointX * segX + toPointZ * segZ) / segLenSq;
+    const clampedT = Math.max(0, Math.min(1, projection));
+    const closestX = startX + segX * clampedT;
+    const closestZ = startZ + segZ * clampedT;
+    return distanceSq(pointX - closestX, pointZ - closestZ);
 }
 
 function sanitizeRoomPlayerId(value, room, fallback = '') {

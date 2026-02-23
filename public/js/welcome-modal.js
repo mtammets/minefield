@@ -22,6 +22,11 @@ const ONLINE_CODE_LOOKUP_DEBOUNCE_MS = 260;
 const ONLINE_PLAYER_NAME_MAX_LENGTH = 18;
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
+const WELCOME_START_SEQUENCE_MIN_MS = 2600;
+const WELCOME_START_SEQUENCE_MAX_MS = 6500;
+const WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS = 260;
+const WELCOME_START_SEQUENCE_PREP_CAP = 0.9;
+const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_TAGLINE_VARIANTS = [
     'Master precision driving across high-stakes circuits. Tune your car, out-drift rivals, and climb the online leaderboard.',
     'Own every corner with elite handling, strategic mine plays, and relentless multiplayer competition.',
@@ -31,6 +36,8 @@ const WELCOME_TAGLINE_VARIANTS = [
 
 export function createWelcomeModalController({
     onStart,
+    onStartRequested,
+    onPrepareStart,
     onColorChange,
     initialColorHex,
     getCurrentColorHex,
@@ -60,6 +67,12 @@ export function createWelcomeModalController({
     const onlineRoomCodeInputEl = document.getElementById('welcomeOnlineRoomCodeInput');
     const onlineRoomCodeStatusEl = document.getElementById('welcomeOnlineRoomCodeStatus');
     const onlineContinueBtnEl = document.getElementById('welcomeOnlineContinueBtn');
+    const launchOverlayEl = document.getElementById('welcomeLaunchOverlay');
+    const launchTitleEl = document.getElementById('welcomeLaunchTitle');
+    const launchStatusEl = document.getElementById('welcomeLaunchStatus');
+    const launchProgressEl = document.getElementById('welcomeLaunchProgress');
+    const launchProgressFillEl = document.getElementById('welcomeLaunchProgressFill');
+    const launchPercentEl = document.getElementById('welcomeLaunchPercent');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
@@ -153,6 +166,11 @@ export function createWelcomeModalController({
     let onlineContinueGlintTimeout = null;
     let customCreateCodeStatus = 'idle';
     let customCreateCodeStatusCode = '';
+    const launchSequenceState = {
+        active: false,
+        token: 0,
+        progress: 0,
+    };
     const hasOnlineStartFlow = Boolean(
         startActionsEl &&
         onlineModeFlowEl &&
@@ -215,13 +233,17 @@ export function createWelcomeModalController({
     resetTransitionVisuals();
     setTaglineByIndex(0);
     applySelectedPreset(selectedColorIndex, false);
+    resetStartSequenceUi();
     bindVehicleButtons();
 
     startBtnEl.addEventListener('click', () => {
         preferredStartMode = 'bots';
-        onStart?.('bots', null);
+        beginStartSequence('bots', null);
     });
     startOnlineBtnEl?.addEventListener('click', () => {
+        if (launchSequenceState.active) {
+            return;
+        }
         if (hasOnlineStartFlow) {
             if (onlineModeFlowEl.hidden) {
                 openOnlineModeFlow();
@@ -231,7 +253,7 @@ export function createWelcomeModalController({
             return;
         }
         preferredStartMode = 'online';
-        onStart?.('online', null);
+        beginStartSequence('online', null);
     });
     if (hasOnlineStartFlow) {
         syncOnlinePlayerNameFromStorage();
@@ -277,7 +299,9 @@ export function createWelcomeModalController({
 
     return {
         show() {
+            cancelStartSequence();
             rootEl.hidden = false;
+            resetStartSequenceUi();
             preferredStartMode = 'bots';
             if (hasOnlineStartFlow) {
                 closeOnlineModeFlow({ clearSelection: true });
@@ -294,6 +318,7 @@ export function createWelcomeModalController({
             renderPreview();
         },
         hide() {
+            cancelStartSequence();
             resetTaglineTransition();
             rootEl.hidden = true;
         },
@@ -380,7 +405,217 @@ export function createWelcomeModalController({
         },
     };
 
+    async function beginStartSequence(mode, startContext = null) {
+        if (launchSequenceState.active) {
+            return;
+        }
+        const normalizedMode = mode === 'online' ? 'online' : 'bots';
+        try {
+            onStartRequested?.(normalizedMode, startContext);
+        } catch {
+            // Ignore pre-start hook failures so launch can continue.
+        }
+        const hasLaunchUi = Boolean(
+            launchOverlayEl &&
+            launchTitleEl &&
+            launchStatusEl &&
+            launchProgressEl &&
+            launchProgressFillEl &&
+            launchPercentEl
+        );
+        if (!hasLaunchUi) {
+            onStart?.(normalizedMode, startContext);
+            return;
+        }
+        const token = launchSequenceState.token + 1;
+        launchSequenceState.token = token;
+        launchSequenceState.active = true;
+        launchSequenceState.progress = 0;
+        setStartButtonsDisabled(true);
+        setStartSequenceUiVisible(true);
+        setLaunchCopy(normalizedMode, 0);
+        setLaunchProgress(0);
+
+        let preparationDone = false;
+        resolveStartPreparation(normalizedMode, startContext).finally(() => {
+            preparationDone = true;
+        });
+
+        const startTime = performance.now();
+        while (launchSequenceState.token === token) {
+            const elapsedMs = performance.now() - startTime;
+            const timeProgress = clampNumber(elapsedMs / WELCOME_START_SEQUENCE_MIN_MS, 0, 1);
+            const rampedProgress = easeOutCubic(timeProgress);
+            const cap = preparationDone
+                ? WELCOME_START_SEQUENCE_READY_CAP
+                : WELCOME_START_SEQUENCE_PREP_CAP;
+            const nextProgress = Math.max(launchSequenceState.progress, rampedProgress * cap);
+            setLaunchProgress(nextProgress);
+            setLaunchCopy(normalizedMode, nextProgress);
+            if (preparationDone && elapsedMs >= WELCOME_START_SEQUENCE_MIN_MS) {
+                break;
+            }
+            if (elapsedMs >= WELCOME_START_SEQUENCE_MAX_MS) {
+                break;
+            }
+            await waitForNextFrame();
+        }
+
+        if (launchSequenceState.token !== token) {
+            return;
+        }
+
+        setLaunchProgress(1);
+        setLaunchCopy(normalizedMode, 1);
+        await sleep(WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS);
+
+        if (launchSequenceState.token !== token) {
+            return;
+        }
+
+        launchSequenceState.active = false;
+        setStartButtonsDisabled(false);
+        onStart?.(normalizedMode, startContext);
+        if (!rootEl.hidden) {
+            resetStartSequenceUi();
+        }
+    }
+
+    function resolveStartPreparation(mode, startContext = null) {
+        if (typeof onPrepareStart !== 'function') {
+            return Promise.resolve();
+        }
+        try {
+            return Promise.resolve(onPrepareStart(mode, startContext)).catch(() => {});
+        } catch {
+            return Promise.resolve();
+        }
+    }
+
+    function cancelStartSequence() {
+        launchSequenceState.token += 1;
+        launchSequenceState.active = false;
+        launchSequenceState.progress = 0;
+        setStartButtonsDisabled(false);
+        resetStartSequenceUi();
+    }
+
+    function resetStartSequenceUi() {
+        rootEl.dataset.launching = 'false';
+        rootEl.removeAttribute('aria-busy');
+        if (launchOverlayEl) {
+            launchOverlayEl.hidden = true;
+        }
+        if (launchTitleEl) {
+            launchTitleEl.textContent = 'PREPARING SESSION';
+        }
+        if (launchStatusEl) {
+            launchStatusEl.textContent = 'Initializing race systems...';
+        }
+        setLaunchProgress(0);
+    }
+
+    function setStartSequenceUiVisible(visible) {
+        const showOverlay = Boolean(visible && launchOverlayEl);
+        rootEl.dataset.launching = showOverlay ? 'true' : 'false';
+        if (showOverlay) {
+            rootEl.setAttribute('aria-busy', 'true');
+            launchOverlayEl.hidden = false;
+            return;
+        }
+        rootEl.removeAttribute('aria-busy');
+        if (launchOverlayEl) {
+            launchOverlayEl.hidden = true;
+        }
+    }
+
+    function setStartButtonsDisabled(disabled) {
+        const locked = Boolean(disabled);
+        startBtnEl.disabled = locked;
+        if (startOnlineBtnEl) {
+            startOnlineBtnEl.disabled = locked;
+        }
+        if (hasOnlineStartFlow) {
+            onlineContinueBtnEl.disabled = locked || onlineContinueBtnEl.disabled;
+            if (!locked) {
+                updateOnlineFlowState();
+            }
+        }
+    }
+
+    function setLaunchProgress(nextProgress) {
+        const progress = clampNumber(nextProgress, 0, 1);
+        launchSequenceState.progress = progress;
+        const percent = Math.round(progress * 100);
+        if (launchProgressFillEl) {
+            launchProgressFillEl.style.width = `${percent}%`;
+        }
+        if (launchPercentEl) {
+            launchPercentEl.textContent = `${percent}%`;
+        }
+        if (launchProgressEl) {
+            launchProgressEl.setAttribute('aria-valuenow', String(percent));
+        }
+    }
+
+    function setLaunchCopy(mode, progress) {
+        const normalizedMode = mode === 'online' ? 'online' : 'bots';
+        if (launchTitleEl) {
+            launchTitleEl.textContent =
+                normalizedMode === 'online' ? 'CONNECTING SESSION' : 'PREPARING SESSION';
+        }
+        if (!launchStatusEl) {
+            return;
+        }
+        launchStatusEl.textContent = resolveLaunchStatus(normalizedMode, progress);
+    }
+
+    function resolveLaunchStatus(mode, progress) {
+        const normalizedProgress = clampNumber(progress, 0, 1);
+        if (normalizedProgress >= 1) {
+            return mode === 'online'
+                ? 'Room link confirmed. Starting now...'
+                : 'Track ready. Launching race...';
+        }
+        if (normalizedProgress >= 0.88) {
+            return mode === 'online'
+                ? 'Syncing player state and room snapshot...'
+                : 'Balancing bots and objective targets...';
+        }
+        if (normalizedProgress >= 0.58) {
+            return mode === 'online'
+                ? 'Checking room and network readiness...'
+                : 'Streaming world and systems...';
+        }
+        return mode === 'online'
+            ? 'Initializing online session...'
+            : 'Initializing race systems...';
+    }
+
+    function clampNumber(value, min, max) {
+        if (!Number.isFinite(value)) {
+            return min;
+        }
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function waitForNextFrame() {
+        return new Promise((resolve) => {
+            window.requestAnimationFrame(() => resolve());
+        });
+    }
+
+    function sleep(timeoutMs = 0) {
+        const ms = Math.max(0, Math.round(Number(timeoutMs) || 0));
+        return new Promise((resolve) => {
+            window.setTimeout(resolve, ms);
+        });
+    }
+
     function openOnlineModeFlow() {
+        if (launchSequenceState.active) {
+            return;
+        }
         preferredStartMode = 'online';
         if (!hasOnlineStartFlow) {
             return;
@@ -392,6 +627,9 @@ export function createWelcomeModalController({
     }
 
     function closeOnlineModeFlow(options = {}) {
+        if (launchSequenceState.active) {
+            return;
+        }
         if (!hasOnlineStartFlow) {
             return;
         }
@@ -415,6 +653,9 @@ export function createWelcomeModalController({
     }
 
     function setOnlineRoomAction(nextAction, options = {}) {
+        if (launchSequenceState.active) {
+            return;
+        }
         if (!hasOnlineStartFlow) {
             return;
         }
@@ -446,6 +687,10 @@ export function createWelcomeModalController({
         if (!hasOnlineStartFlow) {
             return;
         }
+        if (launchSequenceState.active) {
+            onlineContinueBtnEl.disabled = true;
+            return;
+        }
         const normalizedCode = normalizeOnlineRoomCode(preferredOnlineRoomCode);
         const isCustomCreateCodeAvailable =
             customCreateCodeStatus === 'available' &&
@@ -465,6 +710,9 @@ export function createWelcomeModalController({
     }
 
     function handleOnlineFlowContinue() {
+        if (launchSequenceState.active) {
+            return;
+        }
         if (!hasOnlineStartFlow) {
             return;
         }
@@ -496,7 +744,7 @@ export function createWelcomeModalController({
             onlineRoomCodeInputEl.focus();
             return;
         }
-        onStart?.('online', startContext);
+        beginStartSequence('online', startContext);
     }
 
     function syncPreviewSize() {

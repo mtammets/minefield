@@ -14,6 +14,8 @@ import {
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 
 const ELIMINATION_AUTOCOLLECT_POINTS_PER_PICKUP = 100;
+const SCORE_MODEL_TEXT =
+    'Pickup: 100 base x combo x (1 + risk + endgame). Mine kill: 220 base x chain x endgame x anti-farm.';
 
 export function createGameSessionController({
     keys,
@@ -42,6 +44,7 @@ export function createGameSessionController({
     replayController,
     getBotTrafficSystem,
     getCollectorScore = () => 0,
+    getCollectorRoundStats = () => null,
     crashDebrisController,
     mineController,
     replayEffectsController,
@@ -81,6 +84,7 @@ export function createGameSessionController({
     setMultiplayerPanelVisible = () => {},
     startOnlineRoomFlow = () => {},
     clearScorePopups = () => {},
+    onAutoCollectBonusAwarded = () => {},
     audioController = null,
 } = {}) {
     const getBotSystem =
@@ -123,6 +127,7 @@ export function createGameSessionController({
         clearDriveKeys,
         enforceDriveLockMode,
         setPauseState,
+        requestGameplayFullscreen,
         dismissWelcomeModal,
         showWelcomeModal,
         startRaceIntroSequence,
@@ -390,6 +395,11 @@ export function createGameSessionController({
             setPlayerScore(nextPlayerScore);
             setTotalScore(nextTotalScore);
         }
+        onAutoCollectBonusAwarded?.({
+            collectorId: 'player',
+            pointsAwarded: bonusPointsAwarded,
+            pickupCount: remainingPickups,
+        });
 
         finalizePickupRound(resolvedTotal, resolvedTotal, {
             totalScore: getTotalScore(),
@@ -417,28 +427,43 @@ export function createGameSessionController({
         botStatusUi.render(botHudState, createPlayerHudState());
 
         const providedScoreboard = normalizeScoreboardEntries(options?.scoreboardEntries);
-        const scoreboard =
+        const scoreboardRaw =
             providedScoreboard.length > 0
                 ? providedScoreboard
                 : [
                       {
+                          collectorId: 'player',
                           name: 'You',
                           score: getPlayerScore(),
                           collectedCount: getPlayerCollectedCount(),
                       },
                       ...botHudState.map((bot) => ({
+                          collectorId: bot.collectorId || '',
                           name: bot.name,
                           score: bot.score || 0,
                           collectedCount: bot.collectedCount || 0,
                       })),
                   ];
-        if (scoreboard.length === 0) {
-            scoreboard.push({
+        if (scoreboardRaw.length === 0) {
+            scoreboardRaw.push({
+                collectorId: 'player',
                 name: 'You',
                 score: 0,
                 collectedCount: 0,
             });
         }
+        const scoreboard = scoreboardRaw.map((entry) => {
+            const collectorId = resolveScoreboardCollectorId(entry);
+            const entryStats = sanitizeCollectorRoundStats(entry?.stats);
+            const collectorStats = sanitizeCollectorRoundStats(
+                collectorId ? getCollectorRoundStats(collectorId) : null
+            );
+            return {
+                ...entry,
+                collectorId,
+                stats: entryStats || collectorStats || null,
+            };
+        });
         scoreboard.sort((a, b) => {
             const scoreDelta = (b.score || 0) - (a.score || 0);
             if (scoreDelta !== 0) {
@@ -494,6 +519,7 @@ export function createGameSessionController({
             summaryText,
             entries: scoreboard,
             topScore,
+            scoringModelText: SCORE_MODEL_TEXT,
         });
         audioController?.onRoundFinished?.({
             scoreboardEntries: scoreboard,
@@ -734,14 +760,52 @@ export function createGameSessionController({
         }
         return entries
             .map((entry) => ({
+                collectorId: resolveScoreboardCollectorId(entry),
                 name:
                     typeof entry?.name === 'string' && entry.name.trim()
                         ? entry.name.trim()
                         : 'Player',
                 score: Math.max(0, Math.round(Number(entry?.score) || 0)),
                 collectedCount: Math.max(0, Math.round(Number(entry?.collectedCount) || 0)),
+                stats: sanitizeCollectorRoundStats(entry?.stats),
             }))
             .filter((entry) => entry.name);
+    }
+
+    function resolveScoreboardCollectorId(entry) {
+        if (!entry || typeof entry !== 'object') {
+            return '';
+        }
+        if (typeof entry.collectorId === 'string' && entry.collectorId.trim()) {
+            return entry.collectorId.trim();
+        }
+        if (typeof entry.id === 'string' && entry.id.trim()) {
+            return entry.id.trim();
+        }
+        if (entry.isSelf) {
+            return 'player';
+        }
+        return '';
+    }
+
+    function sanitizeCollectorRoundStats(stats) {
+        if (!stats || typeof stats !== 'object') {
+            return null;
+        }
+        return {
+            pickupCount: Math.max(0, Math.round(Number(stats.pickupCount) || 0)),
+            pickupPoints: Math.max(0, Math.round(Number(stats.pickupPoints) || 0)),
+            mineKillCount: Math.max(0, Math.round(Number(stats.mineKillCount) || 0)),
+            mineKillPoints: Math.max(0, Math.round(Number(stats.mineKillPoints) || 0)),
+            autoCollectedCount: Math.max(0, Math.round(Number(stats.autoCollectedCount) || 0)),
+            autoCollectedPoints: Math.max(0, Math.round(Number(stats.autoCollectedPoints) || 0)),
+            bestPickupCombo: Math.max(0, Math.round(Number(stats.bestPickupCombo) || 0)),
+            bestMineChain: Math.max(0, Math.round(Number(stats.bestMineChain) || 0)),
+            riskPickupCount: Math.max(0, Math.round(Number(stats.riskPickupCount) || 0)),
+            endgamePickupCount: Math.max(0, Math.round(Number(stats.endgamePickupCount) || 0)),
+            endgameMineKillCount: Math.max(0, Math.round(Number(stats.endgameMineKillCount) || 0)),
+            antiFarmMineKillCount: Math.max(0, Math.round(Number(stats.antiFarmMineKillCount) || 0)),
+        };
     }
 
     function sanitizeOnlinePlayerName(value) {

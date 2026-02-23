@@ -121,6 +121,7 @@ import {
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
+const SESSION_START_PREP_TIMEOUT_MS = 2200;
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
 const runtimeState = createGameRuntimeState({
@@ -150,7 +151,43 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
         getGameSessionController: () => runtimeState.gameSessionController,
         getInputController: () => runtimeState.inputController,
+        onPrepareStart: prepareRuntimeForSessionStart,
     });
+
+async function prepareRuntimeForSessionStart() {
+    const preparationTasks = [waitForAnimationFrames(2)];
+    if (typeof runtimeState.audioController?.unlock === 'function') {
+        preparationTasks.push(runtimeState.audioController.unlock());
+    }
+    await Promise.race([
+        Promise.allSettled(preparationTasks),
+        delayMs(SESSION_START_PREP_TIMEOUT_MS),
+    ]);
+}
+
+function waitForAnimationFrames(frameCount = 1) {
+    const totalFrames = Math.max(1, Math.round(Number(frameCount) || 1));
+    return new Promise((resolve) => {
+        let remaining = totalFrames;
+        const tick = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                resolve();
+                return;
+            }
+            window.requestAnimationFrame(tick);
+        };
+        window.requestAnimationFrame(tick);
+    });
+}
+
+function delayMs(timeoutMs = 0) {
+    const safeTimeout = Math.max(0, Math.round(Number(timeoutMs) || 0));
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, safeTimeout);
+    });
+}
+
 let mapUiController = null;
 
 car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
@@ -254,6 +291,8 @@ const raceIntroController = createRaceIntroController({
 });
 const starsController = addStars(scene);
 const SHOW_ONLY_LOCAL_SCORE_POPUPS = true;
+const SCORE_AUDIT_PEAK_COMBO_MIN = 1;
+const SCORE_AUDIT_PEAK_CHAIN_MIN = 1;
 
 function resolveCollectorWorldPosition(collectorId = 'player') {
     if (collectorId === 'player') {
@@ -347,6 +386,135 @@ function resolveMineOwnerCollectorId(ownerId = '') {
     return normalizedOwnerId;
 }
 
+function normalizeScoreAuditCollectorId(collectorId = 'player') {
+    const normalized = typeof collectorId === 'string' ? collectorId.trim() : '';
+    if (!normalized) {
+        return 'player';
+    }
+    const selfOnlineId = runtimeState.multiplayerController?.getSelfId?.() || '';
+    if (
+        normalized === 'player' ||
+        normalized === 'local-player' ||
+        (selfOnlineId && normalized === selfOnlineId)
+    ) {
+        return 'player';
+    }
+    return normalized;
+}
+
+function ensureCollectorScoreAudit(collectorId = 'player') {
+    const collectorKey = normalizeScoreAuditCollectorId(collectorId);
+    if (runtimeState.scoreAuditByCollectorId.has(collectorKey)) {
+        return runtimeState.scoreAuditByCollectorId.get(collectorKey);
+    }
+    const entry = {
+        collectorId: collectorKey,
+        pickupCount: 0,
+        pickupPoints: 0,
+        mineKillCount: 0,
+        mineKillPoints: 0,
+        autoCollectedCount: 0,
+        autoCollectedPoints: 0,
+        bestPickupCombo: 0,
+        bestMineChain: 0,
+        riskPickupCount: 0,
+        endgamePickupCount: 0,
+        endgameMineKillCount: 0,
+        antiFarmMineKillCount: 0,
+    };
+    runtimeState.scoreAuditByCollectorId.set(collectorKey, entry);
+    return entry;
+}
+
+function recordPickupScoreAudit({
+    collectorId = 'player',
+    pointsAwarded = 0,
+    scoring = null,
+} = {}) {
+    const points = Math.max(0, Math.round(Number(pointsAwarded) || 0));
+    if (points <= 0) {
+        return;
+    }
+    const entry = ensureCollectorScoreAudit(collectorId);
+    entry.pickupCount += 1;
+    entry.pickupPoints += points;
+    entry.bestPickupCombo = Math.max(
+        Math.max(0, Math.round(Number(entry.bestPickupCombo) || 0)),
+        Math.max(SCORE_AUDIT_PEAK_COMBO_MIN, Math.round(Number(scoring?.comboCount) || 0))
+    );
+    if (Number(scoring?.riskBonus) > 0.08) {
+        entry.riskPickupCount += 1;
+    }
+    if (Number(scoring?.endgameBonus) > 0.05) {
+        entry.endgamePickupCount += 1;
+    }
+}
+
+function recordMineKillScoreAudit({
+    collectorId = 'player',
+    pointsAwarded = 0,
+    scoring = null,
+} = {}) {
+    const points = Math.max(0, Math.round(Number(pointsAwarded) || 0));
+    if (points <= 0) {
+        return;
+    }
+    const entry = ensureCollectorScoreAudit(collectorId);
+    entry.mineKillCount += 1;
+    entry.mineKillPoints += points;
+    entry.bestMineChain = Math.max(
+        Math.max(0, Math.round(Number(entry.bestMineChain) || 0)),
+        Math.max(
+            SCORE_AUDIT_PEAK_CHAIN_MIN,
+            Math.round(Number(scoring?.chainCount ?? scoring?.comboCount) || 0)
+        )
+    );
+    if (Number(scoring?.endgameBonus) > 0.01) {
+        entry.endgameMineKillCount += 1;
+    }
+    if (Number(scoring?.antiFarmMultiplier) > 0 && Number(scoring?.antiFarmMultiplier) < 0.999) {
+        entry.antiFarmMineKillCount += 1;
+    }
+}
+
+function recordAutoCollectScoreAudit({
+    collectorId = 'player',
+    pointsAwarded = 0,
+    pickupCount = 0,
+} = {}) {
+    const points = Math.max(0, Math.round(Number(pointsAwarded) || 0));
+    const count = Math.max(0, Math.round(Number(pickupCount) || 0));
+    if (points <= 0 && count <= 0) {
+        return;
+    }
+    const entry = ensureCollectorScoreAudit(collectorId);
+    entry.autoCollectedCount += count;
+    entry.autoCollectedPoints += points;
+}
+
+function getCollectorScoreAuditSnapshot(collectorId = 'player') {
+    const collectorKey = normalizeScoreAuditCollectorId(collectorId);
+    const entry = runtimeState.scoreAuditByCollectorId.get(collectorKey);
+    if (!entry) {
+        return null;
+    }
+    return {
+        collectorId: collectorKey,
+        pickupCount: Math.max(0, Math.round(Number(entry.pickupCount) || 0)),
+        pickupPoints: Math.max(0, Math.round(Number(entry.pickupPoints) || 0)),
+        mineKillCount: Math.max(0, Math.round(Number(entry.mineKillCount) || 0)),
+        mineKillPoints: Math.max(0, Math.round(Number(entry.mineKillPoints) || 0)),
+        autoCollectedCount: Math.max(0, Math.round(Number(entry.autoCollectedCount) || 0)),
+        autoCollectedPoints: Math.max(0, Math.round(Number(entry.autoCollectedPoints) || 0)),
+        bestPickupCombo: Math.max(0, Math.round(Number(entry.bestPickupCombo) || 0)),
+        bestMineChain: Math.max(0, Math.round(Number(entry.bestMineChain) || 0)),
+        riskPickupCount: Math.max(0, Math.round(Number(entry.riskPickupCount) || 0)),
+        endgamePickupCount: Math.max(0, Math.round(Number(entry.endgamePickupCount) || 0)),
+        endgameMineKillCount: Math.max(0, Math.round(Number(entry.endgameMineKillCount) || 0)),
+        antiFarmMineKillCount: Math.max(0, Math.round(Number(entry.antiFarmMineKillCount) || 0)),
+    };
+}
+
 function awardLocalMineKillScore({ ownerCollectorId = '', targetCollectorId = '' } = {}) {
     const collectorId = resolveMineOwnerCollectorId(ownerCollectorId);
     if (!collectorId) {
@@ -375,6 +543,13 @@ function awardLocalMineKillScore({ ownerCollectorId = '', targetCollectorId = ''
             Math.round(Number(mineScoreEvent.score) || runtimeState.playerScore)
         );
     }
+    if (mineScoreEvent?.pointsAwarded > 0) {
+        recordMineKillScoreAudit({
+            collectorId,
+            pointsAwarded: mineScoreEvent.pointsAwarded,
+            scoring: mineScoreEvent.scoring,
+        });
+    }
     return mineScoreEvent;
 }
 
@@ -395,6 +570,13 @@ function awardLocalPickupScore({ collectorId = 'player', speedKph = 0, roundProg
         0,
         Math.round(Number(runtimeState.scoringSystem?.getTotalScore?.() || 0))
     );
+    if (scoreEvent?.pointsAwarded > 0) {
+        recordPickupScoreAudit({
+            collectorId,
+            pointsAwarded: scoreEvent.pointsAwarded,
+            scoring: scoreEvent.scoring,
+        });
+    }
     return scoreEvent;
 }
 
@@ -448,6 +630,11 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                                 response.playerScore
                             );
                         }
+                        recordPickupScoreAudit({
+                            collectorId: 'player',
+                            pointsAwarded: response.pointsAwarded,
+                            scoring: response.scoring,
+                        });
                         spawnScorePopup({
                             collectorId: 'player',
                             pointsAwarded: response.pointsAwarded,
@@ -649,6 +836,11 @@ runtimeState.mineController = createMineSystemController({
             runtimeState.multiplayerController?.getSelfId?.() || 'player',
             runtimeState.playerScore
         );
+        recordMineKillScoreAudit({
+            collectorId: 'player',
+            pointsAwarded,
+            scoring: ownerScoring,
+        });
         spawnScorePopup({
             collectorId: 'player',
             pointsAwarded,
@@ -848,6 +1040,9 @@ runtimeState.gameSessionController = createGameSessionController({
     getCollectorScore(collectorId) {
         return runtimeState.scoringSystem?.getCollectorScore?.(collectorId) || 0;
     },
+    getCollectorRoundStats(collectorId) {
+        return getCollectorScoreAuditSnapshot(collectorId);
+    },
     crashDebrisController: runtimeState.crashDebrisController,
     mineController: runtimeState.mineController,
     replayEffectsController: runtimeState.replayEffectsController,
@@ -894,7 +1089,15 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     resetPickupScoring() {
         runtimeState.scoringSystem?.clear?.();
+        runtimeState.scoreAuditByCollectorId.clear();
         runtimeState.authoritativeScoreByPlayerId.clear();
+    },
+    onAutoCollectBonusAwarded({ collectorId = 'player', pointsAwarded = 0, pickupCount = 0 } = {}) {
+        recordAutoCollectScoreAudit({
+            collectorId,
+            pointsAwarded,
+            pickupCount,
+        });
     },
     getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
     setPlayerCarsRemaining(value) {

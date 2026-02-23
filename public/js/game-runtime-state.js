@@ -27,6 +27,7 @@ export function createGameRuntimeState({ selectedCarColorHex, batteryMax, player
         replayEffectsController: null,
         scorePopupController: null,
         scoringSystem: null,
+        scoreAuditByCollectorId: new Map(),
         authoritativeScoreByPlayerId: new Map(),
         multiplayerController: null,
         gameSessionController: null,

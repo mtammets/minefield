@@ -216,3 +216,44 @@ test('resolveAuthoritativeMineDetonation validates context and armed status', ()
     assert.equal(notArmed.ok, false);
     assert.equal(notArmed.reason, 'mine-not-armed');
 });
+
+test('resolveAuthoritativeMineDetonation accepts segment intersection against recent state history', () => {
+    const room = {
+        players: new Map([
+            ['owner', { lastState: { x: -5, z: 0 } }],
+            [
+                'victim',
+                {
+                    previousState: { x: -0.2, z: 0 },
+                    previousStateAt: 2900,
+                    lastState: { x: 3.4, z: 0 },
+                    lastStateAt: 2960,
+                },
+            ],
+        ]),
+    };
+    const mine = {
+        id: 'mine-2',
+        ownerId: 'owner',
+        ownerName: 'Owner',
+        x: 0,
+        y: 0,
+        z: 0,
+        triggerRadius: 1.5,
+        armedAt: 1000,
+        expiresAt: 9000,
+    };
+
+    const accepted = resolveAuthoritativeMineDetonation({
+        room,
+        mine,
+        reportingPlayerId: 'victim',
+        detonation: {
+            triggerPlayerId: 'victim',
+            targetPlayerId: 'victim',
+        },
+        nowMs: 3000,
+    });
+    assert.equal(accepted.ok, true);
+    assert.equal(accepted.detonation.targetPlayerId, 'victim');
+});

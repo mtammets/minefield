@@ -1439,7 +1439,8 @@ body.race-intro-active #miniMapHud {
 }
 
 .leaderboardCard {
-    width: min(460px, calc(100vw - 28px));
+    width: min(640px, calc(100vw - 28px));
+    max-height: calc(100vh - 30px);
     border: 1px solid rgba(255, 229, 152, 0.5);
     border-radius: 14px;
     padding: 16px 16px 12px;
@@ -1447,6 +1448,7 @@ body.race-intro-active #miniMapHud {
     box-shadow: 0 16px 56px rgba(0, 0, 0, 0.45);
     color: #e8f3ff;
     font-family: 'Sora', sans-serif;
+    overflow: auto;
 }
 
 #leaderboardTitle {
@@ -1463,6 +1465,17 @@ body.race-intro-active #miniMapHud {
     margin-bottom: 10px;
 }
 
+#leaderboardScoringModel {
+    margin-bottom: 10px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(145, 200, 251, 0.36);
+    background: rgba(12, 26, 44, 0.66);
+    color: rgba(193, 226, 255, 0.95);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
 #leaderboardList {
     display: flex;
     flex-direction: column;
@@ -1472,6 +1485,9 @@ body.race-intro-active #miniMapHud {
 .leaderboardRow {
     display: grid;
     grid-template-columns: auto 1fr auto auto;
+    grid-template-areas:
+        'rank name score collected'
+        'detail detail detail detail';
     gap: 10px;
     align-items: center;
     padding: 8px 10px;
@@ -1485,6 +1501,7 @@ body.race-intro-active #miniMapHud {
 }
 
 .leaderboardRank {
+    grid-area: rank;
     min-width: 22px;
     color: rgba(208, 228, 255, 0.9);
     font-weight: 800;
@@ -1492,11 +1509,17 @@ body.race-intro-active #miniMapHud {
 }
 
 .leaderboardName {
+    grid-area: name;
+    min-width: 0;
     color: #eef7ff;
     font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .leaderboardScore {
+    grid-area: score;
     color: #fff2c6;
     font-weight: 800;
     min-width: 64px;
@@ -1504,10 +1527,22 @@ body.race-intro-active #miniMapHud {
 }
 
 .leaderboardCollected {
+    grid-area: collected;
     color: rgba(217, 236, 255, 0.92);
     font-weight: 700;
     min-width: 44px;
     text-align: right;
+}
+
+.leaderboardDetail {
+    grid-area: detail;
+    min-width: 0;
+    font-size: 10px;
+    line-height: 1.3;
+    color: rgba(191, 220, 244, 0.92);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .leaderboardActions {
@@ -2246,6 +2281,22 @@ body.race-intro-active #botPanel {
         transform-origin: top left;
     }
 
+    .leaderboardCard {
+        width: min(96vw, 560px);
+        padding: 12px;
+    }
+
+    .leaderboardRow {
+        gap: 7px;
+        padding: 7px 8px;
+    }
+
+    .leaderboardDetail {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+    }
+
     #miniMapHud {
         left: 10px;
         bottom: 10px;
@@ -2608,6 +2659,98 @@ body.race-intro-active #botPanel {
 #welcomeStartOnlineBtn:active {
     transform: translateY(0);
     filter: brightness(0.95);
+}
+
+#welcomeStartBtn:disabled,
+#welcomeStartOnlineBtn:disabled {
+    opacity: 0.5;
+    cursor: wait;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+#welcomeModal[data-launching='true'] .welcomeShell {
+    pointer-events: none;
+}
+
+.welcomeLaunchOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 18;
+    display: grid;
+    place-items: center;
+    padding: clamp(18px, 2.8vw, 42px);
+    background:
+        radial-gradient(circle at 50% 34%, rgba(132, 208, 255, 0.16), rgba(8, 15, 24, 0) 36%),
+        linear-gradient(160deg, rgba(4, 9, 14, 0.74), rgba(4, 9, 14, 0.88));
+    backdrop-filter: blur(7px) saturate(1.16);
+    animation: welcomeLaunchOverlayIn 220ms ease both;
+}
+
+.welcomeLaunchOverlay[hidden] {
+    display: none;
+}
+
+.welcomeLaunchCard {
+    width: min(520px, calc(100vw - 42px));
+    border: 1px solid rgba(176, 212, 232, 0.58);
+    border-radius: 20px;
+    padding: clamp(16px, 2.1vw, 24px);
+    display: grid;
+    gap: 10px;
+    background:
+        linear-gradient(170deg, rgba(13, 26, 40, 0.95), rgba(8, 16, 26, 0.96)),
+        linear-gradient(120deg, rgba(146, 208, 242, 0.08), rgba(146, 208, 242, 0));
+    box-shadow:
+        0 26px 60px rgba(0, 0, 0, 0.46),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welcomeLaunchTitle {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+    color: rgba(182, 214, 233, 0.96);
+}
+
+.welcomeLaunchStatus {
+    min-height: 19px;
+    font-family: 'Sora', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    color: rgba(231, 242, 250, 0.96);
+}
+
+.welcomeLaunchProgress {
+    border: 1px solid rgba(152, 202, 229, 0.5);
+    border-radius: 999px;
+    height: 14px;
+    padding: 2px;
+    overflow: hidden;
+    background: linear-gradient(180deg, rgba(8, 18, 29, 0.92), rgba(7, 13, 21, 0.95));
+}
+
+.welcomeLaunchProgressFill {
+    width: 0%;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(129, 217, 170, 0.96), rgba(108, 186, 238, 0.98));
+    box-shadow: 0 0 16px rgba(113, 194, 238, 0.46);
+    transition: width 90ms linear;
+}
+
+.welcomeLaunchPercent {
+    justify-self: end;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(182, 214, 233, 0.96);
 }
 
 .welcomeOnlineModeFlow {
@@ -3130,6 +3273,20 @@ body.race-intro-active #botPanel {
     #welcomeHint {
         font-size: 9px;
     }
+
+    .welcomeLaunchCard {
+        width: calc(100vw - 24px);
+        border-radius: 16px;
+        padding: 14px;
+    }
+
+    .welcomeLaunchStatus {
+        font-size: 12px;
+    }
+
+    .welcomeLaunchPercent {
+        font-size: 10px;
+    }
 }
 
 @keyframes welcomeShellReveal {
@@ -3238,6 +3395,17 @@ body.race-intro-active #botPanel {
         opacity: 1;
         transform: translateY(0);
         filter: blur(0);
+    }
+}
+
+@keyframes welcomeLaunchOverlayIn {
+    0% {
+        opacity: 0;
+        transform: scale(1.012);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
     }
 }
 

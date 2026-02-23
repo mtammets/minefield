@@ -131,6 +131,26 @@
                     <div class="welcomeBayRings" aria-hidden="true"></div>
                 </section>
             </div>
+            <div id="welcomeLaunchOverlay" class="welcomeLaunchOverlay" hidden>
+                <div class="welcomeLaunchCard">
+                    <div id="welcomeLaunchTitle" class="welcomeLaunchTitle">PREPARING SESSION</div>
+                    <div id="welcomeLaunchStatus" class="welcomeLaunchStatus">
+                        Initializing race systems...
+                    </div>
+                    <div
+                        id="welcomeLaunchProgress"
+                        class="welcomeLaunchProgress"
+                        role="progressbar"
+                        aria-label="Session loading progress"
+                        aria-valuemin="0"
+                        aria-valuemax="100"
+                        aria-valuenow="0"
+                    >
+                        <div id="welcomeLaunchProgressFill" class="welcomeLaunchProgressFill"></div>
+                    </div>
+                    <div id="welcomeLaunchPercent" class="welcomeLaunchPercent">0%</div>
+                </div>
+            </div>
         </div>
         <div id="objectivePanel" aria-label="Collect objective">
             <div id="objectiveTitle">COLLECT OBJECTIVE</div>
@@ -223,6 +243,7 @@
             <div class="leaderboardCard">
                 <div id="leaderboardTitle">GAME OVER</div>
                 <div id="leaderboardSummary"></div>
+                <div id="leaderboardScoringModel" hidden></div>
                 <div id="leaderboardList"></div>
                 <div class="leaderboardActions">
                     <button id="leaderboardExitBtn" class="leaderboardBtn exit" type="button">

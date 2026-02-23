@@ -1,5 +1,6 @@
 const express = require('express');
 const http = require('http');
+const os = require('os');
 const path = require('path');
 const { Server } = require('socket.io');
 const { consumeRateLimit } = require('./rate-limit');
@@ -314,6 +315,8 @@ io.on('connection', (socket) => {
         sanitizedState.score = Math.max(0, Math.round(Number(player.score) || 0));
         sanitizedState.isDestroyed = Boolean(player.isDestroyed);
 
+        player.previousState = player.lastState;
+        player.previousStateAt = player.lastStateAt;
         player.lastState = sanitizedState;
         player.lastStateAt = now;
         player.lastInboundStateAt = now;
@@ -722,8 +725,45 @@ io.on('connection', (socket) => {
 });
 
 server.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+    const accessUrls = resolveServerAccessUrls(PORT);
+    console.log('Server is running on:');
+    accessUrls.forEach((url) => {
+        console.log(`- ${url}`);
+    });
 });
+
+function resolveServerAccessUrls(port) {
+    const portText = String(port);
+    const urls = [`http://localhost:${portText}`];
+    const interfaces = os.networkInterfaces();
+    const lanAddresses = new Set();
+
+    Object.values(interfaces).forEach((entries) => {
+        if (!Array.isArray(entries)) {
+            return;
+        }
+        entries.forEach((entry) => {
+            if (!entry || entry.internal || !isIpv4Family(entry.family)) {
+                return;
+            }
+            const address = typeof entry.address === 'string' ? entry.address.trim() : '';
+            if (!address || address.startsWith('169.254.')) {
+                return;
+            }
+            lanAddresses.add(address);
+        });
+    });
+
+    lanAddresses.forEach((address) => {
+        urls.push(`http://${address}:${portText}`);
+    });
+
+    return urls;
+}
+
+function isIpv4Family(family) {
+    return family === 'IPv4' || family === 4;
+}
 
 function safeAck(ack, payload) {
     if (typeof ack === 'function') {
@@ -769,6 +809,8 @@ function createRoomPlayer(id, profile) {
         mineKillByTarget: Object.create(null),
         isDestroyed: false,
         joinedAt: Date.now(),
+        previousState: null,
+        previousStateAt: 0,
         lastState: null,
         lastStateAt: 0,
         lastInboundStateAt: 0,

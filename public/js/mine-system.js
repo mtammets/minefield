@@ -29,10 +29,12 @@ const MINE_DETONATION_SHOCKWAVE_BASE_SCALE = 0.2;
 const MINE_DETONATION_HOT_COLOR = new THREE.Color(0xffcf89);
 const MINE_DETONATION_WARM_COLOR = new THREE.Color(0xff8d4f);
 const MINE_DETONATION_COOL_COLOR = new THREE.Color(0xff4a32);
+const DEFAULT_TARGET_COLLISION_RADIUS = 1.34;
+const POSITION_HISTORY_MAX_AGE_MS = 260;
+const POSITION_HISTORY_RETENTION_MS = 4000;
 
 const mineForward = new THREE.Vector3();
 const mineThrowVelocity = new THREE.Vector3();
-const mineDistanceVector = new THREE.Vector3();
 const mineGroundPosition = new THREE.Vector3();
 
 export function createMineSystemController(options = {}) {
@@ -66,7 +68,9 @@ export function createMineSystemController(options = {}) {
     const detonationHaloTexture = createDetonationHaloTexture();
     const recentDetonations = new Map();
     const ownerLastDeployAtMs = new Map();
+    const previousPositionByEntityKey = new Map();
     let mineSequence = 0;
+    let collisionWasEnabledLastFrame = false;
 
     return {
         deployMine,
@@ -292,6 +296,66 @@ export function createMineSystemController(options = {}) {
         const otherVehicleTargets = Array.isArray(context.otherVehicleTargets)
             ? context.otherVehicleTargets
             : getOtherVehicleTargets();
+        const localCollisionRadius = resolveCollisionRadius(
+            context.localCollisionRadius,
+            DEFAULT_TARGET_COLLISION_RADIUS
+        );
+        const activeEntityKeys = new Set();
+        const allowSweep = enableLocalCollision && collisionWasEnabledLastFrame;
+        let localMovement = null;
+        if (localPlayerId) {
+            const localEntityKey = `local:${localPlayerId}`;
+            localMovement = createMovementSnapshot({
+                position: localCarPosition,
+                entityKey: localEntityKey,
+                now,
+                allowSweep,
+                collisionRadius: localCollisionRadius,
+                previousPositionByEntityKey,
+            });
+            if (localMovement) {
+                activeEntityKeys.add(localEntityKey);
+            }
+        }
+
+        const otherMovementTargets = [];
+        for (let targetIndex = 0; targetIndex < otherVehicleTargets.length; targetIndex += 1) {
+            const target = otherVehicleTargets[targetIndex];
+            if (!target?.position || typeof target.position !== 'object') {
+                continue;
+            }
+            const targetPlayerId = sanitizePlayerId(target.playerId || target.id);
+            if (!targetPlayerId) {
+                continue;
+            }
+            const targetOwnerId = sanitizePlayerId(target.ownerId || target.id);
+            const targetEntityKey = `target:${targetPlayerId}`;
+            const movement = createMovementSnapshot({
+                position: target.position,
+                entityKey: targetEntityKey,
+                now,
+                allowSweep,
+                collisionRadius: resolveCollisionRadius(
+                    target.collisionRadius || target.radius,
+                    DEFAULT_TARGET_COLLISION_RADIUS
+                ),
+                previousPositionByEntityKey,
+            });
+            if (!movement) {
+                continue;
+            }
+
+            activeEntityKeys.add(targetEntityKey);
+            otherMovementTargets.push({
+                id: String(target.id || ''),
+                type: String(target.type || ''),
+                label: String(target.label || ''),
+                playerId: targetPlayerId,
+                ownerId: targetOwnerId,
+                mineImmune: Boolean(target.mineImmune),
+                movement,
+            });
+        }
 
         for (const [mineId, mine] of minesById.entries()) {
             if (mine.expiresAt <= now) {
@@ -334,10 +398,23 @@ export function createMineSystemController(options = {}) {
             const localTriggerActive = mine.landed && (armed || ownerLocalTriggerEnabled);
 
             let detonatedThisFrame = false;
-            if (localPlayerId && localTriggerActive) {
-                mineDistanceVector.subVectors(localCarPosition, mine.mesh.position);
-                mineDistanceVector.y = 0;
-                if (mineDistanceVector.lengthSq() <= mine.triggerRadius * mine.triggerRadius) {
+            if (localMovement && localTriggerActive) {
+                const ownMineCollision = Boolean(ownerLocalTriggerEnabled);
+                const localMovementForMine = ownMineCollision
+                    ? {
+                          ...localMovement,
+                          fromX: localMovement.toX,
+                          fromZ: localMovement.toZ,
+                      }
+                    : localMovement;
+                if (
+                    movementIntersectsMineRadius({
+                        movement: localMovementForMine,
+                        minePosition: mine.mesh.position,
+                        triggerRadius: mine.triggerRadius,
+                        targetCollisionRadius: ownMineCollision ? 0 : localMovement.collisionRadius,
+                    })
+                ) {
                     detonateMine(mineId, {
                         emitNetworkEvent: true,
                         triggerPlayerId: localPlayerId,
@@ -351,39 +428,37 @@ export function createMineSystemController(options = {}) {
                 continue;
             }
 
-            for (let targetIndex = 0; targetIndex < otherVehicleTargets.length; targetIndex += 1) {
-                const target = otherVehicleTargets[targetIndex];
-                if (!target?.position || typeof target.position !== 'object') {
-                    continue;
-                }
-                if (Boolean(target.mineImmune)) {
+            for (let targetIndex = 0; targetIndex < otherMovementTargets.length; targetIndex += 1) {
+                const target = otherMovementTargets[targetIndex];
+                if (target.mineImmune) {
                     continue;
                 }
                 if (!armed) {
                     continue;
                 }
-
-                const targetOwnerId = sanitizePlayerId(target.ownerId || target.id);
-                if (targetOwnerId && targetOwnerId === mine.ownerId) {
+                if (target.ownerId && target.ownerId === mine.ownerId) {
                     continue;
                 }
-
-                mineDistanceVector.subVectors(target.position, mine.mesh.position);
-                mineDistanceVector.y = 0;
-                if (mineDistanceVector.lengthSq() > mine.triggerRadius * mine.triggerRadius) {
+                if (
+                    !movementIntersectsMineRadius({
+                        movement: target.movement,
+                        minePosition: mine.mesh.position,
+                        triggerRadius: mine.triggerRadius,
+                    })
+                ) {
                     continue;
                 }
 
                 detonateMine(mineId, {
                     emitNetworkEvent: false,
-                    triggerPlayerId: sanitizePlayerId(target.playerId || target.id),
-                    targetPlayerId: sanitizePlayerId(target.playerId || target.id),
+                    triggerPlayerId: target.playerId,
+                    targetPlayerId: target.playerId,
                     localHit: false,
                     otherTarget: {
-                        id: String(target.id || ''),
-                        type: String(target.type || ''),
-                        label: String(target.label || ''),
-                        ownerId: targetOwnerId,
+                        id: target.id,
+                        type: target.type,
+                        label: target.label,
+                        ownerId: target.ownerId,
                     },
                 });
                 detonatedThisFrame = true;
@@ -393,6 +468,18 @@ export function createMineSystemController(options = {}) {
 
         updateDetonationEffects(dt);
         pruneRecentDetonations(now);
+        if (localMovement) {
+            storeMovementSnapshot(previousPositionByEntityKey, localMovement, now);
+        }
+        for (let index = 0; index < otherMovementTargets.length; index += 1) {
+            storeMovementSnapshot(
+                previousPositionByEntityKey,
+                otherMovementTargets[index].movement,
+                now
+            );
+        }
+        pruneMovementHistory(previousPositionByEntityKey, activeEntityKeys, now);
+        collisionWasEnabledLastFrame = enableLocalCollision;
     }
 
     function applyRoomMineSnapshot(mineSnapshots = []) {
@@ -624,6 +711,8 @@ export function createMineSystemController(options = {}) {
         }
         recentDetonations.clear();
         ownerLastDeployAtMs.clear();
+        previousPositionByEntityKey.clear();
+        collisionWasEnabledLastFrame = false;
     }
 
     function getMineMarkers() {
@@ -1119,6 +1208,169 @@ function sanitizeOwnerName(value) {
         .replace(/[^\p{L}\p{N}\s\-_]/gu, '')
         .slice(0, 28);
     return normalized || 'Driver';
+}
+
+function resolveCollisionRadius(value, fallback = DEFAULT_TARGET_COLLISION_RADIUS) {
+    return clampFinite(value, 0.2, 4, fallback);
+}
+
+function createMovementSnapshot({
+    position,
+    entityKey,
+    now,
+    allowSweep = true,
+    collisionRadius = DEFAULT_TARGET_COLLISION_RADIUS,
+    previousPositionByEntityKey = new Map(),
+} = {}) {
+    if (!entityKey || !position || typeof position !== 'object') {
+        return null;
+    }
+
+    const toX = Number(position.x);
+    const toZ = Number(position.z);
+    if (!Number.isFinite(toX) || !Number.isFinite(toZ)) {
+        return null;
+    }
+
+    let fromX = toX;
+    let fromZ = toZ;
+    if (allowSweep) {
+        const previous = previousPositionByEntityKey.get(entityKey);
+        if (
+            previous &&
+            Number.isFinite(previous.x) &&
+            Number.isFinite(previous.z) &&
+            Number.isFinite(previous.updatedAt) &&
+            now - previous.updatedAt <= POSITION_HISTORY_MAX_AGE_MS
+        ) {
+            fromX = previous.x;
+            fromZ = previous.z;
+        }
+    }
+
+    return {
+        entityKey,
+        fromX,
+        fromZ,
+        toX,
+        toZ,
+        collisionRadius: resolveCollisionRadius(collisionRadius),
+    };
+}
+
+function storeMovementSnapshot(previousPositionByEntityKey, movementSnapshot, now) {
+    if (!(previousPositionByEntityKey instanceof Map) || !movementSnapshot?.entityKey) {
+        return;
+    }
+    previousPositionByEntityKey.set(movementSnapshot.entityKey, {
+        x: movementSnapshot.toX,
+        z: movementSnapshot.toZ,
+        updatedAt: now,
+    });
+}
+
+function pruneMovementHistory(previousPositionByEntityKey, activeEntityKeys, now) {
+    if (!(previousPositionByEntityKey instanceof Map)) {
+        return;
+    }
+    for (const [entityKey, snapshot] of previousPositionByEntityKey.entries()) {
+        const isActive = activeEntityKeys instanceof Set && activeEntityKeys.has(entityKey);
+        if (isActive) {
+            continue;
+        }
+        const updatedAt = Number(snapshot?.updatedAt);
+        if (!Number.isFinite(updatedAt) || now - updatedAt > POSITION_HISTORY_RETENTION_MS) {
+            previousPositionByEntityKey.delete(entityKey);
+        }
+    }
+}
+
+function movementIntersectsMineRadius({
+    movement,
+    minePosition,
+    triggerRadius = MINE_TRIGGER_RADIUS,
+    targetCollisionRadius = null,
+} = {}) {
+    if (!movement || !minePosition || typeof minePosition !== 'object') {
+        return false;
+    }
+    const centerX = Number(minePosition.x);
+    const centerZ = Number(minePosition.z);
+    if (!Number.isFinite(centerX) || !Number.isFinite(centerZ)) {
+        return false;
+    }
+
+    const resolvedTargetCollisionRadius = resolveCollisionRadius(
+        targetCollisionRadius,
+        movement.collisionRadius
+    );
+    const combinedRadius = Math.max(
+        0.1,
+        clampFinite(triggerRadius, 0.1, 10, MINE_TRIGGER_RADIUS) + resolvedTargetCollisionRadius
+    );
+    return segmentIntersectsCircleXZ({
+        startX: movement.fromX,
+        startZ: movement.fromZ,
+        endX: movement.toX,
+        endZ: movement.toZ,
+        centerX,
+        centerZ,
+        radius: combinedRadius,
+    });
+}
+
+function segmentIntersectsCircleXZ({
+    startX = 0,
+    startZ = 0,
+    endX = 0,
+    endZ = 0,
+    centerX = 0,
+    centerZ = 0,
+    radius = 0,
+} = {}) {
+    if (!Number.isFinite(radius) || radius <= 0) {
+        return false;
+    }
+    if (
+        !Number.isFinite(startX) ||
+        !Number.isFinite(startZ) ||
+        !Number.isFinite(endX) ||
+        !Number.isFinite(endZ) ||
+        !Number.isFinite(centerX) ||
+        !Number.isFinite(centerZ)
+    ) {
+        return false;
+    }
+
+    const radiusSq = radius * radius;
+    const endDx = endX - centerX;
+    const endDz = endZ - centerZ;
+    if (endDx * endDx + endDz * endDz <= radiusSq) {
+        return true;
+    }
+
+    const startDx = startX - centerX;
+    const startDz = startZ - centerZ;
+    if (startDx * startDx + startDz * startDz <= radiusSq) {
+        return true;
+    }
+
+    const segX = endX - startX;
+    const segZ = endZ - startZ;
+    const segLenSq = segX * segX + segZ * segZ;
+    if (segLenSq <= 1e-8) {
+        return false;
+    }
+
+    const toCenterX = centerX - startX;
+    const toCenterZ = centerZ - startZ;
+    const projection = (toCenterX * segX + toCenterZ * segZ) / segLenSq;
+    const clampedT = Math.max(0, Math.min(1, projection));
+    const closestX = startX + segX * clampedT;
+    const closestZ = startZ + segZ * clampedT;
+    const closestDx = closestX - centerX;
+    const closestDz = closestZ - centerZ;
+    return closestDx * closestDx + closestDz * closestDz <= radiusSq;
 }
 
 function clampFinite(value, min, max, fallback) {

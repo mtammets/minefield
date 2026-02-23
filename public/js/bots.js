@@ -200,6 +200,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     heading: bot.car.rotation.y,
                     colorHex: bot.bodyColor,
                     speedKph: Math.abs(bot.state.speed || 0),
+                    radius: BOT_VEHICLE_COLLISION_RADIUS,
+                    collisionRadius: BOT_VEHICLE_COLLISION_RADIUS,
                     mineImmune: isBotSpawnProtected(bot, nowMs),
                 }));
         },

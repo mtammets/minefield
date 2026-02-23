@@ -14,6 +14,7 @@ export function createRuntimeUiControllers({
     getSelectedCarColorHex,
     getGameSessionController,
     getInputController,
+    onPrepareStart,
 }) {
     const objectiveUi = createObjectiveUiController({
         toCssHex,
@@ -50,7 +51,14 @@ export function createRuntimeUiControllers({
         getCurrentColorHex: getSelectedCarColorHex,
         resolvePlayerCarColorHex,
         getCarColorPresetIndex,
+        onPrepareStart,
         toCssHex,
+        onStartRequested(mode) {
+            if (mode !== 'bots') {
+                return;
+            }
+            getGameSessionController()?.requestGameplayFullscreen?.();
+        },
         onColorChange(colorHex) {
             getGameSessionController()?.setSelectedPlayerCarColor(colorHex);
         },
