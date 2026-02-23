@@ -74,7 +74,6 @@ import {
     SHARED_PICKUP_COLOR_INDEX,
     SHARED_PICKUP_COLOR_HEX,
     BATTERY_MAX,
-    BATTERY_PICKUP_GAIN,
     CHARGING_ZONE_ACTIVATION_DELAY_SEC,
     CHARGING_BATTERY_GAIN_PER_SEC,
     ROUND_TOTAL_PICKUPS,
@@ -111,6 +110,8 @@ import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
 import { createMapUiController } from './map-ui.js';
 import { createAudioSystem } from './audio-system.js';
+import { createPickupScoringSystem } from './scoring-system.js';
+import { createScorePopupController } from './score-popup-ui.js';
 import {
     INPUT_CONTEXTS,
     WORLD_MAP_DRIVE_LOCK_MODES,
@@ -127,6 +128,8 @@ const runtimeState = createGameRuntimeState({
     batteryMax: BATTERY_MAX,
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
+runtimeState.scoringSystem = createPickupScoringSystem();
+runtimeState.scorePopupController = createScorePopupController();
 
 setPlayerCarBodyColor(runtimeState.selectedCarColorHex);
 setPlayerTopSpeedLimitKph(
@@ -250,6 +253,151 @@ const raceIntroController = createRaceIntroController({
     },
 });
 const starsController = addStars(scene);
+const SHOW_ONLY_LOCAL_SCORE_POPUPS = true;
+
+function resolveCollectorWorldPosition(collectorId = 'player') {
+    if (collectorId === 'player') {
+        return car.position;
+    }
+    const selfOnlineId = runtimeState.multiplayerController?.getSelfId?.() || '';
+    if (selfOnlineId && collectorId === selfOnlineId) {
+        return car.position;
+    }
+    if (runtimeState.gameMode === 'bots') {
+        const collectors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || [];
+        const collector = collectors.find((entry) => entry?.id === collectorId);
+        return collector?.position || null;
+    }
+    return runtimeState.multiplayerController?.getPlayerWorldPosition?.(collectorId) || null;
+}
+
+function spawnScorePopup({
+    collectorId = 'player',
+    pointsAwarded = 0,
+    scoring = null,
+    sourceLabel = '',
+} = {}) {
+    const awarded = Math.max(0, Math.round(Number(pointsAwarded) || 0));
+    if (awarded <= 0) {
+        return;
+    }
+    if (SHOW_ONLY_LOCAL_SCORE_POPUPS && !isLocalCollectorId(collectorId)) {
+        return;
+    }
+    runtimeState.scorePopupController?.spawn?.({
+        collectorId,
+        pointsAwarded: awarded,
+        comboCount: Math.max(0, Math.round(Number(scoring?.comboCount) || 0)),
+        comboMultiplier: Math.max(1, Number(scoring?.comboMultiplier) || 1),
+        riskBonus: Math.max(0, Number(scoring?.riskBonus) || 0),
+        endgameBonus: Math.max(0, Number(scoring?.endgameBonus) || 0),
+        sourceLabel,
+        resolveWorldPosition: () => resolveCollectorWorldPosition(collectorId),
+        worldPosition: resolveCollectorWorldPosition(collectorId),
+    });
+}
+
+function isLocalCollectorId(collectorId) {
+    if (collectorId === 'player') {
+        return true;
+    }
+    const selfOnlineId = runtimeState.multiplayerController?.getSelfId?.() || '';
+    return Boolean(selfOnlineId && collectorId === selfOnlineId);
+}
+
+function buildPickupStatusContext(pointsAwarded, scoring) {
+    return {
+        batteryPercent: Math.round(runtimeState.playerBattery),
+        pointsAwarded: Math.max(0, Math.round(Number(pointsAwarded) || 0)),
+        comboCount: Math.max(0, Math.round(Number(scoring?.comboCount) || 0)),
+        comboMultiplier: Math.max(1, Number(scoring?.comboMultiplier) || 1),
+        riskBonus: Math.max(0, Number(scoring?.riskBonus) || 0),
+        endgameBonus: Math.max(0, Number(scoring?.endgameBonus) || 0),
+    };
+}
+
+function buildMinePopupScoring(scoring = null) {
+    if (!scoring || typeof scoring !== 'object') {
+        return null;
+    }
+    return {
+        comboCount: Math.max(0, Math.round(Number(scoring.comboCount ?? scoring.chainCount) || 0)),
+        comboMultiplier: Math.max(
+            1,
+            Number(scoring.comboMultiplier ?? scoring.chainMultiplier) || 1
+        ),
+        riskBonus: Math.max(0, Number(scoring.riskBonus) || 0),
+        endgameBonus: Math.max(0, Number(scoring.endgameBonus) || 0),
+    };
+}
+
+function resolveMineOwnerCollectorId(ownerId = '') {
+    const normalizedOwnerId = typeof ownerId === 'string' ? ownerId.trim() : '';
+    if (!normalizedOwnerId) {
+        return '';
+    }
+    const selfOnlineId = runtimeState.multiplayerController?.getSelfId?.() || '';
+    if (
+        normalizedOwnerId === 'player' ||
+        normalizedOwnerId === 'local-player' ||
+        (selfOnlineId && normalizedOwnerId === selfOnlineId)
+    ) {
+        return 'player';
+    }
+    return normalizedOwnerId;
+}
+
+function awardLocalMineKillScore({ ownerCollectorId = '', targetCollectorId = '' } = {}) {
+    const collectorId = resolveMineOwnerCollectorId(ownerCollectorId);
+    if (!collectorId) {
+        return null;
+    }
+    const targetId = typeof targetCollectorId === 'string' ? targetCollectorId.trim() : '';
+    const roundProgress = THREE.MathUtils.clamp(
+        runtimeState.totalCollectedCount / Math.max(1, ROUND_TOTAL_PICKUPS),
+        0,
+        1
+    );
+    const mineScoreEvent = runtimeState.scoringSystem?.awardMineKill?.({
+        collectorId,
+        targetId: targetId || '__target__',
+        nowMs: Date.now(),
+        roundProgress,
+        isSelfKill: Boolean(targetId && collectorId === targetId),
+    });
+    runtimeState.totalScore = Math.max(
+        0,
+        Math.round(Number(runtimeState.scoringSystem?.getTotalScore?.() || runtimeState.totalScore))
+    );
+    if (collectorId === 'player' && mineScoreEvent) {
+        runtimeState.playerScore = Math.max(
+            0,
+            Math.round(Number(mineScoreEvent.score) || runtimeState.playerScore)
+        );
+    }
+    return mineScoreEvent;
+}
+
+function awardLocalPickupScore({ collectorId = 'player', speedKph = 0, roundProgress = 0 } = {}) {
+    const scoreEvent = runtimeState.scoringSystem?.awardPickup?.({
+        collectorId,
+        nowMs: Date.now(),
+        speedKph,
+        roundProgress,
+    });
+    if (!scoreEvent) {
+        return null;
+    }
+    if (collectorId === 'player') {
+        runtimeState.playerScore = Math.max(0, Math.round(Number(scoreEvent.score) || 0));
+    }
+    runtimeState.totalScore = Math.max(
+        0,
+        Math.round(Number(runtimeState.scoringSystem?.getTotalScore?.() || 0))
+    );
+    return scoreEvent;
+}
+
 const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     onTargetColorChanged: ({ targetColorHex }) => {
         objectiveUi.setTargetColor(targetColorHex);
@@ -280,33 +428,94 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                         if (!response?.ok) {
                             return;
                         }
-                        runtimeState.gameSessionController.addBattery(BATTERY_PICKUP_GAIN);
+                        runtimeState.playerScore = Math.max(
+                            0,
+                            Math.round(Number(response.playerScore) || 0)
+                        );
+                        runtimeState.totalScore = Math.max(
+                            0,
+                            Math.round(
+                                Number(
+                                    Number.isFinite(response?.roundState?.totalScore)
+                                        ? response.roundState.totalScore
+                                        : runtimeState.totalScore
+                                ) || 0
+                            )
+                        );
+                        if (Number.isFinite(response.playerScore)) {
+                            runtimeState.scoringSystem?.setCollectorScore?.(
+                                runtimeState.multiplayerController?.getSelfId?.() || 'player',
+                                response.playerScore
+                            );
+                        }
+                        spawnScorePopup({
+                            collectorId: 'player',
+                            pointsAwarded: response.pointsAwarded,
+                            scoring: response.scoring,
+                            sourceLabel: 'online',
+                        });
                         runtimeState.audioController?.onPickupCollected?.({
                             collectorId: 'player',
                             onlineAuthoritative: true,
                         });
                         objectiveUi.flashCorrect(
                             pickupColorHex,
-                            Math.round(runtimeState.playerBattery)
+                            buildPickupStatusContext(response.pointsAwarded, response.scoring)
                         );
                     }
                 );
                 return;
             }
 
+            const nextTotalCollected = runtimeState.totalCollectedCount + 1;
+            const roundProgress = THREE.MathUtils.clamp(
+                nextTotalCollected / Math.max(1, ROUND_TOTAL_PICKUPS),
+                0,
+                1
+            );
+            const scoreEvent = awardLocalPickupScore({
+                collectorId: 'player',
+                speedKph: Math.abs(getVehicleState()?.speed || 0),
+                roundProgress,
+            });
             runtimeState.playerCollectedCount += 1;
-            runtimeState.totalCollectedCount += 1;
-            runtimeState.gameSessionController.addBattery(BATTERY_PICKUP_GAIN);
+            runtimeState.totalCollectedCount = nextTotalCollected;
             runtimeState.audioController?.onPickupCollected?.({
                 collectorId: 'player',
                 onlineAuthoritative: false,
             });
-            objectiveUi.flashCorrect(pickupColorHex, Math.round(runtimeState.playerBattery));
+            spawnScorePopup({
+                collectorId: 'player',
+                pointsAwarded: scoreEvent?.pointsAwarded || 0,
+                scoring: scoreEvent?.scoring || null,
+            });
+            objectiveUi.flashCorrect(
+                pickupColorHex,
+                buildPickupStatusContext(scoreEvent?.pointsAwarded || 0, scoreEvent?.scoring)
+            );
             return;
         }
         if (runtimeState.gameMode === 'bots') {
-            runtimeState.totalCollectedCount += 1;
+            const nextTotalCollected = runtimeState.totalCollectedCount + 1;
+            const roundProgress = THREE.MathUtils.clamp(
+                nextTotalCollected / Math.max(1, ROUND_TOTAL_PICKUPS),
+                0,
+                1
+            );
+            const scoreEvent = awardLocalPickupScore({
+                collectorId,
+                speedKph: Math.abs(
+                    runtimeState.botTrafficSystem?.getCollectorSpeed?.(collectorId) || 0
+                ),
+                roundProgress,
+            });
+            runtimeState.totalCollectedCount = nextTotalCollected;
             runtimeState.botTrafficSystem?.registerCollected(collectorId);
+            spawnScorePopup({
+                collectorId,
+                pointsAwarded: scoreEvent?.pointsAwarded || 0,
+                scoring: scoreEvent?.scoring || null,
+            });
         }
     },
     onExhausted: ({ totalPickups, collectedPickups }) => {
@@ -316,7 +525,9 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         ) {
             return;
         }
-        runtimeState.gameSessionController.finalizePickupRound(totalPickups, collectedPickups);
+        runtimeState.gameSessionController.finalizePickupRound(totalPickups, collectedPickups, {
+            totalScore: runtimeState.totalScore,
+        });
     },
     singleType: true,
     singleShapeIndex: SHARED_PICKUP_COLOR_INDEX,
@@ -408,12 +619,43 @@ runtimeState.mineController = createMineSystemController({
             thrown: mode === 'throw' || Boolean(mineSnapshot?.thrown),
         });
     },
-    onMineDetonated({ localHit, position }) {
+    onMineDetonated({
+        localHit,
+        position,
+        ownerId = '',
+        ownerPointsAwarded = 0,
+        ownerScore = 0,
+        ownerScoring = null,
+    }) {
         const distanceMeters = position?.distanceTo?.(car.position) || 0;
         runtimeState.audioController?.onMineDetonated?.({
             localHit: Boolean(localHit),
             distanceMeters,
         });
+        if (runtimeState.gameMode !== 'online') {
+            return;
+        }
+        const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
+        const pointsAwarded = Math.max(0, Math.round(Number(ownerPointsAwarded) || 0));
+        if (ownerCollectorId !== 'player' || pointsAwarded <= 0) {
+            return;
+        }
+        runtimeState.playerScore = Math.max(
+            runtimeState.playerScore,
+            Math.round(Number(ownerScore) || runtimeState.playerScore)
+        );
+        runtimeState.totalScore = Math.max(runtimeState.totalScore, runtimeState.playerScore);
+        runtimeState.scoringSystem?.setCollectorScore?.(
+            runtimeState.multiplayerController?.getSelfId?.() || 'player',
+            runtimeState.playerScore
+        );
+        spawnScorePopup({
+            collectorId: 'player',
+            pointsAwarded,
+            scoring: buildMinePopupScoring(ownerScoring),
+            sourceLabel: 'mine kill',
+        });
+        objectiveUi.showInfo(`Mine kill: +${pointsAwarded} pts.`, 1400);
     },
     onLocalMineHit({ position, ownerName }) {
         if (runtimeState.isCarDestroyed || runtimeState.pickupRoundFinished) {
@@ -435,13 +677,38 @@ runtimeState.mineController = createMineSystemController({
             },
         });
     },
-    onOtherVehicleMineHit({ target }) {
+    onOtherVehicleMineHit({ target, ownerId = '' }) {
         if (target?.type !== 'bot' || runtimeState.gameMode !== 'bots') {
             return;
         }
         const destroyed = runtimeState.botTrafficSystem?.triggerMineHit?.(target.id);
         if (destroyed) {
-            objectiveUi.showInfo(`Mine hit ${target.label || target.id}.`, 1400);
+            const targetCollectorId = typeof target?.id === 'string' ? target.id : '';
+            const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
+            const mineScoreEvent = awardLocalMineKillScore({
+                ownerCollectorId,
+                targetCollectorId,
+            });
+            const pointsAwarded = Math.max(
+                0,
+                Math.round(Number(mineScoreEvent?.pointsAwarded) || 0)
+            );
+            if (pointsAwarded > 0) {
+                spawnScorePopup({
+                    collectorId: ownerCollectorId,
+                    pointsAwarded,
+                    scoring: buildMinePopupScoring(mineScoreEvent?.scoring || null),
+                    sourceLabel: 'mine kill',
+                });
+            }
+            if (ownerCollectorId === 'player' && pointsAwarded > 0) {
+                objectiveUi.showInfo(
+                    `Mine kill on ${target.label || target.id}: +${pointsAwarded} pts.`,
+                    1500
+                );
+            } else {
+                objectiveUi.showInfo(`Mine hit ${target.label || target.id}.`, 1400);
+            }
         }
     },
 });
@@ -468,20 +735,70 @@ runtimeState.multiplayerController = createMultiplayerController({
     },
     onAuthoritativeRoundState(authoritativeState) {
         if (!authoritativeState?.inRoom) {
+            runtimeState.authoritativeScoreByPlayerId.clear();
+            runtimeState.scorePopupController?.clear?.();
             if (runtimeState.gameMode === 'online') {
                 runtimeState.playerCollectedCount = 0;
+                runtimeState.playerScore = 0;
                 runtimeState.totalCollectedCount = 0;
+                runtimeState.totalScore = 0;
             }
             return;
         }
 
+        const scoreboardEntries = Array.isArray(authoritativeState.scoreboard)
+            ? authoritativeState.scoreboard
+            : [];
         runtimeState.playerCollectedCount = Math.max(
             0,
             Math.round(Number(authoritativeState.playerCollectedCount) || 0)
         );
+        runtimeState.playerScore = Math.max(
+            0,
+            Math.round(Number(authoritativeState.playerScore) || 0)
+        );
         runtimeState.totalCollectedCount = Math.max(
             0,
             Math.round(Number(authoritativeState.totalCollectedCount) || 0)
+        );
+        runtimeState.totalScore = Math.max(
+            0,
+            Math.round(Number(authoritativeState.totalScore) || 0)
+        );
+
+        const previousScoresById = runtimeState.authoritativeScoreByPlayerId;
+        const hasPreviousSnapshot = previousScoresById.size > 0;
+        const nextScoresById = new Map();
+        const selfOnlineId =
+            authoritativeState.selfId || runtimeState.multiplayerController?.getSelfId?.() || '';
+        for (let i = 0; i < scoreboardEntries.length; i += 1) {
+            const entry = scoreboardEntries[i];
+            const entryId = typeof entry?.id === 'string' ? entry.id.trim() : '';
+            if (!entryId) {
+                continue;
+            }
+            const score = Math.max(0, Math.round(Number(entry.score) || 0));
+            nextScoresById.set(entryId, score);
+            if (!hasPreviousSnapshot || entryId === selfOnlineId || Boolean(entry?.isSelf)) {
+                continue;
+            }
+            const previousScore = previousScoresById.get(entryId);
+            if (!Number.isFinite(previousScore)) {
+                continue;
+            }
+            const delta = score - previousScore;
+            if (delta > 0) {
+                spawnScorePopup({
+                    collectorId: entryId,
+                    pointsAwarded: delta,
+                    sourceLabel: 'online',
+                });
+            }
+        }
+        runtimeState.authoritativeScoreByPlayerId = nextScoresById;
+        runtimeState.scoringSystem?.setCollectorScore?.(
+            selfOnlineId || 'player',
+            runtimeState.playerScore
         );
 
         const roundState = authoritativeState.roundState;
@@ -494,9 +811,8 @@ runtimeState.multiplayerController = createMultiplayerController({
                 roundState.totalPickups,
                 roundState.totalCollected,
                 {
-                    scoreboardEntries: Array.isArray(authoritativeState.scoreboard)
-                        ? authoritativeState.scoreboard
-                        : [],
+                    scoreboardEntries: scoreboardEntries,
+                    totalScore: roundState.totalScore,
                 }
             );
         }
@@ -529,6 +845,9 @@ runtimeState.gameSessionController = createGameSessionController({
     collectibleSystem,
     replayController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
+    getCollectorScore(collectorId) {
+        return runtimeState.scoringSystem?.getCollectorScore?.(collectorId) || 0;
+    },
     crashDebrisController: runtimeState.crashDebrisController,
     mineController: runtimeState.mineController,
     replayEffectsController: runtimeState.replayEffectsController,
@@ -555,11 +874,27 @@ runtimeState.gameSessionController = createGameSessionController({
             ? value
             : runtimeState.playerCollectedCount;
     },
+    getPlayerScore: () => runtimeState.playerScore,
+    setPlayerScore(value) {
+        runtimeState.playerScore = Number.isFinite(value) ? value : runtimeState.playerScore;
+    },
     getTotalCollectedCount: () => runtimeState.totalCollectedCount,
     setTotalCollectedCount(value) {
         runtimeState.totalCollectedCount = Number.isFinite(value)
             ? value
             : runtimeState.totalCollectedCount;
+    },
+    getTotalScore: () => runtimeState.totalScore,
+    setTotalScore(value) {
+        runtimeState.totalScore = Number.isFinite(value) ? value : runtimeState.totalScore;
+    },
+    resetPlayerPickupCombo() {
+        runtimeState.scoringSystem?.resetCollectorCombo?.('player');
+        runtimeState.scoringSystem?.resetCollectorMineChain?.('player');
+    },
+    resetPickupScoring() {
+        runtimeState.scoringSystem?.clear?.();
+        runtimeState.authoritativeScoreByPlayerId.clear();
     },
     getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
     setPlayerCarsRemaining(value) {
@@ -596,6 +931,9 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     startOnlineRoomFlow(startContext) {
         runtimeState.multiplayerController?.startOnlineRoomFlow?.(startContext);
+    },
+    clearScorePopups() {
+        runtimeState.scorePopupController?.clear?.();
     },
     audioController: runtimeState.audioController,
 });
@@ -803,6 +1141,7 @@ runtimeState.gameLoopController = createGameLoopController({
     replayController,
     multiplayerController: runtimeState.multiplayerController,
     mineSystemController: runtimeState.mineController,
+    scorePopupController: runtimeState.scorePopupController,
     getMultiplayerCollisionSnapshots() {
         return runtimeState.multiplayerController?.getCollisionSnapshots?.() || [];
     },
@@ -840,9 +1179,14 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getIsBatteryDepleted: () => runtimeState.isBatteryDepleted,
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
+    getPlayerScore: () => runtimeState.playerScore,
     getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
     getPickupRoundFinished: () => runtimeState.pickupRoundFinished,
     getTotalCollectedCount: () => runtimeState.totalCollectedCount,
+    getTotalScore: () => runtimeState.totalScore,
+    getCollectorScore(collectorId) {
+        return runtimeState.scoringSystem?.getCollectorScore?.(collectorId) || 0;
+    },
     getBotsEnabled: () => runtimeState.gameMode !== 'online',
     getGameMode: () => runtimeState.gameMode,
     getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
@@ -857,6 +1201,7 @@ const initialPlayerHudState =
               name: 'YOU',
               targetLabel: 'PLAYER',
               showSwatch: false,
+              score: runtimeState.playerScore,
               collectedCount: runtimeState.playerCollectedCount,
               livesRemaining: runtimeState.playerCarsRemaining,
               maxLives: PLAYER_CAR_POOL_SIZE,

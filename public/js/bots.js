@@ -197,8 +197,21 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 .map((bot) => ({
                     id: bot.collectorId,
                     position: bot.car.position,
+                    heading: bot.car.rotation.y,
+                    colorHex: bot.bodyColor,
+                    speedKph: Math.abs(bot.state.speed || 0),
                     mineImmune: isBotSpawnProtected(bot, nowMs),
                 }));
+        },
+        getCollectorSpeed(collectorId) {
+            if (!enabled) {
+                return 0;
+            }
+            const bot = botsByCollectorId.get(collectorId);
+            if (!bot || bot.destroyed) {
+                return 0;
+            }
+            return Math.abs(bot.state.speed || 0);
         },
         registerCollected(collectorId) {
             if (!enabled) {
@@ -247,6 +260,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             }
             const nowMs = Date.now();
             return bots.map((bot) => ({
+                collectorId: bot.collectorId,
                 name: bot.name,
                 collectedCount: bot.collectedCount,
                 targetColorHex: bot.targetColorHex,

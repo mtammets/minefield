@@ -453,6 +453,29 @@ export function createMineSystemController(options = {}) {
             targetPlayerId: sanitizePlayerId(snapshot?.targetPlayerId),
             ownerId: sanitizePlayerId(snapshot?.ownerId),
             ownerName: sanitizeOwnerName(snapshot?.ownerName),
+            ownerPointsAwarded: clampFinite(snapshot?.ownerPointsAwarded, 0, 10_000, 0),
+            ownerScore: clampFinite(snapshot?.ownerScore, 0, Number.MAX_SAFE_INTEGER, 0),
+            ownerScoring:
+                snapshot?.ownerScoring && typeof snapshot.ownerScoring === 'object'
+                    ? {
+                          chainCount: clampFinite(snapshot.ownerScoring.chainCount, 1, 64, 1),
+                          chainMultiplier: clampFinite(
+                              snapshot.ownerScoring.chainMultiplier,
+                              1,
+                              5,
+                              1
+                          ),
+                          endgameBonus: clampFinite(snapshot.ownerScoring.endgameBonus, 0, 1, 0),
+                          antiFarmMultiplier: clampFinite(
+                              snapshot.ownerScoring.antiFarmMultiplier,
+                              0,
+                              1,
+                              1
+                          ),
+                          repeatedTarget: Boolean(snapshot.ownerScoring.repeatedTarget),
+                          roundProgress: clampFinite(snapshot.ownerScoring.roundProgress, 0, 1, 0),
+                      }
+                    : null,
             fallbackPosition,
             localHit: false,
         });
@@ -490,6 +513,12 @@ export function createMineSystemController(options = {}) {
             ownerName: resolvedOwnerName,
             triggerPlayerId: sanitizePlayerId(context.triggerPlayerId),
             targetPlayerId: sanitizePlayerId(context.targetPlayerId),
+            ownerPointsAwarded: clampFinite(context.ownerPointsAwarded, 0, 10_000, 0),
+            ownerScore: clampFinite(context.ownerScore, 0, Number.MAX_SAFE_INTEGER, 0),
+            ownerScoring:
+                context.ownerScoring && typeof context.ownerScoring === 'object'
+                    ? context.ownerScoring
+                    : null,
         });
 
         if (context.emitNetworkEvent) {

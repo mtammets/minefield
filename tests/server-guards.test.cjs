@@ -4,7 +4,11 @@ const assert = require('node:assert/strict');
 const { consumeRateLimit } = require('../server/rate-limit');
 const { validateCollisionRelay } = require('../server/collision-guard');
 const { resolveAuthoritativeMineDetonation } = require('../server/mine-guard');
-const { createRoomRoundState, applyPlayerPickupScore } = require('../server/room-round-state');
+const {
+    createRoomRoundState,
+    applyPlayerPickupScore,
+    applyPlayerMineKillScore,
+} = require('../server/room-round-state');
 
 test('consumeRateLimit enforces per-window quota', () => {
     const store = new Map();
@@ -38,7 +42,10 @@ test('applyPlayerPickupScore respects cooldown and finishes round', () => {
         nowMs: 1000,
     });
     assert.equal(first.ok, true);
+    assert.equal(first.pointsAwarded > 0, true);
     assert.equal(room.players.get('p1').collectedCount, 1);
+    assert.equal(room.players.get('p1').score, first.playerScore);
+    assert.equal(room.roundState.totalScore, room.players.get('p1').score);
     assert.equal(room.roundState.finished, false);
 
     const cooldownBlocked = applyPlayerPickupScore({
@@ -55,9 +62,72 @@ test('applyPlayerPickupScore respects cooldown and finishes round', () => {
         nowMs: 1285,
     });
     assert.equal(second.ok, true);
+    assert.equal(second.pointsAwarded > 0, true);
+    assert.equal(second.playerScore > first.playerScore, true);
     assert.equal(room.players.get('p1').collectedCount, 2);
+    assert.equal(room.players.get('p1').score, second.playerScore);
     assert.equal(room.roundState.finished, true);
     assert.equal(room.roundState.totalCollected, 2);
+    assert.equal(room.roundState.totalScore, second.playerScore);
+});
+
+test('applyPlayerMineKillScore applies chain and anti-farm penalties', () => {
+    const room = {
+        players: new Map([
+            [
+                'owner',
+                {
+                    score: 0,
+                    mineKillChainCount: 0,
+                    lastMineKillAt: 0,
+                    mineKillByTarget: Object.create(null),
+                },
+            ],
+            [
+                'target-a',
+                {
+                    score: 0,
+                },
+            ],
+            [
+                'target-b',
+                {
+                    score: 0,
+                },
+            ],
+        ]),
+        roundState: createRoomRoundState(30),
+    };
+
+    const first = applyPlayerMineKillScore({
+        room,
+        ownerPlayerId: 'owner',
+        targetPlayerId: 'target-a',
+        nowMs: 1000,
+    });
+    assert.equal(first.ok, true);
+    assert.equal(first.pointsAwarded > 0, true);
+    assert.equal(first.scoring.chainCount, 1);
+
+    const secondChain = applyPlayerMineKillScore({
+        room,
+        ownerPlayerId: 'owner',
+        targetPlayerId: 'target-b',
+        nowMs: 4500,
+    });
+    assert.equal(secondChain.ok, true);
+    assert.equal(secondChain.scoring.chainCount, 2);
+    assert.equal(secondChain.pointsAwarded > first.pointsAwarded, true);
+
+    const antiFarm = applyPlayerMineKillScore({
+        room,
+        ownerPlayerId: 'owner',
+        targetPlayerId: 'target-a',
+        nowMs: 7000,
+    });
+    assert.equal(antiFarm.ok, true);
+    assert.equal(antiFarm.scoring.repeatedTarget, true);
+    assert.equal(antiFarm.pointsAwarded < secondChain.pointsAwarded, true);
 });
 
 test('validateCollisionRelay accepts plausible contacts and rejects stale state', () => {

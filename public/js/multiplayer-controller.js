@@ -83,6 +83,7 @@ export function createMultiplayerController(options = {}) {
         startOnlineRoomFlow,
         getRoundStateSnapshot,
         getScoreboardEntries,
+        getPlayerWorldPosition,
     };
 
     function initialize() {
@@ -167,6 +168,7 @@ export function createMultiplayerController(options = {}) {
                 x: remote.car.position.x,
                 z: remote.car.position.z,
                 heading: normalizeAngle(remote.car.rotation.y),
+                colorHex: remote.colorHex,
                 halfWidth: MP_COLLISION_HALF_WIDTH,
                 halfLength: MP_COLLISION_HALF_LENGTH,
                 radius: MP_COLLISION_RADIUS,
@@ -266,6 +268,9 @@ export function createMultiplayerController(options = {}) {
                         0,
                         Math.round(Number(response.playerCollectedCount) || 0)
                     );
+                }
+                if (selfPlayer && Number.isFinite(response.playerScore)) {
+                    selfPlayer.score = Math.max(0, Math.round(Number(response.playerScore) || 0));
                 }
                 if (response.roundState && typeof response.roundState === 'object') {
                     room.roundState = response.roundState;
@@ -999,7 +1004,9 @@ export function createMultiplayerController(options = {}) {
                 roomCode: '',
                 roundState: null,
                 playerCollectedCount: 0,
+                playerScore: 0,
                 totalCollectedCount: 0,
+                totalScore: 0,
                 scoreboard: [],
                 selfId: selfId || '',
             });
@@ -1015,6 +1022,13 @@ export function createMultiplayerController(options = {}) {
         const resolvedTotalCollected = roundState
             ? roundState.totalCollected
             : Math.max(0, totalCollectedFromPlayers);
+        const totalScoreFromPlayers = scoreboard.reduce(
+            (sum, entry) => sum + (entry.score || 0),
+            0
+        );
+        const resolvedTotalScore = roundState
+            ? roundState.totalScore
+            : Math.max(0, totalScoreFromPlayers);
         const selfEntry = scoreboard.find((entry) => entry.id === selfId);
 
         onAuthoritativeRoundState({
@@ -1022,7 +1036,9 @@ export function createMultiplayerController(options = {}) {
             roomCode: String(snapshot.roomCode || ''),
             roundState,
             playerCollectedCount: selfEntry?.collectedCount || 0,
+            playerScore: selfEntry?.score || 0,
             totalCollectedCount: resolvedTotalCollected,
+            totalScore: resolvedTotalScore,
             scoreboard,
             selfId: selfId || '',
         });
@@ -1041,6 +1057,18 @@ export function createMultiplayerController(options = {}) {
             return [];
         }
         return buildScoreboardEntries(room.players, selfId);
+    }
+
+    function getPlayerWorldPosition(playerId = '') {
+        const normalizedId = typeof playerId === 'string' ? playerId.trim() : '';
+        if (!normalizedId) {
+            return null;
+        }
+        if (normalizedId === selfId) {
+            return car.position;
+        }
+        const remote = remotePlayers.get(normalizedId);
+        return remote?.car?.position || null;
     }
 
     function renderPlayerList(players = [], localPlayerId = selfId) {
@@ -1223,6 +1251,9 @@ function createNoopController() {
         getScoreboardEntries() {
             return [];
         },
+        getPlayerWorldPosition() {
+            return null;
+        },
     };
 }
 
@@ -1235,13 +1266,18 @@ function buildScoreboardEntries(players = [], selfId = '') {
                 typeof player.name === 'string' && player.name.trim()
                     ? player.name.trim()
                     : 'Player',
+            score: Math.max(0, Math.round(Number(player.score) || 0)),
             collectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
             isSelf: Boolean(player.id && player.id === selfId),
         }))
         .sort((a, b) => {
-            const delta = (b.collectedCount || 0) - (a.collectedCount || 0);
-            if (delta !== 0) {
-                return delta;
+            const scoreDelta = (b.score || 0) - (a.score || 0);
+            if (scoreDelta !== 0) {
+                return scoreDelta;
+            }
+            const collectedDelta = (b.collectedCount || 0) - (a.collectedCount || 0);
+            if (collectedDelta !== 0) {
+                return collectedDelta;
             }
             return a.name.localeCompare(b.name);
         });
@@ -1262,10 +1298,21 @@ function sanitizeRoundStateSnapshot(roundState, scoreboard = []) {
         totalPickups,
         Math.min(totalPickups, totalCollectedByPlayers)
     );
+    const totalScoreByPlayers = scoreboard.reduce(
+        (sum, entry) => sum + Math.max(0, Number(entry?.score) || 0),
+        0
+    );
+    const totalScore = clampNumber(
+        roundState.totalScore,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        totalScoreByPlayers
+    );
     const finished = Boolean(roundState.finished) || totalCollected >= totalPickups;
     return {
         totalPickups,
         totalCollected,
+        totalScore,
         finished,
         finishedAt: clampNumber(roundState.finishedAt, 0, Number.MAX_SAFE_INTEGER, 0),
     };

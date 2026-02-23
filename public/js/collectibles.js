@@ -708,15 +708,19 @@ function buildCollectorCellSignature(collectors) {
 }
 
 function findCollectorInRange(pickupPosition, collectors) {
+    let bestCollector = null;
+    let bestDistanceSq = Infinity;
+
     for (let i = 0; i < collectors.length; i += 1) {
         const collector = collectors[i];
         const distanceSq = pickupPosition.distanceToSquared(collector.position);
-        if (distanceSq <= PICKUP_RADIUS_SQ) {
-            return collector;
+        if (distanceSq <= PICKUP_RADIUS_SQ && distanceSq < bestDistanceSq) {
+            bestDistanceSq = distanceSq;
+            bestCollector = collector;
         }
     }
 
-    return null;
+    return bestCollector;
 }
 
 function updatePickupVisual(pickup, timeLeft, elapsedTime, blinkWindowSec) {

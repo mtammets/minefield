@@ -9,6 +9,7 @@ const {
     ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT,
     createRoomRoundState,
     applyPlayerPickupScore,
+    applyPlayerMineKillScore,
     recalculateRoomRoundStateFromPlayers,
     serializeRoomRoundState,
 } = require('./room-round-state');
@@ -310,6 +311,7 @@ io.on('connection', (socket) => {
             return;
         }
         sanitizedState.collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
+        sanitizedState.score = Math.max(0, Math.round(Number(player.score) || 0));
         sanitizedState.isDestroyed = Boolean(player.isDestroyed);
 
         player.lastState = sanitizedState;
@@ -477,6 +479,22 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const detonationOwnerId = sanitizeSocketLikeId(resolvedDetonation.detonation.ownerId);
+        const detonationTargetPlayerId = sanitizeSocketLikeId(
+            resolvedDetonation.detonation.targetPlayerId
+        );
+        const mineScoreApplied =
+            detonationOwnerId &&
+            detonationTargetPlayerId &&
+            detonationOwnerId !== detonationTargetPlayerId
+                ? applyPlayerMineKillScore({
+                      room,
+                      ownerPlayerId: detonationOwnerId,
+                      targetPlayerId: detonationTargetPlayerId,
+                      nowMs: now,
+                  })
+                : null;
+
         room.mines.delete(mine.id);
         room.updatedAt = now;
         io.to(roomCode).emit('mp:mineDetonated', {
@@ -488,8 +506,46 @@ io.on('connection', (socket) => {
             z: roundTo(clampFinite(resolvedDetonation.detonation.z, -5000, 5000, mine.z), 4),
             triggerPlayerId: resolvedDetonation.detonation.triggerPlayerId,
             targetPlayerId: resolvedDetonation.detonation.targetPlayerId,
+            ownerPointsAwarded: mineScoreApplied?.ok
+                ? Math.max(0, Math.round(Number(mineScoreApplied.pointsAwarded) || 0))
+                : 0,
+            ownerScore: mineScoreApplied?.ok
+                ? Math.max(0, Math.round(Number(mineScoreApplied.ownerScore) || 0))
+                : Math.max(0, Math.round(Number(room.players.get(detonationOwnerId)?.score) || 0)),
+            ownerScoring:
+                mineScoreApplied?.ok && mineScoreApplied.scoring
+                    ? {
+                          chainCount: Math.max(
+                              1,
+                              Math.round(Number(mineScoreApplied.scoring.chainCount) || 1)
+                          ),
+                          chainMultiplier: clampFinite(
+                              mineScoreApplied.scoring.chainMultiplier,
+                              1,
+                              5,
+                              1
+                          ),
+                          endgameBonus: clampFinite(mineScoreApplied.scoring.endgameBonus, 0, 1, 0),
+                          antiFarmMultiplier: clampFinite(
+                              mineScoreApplied.scoring.antiFarmMultiplier,
+                              0,
+                              1,
+                              1
+                          ),
+                          repeatedTarget: Boolean(mineScoreApplied.scoring.repeatedTarget),
+                          roundProgress: clampFinite(
+                              mineScoreApplied.scoring.roundProgress,
+                              0,
+                              1,
+                              0
+                          ),
+                      }
+                    : null,
             serverTime: now,
         });
+        if (mineScoreApplied?.ok) {
+            emitRoomState(room);
+        }
     });
 
     socket.on('mp:pickupCollected', (payload, ack) => {
@@ -541,6 +597,7 @@ io.on('connection', (socket) => {
                 error: scoreApplied.reason,
                 roundState: serializeRoomRoundState(room.roundState),
                 playerCollectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
+                playerScore: Math.max(0, Math.round(Number(player.score) || 0)),
             });
             return;
         }
@@ -550,6 +607,27 @@ io.on('connection', (socket) => {
         safeAck(ack, {
             ok: true,
             playerCollectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
+            playerScore: Math.max(0, Math.round(Number(player.score) || 0)),
+            pointsAwarded: Math.max(0, Math.round(Number(scoreApplied.pointsAwarded) || 0)),
+            scoring:
+                scoreApplied.scoring && typeof scoreApplied.scoring === 'object'
+                    ? {
+                          comboCount: Math.max(
+                              1,
+                              Math.round(Number(scoreApplied.scoring.comboCount) || 1)
+                          ),
+                          comboMultiplier: clampFinite(
+                              scoreApplied.scoring.comboMultiplier,
+                              1,
+                              4,
+                              1
+                          ),
+                          riskBonus: clampFinite(scoreApplied.scoring.riskBonus, 0, 1, 0),
+                          endgameBonus: clampFinite(scoreApplied.scoring.endgameBonus, 0, 1, 0),
+                          speedKph: clampFinite(scoreApplied.scoring.speedKph, 0, 400, 0),
+                          roundProgress: clampFinite(scoreApplied.scoring.roundProgress, 0, 1, 0),
+                      }
+                    : null,
             roundState: serializeRoomRoundState(room.roundState),
         });
     });
@@ -622,6 +700,14 @@ io.on('connection', (socket) => {
         if (nextDestroyed === Boolean(player.isDestroyed)) {
             return;
         }
+        if (nextDestroyed) {
+            player.scoreComboCount = 0;
+            player.lastScoredPickupAt = 0;
+            player.lastPickupPoints = 0;
+            player.mineKillChainCount = 0;
+            player.lastMineKillAt = 0;
+            player.lastMineKillPoints = 0;
+        }
         player.isDestroyed = nextDestroyed;
         if (player.lastState && typeof player.lastState === 'object') {
             player.lastState.isDestroyed = nextDestroyed;
@@ -673,6 +759,14 @@ function createRoomPlayer(id, profile) {
         name: profile.name,
         colorHex: profile.colorHex,
         collectedCount: 0,
+        score: 0,
+        scoreComboCount: 0,
+        lastScoredPickupAt: 0,
+        lastPickupPoints: 0,
+        mineKillChainCount: 0,
+        lastMineKillAt: 0,
+        lastMineKillPoints: 0,
+        mineKillByTarget: Object.create(null),
         isDestroyed: false,
         joinedAt: Date.now(),
         lastState: null,
@@ -704,12 +798,14 @@ function serializeRoom(room) {
         .sort((a, b) => a.joinedAt - b.joinedAt)
         .map((player) => {
             const collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
+            const score = Math.max(0, Math.round(Number(player.score) || 0));
             const isDestroyed = Boolean(player.isDestroyed);
             const baseState =
                 player.lastState && typeof player.lastState === 'object'
                     ? {
                           ...player.lastState,
                           collectedCount,
+                          score,
                           isDestroyed,
                       }
                     : null;
@@ -722,6 +818,7 @@ function serializeRoom(room) {
                 name: player.name,
                 colorHex: player.colorHex,
                 collectedCount,
+                score,
                 isDestroyed,
                 isHost: player.id === room.hostId,
                 state: baseState,

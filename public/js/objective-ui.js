@@ -27,11 +27,51 @@ export function createObjectiveUiController({
             swatchEl.style.background = toCssHex(colorHex);
             colorNameEl.textContent = colorNameFromHex(colorHex);
         },
-        flashCorrect(colorHex, batteryPercent = null) {
-            const batteryLabel = Number.isFinite(batteryPercent)
-                ? ` | Battery ${Math.round(batteryPercent)}%`
-                : '';
-            setStatus(`Correct: ${colorNameFromHex(colorHex)}${batteryLabel}`, '#8dff9a');
+        flashCorrect(colorHex, contextOrBattery = null) {
+            const batteryPercent =
+                typeof contextOrBattery === 'number'
+                    ? contextOrBattery
+                    : Number.isFinite(contextOrBattery?.batteryPercent)
+                      ? contextOrBattery.batteryPercent
+                      : null;
+            const pointsAwarded =
+                typeof contextOrBattery === 'object' && contextOrBattery
+                    ? Math.max(0, Math.round(Number(contextOrBattery.pointsAwarded) || 0))
+                    : 0;
+            const comboMultiplier =
+                typeof contextOrBattery === 'object' && contextOrBattery
+                    ? Math.max(1, Number(contextOrBattery.comboMultiplier) || 1)
+                    : 1;
+            const comboCount =
+                typeof contextOrBattery === 'object' && contextOrBattery
+                    ? Math.max(0, Math.round(Number(contextOrBattery.comboCount) || 0))
+                    : 0;
+            const riskBonus =
+                typeof contextOrBattery === 'object' && contextOrBattery
+                    ? Math.max(0, Number(contextOrBattery.riskBonus) || 0)
+                    : 0;
+            const endgameBonus =
+                typeof contextOrBattery === 'object' && contextOrBattery
+                    ? Math.max(0, Number(contextOrBattery.endgameBonus) || 0)
+                    : 0;
+
+            const parts = [`Correct: ${colorNameFromHex(colorHex)}`];
+            if (pointsAwarded > 0) {
+                parts.push(`+${pointsAwarded} pts`);
+            }
+            if (comboCount > 1) {
+                parts.push(`Combo x${comboMultiplier.toFixed(2)}`);
+            }
+            if (riskBonus > 0.08) {
+                parts.push(`Risk +${Math.round(riskBonus * 100)}%`);
+            }
+            if (endgameBonus > 0.05) {
+                parts.push(`End +${Math.round(endgameBonus * 100)}%`);
+            }
+            if (Number.isFinite(batteryPercent)) {
+                parts.push(`Battery ${Math.round(batteryPercent)}%`);
+            }
+            setStatus(parts.join(' | '), '#8dff9a');
         },
         showFailure(wrongColorHex, targetColorHex) {
             const wrongName = colorNameFromHex(wrongColorHex);

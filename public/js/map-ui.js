@@ -378,7 +378,7 @@ export function createMapUiController(options = {}) {
         drawMinimapGrid(ctx, rangeMeters, zoom);
         ctx.restore();
 
-        drawPlayerArrow(ctx, centerX, centerY, 0, Math.max(8, Math.round(width * 0.034)), {
+        drawPlayerArrow(ctx, centerX, centerY, 0, resolveVehicleArrowSize('minimap', zoom), {
             fillColor: '#ecf8ff',
             strokeColor: 'rgba(122, 211, 255, 0.95)',
         });
@@ -546,7 +546,7 @@ export function createMapUiController(options = {}) {
             (state.player.x - state.centerX) * state.zoom,
             (state.player.z - state.centerZ) * state.zoom,
             -state.player.heading,
-            Math.max(9, Math.round(state.zoom * 0.56)),
+            resolveVehicleArrowSize('full', state.zoom),
             {
                 fillColor: '#ffffff',
                 strokeColor: 'rgba(130, 216, 255, 0.95)',
@@ -752,25 +752,12 @@ export function createMapUiController(options = {}) {
             }
             const px = (vehicle.x - centerX) * zoom;
             const py = (vehicle.z - centerZ) * zoom;
-            if (vehicle.type === 'player') {
-                drawDiamond(
-                    ctx,
-                    px,
-                    py,
-                    mode === 'full' ? 6.1 : 4.8,
-                    '#ffd092',
-                    'rgba(255, 232, 196, 0.95)'
-                );
-            } else {
-                drawDiamond(
-                    ctx,
-                    px,
-                    py,
-                    mode === 'full' ? 5.4 : 4.4,
-                    '#99daff',
-                    'rgba(214, 241, 255, 0.92)'
-                );
-            }
+            const markerSize = resolveVehicleArrowSize(mode, zoom);
+            const markerStyle = resolveVehicleArrowStyle(vehicle.color, mode);
+            drawPlayerArrow(ctx, px, py, -vehicle.heading, markerSize, {
+                fillColor: markerStyle.fillColor,
+                strokeColor: markerStyle.strokeColor,
+            });
         }
     }
 
@@ -1514,6 +1501,8 @@ function normalizeVehicles(botDescriptors, remotePlayers) {
                 id: String(entry.id || `bot-${i}`),
                 x,
                 z,
+                heading: normalizeAngle(Number(entry.heading) || 0),
+                color: toCssHexColor(entry.colorHex, '#3fa9ff'),
                 type: 'bot',
             });
         }
@@ -1534,6 +1523,8 @@ function normalizeVehicles(botDescriptors, remotePlayers) {
                 id: String(entry.playerId || entry.id || `player-${i}`),
                 x,
                 z,
+                heading: normalizeAngle(Number(entry.heading) || 0),
+                color: toCssHexColor(entry.colorHex, '#ff9f4a'),
                 type: 'player',
             });
         }
@@ -1874,24 +1865,10 @@ function drawPlayerArrow(ctx, x, y, rotation, size, { fillColor, strokeColor }) 
     ctx.closePath();
     ctx.fillStyle = fillColor;
     ctx.fill();
-    ctx.lineWidth = 1.3;
+    ctx.lineWidth = Math.max(1.3, size * 0.18);
     ctx.strokeStyle = strokeColor;
     ctx.stroke();
     ctx.restore();
-}
-
-function drawDiamond(ctx, x, y, size, fillColor, strokeColor) {
-    ctx.beginPath();
-    ctx.moveTo(x, y - size);
-    ctx.lineTo(x + size, y);
-    ctx.lineTo(x, y + size);
-    ctx.lineTo(x - size, y);
-    ctx.closePath();
-    ctx.fillStyle = fillColor;
-    ctx.fill();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = strokeColor;
-    ctx.stroke();
 }
 
 function drawCrossMarker(ctx, x, y, size, color, width = 1.5) {
@@ -1936,6 +1913,140 @@ function normalizeAngle(value) {
 function resolveMinimapRange(speedKph) {
     const speedRatio = clamp(speedKph / MINIMAP_SPEED_FOR_MAX_RANGE_KPH, 0, 1);
     return MINIMAP_RANGE_NEAR_M + (MINIMAP_RANGE_FAR_M - MINIMAP_RANGE_NEAR_M) * speedRatio;
+}
+
+function resolveVehicleArrowSize(mode, zoom) {
+    if (mode === 'full') {
+        return clamp(zoom * 1.45, 14, 22);
+    }
+    return 8.2;
+}
+
+function resolveVehicleArrowStyle(baseColor, mode) {
+    const fillColor = toVisibleVehicleMarkerColor(baseColor, mode);
+    const rgb = parseCssHexColor(fillColor);
+    if (!rgb) {
+        return {
+            fillColor,
+            strokeColor: 'rgba(14, 24, 38, 0.96)',
+        };
+    }
+
+    const luminance =
+        (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+    return {
+        fillColor,
+        strokeColor:
+            luminance >= 0.58
+                ? 'rgba(10, 20, 34, 0.97)'
+                : 'rgba(236, 248, 255, 0.97)',
+    };
+}
+
+function toVisibleVehicleMarkerColor(color, mode) {
+    const rgb = parseCssHexColor(color);
+    if (!rgb) {
+        return mode === 'full' ? '#60b6ff' : '#7cc7ff';
+    }
+
+    const { h, s, l } = rgbToHsl(rgb.r / 255, rgb.g / 255, rgb.b / 255);
+    const boostedSaturation = clamp(s * 1.28 + 0.08, 0.72, 1);
+    const lightnessBias = mode === 'full' ? 0.02 : 0.06;
+    const boostedLightness = clamp(0.48 + (l - 0.5) * 0.45 + lightnessBias, 0.42, 0.7);
+    const boostedRgb = hslToRgb(h, boostedSaturation, boostedLightness);
+    return rgbToCssHex(boostedRgb.r, boostedRgb.g, boostedRgb.b);
+}
+
+function parseCssHexColor(color) {
+    if (typeof color !== 'string') {
+        return null;
+    }
+    const normalized = color.trim();
+    const matchLong = normalized.match(/^#([0-9a-f]{6})$/i);
+    if (matchLong) {
+        const value = parseInt(matchLong[1], 16);
+        return {
+            r: (value >> 16) & 255,
+            g: (value >> 8) & 255,
+            b: value & 255,
+        };
+    }
+
+    const matchShort = normalized.match(/^#([0-9a-f]{3})$/i);
+    if (!matchShort) {
+        return null;
+    }
+    const shortValue = matchShort[1];
+    return {
+        r: parseInt(shortValue[0] + shortValue[0], 16),
+        g: parseInt(shortValue[1] + shortValue[1], 16),
+        b: parseInt(shortValue[2] + shortValue[2], 16),
+    };
+}
+
+function rgbToCssHex(r, g, b) {
+    const rr = clamp(Math.round(r), 0, 255);
+    const gg = clamp(Math.round(g), 0, 255);
+    const bb = clamp(Math.round(b), 0, 255);
+    return `#${rr.toString(16).padStart(2, '0')}${gg.toString(16).padStart(2, '0')}${bb
+        .toString(16)
+        .padStart(2, '0')}`;
+}
+
+function rgbToHsl(r, g, b) {
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const lightness = (max + min) * 0.5;
+    const delta = max - min;
+    if (delta <= 1e-8) {
+        return { h: 0, s: 0, l: lightness };
+    }
+
+    const saturation =
+        lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    let hue;
+    if (max === r) {
+        hue = (g - b) / delta + (g < b ? 6 : 0);
+    } else if (max === g) {
+        hue = (b - r) / delta + 2;
+    } else {
+        hue = (r - g) / delta + 4;
+    }
+    return { h: hue / 6, s: saturation, l: lightness };
+}
+
+function hslToRgb(h, s, l) {
+    if (s <= 1e-8) {
+        const channel = l * 255;
+        return { r: channel, g: channel, b: channel };
+    }
+
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return {
+        r: hueToRgb(p, q, h + 1 / 3) * 255,
+        g: hueToRgb(p, q, h) * 255,
+        b: hueToRgb(p, q, h - 1 / 3) * 255,
+    };
+}
+
+function hueToRgb(p, q, t) {
+    let value = t;
+    if (value < 0) {
+        value += 1;
+    } else if (value > 1) {
+        value -= 1;
+    }
+    if (value < 1 / 6) {
+        return p + (q - p) * 6 * value;
+    }
+    if (value < 1 / 2) {
+        return q;
+    }
+    if (value < 2 / 3) {
+        return p + (q - p) * (2 / 3 - value) * 6;
+    }
+    return p;
 }
 
 function toCssHexColor(value, fallback = '#8fd9ff') {

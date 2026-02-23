@@ -13,6 +13,8 @@ import {
 } from './constants.js';
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 
+const ELIMINATION_AUTOCOLLECT_POINTS_PER_PICKUP = 100;
+
 export function createGameSessionController({
     keys,
     car,
@@ -39,6 +41,7 @@ export function createGameSessionController({
     collectibleSystem,
     replayController,
     getBotTrafficSystem,
+    getCollectorScore = () => 0,
     crashDebrisController,
     mineController,
     replayEffectsController,
@@ -53,8 +56,14 @@ export function createGameSessionController({
     setPlayerBattery,
     getPlayerCollectedCount,
     setPlayerCollectedCount,
+    getPlayerScore = () => 0,
+    setPlayerScore = () => {},
     getTotalCollectedCount,
     setTotalCollectedCount,
+    getTotalScore = () => 0,
+    setTotalScore = () => {},
+    resetPlayerPickupCombo = () => {},
+    resetPickupScoring = () => {},
     getPlayerCarsRemaining,
     setPlayerCarsRemaining,
     getPendingRespawnTimeout,
@@ -71,20 +80,37 @@ export function createGameSessionController({
     setGameMode = () => {},
     setMultiplayerPanelVisible = () => {},
     startOnlineRoomFlow = () => {},
+    clearScorePopups = () => {},
     audioController = null,
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
+    function getBotHudStateWithScores() {
+        const botEntries = getBotSystem()?.getHudState?.() || [];
+        return botEntries.map((bot) => ({
+            ...bot,
+            score: Math.max(
+                0,
+                Math.round(
+                    Number(bot?.score) ||
+                        Number(getCollectorScore(bot?.collectorId || '__unknown__')) ||
+                        0
+                )
+            ),
+        }));
+    }
     function createPlayerHudState() {
         if (normalizeGameMode(getGameMode()) !== 'bots') {
             return null;
         }
+        const score = Math.max(0, Math.floor(Number(getPlayerScore()) || 0));
         const collectedCount = Math.max(0, Math.floor(Number(getPlayerCollectedCount()) || 0));
         const livesRemaining = Math.max(0, Math.floor(Number(getPlayerCarsRemaining()) || 0));
         return {
             name: 'YOU',
             targetLabel: 'PLAYER',
             showSwatch: false,
+            score,
             collectedCount,
             livesRemaining,
             maxLives: PLAYER_CAR_POOL_SIZE,
@@ -107,6 +133,7 @@ export function createGameSessionController({
         setBatteryDepletedState,
         updateBattery,
         addBattery,
+        maybeFinalizeOnBotElimination,
         finalizePickupRound,
         triggerCarExplosion,
         triggerObstacleCrash,
@@ -305,6 +332,78 @@ export function createGameSessionController({
         }
     }
 
+    function maybeFinalizeOnBotElimination({ totalPickups = ROUND_TOTAL_PICKUPS, botHudState } = {}) {
+        if (getPickupRoundFinished()) {
+            return { ok: false, reason: 'round-finished' };
+        }
+        if (normalizeGameMode(getGameMode()) !== 'bots') {
+            return { ok: false, reason: 'not-bots-mode' };
+        }
+
+        const botEntries = Array.isArray(botHudState) ? botHudState : getBotSystem()?.getHudState?.() || [];
+        if (botEntries.length === 0) {
+            return { ok: false, reason: 'no-bots' };
+        }
+
+        const allOpponentsEliminated = botEntries.every((entry) => {
+            const livesRemaining = Math.max(0, Math.round(Number(entry?.livesRemaining) || 0));
+            return livesRemaining <= 0;
+        });
+        if (!allOpponentsEliminated) {
+            return { ok: false, reason: 'opponents-still-active' };
+        }
+
+        const resolvedTotal = THREE.MathUtils.clamp(
+            Math.round(Number(totalPickups) || ROUND_TOTAL_PICKUPS),
+            1,
+            5000
+        );
+        const currentCollected = THREE.MathUtils.clamp(
+            Math.round(Number(getTotalCollectedCount()) || 0),
+            0,
+            resolvedTotal
+        );
+        const remainingPickups = Math.max(0, resolvedTotal - currentCollected);
+        const bonusPointsAwarded = Math.max(
+            0,
+            Math.round(remainingPickups * ELIMINATION_AUTOCOLLECT_POINTS_PER_PICKUP)
+        );
+
+        if (remainingPickups > 0) {
+            const nextPlayerCollectedCount = Math.max(
+                0,
+                Math.round(Number(getPlayerCollectedCount()) || 0) + remainingPickups
+            );
+            setPlayerCollectedCount(nextPlayerCollectedCount);
+            setTotalCollectedCount(resolvedTotal);
+        }
+
+        if (bonusPointsAwarded > 0) {
+            const nextPlayerScore = Math.max(
+                0,
+                Math.round(Number(getPlayerScore()) || 0) + bonusPointsAwarded
+            );
+            const nextTotalScore = Math.max(
+                0,
+                Math.round(Number(getTotalScore()) || 0) + bonusPointsAwarded
+            );
+            setPlayerScore(nextPlayerScore);
+            setTotalScore(nextTotalScore);
+        }
+
+        finalizePickupRound(resolvedTotal, resolvedTotal, {
+            totalScore: getTotalScore(),
+            finishReason: 'opponents-eliminated',
+            bonusPointsAwarded,
+            bonusPickupsAwarded: remainingPickups,
+        });
+        return {
+            ok: true,
+            remainingPickups,
+            bonusPointsAwarded,
+        };
+    }
+
     function finalizePickupRound(totalPickups, collectedPickups, options = {}) {
         if (getPickupRoundFinished()) {
             return;
@@ -314,32 +413,49 @@ export function createGameSessionController({
         clearPendingRespawn();
         collectibleSystem.setEnabled(false);
         clearDriveKeys();
-        botStatusUi.render(getBotSystem()?.getHudState?.() || [], createPlayerHudState());
+        const botHudState = getBotHudStateWithScores();
+        botStatusUi.render(botHudState, createPlayerHudState());
 
         const providedScoreboard = normalizeScoreboardEntries(options?.scoreboardEntries);
         const scoreboard =
             providedScoreboard.length > 0
                 ? providedScoreboard
                 : [
-                      { name: 'You', collectedCount: getPlayerCollectedCount() },
-                      ...(getBotSystem()?.getHudState?.() || []).map((bot) => ({
+                      {
+                          name: 'You',
+                          score: getPlayerScore(),
+                          collectedCount: getPlayerCollectedCount(),
+                      },
+                      ...botHudState.map((bot) => ({
                           name: bot.name,
+                          score: bot.score || 0,
                           collectedCount: bot.collectedCount || 0,
                       })),
                   ];
         if (scoreboard.length === 0) {
             scoreboard.push({
                 name: 'You',
+                score: 0,
                 collectedCount: 0,
             });
         }
-        scoreboard.sort((a, b) => (b.collectedCount || 0) - (a.collectedCount || 0));
+        scoreboard.sort((a, b) => {
+            const scoreDelta = (b.score || 0) - (a.score || 0);
+            if (scoreDelta !== 0) {
+                return scoreDelta;
+            }
+            const collectedDelta = (b.collectedCount || 0) - (a.collectedCount || 0);
+            if (collectedDelta !== 0) {
+                return collectedDelta;
+            }
+            return a.name.localeCompare(b.name);
+        });
 
         let topScore = 0;
         for (let i = 0; i < scoreboard.length; i += 1) {
-            topScore = Math.max(topScore, scoreboard[i].collectedCount || 0);
+            topScore = Math.max(topScore, scoreboard[i].score || 0);
         }
-        const winners = scoreboard.filter((entry) => (entry.collectedCount || 0) === topScore);
+        const winners = scoreboard.filter((entry) => (entry.score || 0) === topScore);
         const winnerLabel = winners.map((entry) => entry.name).join(', ') || 'Nobody';
         const resolvedTotal = Number.isFinite(totalPickups) ? totalPickups : ROUND_TOTAL_PICKUPS;
         const resolvedCollectedRaw = Number.isFinite(collectedPickups)
@@ -350,13 +466,32 @@ export function createGameSessionController({
             0,
             resolvedTotal
         );
+        const resolvedTotalScoreRaw = Number.isFinite(options?.totalScore)
+            ? options.totalScore
+            : Number.isFinite(getTotalScore())
+              ? getTotalScore()
+              : scoreboard.reduce((sum, entry) => sum + (entry.score || 0), 0);
+        const resolvedTotalScore = Math.max(0, Math.round(Number(resolvedTotalScoreRaw) || 0));
+        const finishReason =
+            options?.finishReason === 'opponents-eliminated'
+                ? 'opponents-eliminated'
+                : 'pickups-exhausted';
+        const finishLabel =
+            finishReason === 'opponents-eliminated' ? 'Opponents eliminated' : 'No objects left';
+        const bonusPointsAwarded = Math.max(0, Math.round(Number(options?.bonusPointsAwarded) || 0));
+        const bonusPickupsAwarded = Math.max(0, Math.round(Number(options?.bonusPickupsAwarded) || 0));
+        const summaryText =
+            `Collected ${resolvedCollected}/${resolvedTotal} objects. Total score: ${resolvedTotalScore} pts.` +
+            (bonusPointsAwarded > 0 && bonusPickupsAwarded > 0
+                ? ` Bonus: +${bonusPointsAwarded} pts from ${bonusPickupsAwarded} auto-collected objects.`
+                : '');
         const tiePrefix = winners.length > 1 ? 'Tie' : 'Winner';
 
         objectiveUi.showResult(
-            `No objects left (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore}).`
+            `${finishLabel} (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore} pts).`
         );
         finalScoreboardUi.show({
-            summaryText: `Collected ${resolvedCollected}/${resolvedTotal} objects.`,
+            summaryText,
             entries: scoreboard,
             topScore,
         });
@@ -365,6 +500,7 @@ export function createGameSessionController({
             topScore,
             totalPickups: resolvedTotal,
             totalCollected: resolvedCollected,
+            totalScore: resolvedTotalScore,
         });
     }
 
@@ -402,6 +538,7 @@ export function createGameSessionController({
         clearDriveKeys();
 
         setPlayerCarsRemaining(Math.max(0, getPlayerCarsRemaining() - 1));
+        resetPlayerPickupCombo();
 
         const crashReason =
             options.statusText ||
@@ -450,11 +587,15 @@ export function createGameSessionController({
         raceIntroController.stop();
         setCameraKeyboardControlsEnabled(true);
         clearPendingRespawn();
+        clearScorePopups();
         objectiveUi.resetStatus();
         finalScoreboardUi.hide();
         setPickupRoundFinished(false);
+        resetPickupScoring();
         setPlayerCollectedCount(0);
+        setPlayerScore(0);
         setTotalCollectedCount(0);
+        setTotalScore(0);
         setIsCarDestroyed(false);
         car.visible = true;
         car.position.copy(playerSpawnState.position);
@@ -487,6 +628,7 @@ export function createGameSessionController({
         replayController.clear();
 
         clearPendingRespawn();
+        clearScorePopups();
         replayEffectsController.clearReplayEffects();
         crashDebrisController.clearDebris();
         if (normalizeGameMode(getGameMode()) !== 'online') {
@@ -496,8 +638,11 @@ export function createGameSessionController({
         objectiveUi.resetStatus();
         finalScoreboardUi.hide();
         setPickupRoundFinished(false);
+        resetPickupScoring();
         setPlayerCollectedCount(0);
+        setPlayerScore(0);
         setTotalCollectedCount(0);
+        setTotalScore(0);
         setIsCarDestroyed(false);
         setPlayerCarsRemaining(PLAYER_CAR_POOL_SIZE);
         setPlayerBattery(BATTERY_MAX);
@@ -521,7 +666,7 @@ export function createGameSessionController({
         if (botsEnabled) {
             getBotSystem()?.reset?.({ sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX });
         }
-        botStatusUi.render(getBotSystem()?.getHudState?.() || [], createPlayerHudState());
+        botStatusUi.render(getBotHudStateWithScores(), createPlayerHudState());
 
         crashDebrisController.resetPlayerDamageState();
         clearDriveKeys();
@@ -593,6 +738,7 @@ export function createGameSessionController({
                     typeof entry?.name === 'string' && entry.name.trim()
                         ? entry.name.trim()
                         : 'Player',
+                score: Math.max(0, Math.round(Number(entry?.score) || 0)),
                 collectedCount: Math.max(0, Math.round(Number(entry?.collectedCount) || 0)),
             }))
             .filter((entry) => entry.name);

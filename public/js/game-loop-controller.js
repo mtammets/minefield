@@ -36,6 +36,7 @@ export function createGameLoopController(options = {}) {
         crashDebrisController,
         replayEffectsController,
         audioController,
+        scorePopupController,
         gameSessionController,
         getBotTrafficSystem,
         getMultiplayerCollisionSnapshots,
@@ -64,9 +65,12 @@ export function createGameLoopController(options = {}) {
         getIsCarDestroyed,
         getIsBatteryDepleted,
         getPlayerCollectedCount,
+        getPlayerScore,
         getPlayerCarsRemaining,
         getPickupRoundFinished,
         getTotalCollectedCount,
+        getTotalScore,
+        getCollectorScore = () => 0,
         getBotsEnabled,
         getGameMode,
         getIsWelcomeModalVisible,
@@ -96,12 +100,14 @@ export function createGameLoopController(options = {}) {
         typeof getIsBatteryDepleted === 'function' ? getIsBatteryDepleted : () => false;
     const readPlayerCollectedCount =
         typeof getPlayerCollectedCount === 'function' ? getPlayerCollectedCount : () => 0;
+    const readPlayerScore = typeof getPlayerScore === 'function' ? getPlayerScore : () => 0;
     const readPlayerCarsRemaining =
         typeof getPlayerCarsRemaining === 'function' ? getPlayerCarsRemaining : () => 0;
     const readPickupRoundFinished =
         typeof getPickupRoundFinished === 'function' ? getPickupRoundFinished : () => false;
     const readTotalCollectedCount =
         typeof getTotalCollectedCount === 'function' ? getTotalCollectedCount : () => 0;
+    const readTotalScore = typeof getTotalScore === 'function' ? getTotalScore : () => 0;
     const readBotsEnabled = typeof getBotsEnabled === 'function' ? getBotsEnabled : () => true;
     const readGameMode = typeof getGameMode === 'function' ? getGameMode : () => 'bots';
     const readWelcomeModalVisible =
@@ -332,17 +338,39 @@ export function createGameLoopController(options = {}) {
                         : [{ id: 'player', position: car.position }];
                     collectibleSystem.updateForCollectors(collectors, frameDelta);
                     if (
-                        readBotsEnabled() &&
+                        botsEnabled &&
+                        !readPickupRoundFinished()
+                    ) {
+                        gameSessionController?.maybeFinalizeOnBotElimination?.({
+                            totalPickups: roundTotalPickups,
+                            botHudState: botTrafficSystem?.getHudState?.() || [],
+                        });
+                    }
+                    if (
+                        botsEnabled &&
                         !readPickupRoundFinished() &&
                         readTotalCollectedCount() >= roundTotalPickups
                     ) {
                         gameSessionController.finalizePickupRound(
                             roundTotalPickups,
-                            readTotalCollectedCount()
+                            readTotalCollectedCount(),
+                            {
+                                totalScore: readTotalScore(),
+                            }
                         );
                     }
                     const botHudEntries = botsEnabled
-                        ? botTrafficSystem?.getHudState?.() || []
+                        ? (botTrafficSystem?.getHudState?.() || []).map((entry) => ({
+                              ...entry,
+                              score: Math.max(
+                                  0,
+                                  Math.round(
+                                      Number(
+                                          getCollectorScore(entry?.collectorId || '__unknown__')
+                                      ) || 0
+                                  )
+                              ),
+                          }))
                         : [];
                     botStatusUi.render(botHudEntries, createPlayerHudState());
                 }
@@ -416,6 +444,7 @@ export function createGameLoopController(options = {}) {
             worldMapVisible: readWorldMapOpen(),
             gameMode: readGameMode(),
         });
+        scorePopupController?.update?.(camera, frameDelta);
 
         updateSunLightPosition();
         renderer.render(scene, camera);
@@ -553,12 +582,14 @@ export function createGameLoopController(options = {}) {
             return null;
         }
         const collectedCount = Math.max(0, Math.floor(Number(readPlayerCollectedCount()) || 0));
+        const score = Math.max(0, Math.floor(Number(readPlayerScore()) || 0));
         const livesRemaining = Math.max(0, Math.floor(Number(readPlayerCarsRemaining()) || 0));
         const maxLives = Math.max(1, Math.floor(Number(playerCarPoolSize) || 3));
         return {
             name: 'YOU',
             targetLabel: 'PLAYER',
             showSwatch: false,
+            score,
             collectedCount,
             livesRemaining,
             maxLives,

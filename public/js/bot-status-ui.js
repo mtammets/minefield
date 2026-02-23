@@ -50,6 +50,7 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                         return `<span class="botLifePip ${active ? 'active' : 'empty'}" aria-hidden="true"></span>`;
                     }).join('');
                     const rowClasses = `botRow${respawning ? ' botRespawning' : ''}${bot.isPlayer ? ' botRowPlayer' : ''}`;
+                    const score = Math.max(0, Math.floor(Number(bot.score) || 0));
                     const collectedCount = Math.max(0, Math.floor(Number(bot.collectedCount) || 0));
                     return (
                         `<div class="${rowClasses}">` +
@@ -60,13 +61,16 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                                 ? `<span class="botSwatch" style="background:${toCssHex(targetHex)}"></span>`
                                 : ''
                         }` +
-                        `${targetName}` +
+                        `<span class="botTargetLabel">${targetName}</span>` +
                         `</span>` +
                         `<span class="botLivesWrap">` +
                         `<span class="botLivesPips">${livesPips}</span>` +
                         `<span class="botLivesLabel">${statusLabel}</span>` +
                         `</span>` +
-                        `<span class="botScore">${collectedCount}</span>` +
+                        `<span class="botStats">` +
+                        `<span class="botScore">${score}</span>` +
+                        `<span class="botCollected">x${collectedCount}</span>` +
+                        `</span>` +
                         `</div>`
                     );
                 })

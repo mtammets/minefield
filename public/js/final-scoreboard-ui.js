@@ -26,13 +26,19 @@ export function createFinalScoreboardController({ onRestart, onExit } = {}) {
             summaryEl.textContent = summaryText;
             listEl.innerHTML = entries
                 .map((entry, index) => {
-                    const isWinner = (entry.collectedCount || 0) === topScore;
+                    const score = Math.max(0, Math.round(Number(entry?.score) || 0));
+                    const collectedCount = Math.max(
+                        0,
+                        Math.round(Number(entry?.collectedCount) || 0)
+                    );
+                    const isWinner = score === topScore;
                     const rowClass = isWinner ? 'leaderboardRow winner' : 'leaderboardRow';
                     return (
                         `<div class="${rowClass}">` +
                         `<span class="leaderboardRank">#${index + 1}</span>` +
                         `<span class="leaderboardName">${entry.name}</span>` +
-                        `<span class="leaderboardScore">${entry.collectedCount || 0}</span>` +
+                        `<span class="leaderboardScore">${score} pts</span>` +
+                        `<span class="leaderboardCollected">${collectedCount}x</span>` +
                         `</div>`
                     );
                 })
