@@ -1133,9 +1133,9 @@ function createAudioUi(prefs, handlers) {
         input.step = '1';
         input.value = String(Math.round((prefs[sliderDef.key] || 0) * 100));
         input.addEventListener('input', () => {
-            handlers.onUnlockAudio();
             const normalized = clampNumber(Number(input.value) / 100, 0, 1, 1);
             handlers.onVolumeChanged(sliderDef.key, normalized);
+            handlers.onUnlockAudio();
         });
 
         const value = document.createElement('span');
