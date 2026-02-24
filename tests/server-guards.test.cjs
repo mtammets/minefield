@@ -5,6 +5,11 @@ const { consumeRateLimit } = require('../server/rate-limit');
 const { validateCollisionRelay } = require('../server/collision-guard');
 const { resolveAuthoritativeMineDetonation } = require('../server/mine-guard');
 const {
+    parsePickupId,
+    validatePickupCollection,
+    markPickupCollected,
+} = require('../server/pickup-guard');
+const {
     createRoomRoundState,
     applyPlayerPickupScore,
     applyPlayerMineKillScore,
@@ -256,4 +261,88 @@ test('resolveAuthoritativeMineDetonation accepts segment intersection against re
     });
     assert.equal(accepted.ok, true);
     assert.equal(accepted.detonation.targetPlayerId, 'victim');
+});
+
+test('parsePickupId validates fixed and grid pickup IDs', () => {
+    const validFixed = parsePickupId('pickup:fixed:3', 10);
+    assert.equal(validFixed.ok, true);
+    assert.equal(validFixed.type, 'fixed');
+    assert.equal(validFixed.serial, 3);
+
+    const validCell = parsePickupId('pickup:12:-4', 30);
+    assert.equal(validCell.ok, true);
+    assert.equal(validCell.type, 'cell');
+    assert.equal(validCell.cellX, 12);
+    assert.equal(validCell.cellZ, -4);
+
+    const badPrefix = parsePickupId('coin:fixed:3', 10);
+    assert.equal(badPrefix.ok, false);
+
+    const outOfRound = parsePickupId('pickup:fixed:30', 30);
+    assert.equal(outOfRound.ok, false);
+    assert.equal(outOfRound.reason, 'pickup-id-out-of-range');
+});
+
+test('validatePickupCollection blocks duplicates and accepts nearby fixed pickup IDs', () => {
+    const room = {
+        players: new Map([
+            [
+                'p1',
+                {
+                    lastState: {
+                        x: 100,
+                        y: 1.3,
+                        z: 200,
+                    },
+                    lastStateAt: 10_000,
+                },
+            ],
+        ]),
+        collectedPickupIds: new Map(),
+        roundState: createRoomRoundState(30),
+    };
+
+    const first = validatePickupCollection({
+        room,
+        playerId: 'p1',
+        nowMs: 10_120,
+        payload: {
+            pickupId: 'pickup:fixed:4',
+            x: 102.5,
+            y: 1.35,
+            z: 199.3,
+        },
+    });
+    assert.equal(first.ok, true);
+    assert.equal(first.pickupId, 'pickup:fixed:4');
+
+    assert.equal(markPickupCollected(room, first.pickupId, 10_120), true);
+
+    const duplicate = validatePickupCollection({
+        room,
+        playerId: 'p1',
+        nowMs: 10_240,
+        payload: {
+            pickupId: 'pickup:fixed:4',
+            x: 101.9,
+            y: 1.32,
+            z: 199.8,
+        },
+    });
+    assert.equal(duplicate.ok, false);
+    assert.equal(duplicate.reason, 'pickup-duplicate');
+
+    const tooFar = validatePickupCollection({
+        room,
+        playerId: 'p1',
+        nowMs: 10_260,
+        payload: {
+            pickupId: 'pickup:fixed:5',
+            x: 120,
+            y: 1.35,
+            z: 200,
+        },
+    });
+    assert.equal(tooFar.ok, false);
+    assert.equal(tooFar.reason, 'pickup-too-far');
 });

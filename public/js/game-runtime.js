@@ -180,7 +180,9 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null)
     if (normalizedMode === 'online' && canPrepareOnlineRoomFlow) {
         runtimeState.multiplayerController?.setPanelVisible?.(true);
         if (typeof runtimeState.multiplayerController?.prepareOnlineRoomFlow === 'function') {
-            preparationTasks.push(runtimeState.multiplayerController.prepareOnlineRoomFlow(startContext));
+            preparationTasks.push(
+                runtimeState.multiplayerController.prepareOnlineRoomFlow(startContext)
+            );
         }
     }
     await Promise.allSettled(preparationTasks);
@@ -664,7 +666,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         objectiveUi.setTargetColor(targetColorHex);
         runtimeState.botTrafficSystem?.setSharedTargetColor(targetColorHex);
     },
-    onCorrectPickup: ({ pickupColorHex, collectorId, position }) => {
+    onCorrectPickup: ({ pickupId, pickupColorHex, collectorId, position }) => {
         replayController.recordEvent(REPLAY_EVENT_PICKUP, {
             x: position.x,
             y: position.y,
@@ -680,6 +682,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             if (onlineAuthoritativeRoundActive) {
                 runtimeState.multiplayerController?.reportPickupCollected?.(
                     {
+                        pickupId,
                         x: position.x,
                         y: position.y,
                         z: position.z,

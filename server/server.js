@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -7,6 +8,11 @@ const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
 const { resolveAuthoritativeMineDetonation } = require('./mine-guard');
 const {
+    validatePickupCollection,
+    markPickupCollected,
+    pruneCollectedPickupHistory,
+} = require('./pickup-guard');
+const {
     ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT,
     createRoomRoundState,
     applyPlayerPickupScore,
@@ -14,15 +20,6 @@ const {
     recalculateRoomRoundStateFromPlayers,
     serializeRoomRoundState,
 } = require('./room-round-state');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-    cors: {
-        origin: true,
-        methods: ['GET', 'POST'],
-    },
-});
 
 const PORT = process.env.PORT || 3000;
 const ROOM_CODE_LENGTH = 6;
@@ -42,9 +39,40 @@ const MINE_DEFAULT_TTL_MS = 45_000;
 const MINE_SERVER_PLACE_COOLDOWN_MS = 450;
 const CRASH_REPLICATION_MIN_INTERVAL_MS = 180;
 const VEHICLE_STATUS_MIN_INTERVAL_MS = 140;
+const PICKUP_STATE_MAX_DISTANCE = 4.6;
+const PLAYER_STATE_MAX_HORIZONTAL_SPEED_UNITS_PER_SEC = 82;
+const PLAYER_STATE_MAX_VERTICAL_SPEED_UNITS_PER_SEC = 145;
+const PLAYER_STATE_HORIZONTAL_LEEWAY = 2.4;
+const PLAYER_STATE_VERTICAL_LEEWAY = 3.5;
+const PLAYER_STATE_MAX_INTERVAL_MS = 1400;
+const PLAYER_RESPAWN_SNAP_MIN_DESTROYED_MS = 1300;
+const PLAYER_RESPAWN_SNAP_WINDOW_MS = 1800;
+const PLAYER_RESPAWN_MAX_SNAP_DISTANCE = 320;
+const MINE_ID_RANDOM_BYTES = 4;
 
 const GLOBAL_RATE_WINDOW_MS = 1000;
 const GLOBAL_RATE_MAX_EVENTS = 150;
+const IP_RATE_WINDOW_MS = 1000;
+const IP_RATE_MAX_EVENTS = 300;
+const IP_RATE_RULE_MULTIPLIER = 1.7;
+const IP_RATE_STORE_TTL_MS = 10 * 60 * 1000;
+const IP_RATE_STORE_PRUNE_INTERVAL_MS = 30_000;
+
+const SOCKET_ALLOWED_ORIGINS = parseAllowedOriginList(
+    process.env.SOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || ''
+);
+const HTTP_CONTENT_SECURITY_POLICY = [
+    "default-src 'self'",
+    "script-src 'self' https://cdn.jsdelivr.net",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' ws: wss:",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "object-src 'none'",
+].join('; ');
 
 const EVENT_RATE_LIMITS = {
     'mp:createRoom': { windowMs: 10_000, max: 8 },
@@ -60,8 +88,27 @@ const EVENT_RATE_LIMITS = {
     'mp:vehicleStatus': { windowMs: 1000, max: 12 },
 };
 
-const rooms = new Map();
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: {
+        origin: resolveSocketCorsOrigin,
+        methods: ['GET', 'POST'],
+    },
+});
 
+const rooms = new Map();
+const ipRateLimitStore = new Map();
+let lastIpRateStorePruneAt = 0;
+
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('Content-Security-Policy', HTTP_CONTENT_SECURITY_POLICY);
+    next();
+});
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/api/ping', (req, res) => {
@@ -150,6 +197,7 @@ io.on('connection', (socket) => {
                 updatedAt: Date.now(),
                 players: new Map(),
                 mines: new Map(),
+                collectedPickupIds: new Map(),
                 roundState: createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT),
             };
             room.players.set(socket.id, createRoomPlayer(socket.id, profile));
@@ -311,6 +359,19 @@ io.on('connection', (socket) => {
         if (!sanitizedState) {
             return;
         }
+        const transitionValidation = validateStateTransition({
+            previousState: player.lastState,
+            previousStateAt: player.lastStateAt,
+            nextState: sanitizedState,
+            nowMs: now,
+            allowSnapUntil: player.allowStateSnapUntil,
+        });
+        if (!transitionValidation.ok) {
+            return;
+        }
+        if (transitionValidation.usedSnap) {
+            player.allowStateSnapUntil = 0;
+        }
         sanitizedState.collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
         sanitizedState.score = Math.max(0, Math.round(Number(player.score) || 0));
         sanitizedState.isDestroyed = Boolean(player.isDestroyed);
@@ -421,12 +482,16 @@ io.on('connection', (socket) => {
         }
         pruneExpiredMines(room, now);
         const mine = sanitizeMinePlacement(payload, {
+            room,
             ownerId: socket.id,
             ownerName: player.name,
             now,
         });
         if (!mine) {
             return;
+        }
+        if (room.mines.has(mine.id)) {
+            mine.id = generateServerMineId(mine.ownerId, now);
         }
 
         enforceMineLimits(room, mine.ownerId);
@@ -589,6 +654,24 @@ io.on('connection', (socket) => {
         }
 
         const now = Date.now();
+        pruneCollectedPickupHistory(room, now);
+        const pickupValidation = validatePickupCollection({
+            room,
+            playerId: socket.id,
+            payload,
+            nowMs: now,
+            maxPlayerDistance: PICKUP_STATE_MAX_DISTANCE,
+        });
+        if (!pickupValidation.ok) {
+            safeAck(ack, {
+                ok: false,
+                error: pickupValidation.reason,
+                roundState: serializeRoomRoundState(room.roundState),
+                playerCollectedCount: Math.max(0, Math.round(Number(player.collectedCount) || 0)),
+                playerScore: Math.max(0, Math.round(Number(player.score) || 0)),
+            });
+            return;
+        }
         const scoreApplied = applyPlayerPickupScore({
             room,
             playerId: socket.id,
@@ -605,6 +688,7 @@ io.on('connection', (socket) => {
             return;
         }
 
+        markPickupCollected(room, pickupValidation.pickupId, now);
         room.updatedAt = now;
         emitRoomState(room);
         safeAck(ack, {
@@ -710,6 +794,16 @@ io.on('connection', (socket) => {
             player.mineKillChainCount = 0;
             player.lastMineKillAt = 0;
             player.lastMineKillPoints = 0;
+            player.destroyedAt = now;
+            player.allowStateSnapUntil = 0;
+        } else {
+            const destroyedAt = Number(player.destroyedAt) || 0;
+            if (destroyedAt > 0 && now - destroyedAt >= PLAYER_RESPAWN_SNAP_MIN_DESTROYED_MS) {
+                player.allowStateSnapUntil = now + PLAYER_RESPAWN_SNAP_WINDOW_MS;
+            } else {
+                player.allowStateSnapUntil = 0;
+            }
+            player.destroyedAt = 0;
         }
         player.isDestroyed = nextDestroyed;
         if (player.lastState && typeof player.lastState === 'object') {
@@ -765,6 +859,74 @@ function isIpv4Family(family) {
     return family === 'IPv4' || family === 4;
 }
 
+function parseAllowedOriginList(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return [];
+    }
+    return rawValue
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+}
+
+function resolveSocketCorsOrigin(origin, callback) {
+    const allowed = isSocketOriginAllowed(origin);
+    if (allowed) {
+        callback(null, true);
+        return;
+    }
+    callback(new Error('Origin is not allowed by CORS'));
+}
+
+function isSocketOriginAllowed(origin) {
+    if (!origin) {
+        return true;
+    }
+    if (SOCKET_ALLOWED_ORIGINS.length > 0) {
+        return SOCKET_ALLOWED_ORIGINS.includes(origin);
+    }
+
+    try {
+        const parsed = new URL(origin);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return false;
+        }
+        const hostname = (parsed.hostname || '').toLowerCase();
+        if (!hostname) {
+            return false;
+        }
+        if (
+            hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            hostname === '::1' ||
+            hostname.endsWith('.local')
+        ) {
+            return true;
+        }
+        return isPrivateIpv4Address(hostname);
+    } catch {
+        return false;
+    }
+}
+
+function isPrivateIpv4Address(hostname) {
+    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) {
+        return false;
+    }
+    const parts = hostname.split('.').map((part) => Number(part));
+    if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+        return false;
+    }
+    const [a, b] = parts;
+    if (a === 10 || a === 127) {
+        return true;
+    }
+    if (a === 192 && b === 168) {
+        return true;
+    }
+    return a === 172 && b >= 16 && b <= 31;
+}
+
 function safeAck(ack, payload) {
     if (typeof ack === 'function') {
         ack(payload);
@@ -790,7 +952,119 @@ function consumeInboundEventQuota(socket, eventName) {
     }
 
     const eventRule = EVENT_RATE_LIMITS[eventName] || { windowMs: 1000, max: 20 };
-    return consumeRateLimit(store, `event:${eventName}`, now, eventRule.windowMs, eventRule.max);
+    const eventAllowed = consumeRateLimit(
+        store,
+        `event:${eventName}`,
+        now,
+        eventRule.windowMs,
+        eventRule.max
+    );
+    if (!eventAllowed) {
+        return false;
+    }
+
+    pruneIpRateLimitStore(now);
+    const addressKey = resolveSocketAddressKey(socket);
+    if (!addressKey) {
+        return true;
+    }
+
+    const ipGlobalAllowed = consumeRateLimit(
+        ipRateLimitStore,
+        `ip:${addressKey}:__global__`,
+        now,
+        IP_RATE_WINDOW_MS,
+        IP_RATE_MAX_EVENTS
+    );
+    if (!ipGlobalAllowed) {
+        return false;
+    }
+
+    const ipEventMax = Math.max(10, Math.round(eventRule.max * IP_RATE_RULE_MULTIPLIER));
+    return consumeRateLimit(
+        ipRateLimitStore,
+        `ip:${addressKey}:event:${eventName}`,
+        now,
+        eventRule.windowMs,
+        ipEventMax
+    );
+}
+
+function resolveSocketAddressKey(socket) {
+    const rawAddress = String(
+        socket?.handshake?.address ||
+            socket?.conn?.remoteAddress ||
+            socket?.request?.socket?.remoteAddress ||
+            ''
+    ).trim();
+    if (!rawAddress) {
+        return '';
+    }
+    return rawAddress
+        .replace(/^::ffff:/, '')
+        .replace(/[^\w\-.:]/g, '')
+        .slice(0, 96);
+}
+
+function pruneIpRateLimitStore(nowMs = Date.now()) {
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    if (now - lastIpRateStorePruneAt < IP_RATE_STORE_PRUNE_INTERVAL_MS) {
+        return;
+    }
+    lastIpRateStorePruneAt = now;
+    for (const [key, bucket] of ipRateLimitStore.entries()) {
+        const windowStartAt = Number(bucket?.windowStartAt);
+        if (!Number.isFinite(windowStartAt) || now - windowStartAt > IP_RATE_STORE_TTL_MS) {
+            ipRateLimitStore.delete(key);
+        }
+    }
+}
+
+function validateStateTransition({
+    previousState,
+    previousStateAt,
+    nextState,
+    nowMs = Date.now(),
+    allowSnapUntil = 0,
+} = {}) {
+    if (!nextState || typeof nextState !== 'object') {
+        return { ok: false, reason: 'invalid-next-state' };
+    }
+    if (!previousState || typeof previousState !== 'object') {
+        return { ok: true, usedSnap: false };
+    }
+
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    const previousAt = Number(previousStateAt);
+    if (!Number.isFinite(previousAt) || previousAt <= 0 || now <= previousAt) {
+        return { ok: true, usedSnap: false };
+    }
+
+    const dtSec = Math.max(0.001, Math.min(PLAYER_STATE_MAX_INTERVAL_MS, now - previousAt) / 1000);
+    const dx = (Number(nextState.x) || 0) - (Number(previousState.x) || 0);
+    const dy = (Number(nextState.y) || 0) - (Number(previousState.y) || 0);
+    const dz = (Number(nextState.z) || 0) - (Number(previousState.z) || 0);
+    const horizontalDistance = Math.hypot(dx, dz);
+    const verticalDistance = Math.abs(dy);
+
+    const snapAllowed = now <= Math.max(0, Number(allowSnapUntil) || 0);
+    if (snapAllowed && horizontalDistance <= PLAYER_RESPAWN_MAX_SNAP_DISTANCE) {
+        return { ok: true, usedSnap: true };
+    }
+
+    const allowedHorizontalDistance =
+        PLAYER_STATE_HORIZONTAL_LEEWAY + dtSec * PLAYER_STATE_MAX_HORIZONTAL_SPEED_UNITS_PER_SEC;
+    if (horizontalDistance > allowedHorizontalDistance) {
+        return { ok: false, reason: 'implausible-horizontal-movement' };
+    }
+
+    const allowedVerticalDistance =
+        PLAYER_STATE_VERTICAL_LEEWAY + dtSec * PLAYER_STATE_MAX_VERTICAL_SPEED_UNITS_PER_SEC;
+    if (verticalDistance > allowedVerticalDistance) {
+        return { ok: false, reason: 'implausible-vertical-movement' };
+    }
+
+    return { ok: true, usedSnap: false };
 }
 
 function createRoomPlayer(id, profile) {
@@ -825,6 +1099,8 @@ function createRoomPlayer(id, profile) {
         },
         lastCrashReplicationAt: 0,
         lastVehicleStatusAt: 0,
+        destroyedAt: 0,
+        allowStateSnapUntil: 0,
     };
 }
 
@@ -928,8 +1204,10 @@ function leaveCurrentRoom(socket) {
 }
 
 function generateRoomCode() {
+    const maxValue = 36 ** ROOM_CODE_LENGTH;
     for (let i = 0; i < 64; i += 1) {
-        const value = Math.floor(Math.random() * 36 ** ROOM_CODE_LENGTH)
+        const value = crypto
+            .randomInt(0, maxValue)
             .toString(36)
             .toUpperCase()
             .padStart(ROOM_CODE_LENGTH, '0');
@@ -938,6 +1216,13 @@ function generateRoomCode() {
         }
     }
     return null;
+}
+
+function generateServerMineId(ownerId, nowMs = Date.now()) {
+    const owner = sanitizeSocketLikeId(ownerId) || 'player';
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const nonce = crypto.randomBytes(MINE_ID_RANDOM_BYTES).toString('hex');
+    return `${owner}-${now.toString(36)}-${nonce}`;
 }
 
 function createDefaultProfile(socketId) {
@@ -1102,11 +1387,16 @@ function sanitizeMinePlacement(payload, context) {
     }
 
     const now = clampFinite(context?.now, 0, Number.MAX_SAFE_INTEGER, Date.now());
+    const room = context?.room;
+    const candidateMineId = sanitizeMineId(payload.mineId);
+    const ownerScopedCandidateMineId =
+        candidateMineId && candidateMineId.startsWith(`${ownerId}-`) ? candidateMineId : '';
+    const hasCollisionWithExistingMineId =
+        ownerScopedCandidateMineId && room?.mines?.has?.(ownerScopedCandidateMineId);
     const mineId =
-        sanitizeMineId(payload.mineId) ||
-        `${ownerId}-${now.toString(36)}-${Math.floor(Math.random() * 1296)
-            .toString(36)
-            .padStart(2, '0')}`;
+        ownerScopedCandidateMineId && !hasCollisionWithExistingMineId
+            ? ownerScopedCandidateMineId
+            : generateServerMineId(ownerId, now);
     const triggerRadius = clampFinite(payload.triggerRadius, 0.8, 4, MINE_DEFAULT_TRIGGER_RADIUS);
     const armDelayMs = Math.round(
         clampFinite(payload.armDelayMs, 0, 4000, MINE_DEFAULT_ARM_DELAY_MS)

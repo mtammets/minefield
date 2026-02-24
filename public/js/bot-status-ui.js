@@ -78,20 +78,24 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                     const rowClasses = `botRow${respawning ? ' botRespawning' : ''}${bot.isPlayer ? ' botRowPlayer' : ''}`;
                     const score = Math.max(0, Math.floor(Number(bot.score) || 0));
                     const collectedCount = Math.max(0, Math.floor(Number(bot.collectedCount) || 0));
+                    const displayName = escapeHtml(bot.name || 'Bot');
+                    const displayTargetName = escapeHtml(targetName);
+                    const displayStatusLabel = escapeHtml(statusLabel);
+                    const swatchColor = sanitizeCssColor(toCssHex(targetHex));
                     return (
                         `<div class="${rowClasses}">` +
-                        `<span class="botName">${bot.name}</span>` +
+                        `<span class="botName">${displayName}</span>` +
                         `<span class="botTarget">` +
                         `${
                             showSwatch
-                                ? `<span class="botSwatch" style="background:${toCssHex(targetHex)}"></span>`
+                                ? `<span class="botSwatch" style="background:${swatchColor}"></span>`
                                 : ''
                         }` +
-                        `<span class="botTargetLabel">${targetName}</span>` +
+                        `<span class="botTargetLabel">${displayTargetName}</span>` +
                         `</span>` +
                         `<span class="botLivesWrap">` +
                         `<span class="botLivesPips">${livesPips}</span>` +
-                        `<span class="botLivesLabel">${statusLabel}</span>` +
+                        `<span class="botLivesLabel">${displayStatusLabel}</span>` +
                         `</span>` +
                         `<span class="botStats">` +
                         `<span class="botScore">${score}</span>` +
@@ -104,4 +108,18 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
             lastRenderSignature = renderSignature;
         },
     };
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
+function sanitizeCssColor(value) {
+    const raw = String(value ?? '').trim();
+    return /^#[a-fA-F0-9]{3,8}$/.test(raw) ? raw : '#6b84a5';
 }
