@@ -366,13 +366,23 @@ export function createMapUiController(options = {}) {
 
         const width = canvas.width;
         const height = canvas.height;
-        const panelPadding = Math.max(7, Math.round(width * 0.03));
+        const minCanvasSize = Math.min(width, height);
+        if (!Number.isFinite(width) || !Number.isFinite(height) || minCanvasSize < 24) {
+            ctx.clearRect(0, 0, width, height);
+            return;
+        }
+        const maxAllowedPadding = Math.max(2, Math.floor(minCanvasSize * 0.45));
+        const panelPadding = clamp(Math.round(width * 0.03), 2, maxAllowedPadding);
         const mapRect = {
             x: panelPadding,
             y: panelPadding,
             w: width - panelPadding * 2,
             h: height - panelPadding * 2,
         };
+        if (mapRect.w <= 4 || mapRect.h <= 4) {
+            ctx.clearRect(0, 0, width, height);
+            return;
+        }
 
         ctx.clearRect(0, 0, width, height);
         drawRoundedPanel(ctx, mapRect.x, mapRect.y, mapRect.w, mapRect.h, Math.round(width * 0.06));
@@ -1030,7 +1040,10 @@ export function createMapUiController(options = {}) {
     function drawCompassTicks(ctx, mapRect) {
         const cx = mapRect.x + mapRect.w * 0.5;
         const cy = mapRect.y + mapRect.h * 0.5;
-        const radius = Math.min(mapRect.w, mapRect.h) * 0.5 - 7;
+        const radius = Math.max(0, Math.min(mapRect.w, mapRect.h) * 0.5 - 7);
+        if (!Number.isFinite(radius) || radius < 1) {
+            return;
+        }
         ctx.save();
         ctx.strokeStyle = 'rgba(174, 220, 248, 0.4)';
         ctx.lineWidth = 1;

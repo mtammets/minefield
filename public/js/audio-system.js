@@ -399,15 +399,26 @@ export function createAudioSystem({ camera = null } = {}) {
         if (disposed) {
             return false;
         }
+        const userActivationActive = hasActiveUserActivation();
+        if (!context && !userActivationActive) {
+            refreshUi();
+            return false;
+        }
         const audioContext = ensureAudioContext();
         if (!audioContext) {
             return false;
         }
-        try {
-            await audioContext.resume();
-        } catch {
-            refreshUi();
-            return false;
+        if (audioContext.state !== 'running') {
+            if (!userActivationActive) {
+                refreshUi();
+                return false;
+            }
+            try {
+                await audioContext.resume();
+            } catch {
+                refreshUi();
+                return false;
+            }
         }
 
         unlocked = audioContext.state === 'running';
@@ -468,6 +479,14 @@ export function createAudioSystem({ camera = null } = {}) {
 
         applyBusVolumes();
         return context;
+    }
+
+    function hasActiveUserActivation() {
+        const userActivation = navigator?.userActivation;
+        if (!userActivation || typeof userActivation.isActive !== 'boolean') {
+            return true;
+        }
+        return userActivation.isActive;
     }
 
     async function preloadAllBuffers() {
