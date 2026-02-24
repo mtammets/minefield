@@ -1,5 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { CITY_GRID_RANGE, CITY_GRID_SPACING, CITY_ROAD_OFFSET } from './config.js';
+import { isInsideCentralParkingLot } from './layout.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
 
@@ -31,6 +32,9 @@ export function createStreetLampLayer(_lampLights) {
                 gridX * CITY_GRID_SPACING + (Math.abs(gridX) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
             const positionZ =
                 gridZ * CITY_GRID_SPACING + (Math.abs(gridZ) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
+            if (isInsideCentralParkingLot(positionX, positionZ, 2.2)) {
+                continue;
+            }
             const baseY = getGroundHeightAt(positionX, positionZ);
 
             const pole = new THREE.Mesh(poleGeometry, poleMaterial);

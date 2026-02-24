@@ -1,7 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
-import { CITY_GRID_SPACING, ROAD_WIDTH, SIDEWALK_WIDTH, ROAD_STYLE_CONFIGS } from './config.js';
+import { ROAD_WIDTH, SIDEWALK_WIDTH, ROAD_STYLE_CONFIGS } from './config.js';
 import {
-    worldBounds,
     roadAxisLineDescriptors,
     chargingZoneIntersectionKeys,
     toIntersectionKey,
@@ -17,17 +16,18 @@ export function createRoadLayer() {
     const layer = new THREE.Group();
     layer.name = 'roadLayer';
 
+    const xLineDescriptors = roadAxisLineDescriptors.xLines;
+    const zLineDescriptors = roadAxisLineDescriptors.zLines;
+    const roadAxisHalfExtent = resolveRoadAxisHalfExtent(xLineDescriptors, zLineDescriptors);
     const roadWidth = ROAD_WIDTH;
     const sidewalkWidth = SIDEWALK_WIDTH;
-    const roadLength = worldBounds.size + CITY_GRID_SPACING * 2;
-    const roadExtentMin = -roadLength * 0.5;
-    const roadExtentMax = roadLength * 0.5;
+    const roadLength = roadAxisHalfExtent * 2;
+    const roadExtentMin = -roadAxisHalfExtent;
+    const roadExtentMax = roadAxisHalfExtent;
     const roadY = 0.028;
     const sidewalkY = 0.034;
     const medianY = roadY + 0.006;
 
-    const xLineDescriptors = roadAxisLineDescriptors.xLines;
-    const zLineDescriptors = roadAxisLineDescriptors.zLines;
     const xLineCoordinates = xLineDescriptors.map((line) => line.coordinate);
     const zLineCoordinates = zLineDescriptors.map((line) => line.coordinate);
     const intersectionGapHalfWidth = roadWidth * 0.5;
@@ -124,6 +124,19 @@ export function createRoadLayer() {
     });
 
     return layer;
+}
+
+function resolveRoadAxisHalfExtent(xLineDescriptors, zLineDescriptors) {
+    const allLineCoordinates = [
+        ...xLineDescriptors.map((line) => line.coordinate),
+        ...zLineDescriptors.map((line) => line.coordinate),
+    ];
+    if (allLineCoordinates.length === 0) {
+        return ROAD_WIDTH;
+    }
+    return allLineCoordinates.reduce((maxValue, coordinate) => {
+        return Math.max(maxValue, Math.abs(coordinate));
+    }, 0);
 }
 
 function addAxisRoadMeshes({

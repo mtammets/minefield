@@ -918,7 +918,9 @@ function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
                 collided = true;
                 collidedThisPass = true;
 
-                if (obstacle.category === 'lamp_post') {
+                if (obstacle.category === 'building') {
+                    collidedWithBuilding = true;
+                } else if (obstacle.category === 'lamp_post') {
                     collidedWithLampPost = true;
                 } else if (obstacle.category === 'tree') {
                     collidedWithTree = true;

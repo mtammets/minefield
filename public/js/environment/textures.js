@@ -273,6 +273,134 @@ export function createIntersectionTexture({ variant = 'standard' } = {}) {
     return texture;
 }
 
+export function createParkingLotTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#23394c');
+    baseGradient.addColorStop(1, '#172a3b');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 5200; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 62 + Math.random() * 34;
+        ctx.fillStyle = `rgba(${value}, ${value + 3}, ${value + 8}, 0.13)`;
+        ctx.fillRect(x, y, 2, 2);
+    }
+
+    for (let i = 0; i < 24; i += 1) {
+        const radius = 64 + Math.random() * 124;
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const patch = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        patch.addColorStop(0, 'rgba(200, 224, 248, 0.06)');
+        patch.addColorStop(1, 'rgba(200, 224, 248, 0)');
+        ctx.fillStyle = patch;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.strokeStyle = 'rgba(236, 244, 255, 0.42)';
+    ctx.lineWidth = 5;
+    const perimeterInset = 42;
+    ctx.strokeRect(
+        perimeterInset,
+        perimeterInset,
+        canvas.width - perimeterInset * 2,
+        canvas.height - perimeterInset * 2
+    );
+
+    drawParkingRowMarkings(ctx, {
+        xStart: 122,
+        xEnd: canvas.width - 122,
+        yAnchor: 132,
+        bayDepth: 68,
+        baySpan: 44,
+        gap: 9,
+        direction: 'down',
+    });
+    drawParkingRowMarkings(ctx, {
+        xStart: 122,
+        xEnd: canvas.width - 122,
+        yAnchor: canvas.height - 132,
+        bayDepth: 68,
+        baySpan: 44,
+        gap: 9,
+        direction: 'up',
+    });
+    drawParkingColumnMarkings(ctx, {
+        zStart: 220,
+        zEnd: canvas.height - 220,
+        xAnchor: 122,
+        bayDepth: 62,
+        baySpan: 40,
+        gap: 8,
+        direction: 'right',
+    });
+    drawParkingColumnMarkings(ctx, {
+        zStart: 220,
+        zEnd: canvas.height - 220,
+        xAnchor: canvas.width - 122,
+        bayDepth: 62,
+        baySpan: 40,
+        gap: 8,
+        direction: 'left',
+    });
+
+    const center = canvas.width * 0.5;
+    ctx.strokeStyle = 'rgba(189, 214, 243, 0.26)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([24, 18]);
+    ctx.beginPath();
+    ctx.arc(center, center, 172, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(189, 214, 243, 0.14)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(center, center, 236, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(13, 21, 31, 0.33)';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 90; i += 1) {
+        const radius = 84 + Math.random() * 220;
+        const start = Math.random() * Math.PI * 2;
+        const sweep = (0.15 + Math.random() * 0.3) * Math.PI;
+        ctx.lineWidth = 1.2 + Math.random() * 1.8;
+        ctx.beginPath();
+        ctx.arc(center, center, radius, start, start + sweep);
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = 'rgba(15, 24, 34, 0.24)';
+    for (let i = 0; i < 120; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const length = 8 + Math.random() * 26;
+        const heading = Math.random() * Math.PI * 2;
+        ctx.lineWidth = 0.8 + Math.random() * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(heading) * length, y + Math.sin(heading) * length);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 2;
+    return texture;
+}
+
 export function createSidewalkTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
@@ -466,6 +594,52 @@ function drawSolidHorizontalLine(ctx, y, color, lineWidth, width) {
     ctx.moveTo(0, y);
     ctx.lineTo(width, y);
     ctx.stroke();
+}
+
+function drawParkingRowMarkings(
+    ctx,
+    { xStart, xEnd, yAnchor, bayDepth, baySpan, gap, direction = 'down' }
+) {
+    ctx.strokeStyle = 'rgba(236, 244, 255, 0.44)';
+    ctx.lineWidth = 3;
+    const depthSign = direction === 'up' ? -1 : 1;
+    const yBase = yAnchor + depthSign * bayDepth;
+    ctx.beginPath();
+    ctx.moveTo(xStart, yAnchor);
+    ctx.lineTo(xEnd, yAnchor);
+    ctx.moveTo(xStart, yBase);
+    ctx.lineTo(xEnd, yBase);
+    ctx.stroke();
+
+    for (let x = xStart; x <= xEnd; x += baySpan + gap) {
+        ctx.beginPath();
+        ctx.moveTo(x, yAnchor);
+        ctx.lineTo(x, yBase);
+        ctx.stroke();
+    }
+}
+
+function drawParkingColumnMarkings(
+    ctx,
+    { zStart, zEnd, xAnchor, bayDepth, baySpan, gap, direction = 'right' }
+) {
+    ctx.strokeStyle = 'rgba(236, 244, 255, 0.44)';
+    ctx.lineWidth = 3;
+    const depthSign = direction === 'left' ? -1 : 1;
+    const xBase = xAnchor + depthSign * bayDepth;
+    ctx.beginPath();
+    ctx.moveTo(xAnchor, zStart);
+    ctx.lineTo(xAnchor, zEnd);
+    ctx.moveTo(xBase, zStart);
+    ctx.lineTo(xBase, zEnd);
+    ctx.stroke();
+
+    for (let z = zStart; z <= zEnd; z += baySpan + gap) {
+        ctx.beginPath();
+        ctx.moveTo(xAnchor, z);
+        ctx.lineTo(xBase, z);
+        ctx.stroke();
+    }
 }
 
 function drawDashedVerticalLine(ctx, x, color, lineWidth, dashHeight, dashGap, height) {

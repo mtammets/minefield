@@ -33,7 +33,12 @@ export function createGround({ texture, size, positionY }) {
     return mesh;
 }
 
-export function updateGroundMotionRuntime({ ground, cityScenery, playerSpeed = 0 }) {
+export function updateGroundMotionRuntime({
+    ground,
+    cityScenery,
+    playerSpeed = 0,
+    playerPosition = null,
+}) {
     const speedRatio = THREE.MathUtils.clamp(Math.abs(playerSpeed) / SPEED_GLOW_MAX, 0, 1);
     const intensityBoost = speedRatio * 0.12;
     ground.material.emissiveIntensity = ground.material.userData.baseEmissive + intensityBoost;
@@ -48,4 +53,6 @@ export function updateGroundMotionRuntime({ ground, cityScenery, playerSpeed = 0
             light.intensity = light.userData.baseIntensity * lampBoost * lampFlicker;
         });
     }
+
+    void playerPosition;
 }

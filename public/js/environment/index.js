@@ -22,11 +22,12 @@ const ground = createGround({
 const cityScenery = createCityScenery();
 const worldBoundary = createWorldBoundary();
 
-function updateGroundMotion(_playerPosition, playerSpeed = 0) {
+function updateGroundMotion(playerPosition, playerSpeed = 0) {
     updateGroundMotionRuntime({
         ground,
         cityScenery,
         playerSpeed,
+        playerPosition,
     });
 }
 

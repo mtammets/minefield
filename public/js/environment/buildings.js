@@ -1,6 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { BUILDING_DISTRICT_RADIUS, CITY_GRID_RANGE, CITY_GRID_SPACING } from './config.js';
-import { worldBounds } from './layout.js';
+import { worldBounds, doesRectOverlapCentralParkingLot } from './layout.js';
 import { randomFromGrid } from './grid-noise.js';
 import { addObstacleAabb } from './obstacles.js';
 import { createBuildingWindowTexture } from './textures.js';
@@ -34,10 +34,16 @@ export function createBuildingLayer() {
             const depth = 12 + randomFromGrid(gridX, gridZ, 12) * 11;
             const height = 14 + randomFromGrid(gridX, gridZ, 13) * 58;
             const tint = randomFromGrid(gridX, gridZ, 16);
+            const centerX = gridX * CITY_GRID_SPACING;
+            const centerZ = gridZ * CITY_GRID_SPACING;
+
+            if (doesRectOverlapCentralParkingLot(centerX, centerZ, width, depth, 2)) {
+                continue;
+            }
 
             placements.push({
-                x: gridX * CITY_GRID_SPACING,
-                z: gridZ * CITY_GRID_SPACING,
+                x: centerX,
+                z: centerZ,
                 width,
                 depth,
                 height,

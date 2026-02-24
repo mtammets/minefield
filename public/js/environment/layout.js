@@ -4,6 +4,8 @@ import {
     ROAD_WIDTH,
     SIDEWALK_WIDTH,
     CHARGING_ZONE_RADIUS,
+    CENTRAL_PARKING_LOT_WIDTH,
+    CENTRAL_PARKING_LOT_DEPTH,
     ROAD_STYLE_CONFIGS,
 } from './config.js';
 
@@ -19,6 +21,7 @@ export const worldBounds = {
 
 export const chargingZones = createChargingZones();
 export const chargingZoneIntersectionKeys = createChargingZoneIntersectionKeys(chargingZones);
+export const centralParkingLot = createCentralParkingLot();
 
 export const roadAxisLineDescriptors = createRoadAxisLineDescriptors();
 
@@ -29,6 +32,16 @@ export const cityMapLayout = {
     sidewalkWidth: SIDEWALK_WIDTH,
     roadAxisLinesX: roadAxisLineDescriptors.xLines.map(toCityMapLineDescriptor),
     roadAxisLinesZ: roadAxisLineDescriptors.zLines.map(toCityMapLineDescriptor),
+    centralParkingLot: {
+        centerX: centralParkingLot.centerX,
+        centerZ: centralParkingLot.centerZ,
+        width: centralParkingLot.width,
+        depth: centralParkingLot.depth,
+        minX: centralParkingLot.minX,
+        maxX: centralParkingLot.maxX,
+        minZ: centralParkingLot.minZ,
+        maxZ: centralParkingLot.maxZ,
+    },
 };
 
 function createChargingZones() {
@@ -74,10 +87,65 @@ export function toIntersectionKey(x, z) {
     return `${Math.round(x)}:${Math.round(z)}`;
 }
 
+export function isInsideCentralParkingLot(x, z, padding = 0) {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) {
+        return false;
+    }
+    const extraPadding = Math.max(0, Number(padding) || 0);
+    return (
+        x >= centralParkingLot.minX - extraPadding &&
+        x <= centralParkingLot.maxX + extraPadding &&
+        z >= centralParkingLot.minZ - extraPadding &&
+        z <= centralParkingLot.maxZ + extraPadding
+    );
+}
+
+export function doesRectOverlapCentralParkingLot(centerX, centerZ, width, depth, padding = 0) {
+    if (
+        !Number.isFinite(centerX) ||
+        !Number.isFinite(centerZ) ||
+        !Number.isFinite(width) ||
+        !Number.isFinite(depth)
+    ) {
+        return false;
+    }
+    const halfWidth = Math.max(0, width * 0.5);
+    const halfDepth = Math.max(0, depth * 0.5);
+    const minX = centerX - halfWidth;
+    const maxX = centerX + halfWidth;
+    const minZ = centerZ - halfDepth;
+    const maxZ = centerZ + halfDepth;
+    const extraPadding = Math.max(0, Number(padding) || 0);
+
+    return !(
+        maxX < centralParkingLot.minX - extraPadding ||
+        minX > centralParkingLot.maxX + extraPadding ||
+        maxZ < centralParkingLot.minZ - extraPadding ||
+        minZ > centralParkingLot.maxZ + extraPadding
+    );
+}
+
 function createRoadAxisLineDescriptors() {
     return {
         xLines: createRoadAxisLines(17),
         zLines: createRoadAxisLines(29),
+    };
+}
+
+function createCentralParkingLot() {
+    const centerX = 0;
+    const centerZ = 0;
+    const width = CENTRAL_PARKING_LOT_WIDTH;
+    const depth = CENTRAL_PARKING_LOT_DEPTH;
+    return {
+        centerX,
+        centerZ,
+        width,
+        depth,
+        minX: centerX - width * 0.5,
+        maxX: centerX + width * 0.5,
+        minZ: centerZ - depth * 0.5,
+        maxZ: centerZ + depth * 0.5,
     };
 }
 

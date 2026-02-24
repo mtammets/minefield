@@ -1,6 +1,8 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { clearStaticObstacles } from './obstacles.js';
 import { createRoadLayer } from './roads.js';
+import { createParkingLotLayer } from './parking-lot.js';
+import { createMonumentLayer } from './monument.js';
 import { createParkLayer } from './parks.js';
 import { createBuildingLayer } from './buildings.js';
 import { createStreetLampLayer } from './street-lamps.js';
@@ -12,7 +14,11 @@ export function createCityScenery() {
 
     clearStaticObstacles();
 
+    const monumentLayer = createMonumentLayer();
+
     group.add(createRoadLayer());
+    group.add(createParkingLotLayer());
+    group.add(monumentLayer);
     group.add(createParkLayer());
     group.add(createBuildingLayer());
     group.add(createStreetLampLayer(group.userData.lampLights));
