@@ -127,7 +127,6 @@ import {
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
-const SESSION_START_PREP_TIMEOUT_MS = 2200;
 const GRAPHICS_PRESET_MODE_ORDER = [
     GRAPHICS_QUALITY_MODES.performance,
     GRAPHICS_QUALITY_MODES.balanced,
@@ -171,15 +170,20 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         onPrepareStart: prepareRuntimeForSessionStart,
     });
 
-async function prepareRuntimeForSessionStart() {
+async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null) {
+    const normalizedMode = mode === 'online' ? 'online' : 'bots';
+    const canPrepareOnlineRoomFlow = Boolean(startContext && typeof startContext === 'object');
     const preparationTasks = [waitForAnimationFrames(2)];
     if (typeof runtimeState.audioController?.unlock === 'function') {
         preparationTasks.push(runtimeState.audioController.unlock());
     }
-    await Promise.race([
-        Promise.allSettled(preparationTasks),
-        delayMs(SESSION_START_PREP_TIMEOUT_MS),
-    ]);
+    if (normalizedMode === 'online' && canPrepareOnlineRoomFlow) {
+        runtimeState.multiplayerController?.setPanelVisible?.(true);
+        if (typeof runtimeState.multiplayerController?.prepareOnlineRoomFlow === 'function') {
+            preparationTasks.push(runtimeState.multiplayerController.prepareOnlineRoomFlow(startContext));
+        }
+    }
+    await Promise.allSettled(preparationTasks);
 }
 
 function waitForAnimationFrames(frameCount = 1) {
@@ -195,13 +199,6 @@ function waitForAnimationFrames(frameCount = 1) {
             window.requestAnimationFrame(tick);
         };
         window.requestAnimationFrame(tick);
-    });
-}
-
-function delayMs(timeoutMs = 0) {
-    const safeTimeout = Math.max(0, Math.round(Number(timeoutMs) || 0));
-    return new Promise((resolve) => {
-        window.setTimeout(resolve, safeTimeout);
     });
 }
 

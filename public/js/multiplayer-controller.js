@@ -17,6 +17,7 @@ const MP_COLLISION_MASS = 1.6;
 const COLLISION_RELAY_INTERVAL_MS = 90;
 const CRASH_REPLICATION_SEND_INTERVAL_MS = 190;
 const VEHICLE_STATUS_SEND_INTERVAL_MS = 140;
+const ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS = 9000;
 
 export function createMultiplayerController(options = {}) {
     const {
@@ -63,6 +64,8 @@ export function createMultiplayerController(options = {}) {
     let lastProfileSyncedAt = 0;
     let lastProfileSignature = '';
     let localPlayerName = DEFAULT_PLAYER_NAME;
+    const roomFlowWaiters = new Set();
+    let pendingRoomFlowPromise = null;
 
     return {
         initialize,
@@ -81,6 +84,7 @@ export function createMultiplayerController(options = {}) {
         getSelfId,
         getLocalPlayerName,
         startOnlineRoomFlow,
+        prepareOnlineRoomFlow,
         getRoundStateSnapshot,
         getScoreboardEntries,
         getPlayerWorldPosition,
@@ -109,19 +113,8 @@ export function createMultiplayerController(options = {}) {
             entry.target.removeEventListener(entry.event, entry.handler);
         }
 
-        if (socket) {
-            socket.off('connect');
-            socket.off('disconnect');
-            socket.off('connect_error');
-            socket.off('mp:roomState');
-            socket.off('mp:playerState');
-            socket.off('mp:collision');
-            socket.off('mp:crashReplication');
-            socket.off('mp:minePlaced');
-            socket.off('mp:mineDetonated');
-            socket.disconnect();
-            socket = null;
-        }
+        resolveRoomFlowWaiters(false);
+        teardownSocketConnection();
 
         clearRoomState();
         for (const remote of remotePlayers.values()) {
@@ -328,6 +321,33 @@ export function createMultiplayerController(options = {}) {
         return true;
     }
 
+    function prepareOnlineRoomFlow(startContext = null) {
+        if (!isPanelVisible) {
+            return Promise.resolve(false);
+        }
+        if (isInRoom()) {
+            return Promise.resolve(true);
+        }
+        if (pendingRoomFlowPromise) {
+            return pendingRoomFlowPromise;
+        }
+
+        const waiter = createRoomFlowWaiter(ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS);
+        const roomFlowPromise = waiter.promise.finally(() => {
+            if (pendingRoomFlowPromise === roomFlowPromise) {
+                pendingRoomFlowPromise = null;
+            }
+        });
+        pendingRoomFlowPromise = roomFlowPromise;
+
+        const started = startOnlineRoomFlow(startContext);
+        if (!started) {
+            waiter.finish(isInRoom());
+        }
+
+        return roomFlowPromise;
+    }
+
     function resolveTargetPlayerId(contact = null) {
         if (typeof contact?.playerId === 'string' && contact.playerId.trim()) {
             return contact.playerId.trim();
@@ -343,6 +363,7 @@ export function createMultiplayerController(options = {}) {
 
     function handleCreateRoomClick(explicitRoomCode = '') {
         if (isBusy) {
+            resolveRoomFlowWaiters(isInRoom());
             return;
         }
 
@@ -350,11 +371,13 @@ export function createMultiplayerController(options = {}) {
         if (createRoomCode == null) {
             setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
             updatePanel();
+            resolveRoomFlowWaiters(false);
             return;
         }
 
         const activeSocket = ensureSocket();
         if (!activeSocket) {
+            resolveRoomFlowWaiters(false);
             return;
         }
 
@@ -375,6 +398,7 @@ export function createMultiplayerController(options = {}) {
                 if (!response?.ok) {
                     setStatus(response?.error || 'Failed to create room.', 'error');
                     updatePanel();
+                    resolveRoomFlowWaiters(false);
                     return;
                 }
 
@@ -385,23 +409,27 @@ export function createMultiplayerController(options = {}) {
                 applyRoomSnapshot(response.room, response.selfId);
                 setStatus('In room.', 'success');
                 updatePanel();
+                resolveRoomFlowWaiters(true);
             }
         );
     }
 
     function handleJoinRoomClick(explicitRoomCode = '') {
         if (isBusy) {
+            resolveRoomFlowWaiters(isInRoom());
             return;
         }
 
         const roomCode = normalizeRoomCode(explicitRoomCode);
         if (!roomCode) {
             setStatus(`Room code must be ${ROOM_CODE_LENGTH} letters or numbers.`, 'error');
+            resolveRoomFlowWaiters(false);
             return;
         }
 
         const activeSocket = ensureSocket();
         if (!activeSocket) {
+            resolveRoomFlowWaiters(false);
             return;
         }
 
@@ -416,6 +444,7 @@ export function createMultiplayerController(options = {}) {
             if (!response?.ok) {
                 setStatus(response?.error || 'Failed to join room.', 'error');
                 updatePanel();
+                resolveRoomFlowWaiters(false);
                 return;
             }
 
@@ -426,6 +455,7 @@ export function createMultiplayerController(options = {}) {
             applyRoomSnapshot(response.room, response.selfId);
             setStatus('In room.', 'success');
             updatePanel();
+            resolveRoomFlowWaiters(true);
         });
     }
 
@@ -478,12 +508,14 @@ export function createMultiplayerController(options = {}) {
             setStatus(`Connection lost (${reason}). Reconnect to continue.`, 'error');
             objectiveUi?.showInfo?.('Online session disconnected.', 2200);
             updatePanel();
+            resolveRoomFlowWaiters(false);
         });
 
         socket.on('connect_error', () => {
             isBusy = false;
             setStatus('Server connection failed. Check if the server is running.', 'error');
             updatePanel();
+            resolveRoomFlowWaiters(false);
         });
 
         socket.on('mp:roomState', (snapshot) => {
@@ -491,6 +523,7 @@ export function createMultiplayerController(options = {}) {
             const joinedRoomCode = snapshot?.roomCode || '';
             if (joinedRoomCode) {
                 setStatus('In room.', 'success');
+                resolveRoomFlowWaiters(true);
             }
             updatePanel();
         });
@@ -1143,6 +1176,7 @@ export function createMultiplayerController(options = {}) {
         dom.panel.hidden = !isPanelVisible;
         if (!isPanelVisible) {
             isBusy = false;
+            resolveRoomFlowWaiters(false);
             clearRoomState();
             teardownSocketConnection();
             updatePanel();
@@ -1176,7 +1210,55 @@ export function createMultiplayerController(options = {}) {
         };
     }
 
+    function createRoomFlowWaiter(timeoutMs = ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS) {
+        const safeTimeoutMs = Math.max(
+            1000,
+            Math.round(Number(timeoutMs) || ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS)
+        );
+        let finished = false;
+        let timeoutId = null;
+        let resolveWaiter = null;
+
+        const promise = new Promise((resolve) => {
+            resolveWaiter = resolve;
+            timeoutId = window.setTimeout(() => {
+                finish(false);
+            }, safeTimeoutMs);
+        });
+
+        function finish(nextReady) {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            if (timeoutId != null) {
+                window.clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            roomFlowWaiters.delete(finish);
+            resolveWaiter(Boolean(nextReady));
+        }
+
+        roomFlowWaiters.add(finish);
+        return {
+            promise,
+            finish,
+        };
+    }
+
+    function resolveRoomFlowWaiters(nextReady = false) {
+        if (roomFlowWaiters.size === 0) {
+            return;
+        }
+        const finishers = Array.from(roomFlowWaiters.values());
+        for (let i = 0; i < finishers.length; i += 1) {
+            const finish = finishers[i];
+            finish(Boolean(nextReady));
+        }
+    }
+
     function teardownSocketConnection() {
+        resolveRoomFlowWaiters(false);
         if (!socket) {
             return;
         }
@@ -1244,6 +1326,9 @@ function createNoopController() {
         },
         startOnlineRoomFlow() {
             return false;
+        },
+        prepareOnlineRoomFlow() {
+            return Promise.resolve(false);
         },
         getRoundStateSnapshot() {
             return null;

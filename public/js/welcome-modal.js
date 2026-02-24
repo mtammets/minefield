@@ -23,7 +23,6 @@ const ONLINE_PLAYER_NAME_MAX_LENGTH = 18;
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const WELCOME_START_SEQUENCE_MIN_MS = 2600;
-const WELCOME_START_SEQUENCE_MAX_MS = 6500;
 const WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS = 260;
 const WELCOME_START_SEQUENCE_PREP_CAP = 0.9;
 const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
@@ -453,9 +452,6 @@ export function createWelcomeModalController({
             setLaunchProgress(nextProgress);
             setLaunchCopy(normalizedMode, nextProgress);
             if (preparationDone && elapsedMs >= WELCOME_START_SEQUENCE_MIN_MS) {
-                break;
-            }
-            if (elapsedMs >= WELCOME_START_SEQUENCE_MAX_MS) {
                 break;
             }
             await waitForNextFrame();

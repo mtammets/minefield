@@ -419,6 +419,9 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         applyBusVolumes();
         refreshUi();
+        if (preloadPromise) {
+            await preloadPromise;
+        }
         return unlocked;
     }
 
