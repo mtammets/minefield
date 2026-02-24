@@ -9,6 +9,7 @@ export const COLOR_NAMES = {
 
 export const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
 export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
+export const GRAPHICS_QUALITY_MODE_STORAGE_KEY = 'silentdrift-graphics-quality-mode';
 export const PLAYER_TOP_SPEED_LIMIT_STEP_KPH = 5;
 export const PLAYER_TOP_SPEED_LIMIT_MIN_KPH = 50;
 export const PLAYER_TOP_SPEED_LIMIT_MAX_KPH = 100;

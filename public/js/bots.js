@@ -57,9 +57,13 @@ const BOT_DETOUR_CLEARANCE = BOT_RADIUS + 3.2;
 const BOT_DETOUR_REACH_RADIUS = 6;
 const BOT_AVOIDANCE_BLEND = 1.08;
 const BOT_NAV_CELL_SIZE = 4;
+const BOT_OBSTACLE_QUERY_RADIUS = BOT_BUILDING_AVOID_RADIUS + 6;
+const BOT_OBSTACLE_GRID_CELL_SIZE = 12;
 const BOT_NAV_OBSTACLE_PADDING = BOT_RADIUS + 0.96;
 const BOT_NAV_MAX_EXPANSIONS = 4200;
 const BOT_PATH_REPLAN_COOLDOWN = 0.35;
+const BOT_NAV_PATH_CACHE_LIMIT = 320;
+const BOT_NAV_MAX_BUILDS_PER_FRAME = 1;
 const BOT_STUCK_MIN_SPEED = 1.1;
 const BOT_STUCK_PROGRESS_EPSILON = 2.2;
 const BOT_STUCK_REPLAN_TIME = 1.25;
@@ -83,6 +87,17 @@ const right2 = new THREE.Vector2();
 const targetDir2 = new THREE.Vector2();
 const avoidance2 = new THREE.Vector2();
 const scratch2 = new THREE.Vector2();
+const navSqrt2 = Math.sqrt(2);
+const NAV_NEIGHBOR_OFFSETS = [
+    { x: -1, z: 0, cost: 1 },
+    { x: 1, z: 0, cost: 1 },
+    { x: 0, z: -1, cost: 1 },
+    { x: 0, z: 1, cost: 1 },
+    { x: -1, z: -1, cost: navSqrt2 },
+    { x: -1, z: 1, cost: navSqrt2 },
+    { x: 1, z: -1, cost: navSqrt2 },
+    { x: 1, z: 1, cost: navSqrt2 },
+];
 
 export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [], options = {}) {
     const {
@@ -93,6 +108,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         onPartDetached = null,
     } = options;
     const handlePartDetached = typeof onPartDetached === 'function' ? onPartDetached : null;
+    const navigationPlanner = createNavigationPlanner(worldBounds, staticObstacles);
+    const buildingObstacles = navigationPlanner?.buildingObstacles || [];
     let resolvedSharedTargetColorHex = sharedTargetColorHex;
     let enabled = true;
     const detachedDebrisPieces = [];
@@ -127,6 +144,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             const dt = Math.min(deltaTime, 0.05);
             const nowMs = Date.now();
             updateDetachedDebris(dt);
+            navigationPlanner?.beginFrame?.();
             if (!enabled) {
                 return;
             }
@@ -144,8 +162,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     dt,
                     worldBounds,
                     staticObstacles,
+                    buildingObstacles,
                     getGroundHeightAt,
-                    cityMapLayout
+                    cityMapLayout,
+                    navigationPlanner
                 );
             }
         },
@@ -714,11 +734,19 @@ function updateBot(
     dt,
     worldBounds,
     staticObstacles,
+    buildingObstacles,
     getGroundHeightAt,
-    cityMapLayout
+    cityMapLayout,
+    navigationPlanner
 ) {
     const damageDynamics = getBotDamageDynamics(bot.damageState);
-    const targetPickup = findNearestPickup(bot.car.position, visiblePickups, staticObstacles);
+    const targetPickup = findNearestPickup(bot.car.position, visiblePickups, buildingObstacles);
+    const nearbyObstacles =
+        navigationPlanner?.queryNearbyObstacles?.(
+            bot.car.position.x,
+            bot.car.position.z,
+            BOT_OBSTACLE_QUERY_RADIUS
+        ) || staticObstacles;
 
     if (!targetPickup) {
         const wanderDistanceSq = distanceSqXZ(bot.car.position, bot.wanderTarget);
@@ -737,10 +765,11 @@ function updateBot(
         worldBounds,
         cityMapLayout,
         staticObstacles,
+        navigationPlanner,
         dt
     );
     const navTarget = roadTarget || baseTarget;
-    const detourTarget = resolveDetourTarget(bot, navTarget, worldBounds, staticObstacles);
+    const detourTarget = resolveDetourTarget(bot, navTarget, worldBounds, buildingObstacles);
     const resolvedTarget = detourTarget || navTarget;
 
     targetDir2.set(resolvedTarget.x - bot.car.position.x, resolvedTarget.z - bot.car.position.z);
@@ -751,7 +780,7 @@ function updateBot(
 
     avoidance2.set(0, 0);
     addBoundaryAvoidance(avoidance2, bot.car.position, worldBounds);
-    addObstacleAvoidance(avoidance2, bot.car.position, staticObstacles);
+    addObstacleAvoidance(avoidance2, bot.car.position, nearbyObstacles);
     addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 10.5, 1.35);
 
     for (let i = 0; i < allBots.length; i += 1) {
@@ -923,7 +952,7 @@ function updateBot(
     bot.car.position.z += bot.state.velocity.y * dt;
 
     constrainToWorld(bot.car.position, bot.state, worldBounds);
-    constrainToObstacles(bot, bot.car.position, bot.state, staticObstacles);
+    constrainToObstacles(bot, bot.car.position, bot.state, nearbyObstacles);
     constrainToPlayerVehicle(bot, playerPosition);
     bot.car.position.y = resolveBotGroundHeight(
         bot.car.position.x,
@@ -1532,7 +1561,7 @@ function hexToRgba(colorHex, alpha = 1) {
     return `rgba(${r}, ${g}, ${b}, ${THREE.MathUtils.clamp(alpha, 0, 1)})`;
 }
 
-function findNearestPickup(position, pickups, staticObstacles = null) {
+function findNearestPickup(position, pickups, buildingObstacles = null) {
     let nearest = null;
     let nearestDistanceSq = Infinity;
     let blockedNearest = null;
@@ -1544,13 +1573,14 @@ function findNearestPickup(position, pickups, staticObstacles = null) {
         const dz = pickup.z - position.z;
         const distanceSq = dx * dx + dz * dz;
         if (
-            staticObstacles &&
+            Array.isArray(buildingObstacles) &&
+            buildingObstacles.length > 0 &&
             isLineBlockedByBuildings(
                 position.x,
                 position.z,
                 pickup.x,
                 pickup.z,
-                staticObstacles,
+                buildingObstacles,
                 BOT_LOS_BUILDING_PADDING
             )
         ) {
@@ -1569,13 +1599,9 @@ function findNearestPickup(position, pickups, staticObstacles = null) {
     return nearest || blockedNearest;
 }
 
-function isLineBlockedByBuildings(ax, az, bx, bz, staticObstacles, padding = 0) {
-    for (let i = 0; i < staticObstacles.length; i += 1) {
-        const obstacle = staticObstacles[i];
-        if (!obstacle || obstacle.type !== 'aabb' || obstacle.category !== 'building') {
-            continue;
-        }
-
+function isLineBlockedByBuildings(ax, az, bx, bz, buildingObstacles, padding = 0) {
+    for (let i = 0; i < buildingObstacles.length; i += 1) {
+        const obstacle = buildingObstacles[i];
         const hit = segmentIntersectsAabb2D(
             ax,
             az,
@@ -1786,7 +1812,15 @@ function updateStuckState(bot, target, dt) {
     bot.recoverySteerSign = Math.random() < 0.5 ? -1 : 1;
 }
 
-function resolveRoadTarget(bot, target, worldBounds, cityMapLayout, staticObstacles, dt = 0) {
+function resolveRoadTarget(
+    bot,
+    target,
+    worldBounds,
+    cityMapLayout,
+    staticObstacles,
+    navigationPlanner,
+    dt = 0
+) {
     if (!bot || !target) {
         if (bot) {
             bot.roadTarget = null;
@@ -1805,17 +1839,26 @@ function resolveRoadTarget(bot, target, worldBounds, cityMapLayout, staticObstac
     const pathMissing = !Array.isArray(bot.roadPath) || bot.roadPath.length === 0;
     const canBuildPath = bot.roadPathBuildCooldown <= 0 || targetChanged;
     if ((targetChanged || bot.forcePathReplan || pathMissing) && canBuildPath) {
-        bot.roadPath = buildRoadPath(
-            bot.car.position,
-            target,
-            worldBounds,
-            cityMapLayout,
-            staticObstacles
-        );
-        bot.roadPathIndex = 0;
-        bot.roadPathKey = targetKey;
-        bot.roadPathBuildCooldown = BOT_PATH_REPLAN_COOLDOWN;
-        bot.forcePathReplan = false;
+        const mayBuildPath = navigationPlanner?.tryConsumePathBuildToken?.() ?? true;
+        if (!mayBuildPath) {
+            bot.roadPathBuildCooldown = Math.max(
+                bot.roadPathBuildCooldown,
+                BOT_PATH_REPLAN_COOLDOWN * 0.22
+            );
+        } else {
+            bot.roadPath = buildRoadPath(
+                bot.car.position,
+                target,
+                worldBounds,
+                cityMapLayout,
+                staticObstacles,
+                navigationPlanner
+            );
+            bot.roadPathIndex = 0;
+            bot.roadPathKey = targetKey;
+            bot.roadPathBuildCooldown = BOT_PATH_REPLAN_COOLDOWN;
+            bot.forcePathReplan = false;
+        }
     }
 
     if (!bot.roadPath || bot.roadPath.length === 0) {
@@ -1840,12 +1883,20 @@ function resolveRoadTarget(bot, target, worldBounds, cityMapLayout, staticObstac
     return null;
 }
 
-function buildRoadPath(position, target, worldBounds, cityMapLayout, staticObstacles) {
+function buildRoadPath(
+    position,
+    target,
+    worldBounds,
+    cityMapLayout,
+    staticObstacles,
+    navigationPlanner
+) {
     const obstacleAwarePath = buildObstacleAwarePath(
         position,
         target,
         worldBounds,
-        staticObstacles
+        staticObstacles,
+        navigationPlanner
     );
     if (obstacleAwarePath && obstacleAwarePath.length > 0) {
         return obstacleAwarePath;
@@ -1853,183 +1904,23 @@ function buildRoadPath(position, target, worldBounds, cityMapLayout, staticObsta
     return buildAxisRoadPath(position, target, worldBounds, cityMapLayout);
 }
 
-function buildObstacleAwarePath(position, target, worldBounds, staticObstacles) {
-    if (!worldBounds || !Array.isArray(staticObstacles) || staticObstacles.length === 0) {
+function buildObstacleAwarePath(position, target, worldBounds, staticObstacles, navigationPlanner) {
+    const planner =
+        navigationPlanner && navigationPlanner.worldBounds === worldBounds
+            ? navigationPlanner
+            : createNavigationPlanner(worldBounds, staticObstacles);
+    if (!planner) {
         return null;
     }
 
-    const cellSize = BOT_NAV_CELL_SIZE;
-    const minCellX = Math.ceil((worldBounds.minX + 2) / cellSize);
-    const maxCellX = Math.floor((worldBounds.maxX - 2) / cellSize);
-    const minCellZ = Math.ceil((worldBounds.minZ + 2) / cellSize);
-    const maxCellZ = Math.floor((worldBounds.maxZ - 2) / cellSize);
-    if (minCellX > maxCellX || minCellZ > maxCellZ) {
-        return null;
-    }
-
-    const walkableCache = new Map();
-    const startCell = findNearestWalkableCell(
-        Math.round(position.x / cellSize),
-        Math.round(position.z / cellSize),
-        minCellX,
-        maxCellX,
-        minCellZ,
-        maxCellZ,
-        cellSize,
-        staticObstacles,
-        walkableCache
-    );
-    const targetCell = findNearestWalkableCell(
-        Math.round(target.x / cellSize),
-        Math.round(target.z / cellSize),
-        minCellX,
-        maxCellX,
-        minCellZ,
-        maxCellZ,
-        cellSize,
-        staticObstacles,
-        walkableCache
-    );
-    if (!startCell || !targetCell) {
-        return null;
-    }
-    if (startCell.x === targetCell.x && startCell.z === targetCell.z) {
-        return [clampPointToWorld(target, worldBounds)];
-    }
-
-    const sqrt2 = Math.sqrt(2);
-    const neighborOffsets = [
-        { x: -1, z: 0, cost: 1 },
-        { x: 1, z: 0, cost: 1 },
-        { x: 0, z: -1, cost: 1 },
-        { x: 0, z: 1, cost: 1 },
-        { x: -1, z: -1, cost: sqrt2 },
-        { x: -1, z: 1, cost: sqrt2 },
-        { x: 1, z: -1, cost: sqrt2 },
-        { x: 1, z: 1, cost: sqrt2 },
-    ];
-    const open = [];
-    const openByKey = new Map();
-    const closed = new Set();
-    const startNode = {
-        x: startCell.x,
-        z: startCell.z,
-        g: 0,
-        h: Math.hypot(targetCell.x - startCell.x, targetCell.z - startCell.z),
-        f: 0,
-        parent: null,
-    };
-    startNode.f = startNode.g + startNode.h;
-    open.push(startNode);
-    openByKey.set(buildNavCellKey(startNode.x, startNode.z), startNode);
-
-    let goalNode = null;
-    let expansions = 0;
-
-    while (open.length > 0 && expansions < BOT_NAV_MAX_EXPANSIONS) {
-        let bestIndex = 0;
-        for (let i = 1; i < open.length; i += 1) {
-            if (open[i].f < open[bestIndex].f) {
-                bestIndex = i;
-            }
-        }
-        const current = open.splice(bestIndex, 1)[0];
-        const currentKey = buildNavCellKey(current.x, current.z);
-        openByKey.delete(currentKey);
-
-        if (current.x === targetCell.x && current.z === targetCell.z) {
-            goalNode = current;
-            break;
-        }
-
-        closed.add(currentKey);
-        expansions += 1;
-
-        for (let i = 0; i < neighborOffsets.length; i += 1) {
-            const offset = neighborOffsets[i];
-            const nx = current.x + offset.x;
-            const nz = current.z + offset.z;
-            if (nx < minCellX || nx > maxCellX || nz < minCellZ || nz > maxCellZ) {
-                continue;
-            }
-
-            const neighborKey = buildNavCellKey(nx, nz);
-            if (closed.has(neighborKey)) {
-                continue;
-            }
-            if (!isNavCellWalkable(nx, nz, cellSize, staticObstacles, walkableCache)) {
-                continue;
-            }
-
-            if (offset.x !== 0 && offset.z !== 0) {
-                const sideXWalkable = isNavCellWalkable(
-                    current.x + offset.x,
-                    current.z,
-                    cellSize,
-                    staticObstacles,
-                    walkableCache
-                );
-                const sideZWalkable = isNavCellWalkable(
-                    current.x,
-                    current.z + offset.z,
-                    cellSize,
-                    staticObstacles,
-                    walkableCache
-                );
-                if (!sideXWalkable || !sideZWalkable) {
-                    continue;
-                }
-            }
-
-            const tentativeG = current.g + offset.cost;
-            const existing = openByKey.get(neighborKey);
-            if (existing && tentativeG >= existing.g) {
-                continue;
-            }
-
-            const h = Math.hypot(targetCell.x - nx, targetCell.z - nz);
-            if (existing) {
-                existing.g = tentativeG;
-                existing.h = h;
-                existing.f = tentativeG + h;
-                existing.parent = current;
-                continue;
-            }
-
-            const node = {
-                x: nx,
-                z: nz,
-                g: tentativeG,
-                h,
-                f: tentativeG + h,
-                parent: current,
-            };
-            open.push(node);
-            openByKey.set(neighborKey, node);
-        }
-    }
-
-    if (!goalNode) {
-        return null;
-    }
-
-    const cellPath = [];
-    let cursor = goalNode;
-    while (cursor) {
-        cellPath.push({
-            x: cursor.x * cellSize,
-            z: cursor.z * cellSize,
-        });
-        cursor = cursor.parent;
-    }
-    cellPath.reverse();
-    if (cellPath.length === 0) {
+    const cellPath = planner.findCellPath(position, target);
+    if (!cellPath || cellPath.length === 0) {
         return null;
     }
 
     const smoothed = smoothWaypointPath(
         [{ x: position.x, z: position.z }, ...cellPath, { x: target.x, z: target.z }],
-        staticObstacles,
+        planner.obstaclesForSmoothing,
         BOT_NAV_OBSTACLE_PADDING
     );
     if (smoothed.length <= 1) {
@@ -2055,33 +1946,377 @@ function buildObstacleAwarePath(position, target, worldBounds, staticObstacles) 
     return dedupeWaypoints(waypoints);
 }
 
-function findNearestWalkableCell(
-    seedX,
-    seedZ,
-    minCellX,
-    maxCellX,
-    minCellZ,
-    maxCellZ,
-    cellSize,
-    staticObstacles,
-    walkableCache
-) {
-    const clampedSeedX = THREE.MathUtils.clamp(seedX, minCellX, maxCellX);
-    const clampedSeedZ = THREE.MathUtils.clamp(seedZ, minCellZ, maxCellZ);
-    const maxRadius = Math.max(maxCellX - minCellX, maxCellZ - minCellZ);
+function createNavigationPlanner(worldBounds, staticObstacles) {
+    if (!worldBounds || !Array.isArray(staticObstacles) || staticObstacles.length === 0) {
+        return null;
+    }
+
+    const cellSize = BOT_NAV_CELL_SIZE;
+    const minCellX = Math.ceil((worldBounds.minX + 2) / cellSize);
+    const maxCellX = Math.floor((worldBounds.maxX - 2) / cellSize);
+    const minCellZ = Math.ceil((worldBounds.minZ + 2) / cellSize);
+    const maxCellZ = Math.floor((worldBounds.maxZ - 2) / cellSize);
+    if (minCellX > maxCellX || minCellZ > maxCellZ) {
+        return null;
+    }
+
+    const width = maxCellX - minCellX + 1;
+    const height = maxCellZ - minCellZ + 1;
+    const cellCount = width * height;
+    if (cellCount <= 0) {
+        return null;
+    }
+
+    const walkable = new Uint8Array(cellCount);
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+        for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+            const index = (cellZ - minCellZ) * width + (cellX - minCellX);
+            const worldX = cellX * cellSize;
+            const worldZ = cellZ * cellSize;
+            walkable[index] = isInsideObstacle(
+                worldX,
+                worldZ,
+                staticObstacles,
+                BOT_NAV_OBSTACLE_PADDING
+            )
+                ? 0
+                : 1;
+        }
+    }
+
+    const buildingObstacles = [];
+    for (let i = 0; i < staticObstacles.length; i += 1) {
+        const obstacle = staticObstacles[i];
+        if (obstacle?.type === 'aabb' && obstacle.category === 'building') {
+            buildingObstacles.push(obstacle);
+        }
+    }
+
+    const pathCache = new Map();
+    let cacheSequence = 0;
+    const obstacleGrid = buildObstacleGrid(
+        staticObstacles,
+        BOT_OBSTACLE_GRID_CELL_SIZE,
+        BOT_OBSTACLE_QUERY_RADIUS
+    );
+    let remainingBuildTokens = BOT_NAV_MAX_BUILDS_PER_FRAME;
+
+    function toIndex(cellX, cellZ) {
+        return (cellZ - minCellZ) * width + (cellX - minCellX);
+    }
+
+    function inBounds(cellX, cellZ) {
+        return cellX >= minCellX && cellX <= maxCellX && cellZ >= minCellZ && cellZ <= maxCellZ;
+    }
+
+    function isWalkableCell(cellX, cellZ) {
+        if (!inBounds(cellX, cellZ)) {
+            return false;
+        }
+        return walkable[toIndex(cellX, cellZ)] === 1;
+    }
+
+    function findCellPath(position, target) {
+        const startCell = findNearestWalkableCell(
+            Math.round(position.x / cellSize),
+            Math.round(position.z / cellSize),
+            {
+                minCellX,
+                maxCellX,
+                minCellZ,
+                maxCellZ,
+                isWalkableCell,
+            }
+        );
+        const targetCell = findNearestWalkableCell(
+            Math.round(target.x / cellSize),
+            Math.round(target.z / cellSize),
+            {
+                minCellX,
+                maxCellX,
+                minCellZ,
+                maxCellZ,
+                isWalkableCell,
+            }
+        );
+        if (!startCell || !targetCell) {
+            return null;
+        }
+        if (startCell.x === targetCell.x && startCell.z === targetCell.z) {
+            return [clampPointToWorld(target, worldBounds)];
+        }
+
+        const cacheKey = `${startCell.x}:${startCell.z}->${targetCell.x}:${targetCell.z}`;
+        const cached = pathCache.get(cacheKey);
+        if (cached) {
+            cached.usedAt = ++cacheSequence;
+            return cached.points.map((point) => ({ x: point.x, z: point.z }));
+        }
+
+        const startIndex = toIndex(startCell.x, startCell.z);
+        const targetIndex = toIndex(targetCell.x, targetCell.z);
+        const openHeap = [];
+        const openByIndex = new Map();
+        const closed = new Uint8Array(cellCount);
+
+        const startNode = {
+            index: startIndex,
+            cellX: startCell.x,
+            cellZ: startCell.z,
+            g: 0,
+            f: Math.hypot(targetCell.x - startCell.x, targetCell.z - startCell.z),
+            parent: null,
+        };
+        openByIndex.set(startIndex, startNode);
+        heapPushByF(openHeap, startNode);
+
+        let goalNode = null;
+        let expansions = 0;
+
+        while (openHeap.length > 0 && expansions < BOT_NAV_MAX_EXPANSIONS) {
+            const current = heapPopByF(openHeap);
+            if (!current) {
+                break;
+            }
+            if (openByIndex.get(current.index) !== current) {
+                continue;
+            }
+
+            openByIndex.delete(current.index);
+            if (current.index === targetIndex) {
+                goalNode = current;
+                break;
+            }
+
+            closed[current.index] = 1;
+            expansions += 1;
+
+            for (let i = 0; i < NAV_NEIGHBOR_OFFSETS.length; i += 1) {
+                const offset = NAV_NEIGHBOR_OFFSETS[i];
+                const nextCellX = current.cellX + offset.x;
+                const nextCellZ = current.cellZ + offset.z;
+                if (!isWalkableCell(nextCellX, nextCellZ)) {
+                    continue;
+                }
+
+                if (offset.x !== 0 && offset.z !== 0) {
+                    if (
+                        !isWalkableCell(current.cellX + offset.x, current.cellZ) ||
+                        !isWalkableCell(current.cellX, current.cellZ + offset.z)
+                    ) {
+                        continue;
+                    }
+                }
+
+                const neighborIndex = toIndex(nextCellX, nextCellZ);
+                if (closed[neighborIndex]) {
+                    continue;
+                }
+
+                const tentativeG = current.g + offset.cost;
+                const existing = openByIndex.get(neighborIndex);
+                if (existing && tentativeG >= existing.g) {
+                    continue;
+                }
+
+                const heuristic = Math.hypot(targetCell.x - nextCellX, targetCell.z - nextCellZ);
+                const node = {
+                    index: neighborIndex,
+                    cellX: nextCellX,
+                    cellZ: nextCellZ,
+                    g: tentativeG,
+                    f: tentativeG + heuristic,
+                    parent: current,
+                };
+                openByIndex.set(neighborIndex, node);
+                heapPushByF(openHeap, node);
+            }
+        }
+
+        if (!goalNode) {
+            return null;
+        }
+
+        const points = [];
+        let cursor = goalNode;
+        while (cursor) {
+            points.push({
+                x: cursor.cellX * cellSize,
+                z: cursor.cellZ * cellSize,
+            });
+            cursor = cursor.parent;
+        }
+        points.reverse();
+        if (points.length === 0) {
+            return null;
+        }
+
+        pathCache.set(cacheKey, {
+            points,
+            usedAt: ++cacheSequence,
+        });
+        if (pathCache.size > BOT_NAV_PATH_CACHE_LIMIT) {
+            evictOldestCachedPath(pathCache);
+        }
+
+        return points.map((point) => ({ x: point.x, z: point.z }));
+    }
+
+    function beginFrame() {
+        remainingBuildTokens = BOT_NAV_MAX_BUILDS_PER_FRAME;
+    }
+
+    function tryConsumePathBuildToken() {
+        if (remainingBuildTokens <= 0) {
+            return false;
+        }
+        remainingBuildTokens -= 1;
+        return true;
+    }
+
+    function queryNearbyObstacles(x, z, radius) {
+        return queryObstacleGrid(obstacleGrid, x, z, radius);
+    }
+
+    return {
+        worldBounds,
+        obstaclesForSmoothing: staticObstacles,
+        buildingObstacles,
+        beginFrame,
+        tryConsumePathBuildToken,
+        queryNearbyObstacles,
+        findCellPath,
+    };
+}
+
+function buildObstacleGrid(obstacles, cellSize, maxRadius) {
+    const cells = new Map();
+    const querySeen = new Set();
+    const queryResult = [];
+
+    for (let i = 0; i < obstacles.length; i += 1) {
+        const obstacle = obstacles[i];
+        if (!obstacle || typeof obstacle !== 'object') {
+            continue;
+        }
+
+        let minX;
+        let maxX;
+        let minZ;
+        let maxZ;
+        if (obstacle.type === 'circle') {
+            const x = Number(obstacle.x);
+            const z = Number(obstacle.z);
+            const radius = Math.max(0, Number(obstacle.radius) || 0) + maxRadius;
+            if (!Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(radius)) {
+                continue;
+            }
+            minX = x - radius;
+            maxX = x + radius;
+            minZ = z - radius;
+            maxZ = z + radius;
+        } else if (obstacle.type === 'aabb') {
+            const obstacleMinX = Number(obstacle.minX);
+            const obstacleMaxX = Number(obstacle.maxX);
+            const obstacleMinZ = Number(obstacle.minZ);
+            const obstacleMaxZ = Number(obstacle.maxZ);
+            if (![obstacleMinX, obstacleMaxX, obstacleMinZ, obstacleMaxZ].every(Number.isFinite)) {
+                continue;
+            }
+            minX = obstacleMinX - maxRadius;
+            maxX = obstacleMaxX + maxRadius;
+            minZ = obstacleMinZ - maxRadius;
+            maxZ = obstacleMaxZ + maxRadius;
+        } else {
+            continue;
+        }
+
+        const minCellX = Math.floor(minX / cellSize);
+        const maxCellX = Math.floor(maxX / cellSize);
+        const minCellZ = Math.floor(minZ / cellSize);
+        const maxCellZ = Math.floor(maxZ / cellSize);
+
+        for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+            for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+                const key = `${cellX}:${cellZ}`;
+                let bucket = cells.get(key);
+                if (!bucket) {
+                    bucket = [];
+                    cells.set(key, bucket);
+                }
+                bucket.push(obstacle);
+            }
+        }
+    }
+
+    return {
+        cellSize,
+        cells,
+        querySeen,
+        queryResult,
+        fallback: obstacles,
+    };
+}
+
+function queryObstacleGrid(grid, x, z, radius) {
+    if (!grid || !Number.isFinite(x) || !Number.isFinite(z)) {
+        return [];
+    }
+
+    const effectiveRadius = Math.max(BOT_RADIUS + 1.2, Number(radius) || 0);
+    const minCellX = Math.floor((x - effectiveRadius) / grid.cellSize);
+    const maxCellX = Math.floor((x + effectiveRadius) / grid.cellSize);
+    const minCellZ = Math.floor((z - effectiveRadius) / grid.cellSize);
+    const maxCellZ = Math.floor((z + effectiveRadius) / grid.cellSize);
+
+    const result = grid.queryResult;
+    const seen = grid.querySeen;
+    result.length = 0;
+    seen.clear();
+
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+        for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+            const bucket = grid.cells.get(`${cellX}:${cellZ}`);
+            if (!bucket || bucket.length === 0) {
+                continue;
+            }
+            for (let i = 0; i < bucket.length; i += 1) {
+                const obstacle = bucket[i];
+                if (seen.has(obstacle)) {
+                    continue;
+                }
+                seen.add(obstacle);
+                result.push(obstacle);
+            }
+        }
+    }
+
+    if (result.length === 0) {
+        return grid.fallback;
+    }
+    return result;
+}
+
+function findNearestWalkableCell(seedX, seedZ, planner) {
+    const clampedSeedX = THREE.MathUtils.clamp(seedX, planner.minCellX, planner.maxCellX);
+    const clampedSeedZ = THREE.MathUtils.clamp(seedZ, planner.minCellZ, planner.maxCellZ);
+    const maxRadius = Math.max(
+        planner.maxCellX - planner.minCellX,
+        planner.maxCellZ - planner.minCellZ
+    );
 
     for (let radius = 0; radius <= maxRadius; radius += 1) {
-        const startX = Math.max(minCellX, clampedSeedX - radius);
-        const endX = Math.min(maxCellX, clampedSeedX + radius);
-        const startZ = Math.max(minCellZ, clampedSeedZ - radius);
-        const endZ = Math.min(maxCellZ, clampedSeedZ + radius);
+        const startX = Math.max(planner.minCellX, clampedSeedX - radius);
+        const endX = Math.min(planner.maxCellX, clampedSeedX + radius);
+        const startZ = Math.max(planner.minCellZ, clampedSeedZ - radius);
+        const endZ = Math.min(planner.maxCellZ, clampedSeedZ + radius);
 
         for (let x = startX; x <= endX; x += 1) {
             for (let z = startZ; z <= endZ; z += 1) {
                 if (radius > 0 && x > startX && x < endX && z > startZ && z < endZ) {
                     continue;
                 }
-                if (isNavCellWalkable(x, z, cellSize, staticObstacles, walkableCache)) {
+                if (planner.isWalkableCell(x, z)) {
                     return { x, z };
                 }
             }
@@ -2091,21 +2326,67 @@ function findNearestWalkableCell(
     return null;
 }
 
-function buildNavCellKey(cellX, cellZ) {
-    return `${cellX}:${cellZ}`;
+function heapPushByF(heap, value) {
+    heap.push(value);
+    let index = heap.length - 1;
+    while (index > 0) {
+        const parentIndex = (index - 1) >> 1;
+        if (heap[parentIndex].f <= heap[index].f) {
+            break;
+        }
+        const tmp = heap[parentIndex];
+        heap[parentIndex] = heap[index];
+        heap[index] = tmp;
+        index = parentIndex;
+    }
 }
 
-function isNavCellWalkable(cellX, cellZ, cellSize, staticObstacles, walkableCache) {
-    const key = buildNavCellKey(cellX, cellZ);
-    if (walkableCache.has(key)) {
-        return walkableCache.get(key);
+function heapPopByF(heap) {
+    if (heap.length === 0) {
+        return null;
     }
+    const first = heap[0];
+    const tail = heap.pop();
+    if (heap.length > 0 && tail) {
+        heap[0] = tail;
+        let index = 0;
+        for (;;) {
+            const left = index * 2 + 1;
+            const right = left + 1;
+            let smallest = index;
 
-    const worldX = cellX * cellSize;
-    const worldZ = cellZ * cellSize;
-    const walkable = !isInsideObstacle(worldX, worldZ, staticObstacles, BOT_NAV_OBSTACLE_PADDING);
-    walkableCache.set(key, walkable);
-    return walkable;
+            if (left < heap.length && heap[left].f < heap[smallest].f) {
+                smallest = left;
+            }
+            if (right < heap.length && heap[right].f < heap[smallest].f) {
+                smallest = right;
+            }
+            if (smallest === index) {
+                break;
+            }
+
+            const tmp = heap[index];
+            heap[index] = heap[smallest];
+            heap[smallest] = tmp;
+            index = smallest;
+        }
+    }
+    return first;
+}
+
+function evictOldestCachedPath(pathCache) {
+    let oldestKey = null;
+    let oldestUsedAt = Infinity;
+    for (const [key, entry] of pathCache.entries()) {
+        if (!entry || entry.usedAt >= oldestUsedAt) {
+            continue;
+        }
+        oldestUsedAt = entry.usedAt;
+        oldestKey = key;
+    }
+    if (oldestKey != null) {
+        pathCache.delete(oldestKey);
+    }
 }
 
 function smoothWaypointPath(points, staticObstacles, obstaclePadding = 0) {
@@ -2115,9 +2396,15 @@ function smoothWaypointPath(points, staticObstacles, obstaclePadding = 0) {
 
     const result = [points[0]];
     let anchorIndex = 0;
+    let segmentChecks = 0;
+    const maxSegmentChecks = 260;
     while (anchorIndex < points.length - 1) {
         let nextIndex = points.length - 1;
         while (nextIndex > anchorIndex + 1) {
+            if (segmentChecks >= maxSegmentChecks) {
+                nextIndex = anchorIndex + 1;
+                break;
+            }
             const from = points[anchorIndex];
             const to = points[nextIndex];
             const blocked = isSegmentBlockedByObstacles(
@@ -2128,6 +2415,7 @@ function smoothWaypointPath(points, staticObstacles, obstaclePadding = 0) {
                 staticObstacles,
                 obstaclePadding
             );
+            segmentChecks += 1;
             if (!blocked) {
                 break;
             }
@@ -2349,8 +2637,8 @@ function pathCost(origin, points) {
 }
 
 function buildTargetKey(target) {
-    const x = Number.isFinite(target?.x) ? Math.round(target.x / 6) : 0;
-    const z = Number.isFinite(target?.z) ? Math.round(target.z / 6) : 0;
+    const x = Number.isFinite(target?.x) ? Math.round(target.x / BOT_NAV_CELL_SIZE) : 0;
+    const z = Number.isFinite(target?.z) ? Math.round(target.z / BOT_NAV_CELL_SIZE) : 0;
     return `${x}:${z}`;
 }
 
@@ -2400,8 +2688,8 @@ function clampPointToWorld(point, worldBounds) {
     };
 }
 
-function resolveDetourTarget(bot, target, worldBounds, staticObstacles) {
-    if (!bot || !target || !Array.isArray(staticObstacles) || staticObstacles.length === 0) {
+function resolveDetourTarget(bot, target, worldBounds, buildingObstacles) {
+    if (!bot || !target || !Array.isArray(buildingObstacles) || buildingObstacles.length === 0) {
         bot.detourTarget = null;
         return null;
     }
@@ -2409,7 +2697,7 @@ function resolveDetourTarget(bot, target, worldBounds, staticObstacles) {
     const blocking = findBlockingBuilding(
         bot.car.position,
         target,
-        staticObstacles,
+        buildingObstacles,
         BOT_DETOUR_CLEARANCE
     );
     if (!blocking) {
@@ -2445,16 +2733,12 @@ function resolveDetourTarget(bot, target, worldBounds, staticObstacles) {
     return bot.detourTarget;
 }
 
-function findBlockingBuilding(position, target, staticObstacles, padding) {
+function findBlockingBuilding(position, target, buildingObstacles, padding) {
     let best = null;
     let bestT = Infinity;
 
-    for (let i = 0; i < staticObstacles.length; i += 1) {
-        const obstacle = staticObstacles[i];
-        if (!obstacle || obstacle.type !== 'aabb' || obstacle.category !== 'building') {
-            continue;
-        }
-
+    for (let i = 0; i < buildingObstacles.length; i += 1) {
+        const obstacle = buildingObstacles[i];
         const bounds = {
             minX: obstacle.minX - padding,
             maxX: obstacle.maxX + padding,

@@ -32,6 +32,7 @@ export function createGameLoopController(options = {}) {
         multiplayerController,
         mineSystemController,
         mapUiController,
+        graphicsQualityController,
         getPlayerTopSpeedLimit,
         crashDebrisController,
         replayEffectsController,
@@ -159,6 +160,7 @@ export function createGameLoopController(options = {}) {
         let skidMarksEnabled = false;
         let skidMarkVehicleState = null;
         let mineCollisionEnabled = false;
+        let visiblePickups = null;
 
         welcomeModalUi.update(frameDelta);
         multiplayerController?.update?.(frameDelta);
@@ -323,9 +325,9 @@ export function createGameLoopController(options = {}) {
                 if (!replayActive && !readPickupRoundFinished()) {
                     const botTrafficSystem = getBotTrafficSystem();
                     const botsEnabled = readBotsEnabled();
-                    const visiblePickupsForBots = collectibleSystem.getVisiblePickups();
+                    visiblePickups = collectibleSystem.getVisiblePickups();
                     if (botsEnabled) {
-                        botTrafficSystem?.update?.(car.position, visiblePickupsForBots, frameDelta);
+                        botTrafficSystem?.update?.(car.position, visiblePickups, frameDelta);
                         updateBotMineDeployment(botTrafficSystem, frameDelta);
                     } else {
                         botMineDecisionById.clear();
@@ -337,10 +339,7 @@ export function createGameLoopController(options = {}) {
                           ]
                         : [{ id: 'player', position: car.position }];
                     collectibleSystem.updateForCollectors(collectors, frameDelta);
-                    if (
-                        botsEnabled &&
-                        !readPickupRoundFinished()
-                    ) {
+                    if (botsEnabled && !readPickupRoundFinished()) {
                         gameSessionController?.maybeFinalizeOnBotElimination?.({
                             totalPickups: roundTotalPickups,
                             botHudState: botTrafficSystem?.getHudState?.() || [],
@@ -418,7 +417,7 @@ export function createGameLoopController(options = {}) {
             playerPosition: car.position,
             playerHeading: car.rotation.y,
             playerSpeedKph: Math.abs(getVehicleState()?.speed || 0),
-            pickups: collectibleSystem.getVisiblePickups(),
+            pickups: visiblePickups || collectibleSystem.getVisiblePickups(),
             botDescriptors: readBotsEnabled()
                 ? getBotTrafficSystem()?.getCollectorDescriptors?.() || []
                 : [],
@@ -448,6 +447,13 @@ export function createGameLoopController(options = {}) {
 
         updateSunLightPosition();
         renderer.render(scene, camera);
+        graphicsQualityController?.sampleFrame?.(frameDelta, {
+            allowAdaptive:
+                !readGamePaused() &&
+                !isEditModeActive &&
+                !readWelcomeModalVisible() &&
+                !readWorldMapOpen(),
+        });
     }
 
     function updateBotMineDeployment(botTrafficSystem, frameDelta) {

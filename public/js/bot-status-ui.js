@@ -5,6 +5,7 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
             render() {},
         };
     }
+    let lastRenderSignature = '';
 
     return {
         render(botStateList = [], playerState = null) {
@@ -14,7 +15,32 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
             }
 
             if (!entries.length) {
-                listEl.textContent = 'No bots available';
+                if (lastRenderSignature !== '__empty__') {
+                    listEl.textContent = 'No bots available';
+                    lastRenderSignature = '__empty__';
+                }
+                return;
+            }
+
+            const renderSignature = entries
+                .map((entry) => {
+                    const bot = entry || {};
+                    return [
+                        bot.id || bot.collectorId || bot.name || '-',
+                        bot.targetColorHex ?? '-',
+                        bot.targetLabel || '-',
+                        bot.showSwatch === false ? 0 : 1,
+                        bot.isPlayer ? 1 : 0,
+                        bot.respawning ? 1 : 0,
+                        Math.max(0, Math.floor(Number(bot.respawnMsRemaining) || 0)),
+                        Math.max(0, Math.floor(Number(bot.livesRemaining) || 0)),
+                        Math.max(1, Math.floor(Number(bot.maxLives) || 0)),
+                        Math.max(0, Math.floor(Number(bot.score) || 0)),
+                        Math.max(0, Math.floor(Number(bot.collectedCount) || 0)),
+                    ].join(':');
+                })
+                .join('|');
+            if (renderSignature === lastRenderSignature) {
                 return;
             }
 
@@ -75,6 +101,7 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                     );
                 })
                 .join('');
+            lastRenderSignature = renderSignature;
         },
     };
 }

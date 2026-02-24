@@ -86,6 +86,8 @@ import { toCssHex, colorNameFromHex } from './color-utils.js';
 import {
     readPersistedPlayerTopSpeedKph,
     persistPlayerTopSpeedKph,
+    readPersistedGraphicsQualityMode,
+    persistGraphicsQualityMode,
     resolvePlayerCarColorHex,
     getCarColorPresetIndex,
     readPersistedPlayerCarColorHex,
@@ -113,6 +115,10 @@ import { createAudioSystem } from './audio-system.js';
 import { createPickupScoringSystem } from './scoring-system.js';
 import { createScorePopupController } from './score-popup-ui.js';
 import {
+    createGraphicsQualityController,
+    GRAPHICS_QUALITY_MODES,
+} from './graphics-quality-controller.js';
+import {
     INPUT_CONTEXTS,
     WORLD_MAP_DRIVE_LOCK_MODES,
     resolveGameplayInputContext,
@@ -122,8 +128,19 @@ import {
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
 const SESSION_START_PREP_TIMEOUT_MS = 2200;
+const GRAPHICS_PRESET_MODE_ORDER = [
+    GRAPHICS_QUALITY_MODES.performance,
+    GRAPHICS_QUALITY_MODES.balanced,
+    GRAPHICS_QUALITY_MODES.quality,
+];
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
+const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
+    GRAPHICS_QUALITY_MODES.balanced
+);
+const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persistedGraphicsQualityMode)
+    ? persistedGraphicsQualityMode
+    : GRAPHICS_QUALITY_MODES.balanced;
 const runtimeState = createGameRuntimeState({
     selectedCarColorHex,
     batteryMax: BATTERY_MAX,
@@ -227,6 +244,12 @@ const chargingProgressHudController = createChargingProgressHudController(scene,
 const skidMarkController = createSkidMarkController(scene, {
     sampleGroundHeight: getGroundHeightAt,
     keys,
+});
+const graphicsQualityController = createGraphicsQualityController({
+    renderer,
+    renderSettings,
+    initialMode: initialGraphicsQualityMode,
+    skidMarkController,
 });
 const carEditModeController = createCarEditModeController({
     camera,
@@ -1224,6 +1247,35 @@ function toggleWorldMapWithPolicy(forceOpen) {
     };
 }
 
+function finalizeGraphicsQualitySnapshot(snapshot, { showStatus = true, persist = true } = {}) {
+    if (!snapshot) {
+        return null;
+    }
+    if (persist) {
+        persistGraphicsQualityMode(snapshot.mode);
+    }
+    pauseMenuUi.refreshGraphicsStatus?.();
+    const statusMessage = snapshot.compactStatusMessage || snapshot.statusMessage || '';
+    if (showStatus && statusMessage) {
+        objectiveUi.showInfo(statusMessage, 1300);
+    }
+    return snapshot;
+}
+
+function cycleGraphicsQualityMode(step = 1, options = {}) {
+    const direction = step < 0 ? -1 : 1;
+    const currentMode = graphicsQualityController.getMode?.() || GRAPHICS_QUALITY_MODES.balanced;
+    const currentIndex = GRAPHICS_PRESET_MODE_ORDER.includes(currentMode)
+        ? GRAPHICS_PRESET_MODE_ORDER.indexOf(currentMode)
+        : GRAPHICS_PRESET_MODE_ORDER.indexOf(GRAPHICS_QUALITY_MODES.balanced);
+    const nextIndex =
+        (currentIndex + direction + GRAPHICS_PRESET_MODE_ORDER.length) %
+        GRAPHICS_PRESET_MODE_ORDER.length;
+    const nextMode = GRAPHICS_PRESET_MODE_ORDER[nextIndex];
+    const snapshot = graphicsQualityController.setMode(nextMode);
+    return finalizeGraphicsQualitySnapshot(snapshot, options);
+}
+
 mapUiController = createMapUiController({
     worldBounds,
     cityMapLayout,
@@ -1234,6 +1286,15 @@ mapUiController = createMapUiController({
     },
     onExpandedChanged(expanded) {
         applyWorldMapVisibilityPolicy(expanded);
+    },
+});
+graphicsQualityController.attachMapUiController(mapUiController);
+pauseMenuUi.configureGraphicsControls({
+    getSnapshot() {
+        return graphicsQualityController.getSnapshot();
+    },
+    onCycleMode(step = 1) {
+        return cycleGraphicsQualityMode(step, { showStatus: false, persist: true });
     },
 });
 syncRuntimeInputContext();
@@ -1322,6 +1383,12 @@ runtimeState.inputController = createInputController({
             getPlayerTopSpeedLimitBounds,
         });
     },
+    getMaxPixelRatio() {
+        return graphicsQualityController.getMaxPixelRatioCap();
+    },
+    onCycleGraphicsQualityMode(step = 1) {
+        return cycleGraphicsQualityMode(step, { showStatus: true, persist: true });
+    },
 });
 
 runtimeState.gameLoopController = createGameLoopController({
@@ -1352,6 +1419,7 @@ runtimeState.gameLoopController = createGameLoopController({
     replayEffectsController: runtimeState.replayEffectsController,
     audioController: runtimeState.audioController,
     mapUiController,
+    graphicsQualityController,
     gameSessionController: runtimeState.gameSessionController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getVehicleState,

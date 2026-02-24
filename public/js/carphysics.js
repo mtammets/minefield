@@ -163,6 +163,8 @@ const VEHICLE_COLLISION_HALF_LENGTH = 2.3;
 const OBSTACLE_COLLISION_ITERATIONS = 4;
 const HORIZONTAL_COLLISION_STEP_FACTOR = 0.42;
 const MAX_HORIZONTAL_COLLISION_SUBSTEPS = 7;
+const OBSTACLE_BROADPHASE_CELL_SIZE = 12;
+const OBSTACLE_BROADPHASE_EXTRA_RADIUS = 6;
 const VEHICLE_COLLISION_MASS = 1.35;
 const VEHICLE_COLLISION_PENETRATION_SHARE = 0.94;
 // Roads/intersections are rendered slightly above the base terrain (around y=0.028),
@@ -236,6 +238,7 @@ let terrainSupportFilterInitialized = false;
 let isPhysicsInitialized = false;
 let pendingCrashCollision = null;
 const pendingVehicleCollisionContacts = [];
+const obstacleBroadphaseByArray = new WeakMap();
 const vehicleDamageState = {
     wheelLossCount: 0,
     leftLoss: 0,
@@ -727,13 +730,150 @@ function integrateHorizontalMovement(
         position.x += moveX * stepScale;
         position.z += moveZ * stepScale;
         constrainToWorld(position, worldBounds);
-        constrainToObstacles(position, staticObstacles, impactSpeed);
+        const obstacleCandidates = resolveObstacleCandidates(
+            position,
+            staticObstacles,
+            maxStepDistance + OBSTACLE_BROADPHASE_EXTRA_RADIUS
+        );
+        constrainToObstacles(position, obstacleCandidates, impactSpeed);
         constrainToVehicles(position, dynamicVehicles);
     }
 }
 
-function constrainToObstacles(position, staticObstacles, impactSpeed = 0) {
-    if (!staticObstacles || staticObstacles.length === 0) {
+function resolveObstacleCandidates(position, staticObstacles, searchRadius = 0) {
+    if (!Array.isArray(staticObstacles) || staticObstacles.length === 0) {
+        return [];
+    }
+    const broadphase = getObstacleBroadphase(staticObstacles);
+    if (!broadphase) {
+        return staticObstacles;
+    }
+    return queryObstacleBroadphase(broadphase, position, searchRadius);
+}
+
+function getObstacleBroadphase(staticObstacles) {
+    const cached = obstacleBroadphaseByArray.get(staticObstacles);
+    if (cached && cached.obstacleCount === staticObstacles.length) {
+        return cached;
+    }
+    const built = buildObstacleBroadphase(staticObstacles);
+    if (!built) {
+        return null;
+    }
+    obstacleBroadphaseByArray.set(staticObstacles, built);
+    return built;
+}
+
+function buildObstacleBroadphase(staticObstacles) {
+    if (!Array.isArray(staticObstacles) || staticObstacles.length === 0) {
+        return null;
+    }
+
+    const cellSize = OBSTACLE_BROADPHASE_CELL_SIZE;
+    const cells = new Map();
+    for (let i = 0; i < staticObstacles.length; i += 1) {
+        const obstacle = staticObstacles[i];
+        if (!obstacle || typeof obstacle !== 'object') {
+            continue;
+        }
+
+        let minX;
+        let maxX;
+        let minZ;
+        let maxZ;
+        if (obstacle.type === 'circle') {
+            const centerX = Number(obstacle.x);
+            const centerZ = Number(obstacle.z);
+            const radius = Math.max(0, Number(obstacle.radius) || 0);
+            if (
+                !Number.isFinite(centerX) ||
+                !Number.isFinite(centerZ) ||
+                !Number.isFinite(radius)
+            ) {
+                continue;
+            }
+            minX = centerX - radius;
+            maxX = centerX + radius;
+            minZ = centerZ - radius;
+            maxZ = centerZ + radius;
+        } else if (obstacle.type === 'aabb') {
+            minX = Number(obstacle.minX);
+            maxX = Number(obstacle.maxX);
+            minZ = Number(obstacle.minZ);
+            maxZ = Number(obstacle.maxZ);
+            if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) {
+                continue;
+            }
+        } else {
+            continue;
+        }
+
+        const minCellX = Math.floor(minX / cellSize);
+        const maxCellX = Math.floor(maxX / cellSize);
+        const minCellZ = Math.floor(minZ / cellSize);
+        const maxCellZ = Math.floor(maxZ / cellSize);
+
+        for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+            for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+                const key = `${cellX}:${cellZ}`;
+                let bucket = cells.get(key);
+                if (!bucket) {
+                    bucket = [];
+                    cells.set(key, bucket);
+                }
+                bucket.push(obstacle);
+            }
+        }
+    }
+
+    return {
+        cellSize,
+        cells,
+        obstacleCount: staticObstacles.length,
+        queryResult: [],
+        querySeen: new Set(),
+    };
+}
+
+function queryObstacleBroadphase(broadphase, position, searchRadius = 0) {
+    const radius = Math.max(VEHICLE_COLLISION_RADIUS, searchRadius);
+    const minX = position.x - radius;
+    const maxX = position.x + radius;
+    const minZ = position.z - radius;
+    const maxZ = position.z + radius;
+
+    const minCellX = Math.floor(minX / broadphase.cellSize);
+    const maxCellX = Math.floor(maxX / broadphase.cellSize);
+    const minCellZ = Math.floor(minZ / broadphase.cellSize);
+    const maxCellZ = Math.floor(maxZ / broadphase.cellSize);
+
+    const result = broadphase.queryResult;
+    const seen = broadphase.querySeen;
+    result.length = 0;
+    seen.clear();
+
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+        for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+            const bucket = broadphase.cells.get(`${cellX}:${cellZ}`);
+            if (!bucket || bucket.length === 0) {
+                continue;
+            }
+            for (let i = 0; i < bucket.length; i += 1) {
+                const obstacle = bucket[i];
+                if (seen.has(obstacle)) {
+                    continue;
+                }
+                seen.add(obstacle);
+                result.push(obstacle);
+            }
+        }
+    }
+
+    return result;
+}
+
+function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
+    if (!obstacleCandidates || obstacleCandidates.length === 0) {
         return;
     }
 
@@ -746,8 +886,8 @@ function constrainToObstacles(position, staticObstacles, impactSpeed = 0) {
     for (let iteration = 0; iteration < OBSTACLE_COLLISION_ITERATIONS; iteration += 1) {
         let collidedThisPass = false;
 
-        for (let i = 0; i < staticObstacles.length; i += 1) {
-            const obstacle = staticObstacles[i];
+        for (let i = 0; i < obstacleCandidates.length; i += 1) {
+            const obstacle = obstacleCandidates[i];
             if (obstacle.type === 'circle') {
                 const nx = position.x - obstacle.x;
                 const nz = position.z - obstacle.z;

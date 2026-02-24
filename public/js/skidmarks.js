@@ -16,6 +16,12 @@ import {
     DRIFT_SMOKE_LIFE_MAX,
 } from './constants.js';
 
+const DEFAULT_SKID_QUALITY_PROFILE = Object.freeze({
+    maxSmokeParticles: DRIFT_SMOKE_MAX_PARTICLES,
+    smokeSpawnRateMultiplier: 1,
+    maxEmissionPerFrame: 12,
+});
+
 export function createSkidMarkController(scene, options = {}) {
     const sampleGroundHeight =
         typeof options.sampleGroundHeight === 'function' ? options.sampleGroundHeight : () => 0;
@@ -24,6 +30,9 @@ export function createSkidMarkController(scene, options = {}) {
         return {
             update() {},
             reset() {},
+            setQualityProfile() {
+                return false;
+            },
         };
     }
 
@@ -60,6 +69,7 @@ export function createSkidMarkController(scene, options = {}) {
         activeCount: 0,
         hasPreviousWheelSample: false,
         smokeSpawnCarry: 0,
+        qualityProfile: { ...DEFAULT_SKID_QUALITY_PROFILE },
         previousLeftWheel: new THREE.Vector3(),
         previousRightWheel: new THREE.Vector3(),
     };
@@ -220,6 +230,20 @@ export function createSkidMarkController(scene, options = {}) {
             mesh.count = 0;
             clearSmokeParticles();
         },
+        setQualityProfile(profile = {}) {
+            const nextProfile = normalizeSkidQualityProfile(profile, state.qualityProfile);
+            state.qualityProfile = nextProfile;
+            const activeLimit = Math.max(1, state.qualityProfile.maxSmokeParticles);
+            while (smokeParticles.length > activeLimit) {
+                removeSmokeParticle(0);
+            }
+            const poolLimit = Math.max(24, activeLimit);
+            while (smokeParticlePool.length > poolLimit) {
+                const recycled = smokeParticlePool.pop();
+                recycled?.mesh?.material?.dispose?.();
+            }
+            return true;
+        },
     };
 
     function resetWheelSamples() {
@@ -256,7 +280,11 @@ export function createSkidMarkController(scene, options = {}) {
         }
 
         const speedFactor = THREE.MathUtils.clamp(speedAbs / 16, 0.35, 1);
-        const targetSpawnRate = DRIFT_SMOKE_SPAWN_RATE * (0.48 + intensity * 1.02) * speedFactor;
+        const targetSpawnRate =
+            DRIFT_SMOKE_SPAWN_RATE *
+            state.qualityProfile.smokeSpawnRateMultiplier *
+            (0.48 + intensity * 1.02) *
+            speedFactor;
         state.smokeSpawnCarry += targetSpawnRate * dt;
         const particleBudget = Math.floor(state.smokeSpawnCarry);
         if (particleBudget <= 0) {
@@ -270,7 +298,7 @@ export function createSkidMarkController(scene, options = {}) {
         const velocityZ = Number.isFinite(vehicleStateSnapshot?.velocity?.y)
             ? vehicleStateSnapshot.velocity.y
             : 0;
-        const emissionCount = Math.min(12, particleBudget);
+        const emissionCount = Math.min(state.qualityProfile.maxEmissionPerFrame, particleBudget);
         for (let i = 0; i < emissionCount; i += 1) {
             const spawnFromLeftWheel = Math.random() < 0.5;
             smokeSpawnPosition.copy(spawnFromLeftWheel ? leftWheelPosition : rightWheelPosition);
@@ -280,7 +308,7 @@ export function createSkidMarkController(scene, options = {}) {
     }
 
     function spawnSmokeParticle(position, intensity, velocityX, velocityZ) {
-        if (smokeParticles.length >= DRIFT_SMOKE_MAX_PARTICLES) {
+        if (smokeParticles.length >= state.qualityProfile.maxSmokeParticles) {
             removeSmokeParticle(0);
         }
 
@@ -383,7 +411,7 @@ export function createSkidMarkController(scene, options = {}) {
         particle.mesh.position.set(0, -1000, 0);
         particle.mesh.scale.setScalar(0.0001);
         particle.mesh.material.opacity = 0;
-        if (smokeParticlePool.length < DRIFT_SMOKE_MAX_PARTICLES) {
+        if (smokeParticlePool.length < state.qualityProfile.maxSmokeParticles) {
             smokeParticlePool.push(particle);
         } else {
             particle.mesh.material.dispose();
@@ -459,6 +487,37 @@ export function createSkidMarkController(scene, options = {}) {
         mesh.count = state.activeCount;
         return true;
     }
+}
+
+function normalizeSkidQualityProfile(profile = {}, fallback = DEFAULT_SKID_QUALITY_PROFILE) {
+    const safeFallback = {
+        ...DEFAULT_SKID_QUALITY_PROFILE,
+        ...(fallback || {}),
+    };
+    return {
+        maxSmokeParticles: clamp(
+            Number(profile.maxSmokeParticles) || safeFallback.maxSmokeParticles,
+            24,
+            DRIFT_SMOKE_MAX_PARTICLES
+        ),
+        smokeSpawnRateMultiplier: clamp(
+            Number(profile.smokeSpawnRateMultiplier) || safeFallback.smokeSpawnRateMultiplier,
+            0.1,
+            1.2
+        ),
+        maxEmissionPerFrame: clamp(
+            Number(profile.maxEmissionPerFrame) || safeFallback.maxEmissionPerFrame,
+            2,
+            14
+        ),
+    };
+}
+
+function clamp(value, min, max) {
+    if (!Number.isFinite(value)) {
+        return min;
+    }
+    return Math.max(min, Math.min(max, value));
 }
 
 function createSkidMarkAlphaTexture() {

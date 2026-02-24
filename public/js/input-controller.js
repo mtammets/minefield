@@ -47,6 +47,8 @@ export function createInputController(options = {}) {
         adjustPlayerTopSpeedLimit,
         getPlayerTopSpeedLimit,
         persistPlayerTopSpeedKph,
+        getMaxPixelRatio = () => renderSettings.maxPixelRatio,
+        onCycleGraphicsQualityMode = () => null,
         escFullscreenFallbackWindowMs = 460,
     } = options;
 
@@ -122,7 +124,8 @@ export function createInputController(options = {}) {
                 key === '4' ||
                 key === 'g' ||
                 key === 't' ||
-                key === 'c')
+                key === 'c' ||
+                key === 'y')
         ) {
             return;
         }
@@ -361,6 +364,12 @@ export function createInputController(options = {}) {
                 const modeKey = setPlayerRoofMenuMode('chassis');
                 showRoofMenuStatus(modeKey);
             },
+            y: () => {
+                if (!isKeyDown || isRaceIntroDriveLocked) {
+                    return;
+                }
+                onCycleGraphicsQualityMode(1);
+            },
         };
         if (actions[key]) {
             actions[key]();
@@ -454,7 +463,11 @@ export function createInputController(options = {}) {
     }
 
     function onWindowResize() {
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, renderSettings.maxPixelRatio));
+        const pixelRatioCap = Math.max(
+            0.45,
+            Number(getMaxPixelRatio()) || Number(renderSettings.maxPixelRatio) || 1
+        );
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
         renderer.setSize(window.innerWidth, window.innerHeight);
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();

@@ -1622,6 +1622,34 @@ body.race-intro-active #miniMapHud {
     color: #dff0ff;
 }
 
+.pauseGraphicsPanel {
+    border: 1px solid rgba(157, 198, 255, 0.35);
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 12px;
+    background: linear-gradient(165deg, rgba(17, 31, 53, 0.64), rgba(11, 20, 36, 0.74));
+    box-shadow: inset 0 0 0 1px rgba(215, 236, 255, 0.05);
+}
+
+.pauseGraphicsHeader {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+.pauseGraphicsLabel {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: rgba(191, 222, 250, 0.92);
+}
+
+.pauseGraphicsActions {
+    display: grid;
+    grid-template-columns: 1fr;
+    margin-top: 7px;
+}
+
 .pauseActions {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1655,6 +1683,12 @@ body.race-intro-active #miniMapHud {
     border-color: rgba(164, 238, 188, 0.72);
     background: rgba(35, 88, 56, 0.62);
     color: #e9ffef;
+}
+
+.pauseBtn.quality {
+    border-color: rgba(186, 220, 255, 0.72);
+    background: rgba(33, 63, 104, 0.68);
+    color: #eef8ff;
 }
 
 .pauseBtn:hover {

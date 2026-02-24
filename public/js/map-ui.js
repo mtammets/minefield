@@ -9,6 +9,24 @@ const WORLD_MAP_ZOOM_STEP = 1.12;
 const WORLD_MAP_LOCK_OVERVIEW = true;
 const WORLD_MAP_OVERVIEW_UNIT_PADDING = 12;
 const WORLD_MAP_OVERVIEW_VIEWPORT_FILL = 0.98;
+const MAP_RESIZE_CHECK_INTERVAL_SEC = 0.5;
+const MINIMAP_DRAW_INTERVAL_SEC = 1 / 30;
+const WORLD_MAP_DRAW_INTERVAL_SEC = 1 / 24;
+const MAP_UI_LABEL_UPDATE_INTERVAL_SEC = 1 / 12;
+const ROUTE_REBUILD_INTERVAL_SEC = 0.16;
+const ROUTE_REBUILD_DISTANCE_SQ = 2.2 * 2.2;
+const ENTITY_SYNC_INTERVAL_SEC = 1 / 30;
+const STATIC_FEATURE_INDEX_CELL_SIZE = 22;
+const DEFAULT_MAP_QUALITY_PROFILE = Object.freeze({
+    minimapMaxDpr: MINIMAP_MAX_DPR,
+    worldMapMaxDpr: WORLD_MAP_MAX_DPR,
+    minimapDrawIntervalSec: MINIMAP_DRAW_INTERVAL_SEC,
+    worldMapDrawIntervalSec: WORLD_MAP_DRAW_INTERVAL_SEC,
+    labelUpdateIntervalSec: MAP_UI_LABEL_UPDATE_INTERVAL_SEC,
+    entitySyncIntervalSec: ENTITY_SYNC_INTERVAL_SEC,
+    routeRebuildIntervalSec: ROUTE_REBUILD_INTERVAL_SEC,
+    routeRebuildDistanceSq: ROUTE_REBUILD_DISTANCE_SQ,
+});
 
 export function createMapUiController(options = {}) {
     const dom = resolveDom();
@@ -73,6 +91,27 @@ export function createMapUiController(options = {}) {
             trees: false,
             lamps: false,
         },
+        qualityProfile: { ...DEFAULT_MAP_QUALITY_PROFILE },
+        timers: {
+            resizeCheck: MAP_RESIZE_CHECK_INTERVAL_SEC,
+            minimapDraw: DEFAULT_MAP_QUALITY_PROFILE.minimapDrawIntervalSec,
+            worldMapDraw: DEFAULT_MAP_QUALITY_PROFILE.worldMapDrawIntervalSec,
+            labelUpdate: DEFAULT_MAP_QUALITY_PROFILE.labelUpdateIntervalSec,
+            entitySync: DEFAULT_MAP_QUALITY_PROFILE.entitySyncIntervalSec,
+            routeRebuild: DEFAULT_MAP_QUALITY_PROFILE.routeRebuildIntervalSec,
+        },
+        routeBuildState: {
+            playerX: Number.NaN,
+            playerZ: Number.NaN,
+            waypointX: Number.NaN,
+            waypointZ: Number.NaN,
+        },
+        previousLabelText: {
+            legend: '',
+            mode: '',
+            range: '',
+            coord: '',
+        },
     };
 
     initializeFilterInputs(state.filters, dom);
@@ -110,11 +149,47 @@ export function createMapUiController(options = {}) {
         getWaypoint() {
             return state.waypoint ? { ...state.waypoint } : null;
         },
+        setQualityProfile(profile = {}) {
+            const nextProfile = normalizeMapQualityProfile(profile, state.qualityProfile);
+            if (mapQualityProfilesEqual(state.qualityProfile, nextProfile)) {
+                return false;
+            }
+            state.qualityProfile = nextProfile;
+            state.timers.minimapDraw = Math.min(
+                state.timers.minimapDraw,
+                state.qualityProfile.minimapDrawIntervalSec
+            );
+            state.timers.worldMapDraw = Math.min(
+                state.timers.worldMapDraw,
+                state.qualityProfile.worldMapDrawIntervalSec
+            );
+            state.timers.labelUpdate = Math.min(
+                state.timers.labelUpdate,
+                state.qualityProfile.labelUpdateIntervalSec
+            );
+            state.timers.entitySync = Math.min(
+                state.timers.entitySync,
+                state.qualityProfile.entitySyncIntervalSec
+            );
+            state.timers.routeRebuild = Math.min(
+                state.timers.routeRebuild,
+                state.qualityProfile.routeRebuildIntervalSec
+            );
+            refreshCanvasSizes(true);
+            return true;
+        },
         dispose,
     };
 
     function update(deltaTime = 1 / 60, frameState = {}) {
-        syncFrameState(frameState);
+        const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.25);
+        state.timers.entitySync += dt;
+        const shouldSyncEntities =
+            state.timers.entitySync >= state.qualityProfile.entitySyncIntervalSec;
+        syncFrameState(frameState, { syncEntities: shouldSyncEntities });
+        if (shouldSyncEntities) {
+            state.timers.entitySync = 0;
+        }
 
         if (state.overlays.welcomeVisible) {
             dom.miniMapHud.hidden = true;
@@ -136,18 +211,36 @@ export function createMapUiController(options = {}) {
             state.centerZ = state.player.z;
         }
 
-        refreshCanvasSizes();
+        state.timers.resizeCheck += dt;
+        if (state.timers.resizeCheck >= MAP_RESIZE_CHECK_INTERVAL_SEC) {
+            state.timers.resizeCheck = 0;
+            refreshCanvasSizes();
+        }
+
+        state.timers.routeRebuild += dt;
         rebuildRoute();
 
         if (minimapVisible) {
-            drawMinimap(deltaTime);
+            state.timers.minimapDraw += dt;
+            if (state.timers.minimapDraw >= state.qualityProfile.minimapDrawIntervalSec) {
+                state.timers.minimapDraw = 0;
+                drawMinimap(dt);
+            }
         }
         if (state.expanded) {
-            drawWorldMap(deltaTime);
+            state.timers.worldMapDraw += dt;
+            if (state.timers.worldMapDraw >= state.qualityProfile.worldMapDrawIntervalSec) {
+                state.timers.worldMapDraw = 0;
+                drawWorldMap(dt);
+            }
         }
 
-        updateMetaLabels();
-        renderLegend();
+        state.timers.labelUpdate += dt;
+        if (state.timers.labelUpdate >= state.qualityProfile.labelUpdateIntervalSec) {
+            state.timers.labelUpdate = 0;
+            updateMetaLabels();
+            renderLegend();
+        }
     }
 
     function toggleExpanded(forceState = null) {
@@ -198,7 +291,7 @@ export function createMapUiController(options = {}) {
         }
     }
 
-    function syncFrameState(frameState = {}) {
+    function syncFrameState(frameState = {}, { syncEntities = true } = {}) {
         const playerPoint = normalizeWorldPoint(frameState.playerPosition, state.player);
         state.player.x = playerPoint.x;
         state.player.z = playerPoint.z;
@@ -210,6 +303,10 @@ export function createMapUiController(options = {}) {
         state.overlays.raceIntroActive = Boolean(frameState.raceIntroActive);
         state.overlays.editModeActive = Boolean(frameState.editModeActive);
 
+        if (!syncEntities) {
+            return;
+        }
+
         state.pickups = normalizePickups(frameState.pickups);
         state.vehicles = normalizeVehicles(frameState.botDescriptors, frameState.remotePlayers);
         state.mines = normalizeMines(frameState.mines);
@@ -219,8 +316,32 @@ export function createMapUiController(options = {}) {
         if (!state.waypoint) {
             state.routePoints = [];
             state.routeDistanceMeters = null;
+            state.routeBuildState.waypointX = Number.NaN;
+            state.routeBuildState.waypointZ = Number.NaN;
             return;
         }
+
+        const playerMovedSq = distanceSq2D(
+            state.player.x,
+            state.player.z,
+            state.routeBuildState.playerX,
+            state.routeBuildState.playerZ
+        );
+        const waypointMovedSq = distanceSq2D(
+            state.waypoint.x,
+            state.waypoint.z,
+            state.routeBuildState.waypointX,
+            state.routeBuildState.waypointZ
+        );
+        if (
+            state.routePoints.length > 0 &&
+            state.timers.routeRebuild < state.qualityProfile.routeRebuildIntervalSec &&
+            playerMovedSq < state.qualityProfile.routeRebuildDistanceSq &&
+            waypointMovedSq < 0.05
+        ) {
+            return;
+        }
+        state.timers.routeRebuild = 0;
 
         const routePoints = buildRoadRoute(
             { x: state.player.x, z: state.player.z },
@@ -230,6 +351,10 @@ export function createMapUiController(options = {}) {
         );
         state.routePoints = routePoints;
         state.routeDistanceMeters = computePathDistance(routePoints);
+        state.routeBuildState.playerX = state.player.x;
+        state.routeBuildState.playerZ = state.player.z;
+        state.routeBuildState.waypointX = state.waypoint.x;
+        state.routeBuildState.waypointZ = state.waypoint.z;
     }
 
     function drawMinimap(_deltaTime) {
@@ -282,6 +407,7 @@ export function createMapUiController(options = {}) {
                 centerZ: state.player.z,
                 range: rangeMeters,
                 buildings: staticFeatures.buildings,
+                spatialIndex: staticFeatures.buildingsIndex,
             });
         }
 
@@ -293,6 +419,7 @@ export function createMapUiController(options = {}) {
                 centerZ: state.player.z,
                 range: rangeMeters,
                 circles: staticFeatures.trees,
+                spatialIndex: staticFeatures.treesIndex,
                 color: 'rgba(92, 150, 112, 0.74)',
             });
         }
@@ -305,6 +432,7 @@ export function createMapUiController(options = {}) {
                 centerZ: state.player.z,
                 range: rangeMeters,
                 circles: staticFeatures.lamps,
+                spatialIndex: staticFeatures.lampsIndex,
                 color: 'rgba(223, 194, 128, 0.78)',
             });
         }
@@ -448,6 +576,7 @@ export function createMapUiController(options = {}) {
                 centerZ: state.centerZ,
                 range: null,
                 buildings: staticFeatures.buildings,
+                spatialIndex: staticFeatures.buildingsIndex,
             });
         }
 
@@ -459,6 +588,7 @@ export function createMapUiController(options = {}) {
                 centerZ: state.centerZ,
                 range: null,
                 circles: staticFeatures.trees,
+                spatialIndex: staticFeatures.treesIndex,
                 color: 'rgba(92, 150, 112, 0.72)',
             });
         }
@@ -471,6 +601,7 @@ export function createMapUiController(options = {}) {
                 centerZ: state.centerZ,
                 range: null,
                 circles: staticFeatures.lamps,
+                spatialIndex: staticFeatures.lampsIndex,
                 color: 'rgba(223, 194, 128, 0.76)',
             });
         }
@@ -617,14 +748,29 @@ export function createMapUiController(options = {}) {
         }
     }
 
-    function drawBuildingFootprints(ctx, { mode, zoom, centerX, centerZ, range, buildings }) {
+    function drawBuildingFootprints(
+        ctx,
+        { mode, zoom, centerX, centerZ, range, buildings, spatialIndex = null }
+    ) {
         ctx.fillStyle = mode === 'full' ? 'rgba(36, 50, 68, 0.9)' : 'rgba(32, 44, 60, 0.92)';
         ctx.strokeStyle =
             mode === 'full' ? 'rgba(144, 182, 217, 0.32)' : 'rgba(138, 174, 205, 0.42)';
         ctx.lineWidth = 1;
 
-        for (let i = 0; i < buildings.length; i += 1) {
-            const building = buildings[i];
+        const drawBuildings =
+            Number.isFinite(range) && spatialIndex
+                ? querySpatialIndexItems(
+                      buildings,
+                      spatialIndex,
+                      centerX - range,
+                      centerX + range,
+                      centerZ - range,
+                      centerZ + range
+                  )
+                : buildings;
+
+        for (let i = 0; i < drawBuildings.length; i += 1) {
+            const building = drawBuildings[i];
             if (Number.isFinite(range)) {
                 if (building.maxX < centerX - range || building.minX > centerX + range) {
                     continue;
@@ -642,11 +788,25 @@ export function createMapUiController(options = {}) {
         }
     }
 
-    function drawCircleObstacles(ctx, { mode, zoom, centerX, centerZ, range, circles, color }) {
+    function drawCircleObstacles(
+        ctx,
+        { mode, zoom, centerX, centerZ, range, circles, color, spatialIndex = null }
+    ) {
         ctx.fillStyle = color;
         const minRadiusPx = mode === 'full' ? 0.8 : 0.7;
-        for (let i = 0; i < circles.length; i += 1) {
-            const circle = circles[i];
+        const drawCircles =
+            Number.isFinite(range) && spatialIndex
+                ? querySpatialIndexItems(
+                      circles,
+                      spatialIndex,
+                      centerX - range,
+                      centerX + range,
+                      centerZ - range,
+                      centerZ + range
+                  )
+                : circles;
+        for (let i = 0; i < drawCircles.length; i += 1) {
+            const circle = drawCircles[i];
             if (Number.isFinite(range)) {
                 if (Math.abs(circle.x - centerX) > range + circle.radius) {
                     continue;
@@ -1132,8 +1292,14 @@ export function createMapUiController(options = {}) {
     }
 
     function refreshCanvasSizes(force = false) {
-        const miniChanged = resizeCanvasToDisplaySize(dom.miniMapCanvas, MINIMAP_MAX_DPR);
-        const worldChanged = resizeCanvasToDisplaySize(dom.worldMapCanvas, WORLD_MAP_MAX_DPR);
+        const miniChanged = resizeCanvasToDisplaySize(
+            dom.miniMapCanvas,
+            state.qualityProfile.minimapMaxDpr
+        );
+        const worldChanged = resizeCanvasToDisplaySize(
+            dom.worldMapCanvas,
+            state.qualityProfile.worldMapMaxDpr
+        );
 
         if (worldChanged || force) {
             const fitTargetBounds = worldBounds;
@@ -1202,21 +1368,36 @@ export function createMapUiController(options = {}) {
         }
         const zoomPercent = Math.round((state.zoom / Math.max(state.fitZoom, 0.001)) * 100);
         lines.push(`Zoom: ${zoomPercent}%`);
-        dom.legend.textContent = lines.join('\n');
+        const nextLegendText = lines.join('\n');
+        if (nextLegendText !== state.previousLabelText.legend) {
+            dom.legend.textContent = nextLegendText;
+            state.previousLabelText.legend = nextLegendText;
+        }
     }
 
     function updateMetaLabels() {
-        dom.modeLabel.textContent = state.mode === 'online' ? 'ONLINE' : 'BOTS';
+        const nextModeText = state.mode === 'online' ? 'ONLINE' : 'BOTS';
+        if (nextModeText !== state.previousLabelText.mode) {
+            dom.modeLabel.textContent = nextModeText;
+            state.previousLabelText.mode = nextModeText;
+        }
         const minimapRange = resolveMinimapRange(state.player.speedKph);
-        const routeLabel =
+        const nextRangeText =
             state.routeDistanceMeters != null
                 ? `WP ${Math.round(state.routeDistanceMeters)}m`
                 : `RANGE ${Math.round(minimapRange)}m`;
-        dom.rangeLabel.textContent = routeLabel;
+        if (nextRangeText !== state.previousLabelText.range) {
+            dom.rangeLabel.textContent = nextRangeText;
+            state.previousLabelText.range = nextRangeText;
+        }
     }
 
     function updateCoordinateReadout(x, z) {
-        dom.coordReadout.textContent = `X ${Math.round(x)} | Z ${Math.round(z)}`;
+        const nextCoordText = `X ${Math.round(x)} | Z ${Math.round(z)}`;
+        if (nextCoordText !== state.previousLabelText.coord) {
+            dom.coordReadout.textContent = nextCoordText;
+            state.previousLabelText.coord = nextCoordText;
+        }
     }
 
     function dispose() {
@@ -1365,7 +1546,139 @@ function buildStaticFeatures(obstacles = []) {
         }
     }
 
-    return { buildings, trees, lamps };
+    return {
+        buildings,
+        trees,
+        lamps,
+        buildingsIndex: buildSpatialIndex(buildings, (entry) => ({
+            minX: entry.minX,
+            maxX: entry.maxX,
+            minZ: entry.minZ,
+            maxZ: entry.maxZ,
+        })),
+        treesIndex: buildSpatialIndex(trees, (entry) => ({
+            minX: entry.x - entry.radius,
+            maxX: entry.x + entry.radius,
+            minZ: entry.z - entry.radius,
+            maxZ: entry.z + entry.radius,
+        })),
+        lampsIndex: buildSpatialIndex(lamps, (entry) => ({
+            minX: entry.x - entry.radius,
+            maxX: entry.x + entry.radius,
+            minZ: entry.z - entry.radius,
+            maxZ: entry.z + entry.radius,
+        })),
+    };
+}
+
+function buildSpatialIndex(
+    items = [],
+    getBounds = () => null,
+    cellSize = STATIC_FEATURE_INDEX_CELL_SIZE
+) {
+    const safeCellSize = clamp(Number(cellSize) || STATIC_FEATURE_INDEX_CELL_SIZE, 4, 2000);
+    const cells = new Map();
+
+    for (let index = 0; index < items.length; index += 1) {
+        const item = items[index];
+        const bounds = getBounds(item, index);
+        if (!bounds) {
+            continue;
+        }
+        const minX = Number(bounds.minX);
+        const maxX = Number(bounds.maxX);
+        const minZ = Number(bounds.minZ);
+        const maxZ = Number(bounds.maxZ);
+        if (![minX, maxX, minZ, maxZ].every(Number.isFinite)) {
+            continue;
+        }
+        if (maxX < minX || maxZ < minZ) {
+            continue;
+        }
+
+        const minCellX = Math.floor(minX / safeCellSize);
+        const maxCellX = Math.floor(maxX / safeCellSize);
+        const minCellZ = Math.floor(minZ / safeCellSize);
+        const maxCellZ = Math.floor(maxZ / safeCellSize);
+        for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+            for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+                const key = toSpatialCellKey(cellX, cellZ);
+                const bucket = cells.get(key);
+                if (bucket) {
+                    bucket.push(index);
+                } else {
+                    cells.set(key, [index]);
+                }
+            }
+        }
+    }
+
+    return {
+        cellSize: safeCellSize,
+        cells,
+        visitMarks: new Uint32Array(Math.max(1, items.length)),
+        queryToken: 0,
+        queryBuffer: [],
+    };
+}
+
+function querySpatialIndexItems(items = [], index = null, minX, maxX, minZ, maxZ) {
+    if (
+        !index ||
+        !Number.isFinite(minX) ||
+        !Number.isFinite(maxX) ||
+        !Number.isFinite(minZ) ||
+        !Number.isFinite(maxZ)
+    ) {
+        return items;
+    }
+    if (maxX < minX || maxZ < minZ) {
+        return [];
+    }
+
+    const queryBuffer = index.queryBuffer || [];
+    queryBuffer.length = 0;
+
+    let token = (index.queryToken || 0) + 1;
+    if (token >= 0xfffffffe) {
+        index.visitMarks.fill(0);
+        token = 1;
+    }
+    index.queryToken = token;
+
+    const cellSize = index.cellSize;
+    const minCellX = Math.floor(minX / cellSize);
+    const maxCellX = Math.floor(maxX / cellSize);
+    const minCellZ = Math.floor(minZ / cellSize);
+    const maxCellZ = Math.floor(maxZ / cellSize);
+
+    for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+        for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
+            const key = toSpatialCellKey(cellX, cellZ);
+            const bucket = index.cells.get(key);
+            if (!bucket) {
+                continue;
+            }
+
+            for (let i = 0; i < bucket.length; i += 1) {
+                const itemIndex = bucket[i];
+                if (index.visitMarks[itemIndex] === token) {
+                    continue;
+                }
+                index.visitMarks[itemIndex] = token;
+                const entry = items[itemIndex];
+                if (entry) {
+                    queryBuffer.push(entry);
+                }
+            }
+        }
+    }
+
+    return queryBuffer;
+}
+
+function toSpatialCellKey(cellX, cellZ) {
+    return `${cellX}:${cellZ}`;
 }
 
 function resolveWorldBounds(worldBounds = null) {
@@ -1703,6 +2016,15 @@ function computePathDistance(points = []) {
     return distance;
 }
 
+function distanceSq2D(ax, az, bx, bz) {
+    if (![ax, az, bx, bz].every(Number.isFinite)) {
+        return Infinity;
+    }
+    const dx = ax - bx;
+    const dz = az - bz;
+    return dx * dx + dz * dz;
+}
+
 function pointerEventToWorld(event, canvas, centerX, centerZ, zoom) {
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0 || !Number.isFinite(zoom) || zoom <= 0) {
@@ -1932,14 +2254,10 @@ function resolveVehicleArrowStyle(baseColor, mode) {
         };
     }
 
-    const luminance =
-        (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+    const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
     return {
         fillColor,
-        strokeColor:
-            luminance >= 0.58
-                ? 'rgba(10, 20, 34, 0.97)'
-                : 'rgba(236, 248, 255, 0.97)',
+        strokeColor: luminance >= 0.58 ? 'rgba(10, 20, 34, 0.97)' : 'rgba(236, 248, 255, 0.97)',
     };
 }
 
@@ -2002,8 +2320,7 @@ function rgbToHsl(r, g, b) {
         return { h: 0, s: 0, l: lightness };
     }
 
-    const saturation =
-        lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
     let hue;
     if (max === r) {
         hue = (g - b) / delta + (g < b ? 6 : 0);
@@ -2065,6 +2382,63 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
+function normalizeMapQualityProfile(profile = {}, fallback = DEFAULT_MAP_QUALITY_PROFILE) {
+    const safeFallback = {
+        ...DEFAULT_MAP_QUALITY_PROFILE,
+        ...(fallback || {}),
+    };
+    return {
+        minimapMaxDpr: clamp(Number(profile.minimapMaxDpr) || safeFallback.minimapMaxDpr, 1, 3),
+        worldMapMaxDpr: clamp(Number(profile.worldMapMaxDpr) || safeFallback.worldMapMaxDpr, 1, 3),
+        minimapDrawIntervalSec: clamp(
+            Number(profile.minimapDrawIntervalSec) || safeFallback.minimapDrawIntervalSec,
+            1 / 72,
+            0.2
+        ),
+        worldMapDrawIntervalSec: clamp(
+            Number(profile.worldMapDrawIntervalSec) || safeFallback.worldMapDrawIntervalSec,
+            1 / 72,
+            0.25
+        ),
+        labelUpdateIntervalSec: clamp(
+            Number(profile.labelUpdateIntervalSec) || safeFallback.labelUpdateIntervalSec,
+            1 / 60,
+            0.35
+        ),
+        entitySyncIntervalSec: clamp(
+            Number(profile.entitySyncIntervalSec) || safeFallback.entitySyncIntervalSec,
+            1 / 72,
+            0.25
+        ),
+        routeRebuildIntervalSec: clamp(
+            Number(profile.routeRebuildIntervalSec) || safeFallback.routeRebuildIntervalSec,
+            1 / 120,
+            0.5
+        ),
+        routeRebuildDistanceSq: clamp(
+            Number(profile.routeRebuildDistanceSq) || safeFallback.routeRebuildDistanceSq,
+            0.01,
+            400
+        ),
+    };
+}
+
+function mapQualityProfilesEqual(a, b) {
+    if (!a || !b) {
+        return false;
+    }
+    return (
+        a.minimapMaxDpr === b.minimapMaxDpr &&
+        a.worldMapMaxDpr === b.worldMapMaxDpr &&
+        a.minimapDrawIntervalSec === b.minimapDrawIntervalSec &&
+        a.worldMapDrawIntervalSec === b.worldMapDrawIntervalSec &&
+        a.labelUpdateIntervalSec === b.labelUpdateIntervalSec &&
+        a.entitySyncIntervalSec === b.entitySyncIntervalSec &&
+        a.routeRebuildIntervalSec === b.routeRebuildIntervalSec &&
+        a.routeRebuildDistanceSq === b.routeRebuildDistanceSq
+    );
+}
+
 function createNoopController() {
     return {
         update() {},
@@ -2083,6 +2457,9 @@ function createNoopController() {
         },
         getWaypoint() {
             return null;
+        },
+        setQualityProfile() {
+            return false;
         },
         dispose() {},
     };

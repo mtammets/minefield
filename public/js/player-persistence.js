@@ -2,9 +2,12 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import {
     CAR_COLOR_STORAGE_KEY,
     PLAYER_TOP_SPEED_STORAGE_KEY,
+    GRAPHICS_QUALITY_MODE_STORAGE_KEY,
     CAR_COLOR_PRESETS,
     DEFAULT_PLAYER_CAR_COLOR_HEX,
 } from './constants.js';
+
+const GRAPHICS_QUALITY_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
 
 export function readPersistedPlayerTopSpeedKph({
     getPlayerTopSpeedLimit,
@@ -34,6 +37,28 @@ export function persistPlayerTopSpeedKph(
     );
     try {
         window.localStorage.setItem(PLAYER_TOP_SPEED_STORAGE_KEY, String(clamped));
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedGraphicsQualityMode(fallback = 'auto') {
+    const fallbackMode = resolveGraphicsQualityMode(fallback, 'auto');
+    try {
+        const storedValue = window.localStorage.getItem(GRAPHICS_QUALITY_MODE_STORAGE_KEY);
+        return resolveGraphicsQualityMode(storedValue, fallbackMode);
+    } catch {
+        return fallbackMode;
+    }
+}
+
+export function persistGraphicsQualityMode(mode) {
+    const normalizedMode = resolveGraphicsQualityMode(mode, '');
+    if (!normalizedMode) {
+        return;
+    }
+    try {
+        window.localStorage.setItem(GRAPHICS_QUALITY_MODE_STORAGE_KEY, normalizedMode);
     } catch {
         // localStorage can fail in restricted browsing modes.
     }
@@ -120,4 +145,12 @@ function parseColorHexInput(input) {
 
     const parsedHex = Number.parseInt(normalizedHex, 16);
     return Number.isFinite(parsedHex) ? parsedHex >>> 0 : DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0;
+}
+
+function resolveGraphicsQualityMode(value, fallback = 'auto') {
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (GRAPHICS_QUALITY_MODES.has(normalized)) {
+        return normalized;
+    }
+    return fallback;
 }
