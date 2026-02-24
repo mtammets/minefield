@@ -5,6 +5,7 @@ import {
     renderSettings,
     worldBounds,
     cityMapLayout,
+    playerSpawnPoint,
     staticObstacles,
     ambientLight,
     skyLight,
@@ -206,10 +207,20 @@ function waitForAnimationFrames(frameCount = 1) {
 
 let mapUiController = null;
 
-car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
+const initialSpawnX = Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x;
+const initialSpawnZ = Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z;
+const initialSpawnRotationY = Number.isFinite(playerSpawnPoint?.rotationY)
+    ? playerSpawnPoint.rotationY
+    : car.rotation.y;
+car.position.set(
+    initialSpawnX,
+    getGroundHeightAt(initialSpawnX, initialSpawnZ) + PLAYER_RIDE_HEIGHT,
+    initialSpawnZ
+);
+car.rotation.set(0, initialSpawnRotationY, 0);
 const playerSpawnState = {
-    position: car.position.clone(),
-    rotationY: car.rotation.y,
+    position: new THREE.Vector3(initialSpawnX, car.position.y, initialSpawnZ),
+    rotationY: initialSpawnRotationY,
 };
 
 const scene = initializeScene({

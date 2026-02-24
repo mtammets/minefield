@@ -17,41 +17,35 @@ export function createMonumentLayer() {
     const basinInnerRadius = basinOuterRadius - 1.5;
     const pedestalRadius = basinInnerRadius * 0.24;
 
-    const stoneMaterial = new THREE.MeshStandardMaterial({
+    const stoneMaterial = new THREE.MeshLambertMaterial({
         color: 0x2a3f57,
-        roughness: 0.92,
-        metalness: 0.08,
     });
-    const trimMaterial = new THREE.MeshStandardMaterial({
+    const trimMaterial = new THREE.MeshLambertMaterial({
         color: 0x9bb2ca,
-        roughness: 0.4,
-        metalness: 0.72,
     });
     const waterMaterial = new THREE.MeshBasicMaterial({
-        color: 0x4d84b3,
-        transparent: true,
-        opacity: 0.74,
+        color: 0x4f86b5,
     });
     const accentMaterial = new THREE.MeshBasicMaterial({
         color: 0xa9c4e2,
     });
 
     const forecourt = new THREE.Mesh(
-        new THREE.CylinderGeometry(forecourtRadius, forecourtRadius, 0.14, 16),
+        new THREE.CylinderGeometry(forecourtRadius, forecourtRadius, 0.14, 12),
         stoneMaterial
     );
     forecourt.position.set(centerX, baseY + 0.07, centerZ);
     layer.add(forecourt);
 
     const basinWall = new THREE.Mesh(
-        new THREE.CylinderGeometry(basinOuterRadius, basinOuterRadius, 0.82, 16),
+        new THREE.CylinderGeometry(basinOuterRadius, basinOuterRadius, 0.82, 12),
         stoneMaterial
     );
     basinWall.position.set(centerX, baseY + 0.41, centerZ);
     layer.add(basinWall);
 
     const basinLip = new THREE.Mesh(
-        new THREE.TorusGeometry(basinOuterRadius - 0.18, 0.22, 8, 20),
+        new THREE.TorusGeometry(basinOuterRadius - 0.18, 0.22, 6, 14),
         trimMaterial
     );
     basinLip.rotation.x = Math.PI / 2;
@@ -59,7 +53,7 @@ export function createMonumentLayer() {
     layer.add(basinLip);
 
     const waterSurface = new THREE.Mesh(
-        new THREE.CircleGeometry(basinInnerRadius - 0.5, 14),
+        new THREE.CircleGeometry(basinInnerRadius - 0.5, 10),
         waterMaterial
     );
     waterSurface.rotation.x = -Math.PI / 2;
@@ -78,19 +72,31 @@ export function createMonumentLayer() {
     layer.add(monolith);
 
     const crown = new THREE.Mesh(
-        new THREE.TorusGeometry(pedestalRadius * 2.46, 0.22, 8, 20),
+        new THREE.TorusGeometry(pedestalRadius * 2.46, 0.22, 6, 14),
         accentMaterial
     );
     crown.rotation.x = Math.PI / 2;
     crown.position.set(centerX, baseY + 11.9, centerZ);
     layer.add(crown);
 
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.66, 8, 6), accentMaterial);
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.66, 6, 5), accentMaterial);
     beacon.position.set(centerX, baseY + 11.9, centerZ);
     layer.add(beacon);
 
     const fountainCollisionRadius = basinOuterRadius + 0.24;
     addObstacleCircle(centerX, centerZ, fountainCollisionRadius, 'building');
 
+    freezeStaticHierarchy(layer);
+
     return layer;
+}
+
+function freezeStaticHierarchy(root) {
+    root.traverse((node) => {
+        if (!node || !node.isObject3D) {
+            return;
+        }
+        node.matrixAutoUpdate = false;
+        node.updateMatrix();
+    });
 }

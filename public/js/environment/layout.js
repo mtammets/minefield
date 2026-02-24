@@ -22,6 +22,7 @@ export const worldBounds = {
 export const chargingZones = createChargingZones();
 export const chargingZoneIntersectionKeys = createChargingZoneIntersectionKeys(chargingZones);
 export const centralParkingLot = createCentralParkingLot();
+export const playerSpawnPoint = createPlayerSpawnPoint();
 
 export const roadAxisLineDescriptors = createRoadAxisLineDescriptors();
 
@@ -41,6 +42,11 @@ export const cityMapLayout = {
         maxX: centralParkingLot.maxX,
         minZ: centralParkingLot.minZ,
         maxZ: centralParkingLot.maxZ,
+    },
+    playerSpawnPoint: {
+        x: playerSpawnPoint.x,
+        z: playerSpawnPoint.z,
+        rotationY: playerSpawnPoint.rotationY,
     },
 };
 
@@ -146,6 +152,14 @@ function createCentralParkingLot() {
         maxX: centerX + width * 0.5,
         minZ: centerZ - depth * 0.5,
         maxZ: centerZ + depth * 0.5,
+    };
+}
+
+function createPlayerSpawnPoint() {
+    return {
+        x: 0,
+        z: -CITY_GRID_SPACING * (CITY_GRID_RANGE - 1),
+        rotationY: Math.PI,
     };
 }
 

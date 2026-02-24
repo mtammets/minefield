@@ -20,6 +20,9 @@ const SUSPENSION_CORNER_DAMAGE_SCALE = 0.65;
 const WHEEL_DEBRIS_GROUND_CLEARANCE_SCALE = 0.52;
 const SUSPENSION_DEBRIS_GROUND_CLEARANCE_SCALE = 0.12;
 const BODY_PANEL_DEBRIS_GROUND_CLEARANCE_SCALE = 0.72;
+const EXPLOSION_DEBRIS_COUNT_BASE = 8;
+const EXPLOSION_DEBRIS_COUNT_MINE = 6;
+const EXPLOSION_DEBRIS_COUNT_CAP = 12;
 
 export function createCrashDebrisController({
     scene,
@@ -44,6 +47,7 @@ export function createCrashDebrisController({
     const debrisPieces = [];
     const debrisPieceById = new Map();
     const debrisMeshPoolByPartId = new Map();
+    const debrisGroundOffsetByPartId = new Map();
     const detachedCrashPartIds = new Set();
     const crashPartById = new Map();
     const crashCornerAssemblies = new Map();
@@ -105,6 +109,7 @@ export function createCrashDebrisController({
 
     function initializeBodyPartBaselines() {
         bodyPartBaselines.clear();
+        debrisGroundOffsetByPartId.clear();
         rebuildCrashPartIndex();
         for (let i = 0; i < crashParts.length; i += 1) {
             const part = crashParts[i];
@@ -472,9 +477,8 @@ export function createCrashDebrisController({
         }
 
         const crashContext = buildCrashContext(hitPosition, collision);
-        const visibleParts = crashParts.filter((part) => part?.source?.visible);
-        const selectedParts =
-            visibleParts.length > 0 ? visibleParts : selectCrashPartsForImpact(crashContext, true);
+        const visibleParts = crashParts.filter((part) => part?.source?.visible && part?.id);
+        const selectedParts = selectExplosionDebrisParts(crashContext, visibleParts);
         selectedParts.forEach((part) => {
             detachCrashPart(part, crashContext, {
                 cascadeCorner: false,
@@ -487,6 +491,99 @@ export function createCrashDebrisController({
         activeExplosionLight.position.copy(crashContext.origin);
         activeExplosionLight.position.y += 1.2;
         explosionLightLife = EXPLOSION_LIGHT_MAX_LIFE;
+    }
+
+    function selectExplosionDebrisParts(crashContext, availableParts = []) {
+        if (!Array.isArray(availableParts) || availableParts.length === 0) {
+            return selectCrashPartsForImpact(crashContext, true);
+        }
+
+        const budget = resolveExplosionDebrisBudget(crashContext, availableParts.length);
+        const selected = [];
+        const selectedIds = new Set();
+        const candidates = selectCrashPartsForImpact(crashContext, true);
+        for (let i = 0; i < candidates.length; i += 1) {
+            const part = candidates[i];
+            if (!part?.id || !part?.source?.visible || selectedIds.has(part.id)) {
+                continue;
+            }
+            selected.push(part);
+            selectedIds.add(part.id);
+            if (selected.length >= budget) {
+                return selected;
+            }
+        }
+
+        const remaining = [];
+        for (let i = 0; i < availableParts.length; i += 1) {
+            const part = availableParts[i];
+            if (!part?.id || selectedIds.has(part.id)) {
+                continue;
+            }
+            remaining.push(part);
+        }
+        remaining.sort(
+            (a, b) =>
+                scoreExplosionDebrisPart(b, crashContext) -
+                scoreExplosionDebrisPart(a, crashContext)
+        );
+        for (let i = 0; i < remaining.length && selected.length < budget; i += 1) {
+            selected.push(remaining[i]);
+        }
+        return selected;
+    }
+
+    function resolveExplosionDebrisBudget(crashContext, availableCount = 0) {
+        const impactSpeed = Math.max(0, Number(crashContext?.impactSpeed) || 0);
+        const crashIntensity = THREE.MathUtils.clamp(
+            Number(crashContext?.crashIntensity) || 0.65,
+            0,
+            1
+        );
+        const obstacleCategory =
+            typeof crashContext?.obstacleCategory === 'string' ? crashContext.obstacleCategory : '';
+        let budget =
+            obstacleCategory === 'landmine'
+                ? EXPLOSION_DEBRIS_COUNT_MINE
+                : EXPLOSION_DEBRIS_COUNT_BASE;
+
+        if (impactSpeed > 46 || crashIntensity > 0.74) {
+            budget += 2;
+        }
+        if (impactSpeed > 68 || crashIntensity > 0.9) {
+            budget += 2;
+        }
+
+        const maxAllowed = Math.max(4, Math.min(EXPLOSION_DEBRIS_COUNT_CAP, availableCount));
+        return THREE.MathUtils.clamp(Math.round(budget), 4, maxAllowed);
+    }
+
+    function scoreExplosionDebrisPart(part, crashContext) {
+        if (!part || !crashContext) {
+            return 0;
+        }
+
+        let score = 0;
+        if (part.type === 'wheel') {
+            score += 3.2;
+        } else if (part.type === 'suspension_link') {
+            score += 2.4;
+        } else if (part.type === 'body_panel') {
+            score += 1.4;
+        }
+
+        if (part.side === crashContext.hitSide) {
+            score += 2.4;
+        } else if (part.side === 'center') {
+            score += 1.1;
+        }
+
+        if (part.zone === crashContext.hitZone) {
+            score += 2.3;
+        }
+
+        score += Math.random() * 0.3;
+        return score;
     }
 
     function getReplicationState() {
@@ -917,7 +1014,7 @@ export function createCrashDebrisController({
             );
         }
 
-        const debrisGroundOffset = estimateDebrisGroundOffset(debrisMesh);
+        const debrisGroundOffset = resolveDebrisGroundOffset(partId, debrisMesh);
         addDebrisPiece({
             partId,
             partType: part.type || '',
@@ -1002,6 +1099,19 @@ export function createCrashDebrisController({
             return DEFAULT_DEBRIS_BOTTOM_OFFSET;
         }
         return Math.max(0.04, object3D.position.y - debrisBottomProbeBox.min.y);
+    }
+
+    function resolveDebrisGroundOffset(partId, object3D) {
+        const key = typeof partId === 'string' ? partId : '';
+        if (key && debrisGroundOffsetByPartId.has(key)) {
+            return debrisGroundOffsetByPartId.get(key);
+        }
+
+        const resolvedOffset = estimateDebrisGroundOffset(object3D);
+        if (key) {
+            debrisGroundOffsetByPartId.set(key, resolvedOffset);
+        }
+        return resolvedOffset;
     }
 
     function getDebrisBottomY(piece) {

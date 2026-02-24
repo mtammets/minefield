@@ -290,6 +290,8 @@ const EVENT_COOLDOWNS = Object.freeze({
     chargingStop: 0.18,
 });
 const AUDIO_FETCH_CACHE_MODES = Object.freeze(['default', 'reload']);
+const WELCOME_MENU_AMBIENCE_GAIN = 0;
+const WELCOME_MENU_CROWD_GAIN = 0;
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -706,9 +708,9 @@ export function createAudioSystem({ camera = null } = {}) {
               )
             : 0;
 
-        const ambienceBase = welcomeVisible ? 0.17 : 0.38;
+        const ambienceBase = welcomeVisible ? WELCOME_MENU_AMBIENCE_GAIN : 0.38;
         const ambienceGameplayBoost = driveAudioEnabled ? 0.2 : 0;
-        const crowdGain = welcomeVisible ? 0.05 : driveAudioEnabled ? 0.2 : 0.1;
+        const crowdGain = welcomeVisible ? WELCOME_MENU_CROWD_GAIN : driveAudioEnabled ? 0.2 : 0.1;
 
         updateLoopLayer(
             'engineIdleLoop01',

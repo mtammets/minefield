@@ -18,8 +18,12 @@ const MINE_DETONATION_LIGHT_LIFE = 0.5;
 const MINE_DETONATION_RING_LIFE = 0.5;
 const RECENT_DETONATION_RETENTION_MS = 5000;
 const MAX_POOLED_DETONATION_EFFECTS = 48;
+const DETONATION_EFFECT_POOL_PREWARM_COUNT = 12;
 const MINE_DETONATION_LIGHT_INTENSITY = 7.2;
 const MINE_DETONATION_LIGHT_DISTANCE = 44;
+const MINE_DETONATION_LIGHT_NEAR_DISTANCE = 34;
+const MINE_DETONATION_LIGHT_NEAR_DISTANCE_SQ =
+    MINE_DETONATION_LIGHT_NEAR_DISTANCE * MINE_DETONATION_LIGHT_NEAR_DISTANCE;
 const MINE_DETONATION_SHOCKWAVE_BASE_OPACITY = 0.66;
 const MINE_DETONATION_CORE_BASE_OPACITY = 0.96;
 const MINE_DETONATION_HALO_BASE_OPACITY = 0.64;
@@ -71,6 +75,8 @@ export function createMineSystemController(options = {}) {
     const previousPositionByEntityKey = new Map();
     let mineSequence = 0;
     let collisionWasEnabledLastFrame = false;
+
+    prewarmDetonationEffects();
 
     return {
         deployMine,
@@ -591,7 +597,9 @@ export function createMineSystemController(options = {}) {
         }
 
         recentDetonations.set(mineId, now);
-        spawnDetonationEffect(detonationPosition);
+        spawnDetonationEffect(detonationPosition, {
+            preferLight: Boolean(context.localHit),
+        });
         onMineDetonated({
             mineId,
             position: detonationPosition.clone(),
@@ -743,15 +751,23 @@ export function createMineSystemController(options = {}) {
         return count;
     }
 
-    function spawnDetonationEffect(position) {
+    function spawnDetonationEffect(position, { preferLight = false } = {}) {
         const effect = acquireDetonationEffect();
+        const deltaX = position.x - car.position.x;
+        const deltaZ = position.z - car.position.z;
+        const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+        const shouldSpawnLight =
+            Boolean(preferLight) || distanceSq <= MINE_DETONATION_LIGHT_NEAR_DISTANCE_SQ;
+
         effect.light.position.copy(position);
         effect.light.position.y += 0.42;
-        effect.light.userData.life = MINE_DETONATION_LIGHT_LIFE;
         effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
-        effect.light.intensity = MINE_DETONATION_LIGHT_INTENSITY;
-        effect.light.distance = MINE_DETONATION_LIGHT_DISTANCE;
-        scene.add(effect.light);
+        effect.light.userData.life = shouldSpawnLight ? MINE_DETONATION_LIGHT_LIFE : 0;
+        effect.light.intensity = shouldSpawnLight ? MINE_DETONATION_LIGHT_INTENSITY : 0;
+        effect.light.distance = shouldSpawnLight ? MINE_DETONATION_LIGHT_DISTANCE : 0;
+        if (shouldSpawnLight) {
+            scene.add(effect.light);
+        }
 
         effect.shockwave.position.copy(position);
         effect.shockwave.position.y += 0.05;
@@ -874,10 +890,25 @@ export function createMineSystemController(options = {}) {
         }
     }
 
+    function prewarmDetonationEffects() {
+        const targetCount = THREE.MathUtils.clamp(
+            DETONATION_EFFECT_POOL_PREWARM_COUNT,
+            0,
+            MAX_POOLED_DETONATION_EFFECTS
+        );
+        for (let i = detonationEffectPool.length; i < targetCount; i += 1) {
+            detonationEffectPool.push(createDetonationEffectBundle());
+        }
+    }
+
     function acquireDetonationEffect() {
         if (detonationEffectPool.length > 0) {
             return detonationEffectPool.pop();
         }
+        return createDetonationEffectBundle();
+    }
+
+    function createDetonationEffectBundle() {
         const light = new THREE.PointLight(0xffab6c, MINE_DETONATION_LIGHT_INTENSITY, 48, 2);
         const shockwaveMaterial = new THREE.MeshBasicMaterial({
             color: 0xff9560,

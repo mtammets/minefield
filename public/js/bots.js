@@ -64,6 +64,12 @@ const BOT_NAV_MAX_EXPANSIONS = 4200;
 const BOT_PATH_REPLAN_COOLDOWN = 0.35;
 const BOT_NAV_PATH_CACHE_LIMIT = 320;
 const BOT_NAV_MAX_BUILDS_PER_FRAME = 1;
+const BOT_SIM_NEAR_DISTANCE = 38;
+const BOT_SIM_MID_DISTANCE = 82;
+const BOT_SIM_NEAR_STEP = 1 / 60;
+const BOT_SIM_MID_STEP = 1 / 30;
+const BOT_SIM_FAR_STEP = 1 / 18;
+const BOT_SIM_MAX_STEPS_PER_FRAME = 3;
 const BOT_STUCK_MIN_SPEED = 1.1;
 const BOT_STUCK_PROGRESS_EPSILON = 2.2;
 const BOT_STUCK_REPLAN_TIME = 1.25;
@@ -154,7 +160,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     tryRespawnBot(bot, nowMs);
                     continue;
                 }
-                updateBot(
+                updateBotAdaptiveTick(
                     bot,
                     bots,
                     playerPosition,
@@ -596,6 +602,8 @@ function resetBot(
     bot.stuckTargetKey = null;
     bot.recoveryTimer = 0;
     bot.recoverySteerSign = 0;
+    bot.simulationAccumulator = 0;
+    bot.simulationStep = BOT_SIM_NEAR_STEP;
 
     const freshDamageState = createEmptyBotDamageState();
     bot.damageState.wheelLossCount = freshDamageState.wheelLossCount;
@@ -720,10 +728,64 @@ function createBot(
         stuckTargetKey: null,
         recoveryTimer: 0,
         recoverySteerSign: 0,
+        simulationAccumulator: 0,
+        simulationStep: BOT_SIM_NEAR_STEP,
     };
 
     initializeBotPartBaselines(bot);
     return bot;
+}
+
+function updateBotAdaptiveTick(
+    bot,
+    allBots,
+    playerPosition,
+    visiblePickups,
+    frameDelta,
+    worldBounds,
+    staticObstacles,
+    buildingObstacles,
+    getGroundHeightAt,
+    cityMapLayout,
+    navigationPlanner
+) {
+    const simulationStep = resolveBotSimulationStep(bot.car.position, playerPosition);
+    bot.simulationStep = simulationStep;
+    bot.simulationAccumulator = Math.min(
+        Math.max(0, Number(bot.simulationAccumulator) || 0) + frameDelta,
+        simulationStep * (BOT_SIM_MAX_STEPS_PER_FRAME + 1)
+    );
+
+    let simulationSteps = 0;
+    while (
+        bot.simulationAccumulator >= simulationStep &&
+        simulationSteps < BOT_SIM_MAX_STEPS_PER_FRAME
+    ) {
+        updateBot(
+            bot,
+            allBots,
+            playerPosition,
+            visiblePickups,
+            simulationStep,
+            worldBounds,
+            staticObstacles,
+            buildingObstacles,
+            getGroundHeightAt,
+            cityMapLayout,
+            navigationPlanner
+        );
+        bot.simulationAccumulator -= simulationStep;
+        simulationSteps += 1;
+    }
+
+    if (
+        simulationSteps === BOT_SIM_MAX_STEPS_PER_FRAME &&
+        bot.simulationAccumulator > simulationStep
+    ) {
+        bot.simulationAccumulator = simulationStep * 0.75;
+    }
+
+    updateBotIndicator(bot, frameDelta);
 }
 
 function updateBot(
@@ -961,7 +1023,33 @@ function updateBot(
     );
 
     bot.updateVisuals(bot.state, dt);
-    updateBotIndicator(bot, dt);
+}
+
+function resolveBotSimulationStep(botPosition, playerPosition) {
+    const botX = Number(botPosition?.x);
+    const botZ = Number(botPosition?.z);
+    const playerX = Number(playerPosition?.x);
+    const playerZ = Number(playerPosition?.z);
+    if (!Number.isFinite(botX) || !Number.isFinite(botZ)) {
+        return BOT_SIM_MID_STEP;
+    }
+    if (!Number.isFinite(playerX) || !Number.isFinite(playerZ)) {
+        return BOT_SIM_MID_STEP;
+    }
+
+    const deltaX = playerX - botX;
+    const deltaZ = playerZ - botZ;
+    const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+    if (!Number.isFinite(distanceSq)) {
+        return BOT_SIM_MID_STEP;
+    }
+    if (distanceSq <= BOT_SIM_NEAR_DISTANCE * BOT_SIM_NEAR_DISTANCE) {
+        return BOT_SIM_NEAR_STEP;
+    }
+    if (distanceSq <= BOT_SIM_MID_DISTANCE * BOT_SIM_MID_DISTANCE) {
+        return BOT_SIM_MID_STEP;
+    }
+    return BOT_SIM_FAR_STEP;
 }
 
 function applyCollisionImpulseToBot(bot, contact) {

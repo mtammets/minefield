@@ -3,6 +3,7 @@ import { clearStaticObstacles } from './obstacles.js';
 import { createRoadLayer } from './roads.js';
 import { createParkingLotLayer } from './parking-lot.js';
 import { createMonumentLayer } from './monument.js';
+import { createSpawnMarkerLayer } from './spawn-marker.js';
 import { createParkLayer } from './parks.js';
 import { createBuildingLayer } from './buildings.js';
 import { createStreetLampLayer } from './street-lamps.js';
@@ -19,6 +20,7 @@ export function createCityScenery() {
     group.add(createRoadLayer());
     group.add(createParkingLotLayer());
     group.add(monumentLayer);
+    group.add(createSpawnMarkerLayer());
     group.add(createParkLayer());
     group.add(createBuildingLayer());
     group.add(createStreetLampLayer(group.userData.lampLights));

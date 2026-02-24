@@ -9,6 +9,9 @@ const BOT_MINE_DECISION_MIN_INTERVAL_MS = 900;
 const BOT_MINE_DECISION_MAX_INTERVAL_MS = 1700;
 const BOT_MINE_POST_DEPLOY_MIN_INTERVAL_MS = 2400;
 const BOT_MINE_POST_DEPLOY_MAX_INTERVAL_MS = 3800;
+const VEHICLE_COLLISION_CULL_DISTANCE = 52;
+const VEHICLE_COLLISION_CULL_DISTANCE_SQ =
+    VEHICLE_COLLISION_CULL_DISTANCE * VEHICLE_COLLISION_CULL_DISTANCE;
 
 export function createGameLoopController(options = {}) {
     const {
@@ -243,11 +246,17 @@ export function createGameLoopController(options = {}) {
                     const botTrafficSystem = getBotTrafficSystem();
                     const botsEnabled = readBotsEnabled();
                     const botCollisionSnapshots = botsEnabled
-                        ? botTrafficSystem?.getCollisionSnapshots?.() || []
+                        ? filterCollisionSnapshotsByDistance(
+                              botTrafficSystem?.getCollisionSnapshots?.() || [],
+                              car.position
+                          )
                         : [];
                     const multiplayerCollisionSnapshots =
                         typeof getMultiplayerCollisionSnapshots === 'function'
-                            ? getMultiplayerCollisionSnapshots() || []
+                            ? filterCollisionSnapshotsByDistance(
+                                  getMultiplayerCollisionSnapshots() || [],
+                                  car.position
+                              )
                             : [];
                     const vehicleCollisionSnapshots = botCollisionSnapshots.concat(
                         multiplayerCollisionSnapshots
@@ -581,6 +590,47 @@ export function createGameLoopController(options = {}) {
 
     function randomRangeMs(min, max) {
         return min + Math.random() * (max - min);
+    }
+
+    function filterCollisionSnapshotsByDistance(
+        snapshots = [],
+        origin = null,
+        maxDistanceSq = VEHICLE_COLLISION_CULL_DISTANCE_SQ
+    ) {
+        if (!Array.isArray(snapshots) || snapshots.length === 0) {
+            return [];
+        }
+        const originX = Number(origin?.x);
+        const originZ = Number(origin?.z);
+        if (!Number.isFinite(originX) || !Number.isFinite(originZ)) {
+            return snapshots;
+        }
+
+        let filtered = null;
+        for (let i = 0; i < snapshots.length; i += 1) {
+            const snapshot = snapshots[i];
+            const x = Number(snapshot?.x);
+            const z = Number(snapshot?.z);
+            if (!Number.isFinite(x) || !Number.isFinite(z)) {
+                if (!filtered) {
+                    filtered = snapshots.slice(0, i);
+                }
+                continue;
+            }
+            const deltaX = x - originX;
+            const deltaZ = z - originZ;
+            const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+            if (distanceSq > maxDistanceSq) {
+                if (!filtered) {
+                    filtered = snapshots.slice(0, i);
+                }
+                continue;
+            }
+            if (filtered) {
+                filtered.push(snapshot);
+            }
+        }
+        return filtered || snapshots;
     }
 
     function createPlayerHudState() {

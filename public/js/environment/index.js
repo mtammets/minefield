@@ -6,7 +6,7 @@ import {
     skyLight,
     sunLight,
 } from './config.js';
-import { worldBounds, cityMapLayout, chargingZones } from './layout.js';
+import { worldBounds, cityMapLayout, chargingZones, playerSpawnPoint } from './layout.js';
 import { staticObstacles } from './obstacles.js';
 import { createGroundTexture } from './textures.js';
 import { getGroundHeightAt, createGround, updateGroundMotionRuntime } from './terrain.js';
@@ -37,6 +37,7 @@ export {
     renderSettings,
     worldBounds,
     cityMapLayout,
+    playerSpawnPoint,
     staticObstacles,
     ambientLight,
     skyLight,
