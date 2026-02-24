@@ -242,16 +242,65 @@
         </div>
         <div id="finalLeaderboard" aria-label="Final leaderboard" aria-live="polite" hidden>
             <div class="leaderboardCard">
-                <div id="leaderboardTitle">GAME OVER</div>
-                <div id="leaderboardSummary"></div>
-                <div id="leaderboardScoringModel" hidden></div>
-                <div id="leaderboardList"></div>
-                <div class="leaderboardActions">
-                    <button id="leaderboardExitBtn" class="leaderboardBtn exit" type="button">
-                        EXIT
+                <div class="leaderboardHero">
+                    <div class="leaderboardHeroCopy">
+                        <div id="leaderboardTitle">ROUND COMPLETE</div>
+                        <div id="leaderboardSummary"></div>
+                    </div>
+                    <button
+                        id="leaderboardDetailsToggle"
+                        class="leaderboardDetailsToggle"
+                        type="button"
+                        aria-controls="leaderboardDetailsPanel"
+                        aria-expanded="false"
+                    >
+                        SHOW DETAILS
                     </button>
+                </div>
+                <div class="leaderboardKpiGrid" aria-label="Round summary">
+                    <div class="leaderboardKpi">
+                        <div class="leaderboardKpiLabel">YOUR PLACE</div>
+                        <div id="leaderboardPlayerRank" class="leaderboardKpiValue">#-</div>
+                    </div>
+                    <div class="leaderboardKpi">
+                        <div class="leaderboardKpiLabel">YOUR SCORE</div>
+                        <div id="leaderboardPlayerScore" class="leaderboardKpiValue">0 pts</div>
+                    </div>
+                    <div class="leaderboardKpi">
+                        <div class="leaderboardKpiLabel">TOP SCORE</div>
+                        <div id="leaderboardTopScore" class="leaderboardKpiValue">0 pts</div>
+                    </div>
+                    <div class="leaderboardKpi">
+                        <div class="leaderboardKpiLabel">COLLECTED</div>
+                        <div id="leaderboardCollectedTotal" class="leaderboardKpiValue">0/0</div>
+                    </div>
+                </div>
+                <div class="leaderboardSectionHeader">
+                    <div class="leaderboardSectionTitle">FINAL STANDINGS</div>
+                </div>
+                <div class="leaderboardTableHead" aria-hidden="true">
+                    <span>RANK</span>
+                    <span>DRIVER</span>
+                    <span>SCORE</span>
+                    <span>PICKUPS</span>
+                </div>
+                <div id="leaderboardList"></div>
+                <div id="leaderboardDetailsPanel" hidden>
+                    <div class="leaderboardDetailsBlock">
+                        <div class="leaderboardDetailsLabel">SCORING MODEL</div>
+                        <div id="leaderboardScoringModel" hidden></div>
+                    </div>
+                    <div class="leaderboardDetailsBlock">
+                        <div class="leaderboardDetailsLabel">ROUND BREAKDOWN</div>
+                        <div id="leaderboardBreakdownList"></div>
+                    </div>
+                </div>
+                <div class="leaderboardActions">
                     <button id="leaderboardRestartBtn" class="leaderboardBtn restart" type="button">
                         NEW GAME
+                    </button>
+                    <button id="leaderboardExitBtn" class="leaderboardBtn exit" type="button">
+                        EXIT
                     </button>
                 </div>
             </div>

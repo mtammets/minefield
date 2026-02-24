@@ -337,7 +337,10 @@ export function createGameSessionController({
         }
     }
 
-    function maybeFinalizeOnBotElimination({ totalPickups = ROUND_TOTAL_PICKUPS, botHudState } = {}) {
+    function maybeFinalizeOnBotElimination({
+        totalPickups = ROUND_TOTAL_PICKUPS,
+        botHudState,
+    } = {}) {
         if (getPickupRoundFinished()) {
             return { ok: false, reason: 'round-finished' };
         }
@@ -345,7 +348,9 @@ export function createGameSessionController({
             return { ok: false, reason: 'not-bots-mode' };
         }
 
-        const botEntries = Array.isArray(botHudState) ? botHudState : getBotSystem()?.getHudState?.() || [];
+        const botEntries = Array.isArray(botHudState)
+            ? botHudState
+            : getBotSystem()?.getHudState?.() || [];
         if (botEntries.length === 0) {
             return { ok: false, reason: 'no-bots' };
         }
@@ -503,14 +508,21 @@ export function createGameSessionController({
                 : 'pickups-exhausted';
         const finishLabel =
             finishReason === 'opponents-eliminated' ? 'Opponents eliminated' : 'No objects left';
-        const bonusPointsAwarded = Math.max(0, Math.round(Number(options?.bonusPointsAwarded) || 0));
-        const bonusPickupsAwarded = Math.max(0, Math.round(Number(options?.bonusPickupsAwarded) || 0));
+        const bonusPointsAwarded = Math.max(
+            0,
+            Math.round(Number(options?.bonusPointsAwarded) || 0)
+        );
+        const bonusPickupsAwarded = Math.max(
+            0,
+            Math.round(Number(options?.bonusPickupsAwarded) || 0)
+        );
         const summaryText =
             `Collected ${resolvedCollected}/${resolvedTotal} objects. Total score: ${resolvedTotalScore} pts.` +
             (bonusPointsAwarded > 0 && bonusPickupsAwarded > 0
                 ? ` Bonus: +${bonusPointsAwarded} pts from ${bonusPickupsAwarded} auto-collected objects.`
                 : '');
         const tiePrefix = winners.length > 1 ? 'Tie' : 'Winner';
+        const winnerSummary = `${tiePrefix}: ${winnerLabel}`;
 
         objectiveUi.showResult(
             `${finishLabel} (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore} pts).`
@@ -520,6 +532,13 @@ export function createGameSessionController({
             entries: scoreboard,
             topScore,
             scoringModelText: SCORE_MODEL_TEXT,
+            winnerLabel: winnerSummary,
+            finishLabel,
+            totalCollected: resolvedCollected,
+            totalPickups: resolvedTotal,
+            totalScore: resolvedTotalScore,
+            bonusPointsAwarded,
+            bonusPickupsAwarded,
         });
         audioController?.onRoundFinished?.({
             scoreboardEntries: scoreboard,
@@ -795,6 +814,10 @@ export function createGameSessionController({
         return {
             pickupCount: Math.max(0, Math.round(Number(stats.pickupCount) || 0)),
             pickupPoints: Math.max(0, Math.round(Number(stats.pickupPoints) || 0)),
+            mineDeployedCount: Math.max(0, Math.round(Number(stats.mineDeployedCount) || 0)),
+            mineDetonatedCount: Math.max(0, Math.round(Number(stats.mineDetonatedCount) || 0)),
+            mineHitCount: Math.max(0, Math.round(Number(stats.mineHitCount) || 0)),
+            mineHitTakenCount: Math.max(0, Math.round(Number(stats.mineHitTakenCount) || 0)),
             mineKillCount: Math.max(0, Math.round(Number(stats.mineKillCount) || 0)),
             mineKillPoints: Math.max(0, Math.round(Number(stats.mineKillPoints) || 0)),
             autoCollectedCount: Math.max(0, Math.round(Number(stats.autoCollectedCount) || 0)),
@@ -804,7 +827,10 @@ export function createGameSessionController({
             riskPickupCount: Math.max(0, Math.round(Number(stats.riskPickupCount) || 0)),
             endgamePickupCount: Math.max(0, Math.round(Number(stats.endgamePickupCount) || 0)),
             endgameMineKillCount: Math.max(0, Math.round(Number(stats.endgameMineKillCount) || 0)),
-            antiFarmMineKillCount: Math.max(0, Math.round(Number(stats.antiFarmMineKillCount) || 0)),
+            antiFarmMineKillCount: Math.max(
+                0,
+                Math.round(Number(stats.antiFarmMineKillCount) || 0)
+            ),
         };
     }
 

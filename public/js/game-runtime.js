@@ -425,6 +425,14 @@ function normalizeScoreAuditCollectorId(collectorId = 'player') {
     return normalized;
 }
 
+function normalizeOptionalScoreAuditCollectorId(collectorId = '') {
+    const normalized = typeof collectorId === 'string' ? collectorId.trim() : '';
+    if (!normalized) {
+        return '';
+    }
+    return normalizeScoreAuditCollectorId(normalized);
+}
+
 function ensureCollectorScoreAudit(collectorId = 'player') {
     const collectorKey = normalizeScoreAuditCollectorId(collectorId);
     if (runtimeState.scoreAuditByCollectorId.has(collectorKey)) {
@@ -434,6 +442,10 @@ function ensureCollectorScoreAudit(collectorId = 'player') {
         collectorId: collectorKey,
         pickupCount: 0,
         pickupPoints: 0,
+        mineDeployedCount: 0,
+        mineDetonatedCount: 0,
+        mineHitCount: 0,
+        mineHitTakenCount: 0,
         mineKillCount: 0,
         mineKillPoints: 0,
         autoCollectedCount: 0,
@@ -500,6 +512,49 @@ function recordMineKillScoreAudit({
     }
 }
 
+function recordMineDeploymentAudit({ collectorId = 'player', mineId = '' } = {}) {
+    const normalizedMineId = typeof mineId === 'string' ? mineId.trim() : '';
+    if (normalizedMineId && runtimeState.scoredMineDeployIds.has(normalizedMineId)) {
+        return;
+    }
+    const resolvedCollectorId = normalizeOptionalScoreAuditCollectorId(collectorId);
+    if (!resolvedCollectorId) {
+        return;
+    }
+    if (normalizedMineId) {
+        runtimeState.scoredMineDeployIds.add(normalizedMineId);
+    }
+    const entry = ensureCollectorScoreAudit(resolvedCollectorId);
+    entry.mineDeployedCount += 1;
+}
+
+function recordMineDetonationAudit({
+    mineId = '',
+    ownerCollectorId = '',
+    targetCollectorId = '',
+} = {}) {
+    const normalizedMineId = typeof mineId === 'string' ? mineId.trim() : '';
+    if (!normalizedMineId || runtimeState.scoredMineDetonationIds.has(normalizedMineId)) {
+        return;
+    }
+    runtimeState.scoredMineDetonationIds.add(normalizedMineId);
+
+    const ownerId = normalizeOptionalScoreAuditCollectorId(ownerCollectorId);
+    const targetId = normalizeOptionalScoreAuditCollectorId(targetCollectorId);
+    if (ownerId) {
+        const ownerEntry = ensureCollectorScoreAudit(ownerId);
+        ownerEntry.mineDetonatedCount += 1;
+        if (targetId && targetId !== ownerId) {
+            ownerEntry.mineHitCount += 1;
+        }
+    }
+
+    if (targetId) {
+        const targetEntry = ensureCollectorScoreAudit(targetId);
+        targetEntry.mineHitTakenCount += 1;
+    }
+}
+
 function recordAutoCollectScoreAudit({
     collectorId = 'player',
     pointsAwarded = 0,
@@ -525,6 +580,10 @@ function getCollectorScoreAuditSnapshot(collectorId = 'player') {
         collectorId: collectorKey,
         pickupCount: Math.max(0, Math.round(Number(entry.pickupCount) || 0)),
         pickupPoints: Math.max(0, Math.round(Number(entry.pickupPoints) || 0)),
+        mineDeployedCount: Math.max(0, Math.round(Number(entry.mineDeployedCount) || 0)),
+        mineDetonatedCount: Math.max(0, Math.round(Number(entry.mineDetonatedCount) || 0)),
+        mineHitCount: Math.max(0, Math.round(Number(entry.mineHitCount) || 0)),
+        mineHitTakenCount: Math.max(0, Math.round(Number(entry.mineHitTakenCount) || 0)),
         mineKillCount: Math.max(0, Math.round(Number(entry.mineKillCount) || 0)),
         mineKillPoints: Math.max(0, Math.round(Number(entry.mineKillPoints) || 0)),
         autoCollectedCount: Math.max(0, Math.round(Number(entry.autoCollectedCount) || 0)),
@@ -825,14 +884,23 @@ runtimeState.mineController = createMineSystemController({
         runtimeState.multiplayerController?.reportMineDetonated?.(snapshot);
     },
     onMineDeployed({ mineSnapshot, mode }) {
+        const ownerCollectorId = resolveMineOwnerCollectorId(mineSnapshot?.ownerId);
+        if (ownerCollectorId) {
+            recordMineDeploymentAudit({
+                collectorId: ownerCollectorId,
+                mineId: mineSnapshot?.mineId,
+            });
+        }
         runtimeState.audioController?.onMineDeployed?.({
             thrown: mode === 'throw' || Boolean(mineSnapshot?.thrown),
         });
     },
     onMineDetonated({
+        mineId = '',
         localHit,
         position,
         ownerId = '',
+        targetPlayerId = '',
         ownerPointsAwarded = 0,
         ownerScore = 0,
         ownerScoring = null,
@@ -842,10 +910,16 @@ runtimeState.mineController = createMineSystemController({
             localHit: Boolean(localHit),
             distanceMeters,
         });
+        const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
+        const targetCollectorId = normalizeOptionalScoreAuditCollectorId(targetPlayerId);
+        recordMineDetonationAudit({
+            mineId,
+            ownerCollectorId,
+            targetCollectorId,
+        });
         if (runtimeState.gameMode !== 'online') {
             return;
         }
-        const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
         const pointsAwarded = Math.max(0, Math.round(Number(ownerPointsAwarded) || 0));
         if (ownerCollectorId !== 'player' || pointsAwarded <= 0) {
             return;
@@ -943,6 +1017,13 @@ runtimeState.multiplayerController = createMultiplayerController({
         runtimeState.mineController?.applyRoomMineSnapshot?.(mineSnapshots);
     },
     onMinePlaced(snapshot) {
+        const ownerCollectorId = resolveMineOwnerCollectorId(snapshot?.ownerId);
+        if (ownerCollectorId) {
+            recordMineDeploymentAudit({
+                collectorId: ownerCollectorId,
+                mineId: snapshot?.mineId,
+            });
+        }
         runtimeState.mineController?.handleRemoteMinePlaced?.(snapshot);
     },
     onMineDetonated(snapshot) {
@@ -1113,6 +1194,8 @@ runtimeState.gameSessionController = createGameSessionController({
     resetPickupScoring() {
         runtimeState.scoringSystem?.clear?.();
         runtimeState.scoreAuditByCollectorId.clear();
+        runtimeState.scoredMineDeployIds.clear();
+        runtimeState.scoredMineDetonationIds.clear();
         runtimeState.authoritativeScoreByPlayerId.clear();
     },
     onAutoCollectBonusAwarded({ collectorId = 'player', pointsAwarded = 0, pickupCount = 0 } = {}) {
