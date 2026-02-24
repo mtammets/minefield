@@ -289,6 +289,7 @@ const EVENT_COOLDOWNS = Object.freeze({
     chargingStart: 0.18,
     chargingStop: 0.18,
 });
+const AUDIO_FETCH_CACHE_MODES = Object.freeze(['default', 'reload']);
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -399,20 +400,11 @@ export function createAudioSystem({ camera = null } = {}) {
         if (disposed) {
             return false;
         }
-        const userActivationActive = hasActiveUserActivation();
-        if (!context && !userActivationActive) {
-            refreshUi();
-            return false;
-        }
         const audioContext = ensureAudioContext();
         if (!audioContext) {
             return false;
         }
         if (audioContext.state !== 'running') {
-            if (!userActivationActive) {
-                refreshUi();
-                return false;
-            }
             try {
                 await audioContext.resume();
             } catch {
@@ -481,14 +473,6 @@ export function createAudioSystem({ camera = null } = {}) {
         return context;
     }
 
-    function hasActiveUserActivation() {
-        const userActivation = navigator?.userActivation;
-        if (!userActivation || typeof userActivation.isActive !== 'boolean') {
-            return true;
-        }
-        return userActivation.isActive;
-    }
-
     async function preloadAllBuffers() {
         const ids = Object.keys(SOUND_DEFINITIONS);
         await Promise.all(ids.map((id) => loadBuffer(id)));
@@ -517,23 +501,26 @@ export function createAudioSystem({ camera = null } = {}) {
                 return null;
             }
 
-            try {
-                const response = await window.fetch(definition.src, {
-                    method: 'GET',
-                    cache: 'force-cache',
-                });
-                if (!response.ok) {
-                    failedBuffers.add(soundId);
-                    return null;
+            for (let i = 0; i < AUDIO_FETCH_CACHE_MODES.length; i += 1) {
+                const cacheMode = AUDIO_FETCH_CACHE_MODES[i];
+                try {
+                    const response = await window.fetch(definition.src, {
+                        method: 'GET',
+                        cache: cacheMode,
+                    });
+                    if (!response.ok) {
+                        continue;
+                    }
+                    const data = await response.arrayBuffer();
+                    const decoded = await audioContext.decodeAudioData(data.slice(0));
+                    buffers.set(soundId, decoded);
+                    return decoded;
+                } catch {
+                    // Retry with stricter cache mode before marking this file failed.
                 }
-                const data = await response.arrayBuffer();
-                const decoded = await audioContext.decodeAudioData(data.slice(0));
-                buffers.set(soundId, decoded);
-                return decoded;
-            } catch {
-                failedBuffers.add(soundId);
-                return null;
             }
+            failedBuffers.add(soundId);
+            return null;
         })();
 
         pendingLoads.set(soundId, loadPromise);
