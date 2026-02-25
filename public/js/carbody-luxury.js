@@ -92,6 +92,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
         wheelPositions = DEFAULT_WHEEL_POSITIONS,
         displayName = 'MAREK',
         rearModelName = REAR_MODEL_NAME,
+        roofScreenDynamic = true,
     } = bodyConfig;
 
     const bodyShellGroup = new THREE.Group();
@@ -171,7 +172,8 @@ function addLuxuryBody(car, bodyConfig = {}) {
         roofAssemblyGroup,
         bodyDimensions,
         ROOF_BRAND_NAME,
-        displayName
+        displayName,
+        { roofScreenDynamic }
     );
     let nameplateGroup = null;
     if (rearModelName) {
@@ -415,8 +417,10 @@ function addVoltlineRoofBranding(
     parent,
     bodyDimensions,
     brandName = ROOF_BRAND_NAME,
-    playerName = 'MAREK'
+    playerName = 'MAREK',
+    options = {}
 ) {
+    const roofScreenDynamic = options?.roofScreenDynamic !== false;
     const roofScreen = createVoltlineRoofScreenController(brandName, playerName);
     const roofTexture = roofScreen.texture;
     const shimmerTexture = createRoofShimmerTexture();
@@ -667,7 +671,7 @@ function addVoltlineRoofBranding(
                 needsScreenRefresh = true;
             }
 
-            if (needsScreenRefresh) {
+            if (roofScreenDynamic && needsScreenRefresh) {
                 roofScreen.render(brandState.activeMode, brandState.batteryLevel, vehicleState);
             }
 
@@ -686,7 +690,7 @@ function addVoltlineRoofBranding(
             const level = THREE.MathUtils.clamp(levelNormalized, 0, 1);
             brandState.batteryLevel = level;
             brandState.batteryPercent = Math.round(level * 100);
-            if (brandState.activeMode === 'battery') {
+            if (roofScreenDynamic && brandState.activeMode === 'battery') {
                 roofScreen.render(brandState.activeMode, level, brandState.lastVehicleState);
             }
         },

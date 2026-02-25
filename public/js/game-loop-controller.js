@@ -12,6 +12,8 @@ const BOT_MINE_POST_DEPLOY_MAX_INTERVAL_MS = 3800;
 const VEHICLE_COLLISION_CULL_DISTANCE = 52;
 const VEHICLE_COLLISION_CULL_DISTANCE_SQ =
     VEHICLE_COLLISION_CULL_DISTANCE * VEHICLE_COLLISION_CULL_DISTANCE;
+const BOT_STATUS_UPDATE_INTERVAL_SEC = 1 / 12;
+const EMPTY_ARRAY = Object.freeze([]);
 
 export function createGameLoopController(options = {}) {
     const {
@@ -128,6 +130,74 @@ export function createGameLoopController(options = {}) {
     let animationFrameId = null;
     const botMineDecisionById = new Map();
     const vehicleCollisionSnapshotBuffer = [];
+    const vehicleContactsBuffer = [];
+    const botCollisionSnapshotBuffer = [];
+    const multiplayerCollisionSnapshotBuffer = [];
+    const latestMultiplayerCollisionSnapshots = [];
+    const collectorBuffer = [{ id: 'player', position: car.position }];
+    const botHudEntriesBuffer = [];
+    const botHudEntryByCollectorId = new Map();
+    const mapFrameCache = {
+        pickups: EMPTY_ARRAY,
+        botDescriptors: EMPTY_ARRAY,
+        remotePlayers: EMPTY_ARRAY,
+        mines: EMPTY_ARRAY,
+    };
+    const mapFrameState = {
+        playerPosition: car.position,
+        playerHeading: 0,
+        playerSpeedKph: 0,
+        getPickups() {
+            return mapFrameCache.pickups;
+        },
+        getBotDescriptors() {
+            return mapFrameCache.botDescriptors;
+        },
+        getRemotePlayers() {
+            return mapFrameCache.remotePlayers;
+        },
+        getMines() {
+            return mapFrameCache.mines;
+        },
+        gameMode: 'bots',
+        welcomeVisible: false,
+        raceIntroActive: false,
+        editModeActive: false,
+    };
+    const audioFrameState = {
+        vehicleState: getVehicleState(),
+        isPaused: false,
+        welcomeVisible: false,
+        editModeActive: false,
+        raceIntroActive: false,
+        replayActive: false,
+        isCarDestroyed: false,
+        pickupRoundFinished: false,
+        isBatteryDepleted: false,
+        isChargingActive: false,
+        chargingLevel: 0,
+        worldMapVisible: false,
+        gameMode: 'bots',
+    };
+    const chargingHudFrameState = {
+        enabled: false,
+        isCharging: false,
+        chargingLevel: 0,
+        batteryDepleted: false,
+    };
+    const skidMarkFrameState = {
+        enabled: false,
+        vehicle: car,
+        vehicleState: null,
+    };
+    const mineFrameState = {
+        localCarPosition: car.position,
+        localPlayerId: '',
+        enableLocalCollision: false,
+    };
+    let botHudUpdateTimer = BOT_STATUS_UPDATE_INTERVAL_SEC;
+    let botMineDecisionStamp = 0;
+    let botHudEntryStamp = 0;
 
     return {
         start() {
@@ -165,6 +235,9 @@ export function createGameLoopController(options = {}) {
         let skidMarkVehicleState = null;
         let mineCollisionEnabled = false;
         let visiblePickups = null;
+        let botCollectorDescriptors = EMPTY_ARRAY;
+        let botHudState = EMPTY_ARRAY;
+        let multiplayerSnapshotsCaptured = false;
 
         welcomeModalUi.update(frameDelta);
         multiplayerController?.update?.(frameDelta);
@@ -246,24 +319,40 @@ export function createGameLoopController(options = {}) {
                     let physicsAccumulator = readPhysicsAccumulator() + frameDelta;
                     const botTrafficSystem = getBotTrafficSystem();
                     const botsEnabled = readBotsEnabled();
-                    const botCollisionSnapshots = botsEnabled
-                        ? filterCollisionSnapshotsByDistance(
-                              botTrafficSystem?.getCollisionSnapshots?.() || [],
-                              car.position
-                          )
-                        : [];
-                    const multiplayerCollisionSnapshots =
+                    const rawBotCollisionSnapshots = botsEnabled
+                        ? botTrafficSystem?.getCollisionSnapshots?.() || EMPTY_ARRAY
+                        : EMPTY_ARRAY;
+                    const rawMultiplayerCollisionSnapshots =
                         typeof getMultiplayerCollisionSnapshots === 'function'
-                            ? filterCollisionSnapshotsByDistance(
-                                  getMultiplayerCollisionSnapshots() || [],
-                                  car.position
-                              )
-                            : [];
+                            ? getMultiplayerCollisionSnapshots() || EMPTY_ARRAY
+                            : multiplayerController?.getCollisionSnapshots?.() || EMPTY_ARRAY;
+                    multiplayerSnapshotsCaptured = true;
+                    latestMultiplayerCollisionSnapshots.length = 0;
+                    appendCollisionSnapshots(
+                        latestMultiplayerCollisionSnapshots,
+                        rawMultiplayerCollisionSnapshots
+                    );
+
+                    filterCollisionSnapshotsByDistance(
+                        rawBotCollisionSnapshots,
+                        car.position,
+                        VEHICLE_COLLISION_CULL_DISTANCE_SQ,
+                        botCollisionSnapshotBuffer
+                    );
+                    filterCollisionSnapshotsByDistance(
+                        rawMultiplayerCollisionSnapshots,
+                        car.position,
+                        VEHICLE_COLLISION_CULL_DISTANCE_SQ,
+                        multiplayerCollisionSnapshotBuffer
+                    );
                     vehicleCollisionSnapshotBuffer.length = 0;
-                    appendCollisionSnapshots(vehicleCollisionSnapshotBuffer, botCollisionSnapshots);
                     appendCollisionSnapshots(
                         vehicleCollisionSnapshotBuffer,
-                        multiplayerCollisionSnapshots
+                        botCollisionSnapshotBuffer
+                    );
+                    appendCollisionSnapshots(
+                        vehicleCollisionSnapshotBuffer,
+                        multiplayerCollisionSnapshotBuffer
                     );
                     if (isBatteryDepleted) {
                         gameSessionController.clearDriveKeys();
@@ -294,7 +383,7 @@ export function createGameLoopController(options = {}) {
                     }
                     writePhysicsAccumulator(physicsAccumulator);
 
-                    const vehicleContacts = consumeVehicleCollisionContacts();
+                    const vehicleContacts = consumeVehicleCollisionContacts(vehicleContactsBuffer);
                     if (vehicleContacts.length > 0) {
                         crashDebrisController.processVehicleCollisionContacts(vehicleContacts);
                         audioController?.onVehicleCollisionContacts?.(vehicleContacts);
@@ -341,50 +430,46 @@ export function createGameLoopController(options = {}) {
                     visiblePickups = collectibleSystem.getVisiblePickups();
                     if (botsEnabled) {
                         botTrafficSystem?.update?.(car.position, visiblePickups, frameDelta);
-                        updateBotMineDeployment(botTrafficSystem, frameDelta);
+                        updateBotMineDeployment(
+                            botTrafficSystem?.getCollisionSnapshots?.() || EMPTY_ARRAY,
+                            frameDelta
+                        );
+                        botCollectorDescriptors =
+                            botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
+                        botHudState = botTrafficSystem?.getHudState?.() || EMPTY_ARRAY;
                     } else {
                         botMineDecisionById.clear();
                     }
-                    const collectors = botsEnabled
-                        ? [
-                              { id: 'player', position: car.position },
-                              ...(botTrafficSystem?.getCollectorDescriptors?.() || []),
-                          ]
-                        : [{ id: 'player', position: car.position }];
-                    collectibleSystem.updateForCollectors(collectors, frameDelta);
-                    if (botsEnabled && !readPickupRoundFinished()) {
+
+                    collectorBuffer.length = 1;
+                    if (botsEnabled) {
+                        appendCollisionSnapshots(collectorBuffer, botCollectorDescriptors);
+                    }
+                    collectibleSystem.updateForCollectors(collectorBuffer, frameDelta);
+                    if (botsEnabled) {
                         gameSessionController?.maybeFinalizeOnBotElimination?.({
                             totalPickups: roundTotalPickups,
-                            botHudState: botTrafficSystem?.getHudState?.() || [],
+                            botHudState,
                         });
                     }
-                    if (
-                        botsEnabled &&
-                        !readPickupRoundFinished() &&
-                        readTotalCollectedCount() >= roundTotalPickups
-                    ) {
+                    const totalCollectedCount = readTotalCollectedCount();
+                    if (botsEnabled && totalCollectedCount >= roundTotalPickups) {
                         gameSessionController.finalizePickupRound(
                             roundTotalPickups,
-                            readTotalCollectedCount(),
+                            totalCollectedCount,
                             {
                                 totalScore: readTotalScore(),
                             }
                         );
                     }
-                    const botHudEntries = botsEnabled
-                        ? (botTrafficSystem?.getHudState?.() || []).map((entry) => ({
-                              ...entry,
-                              score: Math.max(
-                                  0,
-                                  Math.round(
-                                      Number(
-                                          getCollectorScore(entry?.collectorId || '__unknown__')
-                                      ) || 0
-                                  )
-                              ),
-                          }))
-                        : [];
-                    botStatusUi.render(botHudEntries, createPlayerHudState());
+                    botHudUpdateTimer += frameDelta;
+                    if (botHudUpdateTimer >= BOT_STATUS_UPDATE_INTERVAL_SEC) {
+                        botHudUpdateTimer = 0;
+                        botStatusUi.render(
+                            botsEnabled ? buildBotHudEntries(botHudState) : EMPTY_ARRAY,
+                            createPlayerHudState()
+                        );
+                    }
                 }
 
                 replayEffectsController.updateReplayEffects(frameDelta);
@@ -410,61 +495,59 @@ export function createGameLoopController(options = {}) {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
         }
 
-        chargingProgressHudController.update(frameDelta, {
-            enabled: chargingHudEnabled,
-            isCharging: chargingHudActive,
-            chargingLevel: chargingHudLevel,
-            batteryDepleted: readBatteryDepleted(),
-        });
-        skidMarkController.update(frameDelta, {
-            enabled: skidMarksEnabled,
-            vehicle: car,
-            vehicleState: skidMarkVehicleState,
-        });
-        mineSystemController?.update?.(frameDelta, {
-            localCarPosition: car.position,
-            localPlayerId: readLocalPlayerId(),
-            enableLocalCollision: mineCollisionEnabled,
-        });
-        mapUiController?.update?.(frameDelta, {
-            playerPosition: car.position,
-            playerHeading: car.rotation.y,
-            playerSpeedKph: Math.abs(getVehicleState()?.speed || 0),
-            getPickups() {
-                return visiblePickups || collectibleSystem.getVisiblePickups();
-            },
-            getBotDescriptors() {
-                if (!readBotsEnabled()) {
-                    return [];
-                }
-                return getBotTrafficSystem()?.getCollectorDescriptors?.() || [];
-            },
-            getRemotePlayers() {
-                return multiplayerController?.getCollisionSnapshots?.() || [];
-            },
-            getMines() {
-                return mineSystemController?.getMineMarkers?.() || [];
-            },
-            gameMode: readGameMode(),
-            welcomeVisible: readWelcomeModalVisible(),
-            raceIntroActive: raceIntroController.isActive(),
-            editModeActive: isEditModeActive,
-        });
-        audioController?.update?.(frameDelta, {
-            vehicleState: getVehicleState(),
-            isPaused: readGamePaused(),
-            welcomeVisible: readWelcomeModalVisible(),
-            editModeActive: isEditModeActive,
-            raceIntroActive: raceIntroController.isActive(),
-            replayActive: replayController.isPlaybackActive(),
-            isCarDestroyed: readCarDestroyed(),
-            pickupRoundFinished: readPickupRoundFinished(),
-            isBatteryDepleted: readBatteryDepleted(),
-            isChargingActive: chargingHudActive,
-            chargingLevel: chargingHudLevel,
-            worldMapVisible: readWorldMapOpen(),
-            gameMode: readGameMode(),
-        });
+        chargingHudFrameState.enabled = chargingHudEnabled;
+        chargingHudFrameState.isCharging = chargingHudActive;
+        chargingHudFrameState.chargingLevel = chargingHudLevel;
+        chargingHudFrameState.batteryDepleted = readBatteryDepleted();
+        chargingProgressHudController.update(frameDelta, chargingHudFrameState);
+
+        skidMarkFrameState.enabled = skidMarksEnabled;
+        skidMarkFrameState.vehicleState = skidMarkVehicleState;
+        skidMarkController.update(frameDelta, skidMarkFrameState);
+
+        mineFrameState.localPlayerId = readLocalPlayerId();
+        mineFrameState.enableLocalCollision = mineCollisionEnabled;
+        mineSystemController?.update?.(frameDelta, mineFrameState);
+
+        if (!multiplayerSnapshotsCaptured) {
+            latestMultiplayerCollisionSnapshots.length = 0;
+            const multiplayerSnapshots =
+                typeof getMultiplayerCollisionSnapshots === 'function'
+                    ? getMultiplayerCollisionSnapshots() || EMPTY_ARRAY
+                    : multiplayerController?.getCollisionSnapshots?.() || EMPTY_ARRAY;
+            appendCollisionSnapshots(latestMultiplayerCollisionSnapshots, multiplayerSnapshots);
+        }
+        if (botCollectorDescriptors === EMPTY_ARRAY && readBotsEnabled()) {
+            botCollectorDescriptors =
+                getBotTrafficSystem()?.getCollectorDescriptors?.() || EMPTY_ARRAY;
+        }
+
+        mapFrameCache.pickups = visiblePickups || collectibleSystem.getVisiblePickups();
+        mapFrameCache.botDescriptors = readBotsEnabled() ? botCollectorDescriptors : EMPTY_ARRAY;
+        mapFrameCache.remotePlayers = latestMultiplayerCollisionSnapshots;
+        mapFrameCache.mines = mineSystemController?.getMineMarkers?.() || EMPTY_ARRAY;
+        mapFrameState.playerHeading = car.rotation.y;
+        mapFrameState.playerSpeedKph = Math.abs(getVehicleState()?.speed || 0);
+        mapFrameState.gameMode = readGameMode();
+        mapFrameState.welcomeVisible = readWelcomeModalVisible();
+        mapFrameState.raceIntroActive = raceIntroController.isActive();
+        mapFrameState.editModeActive = isEditModeActive;
+        mapUiController?.update?.(frameDelta, mapFrameState);
+
+        audioFrameState.vehicleState = getVehicleState();
+        audioFrameState.isPaused = readGamePaused();
+        audioFrameState.welcomeVisible = readWelcomeModalVisible();
+        audioFrameState.editModeActive = isEditModeActive;
+        audioFrameState.raceIntroActive = raceIntroController.isActive();
+        audioFrameState.replayActive = replayController.isPlaybackActive();
+        audioFrameState.isCarDestroyed = readCarDestroyed();
+        audioFrameState.pickupRoundFinished = readPickupRoundFinished();
+        audioFrameState.isBatteryDepleted = readBatteryDepleted();
+        audioFrameState.isChargingActive = chargingHudActive;
+        audioFrameState.chargingLevel = chargingHudLevel;
+        audioFrameState.worldMapVisible = readWorldMapOpen();
+        audioFrameState.gameMode = readGameMode();
+        audioController?.update?.(frameDelta, audioFrameState);
         scorePopupController?.update?.(camera, frameDelta);
 
         updateSunLightPosition();
@@ -478,9 +561,8 @@ export function createGameLoopController(options = {}) {
         });
     }
 
-    function updateBotMineDeployment(botTrafficSystem, frameDelta) {
+    function updateBotMineDeployment(snapshots = [], frameDelta) {
         if (
-            !botTrafficSystem ||
             readGameMode() !== 'bots' ||
             readCarDestroyed() ||
             readPickupRoundFinished() ||
@@ -490,14 +572,14 @@ export function createGameLoopController(options = {}) {
             return;
         }
 
-        const snapshots = botTrafficSystem.getCollisionSnapshots?.() || [];
         if (!Array.isArray(snapshots) || snapshots.length === 0) {
             botMineDecisionById.clear();
             return;
         }
 
         const now = Date.now();
-        const activeBotIds = new Set();
+        botMineDecisionStamp = botMineDecisionStamp >= 0x3fffffff ? 1 : botMineDecisionStamp + 1;
+        const activeStamp = botMineDecisionStamp;
 
         for (let i = 0; i < snapshots.length; i += 1) {
             const snapshot = snapshots[i];
@@ -505,14 +587,16 @@ export function createGameLoopController(options = {}) {
             if (!ownerId) {
                 continue;
             }
-            activeBotIds.add(ownerId);
 
             let decisionState = botMineDecisionById.get(ownerId);
             if (!decisionState) {
                 decisionState = {
                     nextAttemptAtMs: now + randomRangeMs(320, 1200),
+                    activeStamp,
                 };
                 botMineDecisionById.set(ownerId, decisionState);
+            } else {
+                decisionState.activeStamp = activeStamp;
             }
             if (now < decisionState.nextAttemptAtMs) {
                 continue;
@@ -594,8 +678,8 @@ export function createGameLoopController(options = {}) {
             }
         }
 
-        for (const botId of Array.from(botMineDecisionById.keys())) {
-            if (!activeBotIds.has(botId)) {
+        for (const [botId, decisionState] of botMineDecisionById.entries()) {
+            if (decisionState?.activeStamp !== activeStamp) {
                 botMineDecisionById.delete(botId);
             }
         }
@@ -608,15 +692,42 @@ export function createGameLoopController(options = {}) {
     function filterCollisionSnapshotsByDistance(
         snapshots = [],
         origin = null,
-        maxDistanceSq = VEHICLE_COLLISION_CULL_DISTANCE_SQ
+        maxDistanceSq = VEHICLE_COLLISION_CULL_DISTANCE_SQ,
+        outputBuffer = null
     ) {
+        const useOutputBuffer = Array.isArray(outputBuffer);
+        if (useOutputBuffer) {
+            outputBuffer.length = 0;
+        }
         if (!Array.isArray(snapshots) || snapshots.length === 0) {
-            return [];
+            return useOutputBuffer ? outputBuffer : [];
         }
         const originX = Number(origin?.x);
         const originZ = Number(origin?.z);
         if (!Number.isFinite(originX) || !Number.isFinite(originZ)) {
+            if (useOutputBuffer) {
+                appendCollisionSnapshots(outputBuffer, snapshots);
+                return outputBuffer;
+            }
             return snapshots;
+        }
+
+        if (useOutputBuffer) {
+            for (let i = 0; i < snapshots.length; i += 1) {
+                const snapshot = snapshots[i];
+                const x = Number(snapshot?.x);
+                const z = Number(snapshot?.z);
+                if (!Number.isFinite(x) || !Number.isFinite(z)) {
+                    continue;
+                }
+                const deltaX = x - originX;
+                const deltaZ = z - originZ;
+                const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+                if (distanceSq <= maxDistanceSq) {
+                    outputBuffer.push(snapshot);
+                }
+            }
+            return outputBuffer;
         }
 
         let filtered = null;
@@ -644,6 +755,50 @@ export function createGameLoopController(options = {}) {
             }
         }
         return filtered || snapshots;
+    }
+
+    function buildBotHudEntries(botHudState = []) {
+        botHudEntriesBuffer.length = 0;
+        if (!Array.isArray(botHudState) || botHudState.length === 0) {
+            botHudEntryByCollectorId.clear();
+            return botHudEntriesBuffer;
+        }
+
+        botHudEntryStamp = botHudEntryStamp >= 0x3fffffff ? 1 : botHudEntryStamp + 1;
+        const activeStamp = botHudEntryStamp;
+        for (let i = 0; i < botHudState.length; i += 1) {
+            const entry = botHudState[i];
+            const collectorId =
+                typeof entry?.collectorId === 'string' && entry.collectorId
+                    ? entry.collectorId
+                    : `bot:${i}`;
+            let botHudEntry = botHudEntryByCollectorId.get(collectorId);
+            if (!botHudEntry) {
+                botHudEntry = {};
+                botHudEntryByCollectorId.set(collectorId, botHudEntry);
+            }
+            botHudEntry.activeStamp = activeStamp;
+            botHudEntry.collectorId = collectorId;
+            botHudEntry.name = entry?.name || 'BOT';
+            botHudEntry.collectedCount = entry?.collectedCount || 0;
+            botHudEntry.targetColorHex = entry?.targetColorHex;
+            botHudEntry.livesRemaining = entry?.livesRemaining || 0;
+            botHudEntry.maxLives = entry?.maxLives || 1;
+            botHudEntry.respawning = Boolean(entry?.respawning);
+            botHudEntry.respawnMsRemaining = entry?.respawnMsRemaining || 0;
+            botHudEntry.score = Math.max(
+                0,
+                Math.round(Number(getCollectorScore(collectorId || '__unknown__')) || 0)
+            );
+            botHudEntriesBuffer.push(botHudEntry);
+        }
+
+        for (const [collectorId, botHudEntry] of botHudEntryByCollectorId.entries()) {
+            if (botHudEntry.activeStamp !== activeStamp) {
+                botHudEntryByCollectorId.delete(collectorId);
+            }
+        }
+        return botHudEntriesBuffer;
     }
 
     function appendCollisionSnapshots(buffer, snapshots = []) {

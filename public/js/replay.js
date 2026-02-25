@@ -3,6 +3,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 const CAPTURE_RATE = 1 / 30;
 const MAX_RECORDING_SECONDS = 120;
 const MAX_FRAMES = Math.ceil(MAX_RECORDING_SECONDS / CAPTURE_RATE);
+const FRAME_TRIM_BATCH = Math.max(60, Math.floor(MAX_FRAMES * 0.05));
 const MIN_REPLAY_DURATION = 1.2;
 
 const SHOT_TYPES = {
@@ -304,7 +305,21 @@ export function createReplayController(car, camera) {
 
     function recordFrame(sourceCar, vehicleState, time) {
         if (frames.length >= MAX_FRAMES) {
-            frames.shift();
+            const trimCount = Math.min(
+                FRAME_TRIM_BATCH,
+                Math.max(1, frames.length - MAX_FRAMES + 1)
+            );
+            frames.splice(0, trimCount);
+            if (events.length > 0) {
+                const oldestFrameTime = frames.length > 0 ? frames[0].time : time;
+                let staleEventCount = 0;
+                while (staleEventCount < events.length && events[staleEventCount].time < oldestFrameTime) {
+                    staleEventCount += 1;
+                }
+                if (staleEventCount > 0) {
+                    events.splice(0, staleEventCount);
+                }
+            }
         }
 
         frames.push({

@@ -18,12 +18,20 @@ const MINE_DETONATION_LIGHT_LIFE = 0.5;
 const MINE_DETONATION_RING_LIFE = 0.5;
 const RECENT_DETONATION_RETENTION_MS = 5000;
 const MAX_POOLED_DETONATION_EFFECTS = 48;
-const DETONATION_EFFECT_POOL_PREWARM_COUNT = 12;
+const MAX_ACTIVE_DETONATION_EFFECTS = 28;
+const MAX_ACTIVE_DETONATION_LIGHTS = 6;
+const DETONATION_EFFECT_POOL_PREWARM_COUNT = MAX_ACTIVE_DETONATION_EFFECTS;
 const MINE_DETONATION_LIGHT_INTENSITY = 7.2;
 const MINE_DETONATION_LIGHT_DISTANCE = 44;
 const MINE_DETONATION_LIGHT_NEAR_DISTANCE = 34;
 const MINE_DETONATION_LIGHT_NEAR_DISTANCE_SQ =
     MINE_DETONATION_LIGHT_NEAR_DISTANCE * MINE_DETONATION_LIGHT_NEAR_DISTANCE;
+const MINE_DETONATION_VISUAL_DISTANCE = 90;
+const MINE_DETONATION_VISUAL_DISTANCE_SQ =
+    MINE_DETONATION_VISUAL_DISTANCE * MINE_DETONATION_VISUAL_DISTANCE;
+const MINE_DETONATION_FULL_DETAIL_DISTANCE = 58;
+const MINE_DETONATION_FULL_DETAIL_DISTANCE_SQ =
+    MINE_DETONATION_FULL_DETAIL_DISTANCE * MINE_DETONATION_FULL_DETAIL_DISTANCE;
 const MINE_DETONATION_SHOCKWAVE_BASE_OPACITY = 0.66;
 const MINE_DETONATION_CORE_BASE_OPACITY = 0.96;
 const MINE_DETONATION_HALO_BASE_OPACITY = 0.64;
@@ -76,8 +84,10 @@ export function createMineSystemController(options = {}) {
     const ownerLastDeployAtMs = new Map();
     const previousPositionByEntityKey = new Map();
     const mineMeshPool = [];
+    const mineMarkerBuffer = [];
     let mineSequence = 0;
     let collisionWasEnabledLastFrame = false;
+    let activeDetonationLightCount = 0;
     const activeEntityKeysScratch = new Set();
     const otherMovementTargetsScratch = [];
     const localMineSweepMovement = {
@@ -622,7 +632,7 @@ export function createMineSystemController(options = {}) {
         });
         onMineDetonated({
             mineId,
-            position: detonationPosition.clone(),
+            position: detonationPosition,
             localHit: Boolean(context.localHit),
             ownerId: resolvedOwnerId,
             ownerName: resolvedOwnerName,
@@ -731,13 +741,9 @@ export function createMineSystemController(options = {}) {
             removeMine(mineId);
         }
         while (detonationEffects.length > 0) {
-            const effect = detonationEffects.pop();
-            scene.remove(effect.shockwave);
-            scene.remove(effect.coreSprite);
-            scene.remove(effect.haloSprite);
-            scene.remove(effect.light);
-            recycleDetonationEffect(effect);
+            removeActiveDetonationEffectAt(detonationEffects.length - 1);
         }
+        activeDetonationLightCount = 0;
         recentDetonations.clear();
         ownerLastDeployAtMs.clear();
         previousPositionByEntityKey.clear();
@@ -761,7 +767,6 @@ export function createMineSystemController(options = {}) {
         scene.add(mineBundle.group);
 
         spawnDetonationEffect(warmupPosition, { preferLight: true });
-        const warmupEffect = detonationEffects.pop() || null;
 
         const compileCamera = camera?.isCamera
             ? camera
@@ -787,12 +792,8 @@ export function createMineSystemController(options = {}) {
         } finally {
             scene.remove(mineBundle.group);
             recycleMineMeshBundle(mineBundle);
-            if (warmupEffect) {
-                scene.remove(warmupEffect.light);
-                scene.remove(warmupEffect.shockwave);
-                scene.remove(warmupEffect.coreSprite);
-                scene.remove(warmupEffect.haloSprite);
-                recycleDetonationEffect(warmupEffect);
+            if (detonationEffects.length > 0) {
+                removeActiveDetonationEffectAt(detonationEffects.length - 1);
             }
         }
 
@@ -801,20 +802,25 @@ export function createMineSystemController(options = {}) {
 
     function getMineMarkers() {
         const now = Date.now();
-        const markers = [];
+        let markerCount = 0;
         for (const mine of minesById.values()) {
             if (!mine || mine.expiresAt <= now) {
                 continue;
             }
-            markers.push({
-                id: mine.id,
-                x: mine.mesh.position.x,
-                z: mine.mesh.position.z,
-                armed: now >= mine.armedAt && mine.landed,
-                ownerId: mine.ownerId,
-            });
+            let marker = mineMarkerBuffer[markerCount];
+            if (!marker) {
+                marker = {};
+                mineMarkerBuffer[markerCount] = marker;
+            }
+            marker.id = mine.id;
+            marker.x = mine.mesh.position.x;
+            marker.z = mine.mesh.position.z;
+            marker.armed = now >= mine.armedAt && mine.landed;
+            marker.ownerId = mine.ownerId;
+            markerCount += 1;
         }
-        return markers;
+        mineMarkerBuffer.length = markerCount;
+        return mineMarkerBuffer;
     }
 
     function countOwnerMines(ownerId) {
@@ -873,12 +879,24 @@ export function createMineSystemController(options = {}) {
     }
 
     function spawnDetonationEffect(position, { preferLight = false } = {}) {
-        const effect = acquireDetonationEffect();
         const deltaX = position.x - car.position.x;
         const deltaZ = position.z - car.position.z;
         const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+        if (!preferLight && distanceSq > MINE_DETONATION_VISUAL_DISTANCE_SQ) {
+            return;
+        }
+        const fullDetail = Boolean(preferLight) || distanceSq <= MINE_DETONATION_FULL_DETAIL_DISTANCE_SQ;
+
+        if (detonationEffects.length >= MAX_ACTIVE_DETONATION_EFFECTS) {
+            removeActiveDetonationEffectAt(0);
+        }
+        const effect = acquireDetonationEffect();
+        if (!effect) {
+            return;
+        }
         const shouldSpawnLight =
-            Boolean(preferLight) || distanceSq <= MINE_DETONATION_LIGHT_NEAR_DISTANCE_SQ;
+            (Boolean(preferLight) || distanceSq <= MINE_DETONATION_LIGHT_NEAR_DISTANCE_SQ) &&
+            activeDetonationLightCount < MAX_ACTIVE_DETONATION_LIGHTS;
 
         effect.light.position.copy(position);
         effect.light.position.y += 0.42;
@@ -886,8 +904,10 @@ export function createMineSystemController(options = {}) {
         effect.light.userData.life = shouldSpawnLight ? MINE_DETONATION_LIGHT_LIFE : 0;
         effect.light.intensity = shouldSpawnLight ? MINE_DETONATION_LIGHT_INTENSITY : 0;
         effect.light.distance = shouldSpawnLight ? MINE_DETONATION_LIGHT_DISTANCE : 0;
+        effect.light.userData.active = shouldSpawnLight;
         if (shouldSpawnLight) {
             scene.add(effect.light);
+            activeDetonationLightCount += 1;
         }
 
         effect.shockwave.position.copy(position);
@@ -904,21 +924,25 @@ export function createMineSystemController(options = {}) {
         effect.coreSprite.position.y += 0.28;
         effect.coreSprite.scale.setScalar(MINE_DETONATION_CORE_BASE_SCALE);
         effect.coreSprite.material.rotation = Math.random() * Math.PI * 2;
-        effect.coreSprite.userData.life = MINE_DETONATION_RING_LIFE;
+        effect.coreSprite.userData.life = fullDetail ? MINE_DETONATION_RING_LIFE : 0;
         effect.coreSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.coreSprite.material.opacity = MINE_DETONATION_CORE_BASE_OPACITY;
+        effect.coreSprite.material.opacity = fullDetail ? MINE_DETONATION_CORE_BASE_OPACITY : 0;
         effect.coreSprite.material.color.copy(MINE_DETONATION_HOT_COLOR);
-        scene.add(effect.coreSprite);
+        if (fullDetail) {
+            scene.add(effect.coreSprite);
+        }
 
         effect.haloSprite.position.copy(position);
         effect.haloSprite.position.y += 0.16;
         effect.haloSprite.scale.setScalar(MINE_DETONATION_HALO_BASE_SCALE);
         effect.haloSprite.material.rotation = Math.random() * Math.PI * 2;
-        effect.haloSprite.userData.life = MINE_DETONATION_RING_LIFE;
+        effect.haloSprite.userData.life = fullDetail ? MINE_DETONATION_RING_LIFE : 0;
         effect.haloSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.haloSprite.material.opacity = MINE_DETONATION_HALO_BASE_OPACITY;
+        effect.haloSprite.material.opacity = fullDetail ? MINE_DETONATION_HALO_BASE_OPACITY : 0;
         effect.haloSprite.material.color.copy(MINE_DETONATION_WARM_COLOR);
-        scene.add(effect.haloSprite);
+        if (fullDetail) {
+            scene.add(effect.haloSprite);
+        }
 
         detonationEffects.push(effect);
     }
@@ -1002,12 +1026,7 @@ export function createMineSystemController(options = {}) {
                 continue;
             }
 
-            scene.remove(effect.light);
-            scene.remove(effect.shockwave);
-            scene.remove(effect.coreSprite);
-            scene.remove(effect.haloSprite);
-            recycleDetonationEffect(effect);
-            detonationEffects.splice(index, 1);
+            removeActiveDetonationEffectAt(index);
         }
     }
 
@@ -1022,15 +1041,40 @@ export function createMineSystemController(options = {}) {
         }
     }
 
+    function removeActiveDetonationEffectAt(index) {
+        const effect = detonationEffects[index];
+        if (!effect) {
+            return;
+        }
+
+        if (effect.light.userData.active) {
+            scene.remove(effect.light);
+            effect.light.userData.active = false;
+            activeDetonationLightCount = Math.max(0, activeDetonationLightCount - 1);
+        }
+        scene.remove(effect.light);
+        scene.remove(effect.shockwave);
+        scene.remove(effect.coreSprite);
+        scene.remove(effect.haloSprite);
+        recycleDetonationEffect(effect);
+
+        const lastIndex = detonationEffects.length - 1;
+        if (index !== lastIndex) {
+            detonationEffects[index] = detonationEffects[lastIndex];
+        }
+        detonationEffects.pop();
+    }
+
     function acquireDetonationEffect() {
         if (detonationEffectPool.length > 0) {
             return detonationEffectPool.pop();
         }
-        return createDetonationEffectBundle();
+        return null;
     }
 
     function createDetonationEffectBundle() {
         const light = new THREE.PointLight(0xffab6c, MINE_DETONATION_LIGHT_INTENSITY, 48, 2);
+        light.userData.active = false;
         const shockwaveMaterial = new THREE.MeshBasicMaterial({
             color: 0xff9560,
             map: detonationShockwaveTexture,
@@ -1072,6 +1116,7 @@ export function createMineSystemController(options = {}) {
         }
         effect.light.userData.life = 0;
         effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
+        effect.light.userData.active = false;
         effect.light.intensity = 0;
         effect.light.position.set(0, -1000, 0);
         effect.light.distance = 0;

@@ -134,6 +134,14 @@ const GRAPHICS_PRESET_MODE_ORDER = [
     GRAPHICS_QUALITY_MODES.quality,
     GRAPHICS_QUALITY_MODES.auto,
 ];
+const EMPTY_ARRAY = Object.freeze([]);
+const BOT_MINE_DEBRIS_BUDGET_NEAR = 6;
+const BOT_MINE_DEBRIS_BUDGET_MID = 2;
+const BOT_MINE_DEBRIS_BUDGET_FAR = 0;
+const BOT_MINE_DEBRIS_NEAR_DISTANCE = 52;
+const BOT_MINE_DEBRIS_MID_DISTANCE = 84;
+const BOT_MINE_DEBRIS_NEAR_DISTANCE_SQ = BOT_MINE_DEBRIS_NEAR_DISTANCE * BOT_MINE_DEBRIS_NEAR_DISTANCE;
+const BOT_MINE_DEBRIS_MID_DISTANCE_SQ = BOT_MINE_DEBRIS_MID_DISTANCE * BOT_MINE_DEBRIS_MID_DISTANCE;
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(GRAPHICS_QUALITY_MODES.balanced);
@@ -293,6 +301,7 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
 
     try {
         runtimeState.collectibleSystem?.prewarmEffects?.();
+        skidMarkController?.prewarmParticles?.();
 
         const collectors = [{ id: 'player', position: car.position }];
         if (mode === 'bots') {
@@ -301,7 +310,7 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
         runtimeState.collectibleSystem?.primeForCollectors?.(collectors);
         reportProgress({
             stage: 'graphics',
-            progress: 0.2,
+            progress: 0.18,
         });
 
         await waitForAnimationFrames(1);
@@ -311,14 +320,14 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
         );
         reportProgress({
             stage: 'graphics',
-            progress: 0.45,
+            progress: 0.38,
         });
 
         await waitForAnimationFrames(1);
         const warmedMineShaders = runtimeState.mineController?.warmupGraphics?.(renderer, camera);
         reportProgress({
             stage: 'graphics',
-            progress: 0.68,
+            progress: 0.56,
         });
 
         await waitForAnimationFrames(1);
@@ -328,7 +337,14 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
         );
         reportProgress({
             stage: 'graphics',
-            progress: 0.86,
+            progress: 0.74,
+        });
+
+        await waitForAnimationFrames(1);
+        const warmedSkidShaders = skidMarkController?.warmupGraphics?.(renderer, camera);
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.88,
         });
 
         await waitForAnimationFrames(1);
@@ -337,7 +353,12 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
         }
         await waitForAnimationFrames(1);
 
-        const warmupResults = [warmedCollectibleShaders, warmedMineShaders, warmedCrashShaders];
+        const warmupResults = [
+            warmedCollectibleShaders,
+            warmedMineShaders,
+            warmedCrashShaders,
+            warmedSkidShaders,
+        ];
         runtimeGraphicsWarmupReady = warmupResults.every(
             (value) => value === undefined || Boolean(value)
         );
@@ -1008,6 +1029,7 @@ runtimeState.replayEffectsController = createReplayEffectsController({
     replayEventCrash: REPLAY_EVENT_CRASH,
     obstacleCrashMaxSpeed: OBSTACLE_CRASH_MAX_SPEED,
 });
+const mineOtherVehicleTargetsBuffer = [];
 runtimeState.mineController = createMineSystemController({
     scene,
     car,
@@ -1015,17 +1037,31 @@ runtimeState.mineController = createMineSystemController({
     getVehicleState,
     getOtherVehicleTargets: () => {
         if (runtimeState.gameMode !== 'bots') {
-            return [];
+            mineOtherVehicleTargetsBuffer.length = 0;
+            return mineOtherVehicleTargetsBuffer;
         }
-        const descriptors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || [];
-        return descriptors.map((entry) => ({
-            id: entry.id,
-            ownerId: entry.id,
-            type: 'bot',
-            label: entry.id,
-            position: entry.position,
-            mineImmune: Boolean(entry.mineImmune),
-        }));
+        const descriptors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
+        let targetCount = 0;
+        for (let i = 0; i < descriptors.length; i += 1) {
+            const entry = descriptors[i];
+            if (!entry || !entry.position) {
+                continue;
+            }
+            let target = mineOtherVehicleTargetsBuffer[targetCount];
+            if (!target) {
+                target = {};
+                mineOtherVehicleTargetsBuffer[targetCount] = target;
+            }
+            target.id = entry.id;
+            target.ownerId = entry.id;
+            target.type = 'bot';
+            target.label = entry.id;
+            target.position = entry.position;
+            target.mineImmune = Boolean(entry.mineImmune);
+            targetCount += 1;
+        }
+        mineOtherVehicleTargetsBuffer.length = targetCount;
+        return mineOtherVehicleTargetsBuffer;
     },
     getLocalPlayerId: () =>
         runtimeState.gameMode === 'bots'
@@ -1130,11 +1166,33 @@ runtimeState.mineController = createMineSystemController({
             },
         });
     },
-    onOtherVehicleMineHit({ target, ownerId = '' }) {
+    onOtherVehicleMineHit({ target, ownerId = '', position = null }) {
         if (target?.type !== 'bot' || runtimeState.gameMode !== 'bots') {
             return;
         }
-        const destroyed = runtimeState.botTrafficSystem?.triggerMineHit?.(target.id);
+
+        let hasDistance = false;
+        let distanceSq = 0;
+        let debrisSpawnBudget = BOT_MINE_DEBRIS_BUDGET_NEAR;
+        const positionX = Number(position?.x);
+        const positionZ = Number(position?.z);
+        if (Number.isFinite(positionX) && Number.isFinite(positionZ)) {
+            const deltaX = positionX - car.position.x;
+            const deltaZ = positionZ - car.position.z;
+            distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+            hasDistance = true;
+            if (distanceSq > BOT_MINE_DEBRIS_MID_DISTANCE_SQ) {
+                debrisSpawnBudget = BOT_MINE_DEBRIS_BUDGET_FAR;
+            } else if (distanceSq > BOT_MINE_DEBRIS_NEAR_DISTANCE_SQ) {
+                debrisSpawnBudget = BOT_MINE_DEBRIS_BUDGET_MID;
+            }
+        }
+
+        const destroyed = runtimeState.botTrafficSystem?.triggerMineHit?.(target.id, {
+            crashContext: {
+                debrisSpawnBudget,
+            },
+        });
         if (destroyed) {
             const targetCollectorId = typeof target?.id === 'string' ? target.id : '';
             const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
@@ -1159,7 +1217,7 @@ runtimeState.mineController = createMineSystemController({
                     `Mine kill on ${target.label || target.id}: +${pointsAwarded} pts.`,
                     1500
                 );
-            } else {
+            } else if (!hasDistance || distanceSq <= BOT_MINE_DEBRIS_MID_DISTANCE_SQ) {
                 objectiveUi.showInfo(`Mine hit ${target.label || target.id}.`, 1400);
             }
         }
@@ -1660,7 +1718,7 @@ runtimeState.gameLoopController = createGameLoopController({
     mineSystemController: runtimeState.mineController,
     scorePopupController: runtimeState.scorePopupController,
     getMultiplayerCollisionSnapshots() {
-        return runtimeState.multiplayerController?.getCollisionSnapshots?.() || [];
+        return runtimeState.multiplayerController?.getCollisionSnapshots?.() || EMPTY_ARRAY;
     },
     crashDebrisController: runtimeState.crashDebrisController,
     replayEffectsController: runtimeState.replayEffectsController,

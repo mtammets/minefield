@@ -91,7 +91,11 @@ export function createReplayEffectsController({
 
                 if (effect.life <= 0) {
                     recycleReplayPickupEffect(scene, replayEffectPool, effect);
-                    replayEffects.splice(i, 1);
+                    const lastIndex = replayEffects.length - 1;
+                    if (i !== lastIndex) {
+                        replayEffects[i] = replayEffects[lastIndex];
+                    }
+                    replayEffects.pop();
                 }
             }
         },

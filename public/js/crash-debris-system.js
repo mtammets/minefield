@@ -28,6 +28,10 @@ const DEBRIS_PRECISE_PROBE_NEAR_GROUND_THRESHOLD = 0.24;
 const REPLICATION_MAX_DEBRIS_PIECES = 18;
 const REPLICATION_MISS_TOLERANCE = 3;
 const MAX_ACTIVE_DEBRIS_PIECES = 80;
+const DEBRIS_SPAWN_BUDGET_PER_FRAME = 3;
+const DEBRIS_SPAWN_BUDGET_UNDER_LOAD = 1;
+const MAX_PENDING_DEBRIS_SPAWNS = 48;
+const MAX_PRECISE_DEBRIS_PROBES_PER_FRAME = 4;
 
 export function createCrashDebrisController({
     scene,
@@ -53,6 +57,11 @@ export function createCrashDebrisController({
     const debrisPieceById = new Map();
     const debrisMeshPoolByPartId = new Map();
     const debrisGroundOffsetByPartId = new Map();
+    const pendingDebrisSpawns = [];
+    const visibleCrashPartsBuffer = [];
+    const explosionDebrisSelectionBuffer = [];
+    const explosionDebrisRemainingBuffer = [];
+    const explosionDebrisSelectedIdSet = new Set();
     const detachedCrashPartIds = new Set();
     const crashPartById = new Map();
     const crashCornerAssemblies = new Map();
@@ -61,8 +70,12 @@ export function createCrashDebrisController({
     const bodyPartBaselines = new Map();
     const crashDamageTuning = createDefaultCrashDamageTuning();
     const debrisBottomProbeBox = new THREE.Box3();
+    const spawnRelativeScratch = new THREE.Vector3();
+    const spawnVelocityScratch = new THREE.Vector3();
     let crashPartIndexReady = false;
     let nextDebrisPieceId = 1;
+    let preciseProbeBudgetRemaining = 0;
+    let pendingDebrisSpawnReadIndex = 0;
 
     let explosionLight = null;
     let explosionLightLife = 0;
@@ -426,14 +439,23 @@ export function createCrashDebrisController({
     }
 
     function detachCrashPart(part, crashContext, options = {}) {
-        const { cascadeCorner = false, registerDamage = true, damageScale = 1 } = options;
+        const {
+            cascadeCorner = false,
+            registerDamage = true,
+            damageScale = 1,
+            deferDebrisSpawn = false,
+        } = options;
         if (!part?.source || detachedCrashPartIds.has(part.id)) {
             return false;
         }
 
         detachedCrashPartIds.add(part.id);
         part.source.visible = false;
-        spawnCrashPartDebris(part, crashContext);
+        if (deferDebrisSpawn) {
+            queueCrashPartDebrisSpawn(part, crashContext);
+        } else {
+            spawnCrashPartDebris(part, crashContext);
+        }
         if (registerDamage) {
             registerDetachedPartDamage(part, damageScale);
         }
@@ -484,14 +506,24 @@ export function createCrashDebrisController({
         }
 
         const crashContext = buildCrashContext(hitPosition, collision);
-        const visibleParts = crashParts.filter((part) => part?.source?.visible && part?.id);
+        const visibleParts = visibleCrashPartsBuffer;
+        visibleParts.length = 0;
+        for (let i = 0; i < crashParts.length; i += 1) {
+            const part = crashParts[i];
+            if (!part?.source?.visible || !part?.id) {
+                continue;
+            }
+            visibleParts.push(part);
+        }
         const selectedParts = selectExplosionDebrisParts(crashContext, visibleParts);
-        selectedParts.forEach((part) => {
+        for (let i = 0; i < selectedParts.length; i += 1) {
+            const part = selectedParts[i];
             detachCrashPart(part, crashContext, {
                 cascadeCorner: false,
                 registerDamage: false,
+                deferDebrisSpawn: true,
             });
-        });
+        }
         applyDetachedPartVisibility();
 
         const activeExplosionLight = ensureExplosionLightAttached();
@@ -506,8 +538,12 @@ export function createCrashDebrisController({
         }
 
         const budget = resolveExplosionDebrisBudget(crashContext, availableParts.length);
-        const selected = [];
-        const selectedIds = new Set();
+        const selected = explosionDebrisSelectionBuffer;
+        const selectedIds = explosionDebrisSelectedIdSet;
+        const remaining = explosionDebrisRemainingBuffer;
+        selected.length = 0;
+        selectedIds.clear();
+        remaining.length = 0;
         const candidates = selectCrashPartsForImpact(crashContext, true);
         for (let i = 0; i < candidates.length; i += 1) {
             const part = candidates[i];
@@ -521,7 +557,6 @@ export function createCrashDebrisController({
             }
         }
 
-        const remaining = [];
         for (let i = 0; i < availableParts.length; i += 1) {
             const part = availableParts[i];
             if (!part?.id || selectedIds.has(part.id)) {
@@ -538,6 +573,51 @@ export function createCrashDebrisController({
             selected.push(remaining[i]);
         }
         return selected;
+    }
+
+    function queueCrashPartDebrisSpawn(part, crashContext) {
+        if (!part?.source || !part?.id || !crashContext) {
+            return;
+        }
+        const activePendingCount = pendingDebrisSpawns.length - pendingDebrisSpawnReadIndex;
+        if (activePendingCount >= MAX_PENDING_DEBRIS_SPAWNS) {
+            spawnCrashPartDebris(part, crashContext);
+            return;
+        }
+        pendingDebrisSpawns.push({
+            part,
+            crashContext,
+        });
+    }
+
+    function processPendingDebrisSpawns(dt) {
+        if (pendingDebrisSpawns.length - pendingDebrisSpawnReadIndex <= 0) {
+            return;
+        }
+        let budget = DEBRIS_SPAWN_BUDGET_PER_FRAME;
+        if (
+            dt > 1 / 42 ||
+            debrisPieces.length >= Math.floor(MAX_ACTIVE_DEBRIS_PIECES * 0.8)
+        ) {
+            budget = DEBRIS_SPAWN_BUDGET_UNDER_LOAD;
+        }
+        while (budget > 0 && pendingDebrisSpawnReadIndex < pendingDebrisSpawns.length) {
+            const entry = pendingDebrisSpawns[pendingDebrisSpawnReadIndex];
+            pendingDebrisSpawnReadIndex += 1;
+            if (entry?.part && entry?.crashContext) {
+                spawnCrashPartDebris(entry.part, entry.crashContext);
+            }
+            budget -= 1;
+        }
+        if (pendingDebrisSpawnReadIndex >= pendingDebrisSpawns.length) {
+            pendingDebrisSpawns.length = 0;
+            pendingDebrisSpawnReadIndex = 0;
+            return;
+        }
+        if (pendingDebrisSpawnReadIndex >= 16) {
+            pendingDebrisSpawns.splice(0, pendingDebrisSpawnReadIndex);
+            pendingDebrisSpawnReadIndex = 0;
+        }
     }
 
     function resolveExplosionDebrisBudget(crashContext, availableCount = 0) {
@@ -956,13 +1036,13 @@ export function createCrashDebrisController({
         source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
         scene.add(debrisMesh);
 
-        const relative = debrisMesh.position.clone().sub(crashContext.origin);
+        const relative = spawnRelativeScratch.copy(debrisMesh.position).sub(crashContext.origin);
         relative.y = 0;
 
         const partSideSign = part.side === 'left' ? -1 : part.side === 'right' ? 1 : 0;
         const partZoneSign = part.zone === 'front' ? 1 : part.zone === 'rear' ? -1 : 0;
         const radialDirection =
-            relative.lengthSq() > 0.0001 ? relative.normalize() : crashContext.hitDirection.clone();
+            relative.lengthSq() > 0.0001 ? relative.normalize() : crashContext.hitDirection;
         const frontalImpact = crashContext.frontalImpact || 0;
         const lampPostFrontBoost =
             crashContext.obstacleCategory === 'lamp_post' && crashContext.hitZone === 'front'
@@ -983,21 +1063,18 @@ export function createCrashDebrisController({
             crashDamageTuning.debrisImpactInertiaScale *
             inertiaCarryScale;
 
-        const velocity = new THREE.Vector3()
-            .addScaledVector(
-                radialDirection,
-                crashDamageTuning.debrisLateralBoost * reducedBlastScale
-            )
-            .addScaledVector(
-                crashContext.impactNormal,
-                crashDamageTuning.debrisBlastBoost * reducedBlastScale
-            )
-            .addScaledVector(
-                crashContext.carForward,
-                crashDamageTuning.debrisForwardCarryBoost * forwardCarryScale
-            )
-            .addScaledVector(crashContext.impactTravelDirection, inertiaCarryBoost)
-            .addScaledVector(crashContext.carRight, partSideSign * (0.6 + Math.random() * 1.24));
+        const velocity = new THREE.Vector3().copy(
+            spawnVelocityScratch
+                .set(0, 0, 0)
+                .addScaledVector(radialDirection, crashDamageTuning.debrisLateralBoost * reducedBlastScale)
+                .addScaledVector(crashContext.impactNormal, crashDamageTuning.debrisBlastBoost * reducedBlastScale)
+                .addScaledVector(
+                    crashContext.carForward,
+                    crashDamageTuning.debrisForwardCarryBoost * forwardCarryScale
+                )
+                .addScaledVector(crashContext.impactTravelDirection, inertiaCarryBoost)
+                .addScaledVector(crashContext.carRight, partSideSign * (0.6 + Math.random() * 1.24))
+        );
 
         if (part.type === 'wheel') {
             velocity.addScaledVector(
@@ -1189,12 +1266,15 @@ export function createCrashDebrisController({
         return resolvedOffset;
     }
 
-    function getDebrisBottomY(piece, { precise = false } = {}) {
+    function getDebrisBottomY(piece, { precise = false, bypassBudget = false } = {}) {
         const halfY = Number.isFinite(piece.groundOffset)
             ? piece.groundOffset
             : DEFAULT_DEBRIS_BOTTOM_OFFSET;
-        if (!precise) {
+        if (!precise || (!bypassBudget && preciseProbeBudgetRemaining <= 0)) {
             return piece.mesh.position.y - halfY;
+        }
+        if (!bypassBudget) {
+            preciseProbeBudgetRemaining -= 1;
         }
         piece.mesh.updateWorldMatrix(true, true);
         debrisBottomProbeBox.setFromObject(piece.mesh);
@@ -1225,6 +1305,7 @@ export function createCrashDebrisController({
         }
         const bottomY = getDebrisBottomY(piece, {
             precise: forceSnap || precise,
+            bypassBudget: forceSnap,
         });
         const groundY = getDebrisGroundHeightAt(
             piece,
@@ -1477,6 +1558,8 @@ export function createCrashDebrisController({
     }
 
     function updateDebris(dt) {
+        preciseProbeBudgetRemaining = MAX_PRECISE_DEBRIS_PROBES_PER_FRAME;
+        processPendingDebrisSpawns(dt);
         for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
             const piece = debrisPieces[i];
             if (Number.isFinite(piece.life)) {
@@ -1628,6 +1711,8 @@ export function createCrashDebrisController({
     }
 
     function clearDebris() {
+        pendingDebrisSpawns.length = 0;
+        pendingDebrisSpawnReadIndex = 0;
         for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
             removeDebrisPieceAtIndex(i);
         }
@@ -1727,7 +1812,11 @@ export function createCrashDebrisController({
         scene.remove(piece.mesh);
         recycleDebrisMesh(piece.partId, piece.mesh);
         debrisPieceById.delete(piece.id);
-        debrisPieces.splice(index, 1);
+        const lastIndex = debrisPieces.length - 1;
+        if (index !== lastIndex) {
+            debrisPieces[index] = debrisPieces[lastIndex];
+        }
+        debrisPieces.pop();
     }
 
     function ensureExplosionLightAttached() {

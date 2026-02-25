@@ -238,6 +238,7 @@ let terrainSupportFilterInitialized = false;
 let isPhysicsInitialized = false;
 let pendingCrashCollision = null;
 const pendingVehicleCollisionContacts = [];
+const EMPTY_COLLISION_CONTACTS = Object.freeze([]);
 const obstacleBroadphaseByArray = new WeakMap();
 const vehicleDamageState = {
     wheelLossCount: 0,
@@ -304,9 +305,21 @@ export function consumeCrashCollision() {
     return collision;
 }
 
-export function consumeVehicleCollisionContacts() {
+export function consumeVehicleCollisionContacts(outputBuffer = null) {
     if (pendingVehicleCollisionContacts.length === 0) {
-        return [];
+        if (Array.isArray(outputBuffer)) {
+            outputBuffer.length = 0;
+            return outputBuffer;
+        }
+        return EMPTY_COLLISION_CONTACTS;
+    }
+    if (Array.isArray(outputBuffer)) {
+        outputBuffer.length = pendingVehicleCollisionContacts.length;
+        for (let i = 0; i < pendingVehicleCollisionContacts.length; i += 1) {
+            outputBuffer[i] = pendingVehicleCollisionContacts[i];
+        }
+        pendingVehicleCollisionContacts.length = 0;
+        return outputBuffer;
     }
     const contacts = pendingVehicleCollisionContacts.slice();
     pendingVehicleCollisionContacts.length = 0;
@@ -821,7 +834,7 @@ function buildObstacleBroadphase(staticObstacles) {
                     bucket = [];
                     cells.set(key, bucket);
                 }
-                bucket.push(obstacle);
+                bucket.push(i);
             }
         }
     }
@@ -829,9 +842,11 @@ function buildObstacleBroadphase(staticObstacles) {
     return {
         cellSize,
         cells,
+        obstacles: staticObstacles,
         obstacleCount: staticObstacles.length,
         queryResult: [],
-        querySeen: new Set(),
+        queryToken: 0,
+        visitMarks: new Uint32Array(Math.max(1, staticObstacles.length)),
     };
 }
 
@@ -846,11 +861,16 @@ function queryObstacleBroadphase(broadphase, position, searchRadius = 0) {
     const maxCellX = Math.floor(maxX / broadphase.cellSize);
     const minCellZ = Math.floor(minZ / broadphase.cellSize);
     const maxCellZ = Math.floor(maxZ / broadphase.cellSize);
-
     const result = broadphase.queryResult;
-    const seen = broadphase.querySeen;
+    const visitMarks = broadphase.visitMarks;
+    const obstacles = broadphase.obstacles;
     result.length = 0;
-    seen.clear();
+    let token = (broadphase.queryToken || 0) + 1;
+    if (token >= 0xfffffffe) {
+        visitMarks.fill(0);
+        token = 1;
+    }
+    broadphase.queryToken = token;
 
     for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ += 1) {
         for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
@@ -859,12 +879,15 @@ function queryObstacleBroadphase(broadphase, position, searchRadius = 0) {
                 continue;
             }
             for (let i = 0; i < bucket.length; i += 1) {
-                const obstacle = bucket[i];
-                if (seen.has(obstacle)) {
+                const obstacleIndex = bucket[i];
+                if (!Number.isFinite(obstacleIndex) || visitMarks[obstacleIndex] === token) {
                     continue;
                 }
-                seen.add(obstacle);
-                result.push(obstacle);
+                visitMarks[obstacleIndex] = token;
+                const obstacle = obstacles[obstacleIndex];
+                if (obstacle) {
+                    result.push(obstacle);
+                }
             }
         }
     }

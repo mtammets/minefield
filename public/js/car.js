@@ -74,6 +74,7 @@ export function createCarRig(options = {}) {
         showBatteryIndicator = false,
         lightConfig = {},
         carBaseRideHeight = DEFAULT_CAR_BASE_RIDE_HEIGHT,
+        roofScreenDynamic = true,
     } = options;
 
     const car = new THREE.Group();
@@ -87,7 +88,11 @@ export function createCarRig(options = {}) {
     // Keep tire contact visually aligned with the raised road surface planes.
     car.position.y = carBaseRideHeight;
 
-    const bodyMeta = addLuxuryBody(bodyRig, { bodyColor, displayName });
+    const bodyMeta = addLuxuryBody(bodyRig, {
+        bodyColor,
+        displayName,
+        roofScreenDynamic,
+    });
     const wheelController = initializeWheels(wheelRig, { addWheelWellLights });
     const lightController = addLights ? addLightsToCar(lightRig, lightConfig) : null;
     const suspensionLinkage = createSuspensionLinkage(car, bodyRig, wheelRig, bodyMeta);
@@ -735,7 +740,14 @@ function getWheelKey(side, zone) {
 function createScrapeSparkSystem(car) {
     const sparkGeometry = new THREE.SphereGeometry(0.03, 6, 6);
     const sparks = [];
+    const sparkPool = [];
     const localPos = new THREE.Vector3();
+    const sparkPoolLimit = DAMAGE_SCRAPE.sparkMaxCount;
+    const prewarmCount = Math.max(8, Math.floor(DAMAGE_SCRAPE.sparkMaxCount * 0.35));
+
+    for (let i = 0; i < prewarmCount; i += 1) {
+        sparkPool.push(createSparkParticle());
+    }
 
     return {
         update(vehicleState, scrapeContacts = [], dt = 1 / 60) {
@@ -766,15 +778,9 @@ function createScrapeSparkSystem(car) {
                 removeSpark(0);
             }
 
-            const sparkMaterial = new THREE.MeshBasicMaterial({
-                color: 0xffd28a,
-                transparent: true,
-                opacity: 0.95,
-                blending: THREE.AdditiveBlending,
-                depthWrite: false,
-                toneMapped: false,
-            });
-            const spark = new THREE.Mesh(sparkGeometry, sparkMaterial);
+            const sparkParticle = acquireSparkParticle();
+            const spark = sparkParticle.mesh;
+            spark.material.opacity = 0.95;
             const scale = 0.62 + Math.random() * 0.86;
             spark.scale.setScalar(scale);
             spark.position.copy(localPos);
@@ -786,7 +792,7 @@ function createScrapeSparkSystem(car) {
             const rearKick = THREE.MathUtils.lerp(1.2, 6.4, intensity) + speedAbs * 0.1;
             const lateralKick = (Math.random() - 0.5) * THREE.MathUtils.lerp(1.8, 6.1, intensity);
             const upwardKick = 1.5 + Math.random() * 2.3 + intensity * 2.15;
-            const velocity = new THREE.Vector3(lateralKick, upwardKick, rearKick);
+            sparkParticle.velocity.set(lateralKick, upwardKick, rearKick);
 
             const life =
                 THREE.MathUtils.lerp(
@@ -795,12 +801,9 @@ function createScrapeSparkSystem(car) {
                     Math.random()
                 ) *
                 (0.86 + intensity * 0.48);
-            sparks.push({
-                mesh: spark,
-                velocity,
-                life,
-                maxLife: life,
-            });
+            sparkParticle.life = life;
+            sparkParticle.maxLife = life;
+            sparks.push(sparkParticle);
         }
     }
 
@@ -832,8 +835,54 @@ function createScrapeSparkSystem(car) {
         if (parent) {
             parent.remove(spark.mesh);
         }
-        spark.mesh.material?.dispose?.();
-        sparks.splice(index, 1);
+        const lastIndex = sparks.length - 1;
+        if (index !== lastIndex) {
+            sparks[index] = sparks[lastIndex];
+        }
+        sparks.pop();
+        recycleSparkParticle(spark);
+    }
+
+    function acquireSparkParticle() {
+        if (sparkPool.length > 0) {
+            return sparkPool.pop();
+        }
+        return createSparkParticle();
+    }
+
+    function recycleSparkParticle(sparkParticle) {
+        if (!sparkParticle?.mesh) {
+            return;
+        }
+        sparkParticle.life = 0;
+        sparkParticle.maxLife = 1;
+        sparkParticle.velocity.set(0, 0, 0);
+        sparkParticle.mesh.position.set(0, -1000, 0);
+        sparkParticle.mesh.scale.setScalar(0.0001);
+        sparkParticle.mesh.material.opacity = 0;
+        if (sparkPool.length < sparkPoolLimit) {
+            sparkPool.push(sparkParticle);
+            return;
+        }
+        sparkParticle.mesh.material?.dispose?.();
+    }
+
+    function createSparkParticle() {
+        const sparkMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffd28a,
+            transparent: true,
+            opacity: 0,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const mesh = new THREE.Mesh(sparkGeometry, sparkMaterial);
+        return {
+            mesh,
+            velocity: new THREE.Vector3(),
+            life: 0,
+            maxLife: 1,
+        };
     }
 }
 

@@ -139,8 +139,8 @@ export function createScorePopupController() {
             }
         },
         clear() {
-            for (let i = popups.length - 1; i >= 0; i -= 1) {
-                removePopup(popups[i], i);
+            while (popups.length > 0) {
+                removePopup(popups[popups.length - 1], popups.length - 1);
             }
             laneByCollector.clear();
         },
@@ -157,7 +157,14 @@ export function createScorePopupController() {
         if (popup?.el?.parentNode) {
             popup.el.parentNode.removeChild(popup.el);
         }
-        popups.splice(index, 1);
+        if (index < 0 || index >= popups.length) {
+            return;
+        }
+        const lastIndex = popups.length - 1;
+        if (index !== lastIndex) {
+            popups[index] = popups[lastIndex];
+        }
+        popups.pop();
     }
 }
 

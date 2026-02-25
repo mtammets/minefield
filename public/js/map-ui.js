@@ -33,6 +33,11 @@ export function createMapUiController(options = {}) {
     if (!dom.ready) {
         return createNoopController();
     }
+    const miniMapCtx = dom.miniMapCanvas.getContext('2d');
+    const worldMapCtx = dom.worldMapCanvas.getContext('2d');
+    if (!miniMapCtx || !worldMapCtx) {
+        return createNoopController();
+    }
 
     const worldBounds = resolveWorldBounds(options.worldBounds);
     const cityMapLayout = resolveCityMapLayout(options.cityMapLayout);
@@ -322,9 +327,9 @@ export function createMapUiController(options = {}) {
         const minesPayload =
             typeof frameState.getMines === 'function' ? frameState.getMines() : frameState.mines;
 
-        state.pickups = normalizePickups(pickupsPayload);
-        state.vehicles = normalizeVehicles(botDescriptorsPayload, remotePlayersPayload);
-        state.mines = normalizeMines(minesPayload);
+        normalizePickupsInPlace(state.pickups, pickupsPayload);
+        normalizeVehiclesInPlace(state.vehicles, botDescriptorsPayload, remotePlayersPayload);
+        normalizeMinesInPlace(state.mines, minesPayload);
     }
 
     function rebuildRoute() {
@@ -374,10 +379,7 @@ export function createMapUiController(options = {}) {
 
     function drawMinimap(_deltaTime) {
         const canvas = dom.miniMapCanvas;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            return;
-        }
+        const ctx = miniMapCtx;
 
         const width = canvas.width;
         const height = canvas.height;
@@ -545,10 +547,7 @@ export function createMapUiController(options = {}) {
         }
 
         const canvas = dom.worldMapCanvas;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            return;
-        }
+        const ctx = worldMapCtx;
 
         const width = canvas.width;
         const height = canvas.height;
@@ -745,12 +744,9 @@ export function createMapUiController(options = {}) {
             ) {
                 continue;
             }
-            fillWorldQuad(ctx, centerX, centerZ, zoom, [
-                { x: line.coord - line.roadWidth * 0.5, z: zMin },
-                { x: line.coord + line.roadWidth * 0.5, z: zMin },
-                { x: line.coord + line.roadWidth * 0.5, z: zMax },
-                { x: line.coord - line.roadWidth * 0.5, z: zMax },
-            ]);
+            const minRoadX = line.coord - line.roadWidth * 0.5;
+            const maxRoadX = line.coord + line.roadWidth * 0.5;
+            fillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minRoadX, maxRoadX, zMin, zMax);
         }
 
         for (let i = 0; i < zLines.length; i += 1) {
@@ -764,12 +760,9 @@ export function createMapUiController(options = {}) {
             ) {
                 continue;
             }
-            fillWorldQuad(ctx, centerX, centerZ, zoom, [
-                { x: xMin, z: line.coord - line.roadWidth * 0.5 },
-                { x: xMax, z: line.coord - line.roadWidth * 0.5 },
-                { x: xMax, z: line.coord + line.roadWidth * 0.5 },
-                { x: xMin, z: line.coord + line.roadWidth * 0.5 },
-            ]);
+            const minRoadZ = line.coord - line.roadWidth * 0.5;
+            const maxRoadZ = line.coord + line.roadWidth * 0.5;
+            fillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, xMin, xMax, minRoadZ, maxRoadZ);
         }
     }
 
@@ -804,12 +797,16 @@ export function createMapUiController(options = {}) {
                     continue;
                 }
             }
-            strokeAndFillWorldQuad(ctx, centerX, centerZ, zoom, [
-                { x: building.minX, z: building.minZ },
-                { x: building.maxX, z: building.minZ },
-                { x: building.maxX, z: building.maxZ },
-                { x: building.minX, z: building.maxZ },
-            ]);
+            strokeAndFillWorldQuadFromBounds(
+                ctx,
+                centerX,
+                centerZ,
+                zoom,
+                building.minX,
+                building.maxX,
+                building.minZ,
+                building.maxZ
+            );
         }
     }
 
@@ -1073,40 +1070,30 @@ export function createMapUiController(options = {}) {
         ctx.restore();
     }
 
-    function fillWorldQuad(ctx, centerX, centerZ, zoom, points) {
-        if (!Array.isArray(points) || points.length !== 4) {
-            return;
-        }
+    function fillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ) {
+        const x0 = (minX - centerX) * zoom;
+        const x1 = (maxX - centerX) * zoom;
+        const y0 = (minZ - centerZ) * zoom;
+        const y1 = (maxZ - centerZ) * zoom;
         ctx.beginPath();
-        for (let i = 0; i < points.length; i += 1) {
-            const point = points[i];
-            const x = (point.x - centerX) * zoom;
-            const y = (point.z - centerZ) * zoom;
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-        }
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y0);
+        ctx.lineTo(x1, y1);
+        ctx.lineTo(x0, y1);
         ctx.closePath();
         ctx.fill();
     }
 
-    function strokeAndFillWorldQuad(ctx, centerX, centerZ, zoom, points) {
-        if (!Array.isArray(points) || points.length !== 4) {
-            return;
-        }
+    function strokeAndFillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ) {
+        const x0 = (minX - centerX) * zoom;
+        const x1 = (maxX - centerX) * zoom;
+        const y0 = (minZ - centerZ) * zoom;
+        const y1 = (maxZ - centerZ) * zoom;
         ctx.beginPath();
-        for (let i = 0; i < points.length; i += 1) {
-            const point = points[i];
-            const x = (point.x - centerX) * zoom;
-            const y = (point.z - centerZ) * zoom;
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-        }
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y0);
+        ctx.lineTo(x1, y1);
+        ctx.lineTo(x0, y1);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
@@ -1798,12 +1785,16 @@ function normalizeChargingZones(zones) {
     return result;
 }
 
-function normalizePickups(pickups) {
-    if (!Array.isArray(pickups)) {
+function normalizePickupsInPlace(target, pickups) {
+    if (!Array.isArray(target)) {
         return [];
     }
+    if (!Array.isArray(pickups)) {
+        target.length = 0;
+        return target;
+    }
 
-    const result = [];
+    let count = 0;
     for (let i = 0; i < pickups.length; i += 1) {
         const pickup = pickups[i];
         if (!pickup || typeof pickup !== 'object') {
@@ -1814,19 +1805,27 @@ function normalizePickups(pickups) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) {
             continue;
         }
-        result.push({
-            x,
-            z,
-            color: toCssHexColor(pickup.colorHex, '#8fd9ff'),
-            isTarget: Boolean(pickup.isTarget),
-        });
+        let normalized = target[count];
+        if (!normalized) {
+            normalized = {};
+            target[count] = normalized;
+        }
+        normalized.x = x;
+        normalized.z = z;
+        normalized.color = toCssHexColor(pickup.colorHex, '#8fd9ff');
+        normalized.isTarget = Boolean(pickup.isTarget);
+        count += 1;
     }
-    return result;
+    target.length = count;
+    return target;
 }
 
-function normalizeVehicles(botDescriptors, remotePlayers) {
-    const result = [];
+function normalizeVehiclesInPlace(target, botDescriptors, remotePlayers) {
+    if (!Array.isArray(target)) {
+        return [];
+    }
 
+    let count = 0;
     if (Array.isArray(botDescriptors)) {
         for (let i = 0; i < botDescriptors.length; i += 1) {
             const entry = botDescriptors[i];
@@ -1838,14 +1837,17 @@ function normalizeVehicles(botDescriptors, remotePlayers) {
             if (!Number.isFinite(x) || !Number.isFinite(z)) {
                 continue;
             }
-            result.push({
-                id: String(entry.id || `bot-${i}`),
-                x,
-                z,
-                heading: normalizeAngle(Number(entry.heading) || 0),
-                color: toCssHexColor(entry.colorHex, '#3fa9ff'),
-                type: 'bot',
-            });
+            let normalized = target[count];
+            if (!normalized) {
+                normalized = {};
+                target[count] = normalized;
+            }
+            normalized.x = x;
+            normalized.z = z;
+            normalized.heading = normalizeAngle(Number(entry.heading) || 0);
+            normalized.color = toCssHexColor(entry.colorHex, '#3fa9ff');
+            normalized.type = 'bot';
+            count += 1;
         }
     }
 
@@ -1860,26 +1862,34 @@ function normalizeVehicles(botDescriptors, remotePlayers) {
             if (!Number.isFinite(x) || !Number.isFinite(z)) {
                 continue;
             }
-            result.push({
-                id: String(entry.playerId || entry.id || `player-${i}`),
-                x,
-                z,
-                heading: normalizeAngle(Number(entry.heading) || 0),
-                color: toCssHexColor(entry.colorHex, '#ff9f4a'),
-                type: 'player',
-            });
+            let normalized = target[count];
+            if (!normalized) {
+                normalized = {};
+                target[count] = normalized;
+            }
+            normalized.x = x;
+            normalized.z = z;
+            normalized.heading = normalizeAngle(Number(entry.heading) || 0);
+            normalized.color = toCssHexColor(entry.colorHex, '#ff9f4a');
+            normalized.type = 'player';
+            count += 1;
         }
     }
 
-    return result;
+    target.length = count;
+    return target;
 }
 
-function normalizeMines(mines) {
-    if (!Array.isArray(mines)) {
+function normalizeMinesInPlace(target, mines) {
+    if (!Array.isArray(target)) {
         return [];
     }
+    if (!Array.isArray(mines)) {
+        target.length = 0;
+        return target;
+    }
 
-    const result = [];
+    let count = 0;
     for (let i = 0; i < mines.length; i += 1) {
         const mine = mines[i];
         if (!mine || typeof mine !== 'object') {
@@ -1890,15 +1900,18 @@ function normalizeMines(mines) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) {
             continue;
         }
-        result.push({
-            id: String(mine.id || mine.mineId || `mine-${i}`),
-            x,
-            z,
-            armed: Boolean(mine.armed),
-        });
+        let normalized = target[count];
+        if (!normalized) {
+            normalized = {};
+            target[count] = normalized;
+        }
+        normalized.x = x;
+        normalized.z = z;
+        normalized.armed = Boolean(mine.armed);
+        count += 1;
     }
-
-    return result;
+    target.length = count;
+    return target;
 }
 
 function normalizeWorldPoint(value, fallback = { x: 0, z: 0 }) {

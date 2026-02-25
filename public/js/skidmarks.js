@@ -21,6 +21,7 @@ const DEFAULT_SKID_QUALITY_PROFILE = Object.freeze({
     smokeSpawnRateMultiplier: 1,
     maxEmissionPerFrame: 12,
 });
+const SKID_SMOKE_WARMUP_FRACTION = 0.6;
 
 export function createSkidMarkController(scene, options = {}) {
     const sampleGroundHeight =
@@ -31,6 +32,12 @@ export function createSkidMarkController(scene, options = {}) {
             update() {},
             reset() {},
             setQualityProfile() {
+                return false;
+            },
+            prewarmParticles() {
+                return 0;
+            },
+            warmupGraphics() {
                 return false;
             },
         };
@@ -237,12 +244,60 @@ export function createSkidMarkController(scene, options = {}) {
             while (smokeParticles.length > activeLimit) {
                 removeSmokeParticle(0);
             }
-            const poolLimit = Math.max(24, activeLimit);
-            while (smokeParticlePool.length > poolLimit) {
-                const recycled = smokeParticlePool.pop();
-                recycled?.mesh?.material?.dispose?.();
-            }
             return true;
+        },
+        prewarmParticles(targetCount = 0) {
+            const requested = Math.floor(Number(targetCount) || 0);
+            const boundedTarget = clamp(
+                requested > 0 ? requested : Math.round(state.qualityProfile.maxSmokeParticles),
+                8,
+                DRIFT_SMOKE_MAX_PARTICLES
+            );
+            while (smokeParticlePool.length < boundedTarget) {
+                smokeParticlePool.push(createSmokeParticle());
+            }
+            return smokeParticlePool.length;
+        },
+        warmupGraphics(renderer, camera = null) {
+            if (!renderer || typeof renderer.compile !== 'function') {
+                return false;
+            }
+
+            const warmupTarget = Math.round(
+                state.qualityProfile.maxSmokeParticles * SKID_SMOKE_WARMUP_FRACTION
+            );
+            this.prewarmParticles(warmupTarget);
+
+            const probe = acquireSmokeParticle();
+            probe.mesh.position.set(0, sampleSurfaceY(0, 0) + 0.18, -2.4);
+            probe.mesh.scale.setScalar(0.78);
+            probe.mesh.material.opacity = 0.44;
+            layer.add(probe.mesh);
+
+            const compileCamera = camera?.isCamera
+                ? camera
+                : new THREE.PerspectiveCamera(55, 1, 0.1, 120);
+            if (!camera?.isCamera) {
+                compileCamera.position.set(4.6, 2.4, 6.2);
+                compileCamera.lookAt(0, sampleSurfaceY(0, 0) + 0.12, 0);
+                compileCamera.updateProjectionMatrix();
+            }
+
+            let warmedUp = false;
+            try {
+                scene.updateMatrixWorld(true);
+                compileCamera.updateMatrixWorld(true);
+                renderer.compile(scene, compileCamera);
+                warmedUp = true;
+            } catch {
+                warmedUp = false;
+            }
+
+            if (probe.mesh?.parent) {
+                probe.mesh.parent.remove(probe.mesh);
+            }
+            recycleSmokeParticle(probe);
+            return warmedUp;
         },
     };
 
@@ -386,6 +441,29 @@ export function createSkidMarkController(scene, options = {}) {
         if (smokeParticlePool.length > 0) {
             return smokeParticlePool.pop();
         }
+        return createSmokeParticle();
+    }
+
+    function recycleSmokeParticle(particle) {
+        if (!particle || !particle.mesh) {
+            return;
+        }
+        particle.life = 0;
+        particle.maxLife = 1;
+        particle.growthRate = 0;
+        particle.baseOpacity = 0;
+        particle.velocity.set(0, 0, 0);
+        particle.mesh.position.set(0, -1000, 0);
+        particle.mesh.scale.setScalar(0.0001);
+        particle.mesh.material.opacity = 0;
+        if (smokeParticlePool.length < DRIFT_SMOKE_MAX_PARTICLES) {
+            smokeParticlePool.push(particle);
+        } else {
+            particle.mesh.material.dispose();
+        }
+    }
+
+    function createSmokeParticle() {
         const material = new THREE.SpriteMaterial({
             map: smokeTexture,
             color: new THREE.Color().setScalar(0.22),
@@ -404,25 +482,6 @@ export function createSkidMarkController(scene, options = {}) {
             growthRate: 0,
             baseOpacity: 0,
         };
-    }
-
-    function recycleSmokeParticle(particle) {
-        if (!particle || !particle.mesh) {
-            return;
-        }
-        particle.life = 0;
-        particle.maxLife = 1;
-        particle.growthRate = 0;
-        particle.baseOpacity = 0;
-        particle.velocity.set(0, 0, 0);
-        particle.mesh.position.set(0, -1000, 0);
-        particle.mesh.scale.setScalar(0.0001);
-        particle.mesh.material.opacity = 0;
-        if (smokeParticlePool.length < state.qualityProfile.maxSmokeParticles) {
-            smokeParticlePool.push(particle);
-        } else {
-            particle.mesh.material.dispose();
-        }
     }
 
     function getLateralSpeed(vehicleStateSnapshot, headingYaw) {

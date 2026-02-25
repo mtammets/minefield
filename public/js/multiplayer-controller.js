@@ -18,6 +18,7 @@ const COLLISION_RELAY_INTERVAL_MS = 90;
 const CRASH_REPLICATION_SEND_INTERVAL_MS = 190;
 const VEHICLE_STATUS_SEND_INTERVAL_MS = 140;
 const ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS = 9000;
+const EMPTY_ARRAY = Object.freeze([]);
 
 export function createMultiplayerController(options = {}) {
     const {
@@ -50,6 +51,7 @@ export function createMultiplayerController(options = {}) {
     const listeners = [];
     const remotePlayers = new Map();
     const lastCollisionRelaySentAtByTarget = new Map();
+    const collisionSnapshotBuffer = [];
 
     let socket = null;
     let room = null;
@@ -143,10 +145,11 @@ export function createMultiplayerController(options = {}) {
 
     function getCollisionSnapshots() {
         if (!isPanelVisible) {
-            return [];
+            collisionSnapshotBuffer.length = 0;
+            return EMPTY_ARRAY;
         }
-        const snapshots = [];
         const now = performance.now();
+        let snapshotCount = 0;
         for (const remote of remotePlayers.values()) {
             if (!remote.hasState || remote.isDestroyed) {
                 continue;
@@ -154,24 +157,29 @@ export function createMultiplayerController(options = {}) {
             if (now - remote.lastStateAt > REMOTE_STATE_TIMEOUT_MS) {
                 continue;
             }
-            snapshots.push({
-                id: `player:${remote.id}`,
-                playerId: remote.id,
-                sourceType: 'player',
-                x: remote.car.position.x,
-                z: remote.car.position.z,
-                heading: normalizeAngle(remote.car.rotation.y),
-                colorHex: remote.colorHex,
-                halfWidth: MP_COLLISION_HALF_WIDTH,
-                halfLength: MP_COLLISION_HALF_LENGTH,
-                radius: MP_COLLISION_RADIUS,
-                collisionRadius: MP_COLLISION_RADIUS,
-                mass: MP_COLLISION_MASS,
-                velocityX: clampNumber(remote.visualState?.velocity?.x, -400, 400, 0),
-                velocityZ: clampNumber(remote.visualState?.velocity?.y, -400, 400, 0),
-            });
+            let snapshot = collisionSnapshotBuffer[snapshotCount];
+            if (!snapshot) {
+                snapshot = {};
+                collisionSnapshotBuffer[snapshotCount] = snapshot;
+            }
+            snapshot.id = `player:${remote.id}`;
+            snapshot.playerId = remote.id;
+            snapshot.sourceType = 'player';
+            snapshot.x = remote.car.position.x;
+            snapshot.z = remote.car.position.z;
+            snapshot.heading = normalizeAngle(remote.car.rotation.y);
+            snapshot.colorHex = remote.colorHex;
+            snapshot.halfWidth = MP_COLLISION_HALF_WIDTH;
+            snapshot.halfLength = MP_COLLISION_HALF_LENGTH;
+            snapshot.radius = MP_COLLISION_RADIUS;
+            snapshot.collisionRadius = MP_COLLISION_RADIUS;
+            snapshot.mass = MP_COLLISION_MASS;
+            snapshot.velocityX = clampNumber(remote.visualState?.velocity?.x, -400, 400, 0);
+            snapshot.velocityZ = clampNumber(remote.visualState?.velocity?.y, -400, 400, 0);
+            snapshotCount += 1;
         }
-        return snapshots;
+        collisionSnapshotBuffer.length = snapshotCount;
+        return collisionSnapshotBuffer;
     }
 
     function reportLocalVehicleContacts(contacts = [], vehicleStateSnapshot = null) {
