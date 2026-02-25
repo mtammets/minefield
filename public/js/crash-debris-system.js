@@ -23,6 +23,11 @@ const BODY_PANEL_DEBRIS_GROUND_CLEARANCE_SCALE = 0.72;
 const EXPLOSION_DEBRIS_COUNT_BASE = 8;
 const EXPLOSION_DEBRIS_COUNT_MINE = 6;
 const EXPLOSION_DEBRIS_COUNT_CAP = 12;
+const DEBRIS_PRECISE_GROUND_PROBE_INTERVAL = 0.14;
+const DEBRIS_PRECISE_PROBE_NEAR_GROUND_THRESHOLD = 0.24;
+const REPLICATION_MAX_DEBRIS_PIECES = 18;
+const REPLICATION_MISS_TOLERANCE = 3;
+const MAX_ACTIVE_DEBRIS_PIECES = 80;
 
 export function createCrashDebrisController({
     scene,
@@ -91,6 +96,7 @@ export function createCrashDebrisController({
         applyReplicationState,
         updateDebris,
         clearDebris,
+        warmupGraphics,
         hasActiveDebrisOrExplosion() {
             return debrisPieces.length > 0 || (explosionLightAttached && explosionLightLife > 0);
         },
@@ -122,6 +128,7 @@ export function createCrashDebrisController({
                 scale: part.source.scale.clone(),
             });
         }
+        prewarmDebrisMeshPool();
     }
 
     function applyBodyDentVisuals() {
@@ -588,7 +595,35 @@ export function createCrashDebrisController({
 
     function getReplicationState() {
         const detachedPartIds = Array.from(detachedCrashPartIds.values());
-        const debrisPiecesSnapshot = debrisPieces.map((piece) => ({
+        const debrisPiecesSnapshot = [];
+        for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
+            if (debrisPiecesSnapshot.length >= REPLICATION_MAX_DEBRIS_PIECES) {
+                break;
+            }
+            const piece = debrisPieces[i];
+            if (!piece?.mesh) {
+                continue;
+            }
+            debrisPiecesSnapshot.push(serializeDebrisPiece(piece));
+        }
+
+        return {
+            detachedPartIds,
+            debrisPieces: debrisPiecesSnapshot,
+            explosion:
+                explosionLightAttached && explosionLight
+                    ? {
+                          x: explosionLight.position.x,
+                          y: explosionLight.position.y,
+                          z: explosionLight.position.z,
+                          life: explosionLightLife,
+                      }
+                    : null,
+        };
+    }
+
+    function serializeDebrisPiece(piece) {
+        return {
             id: piece.id,
             partId: piece.partId || '',
             x: piece.mesh.position.x,
@@ -613,20 +648,6 @@ export function createCrashDebrisController({
             wheelRoll: piece.wheelRoll ? { ...piece.wheelRoll } : null,
             suspensionRest: piece.suspensionRest ? { ...piece.suspensionRest } : null,
             bodyRest: piece.bodyRest ? { ...piece.bodyRest } : null,
-        }));
-
-        return {
-            detachedPartIds,
-            debrisPieces: debrisPiecesSnapshot,
-            explosion:
-                explosionLightAttached && explosionLight
-                    ? {
-                          x: explosionLight.position.x,
-                          y: explosionLight.position.y,
-                          z: explosionLight.position.z,
-                          life: explosionLightLife,
-                      }
-                    : null,
         };
     }
 
@@ -637,6 +658,7 @@ export function createCrashDebrisController({
 
         ensureCrashPartIndex();
         setDetachedPartIds(Array.isArray(snapshot.detachedPartIds) ? snapshot.detachedPartIds : []);
+        markAllDebrisPiecesNetworkUnsynced();
 
         const incomingPieces = Array.isArray(snapshot.debrisPieces) ? snapshot.debrisPieces : [];
         for (let i = 0; i < incomingPieces.length; i += 1) {
@@ -655,7 +677,7 @@ export function createCrashDebrisController({
             let piece = debrisPieceById.get(id);
             if (!piece) {
                 const source = part.source;
-                source.updateWorldMatrix(true, true);
+                source.updateWorldMatrix(true, false);
                 const debrisMesh = acquireDebrisMesh(partId, source);
                 source.matrixWorld.decompose(
                     debrisMesh.position,
@@ -718,9 +740,44 @@ export function createCrashDebrisController({
             piece.wheelRoll = deserializeWheelRollState(serializedPiece.wheelRoll);
             piece.suspensionRest = deserializeSuspensionRestState(serializedPiece.suspensionRest);
             piece.bodyRest = deserializeBodyRestState(serializedPiece.bodyRest);
+            piece.networkSeenThisSync = true;
+            piece.networkMissCount = 0;
         }
+        cleanupReplicatedDebrisPieces();
 
         applyExplosionSnapshot(snapshot.explosion);
+    }
+
+    function markAllDebrisPiecesNetworkUnsynced() {
+        for (let i = 0; i < debrisPieces.length; i += 1) {
+            const piece = debrisPieces[i];
+            if (!piece) {
+                continue;
+            }
+            piece.networkSeenThisSync = false;
+        }
+    }
+
+    function cleanupReplicatedDebrisPieces() {
+        for (let i = debrisPieces.length - 1; i >= 0; i -= 1) {
+            const piece = debrisPieces[i];
+            if (!piece) {
+                continue;
+            }
+            if (piece.networkSeenThisSync) {
+                piece.networkSeenThisSync = false;
+                piece.networkMissCount = 0;
+                continue;
+            }
+            piece.networkMissCount = Math.max(
+                0,
+                (Number.isFinite(piece.networkMissCount) ? piece.networkMissCount : 0) + 1
+            );
+            if (piece.networkMissCount < REPLICATION_MISS_TOLERANCE) {
+                continue;
+            }
+            removeDebrisPieceAtIndex(i);
+        }
     }
 
     function buildCrashContext(hitPosition, collision) {
@@ -893,7 +950,7 @@ export function createCrashDebrisController({
         }
 
         const source = part.source;
-        source.updateWorldMatrix(true, true);
+        source.updateWorldMatrix(true, false);
         const partId = part.id || '';
         const debrisMesh = acquireDebrisMesh(partId, source);
         source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
@@ -1049,6 +1106,24 @@ export function createCrashDebrisController({
         return cloneCrashPartSource(source);
     }
 
+    function prewarmDebrisMeshPool() {
+        for (let i = 0; i < crashParts.length; i += 1) {
+            const part = crashParts[i];
+            if (!part?.source || typeof part.id !== 'string' || !part.id) {
+                continue;
+            }
+            const key = part.id;
+            const pool = debrisMeshPoolByPartId.get(key) || [];
+            if (!debrisMeshPoolByPartId.has(key)) {
+                debrisMeshPoolByPartId.set(key, pool);
+            }
+            if (pool.length > 0) {
+                continue;
+            }
+            pool.push(cloneCrashPartSource(part.source));
+        }
+    }
+
     function cloneCrashPartSource(source) {
         const clone = source.clone(true);
         clone.visible = true;
@@ -1114,15 +1189,18 @@ export function createCrashDebrisController({
         return resolvedOffset;
     }
 
-    function getDebrisBottomY(piece) {
+    function getDebrisBottomY(piece, { precise = false } = {}) {
+        const halfY = Number.isFinite(piece.groundOffset)
+            ? piece.groundOffset
+            : DEFAULT_DEBRIS_BOTTOM_OFFSET;
+        if (!precise) {
+            return piece.mesh.position.y - halfY;
+        }
         piece.mesh.updateWorldMatrix(true, true);
         debrisBottomProbeBox.setFromObject(piece.mesh);
         if (Number.isFinite(debrisBottomProbeBox.min.y)) {
             return debrisBottomProbeBox.min.y;
         }
-        const halfY = Number.isFinite(piece.groundOffset)
-            ? piece.groundOffset
-            : DEFAULT_DEBRIS_BOTTOM_OFFSET;
         return piece.mesh.position.y - halfY;
     }
 
@@ -1140,12 +1218,14 @@ export function createCrashDebrisController({
 
     function stickDebrisToGround(
         piece,
-        { allowDrop = false, maxDrop = 0.08, forceSnap = false } = {}
+        { allowDrop = false, maxDrop = 0.08, forceSnap = false, precise = false } = {}
     ) {
         if (!piece?.mesh) {
             return 0;
         }
-        const bottomY = getDebrisBottomY(piece);
+        const bottomY = getDebrisBottomY(piece, {
+            precise: forceSnap || precise,
+        });
         const groundY = getDebrisGroundHeightAt(
             piece,
             piece.mesh.position.x,
@@ -1348,6 +1428,7 @@ export function createCrashDebrisController({
         suspensionRest = null,
         bodyRest = null,
     }) {
+        trimDebrisPieceBudget();
         const nextId = Number.isFinite(id) ? Math.max(1, Math.round(id)) : nextDebrisPieceId++;
         if (nextId >= nextDebrisPieceId) {
             nextDebrisPieceId = nextId + 1;
@@ -1368,12 +1449,31 @@ export function createCrashDebrisController({
             wheelRoll,
             suspensionRest,
             bodyRest,
+            groundProbeCooldown: 0,
             networkMissCount: 0,
             networkSeenThisSync: false,
         };
         debrisPieces.push(piece);
         debrisPieceById.set(piece.id, piece);
         return piece;
+    }
+
+    function trimDebrisPieceBudget() {
+        if (debrisPieces.length < MAX_ACTIVE_DEBRIS_PIECES) {
+            return;
+        }
+
+        let removalIndex = -1;
+        for (let i = 0; i < debrisPieces.length; i += 1) {
+            if (debrisPieces[i]?.settled) {
+                removalIndex = i;
+                break;
+            }
+        }
+        if (removalIndex < 0) {
+            removalIndex = 0;
+        }
+        removeDebrisPieceAtIndex(removalIndex);
     }
 
     function updateDebris(dt) {
@@ -1387,10 +1487,6 @@ export function createCrashDebrisController({
                 }
             }
             if (piece.settled) {
-                stickDebrisToGround(piece, {
-                    allowDrop: true,
-                    forceSnap: true,
-                });
                 continue;
             }
 
@@ -1404,13 +1500,31 @@ export function createCrashDebrisController({
             piece.mesh.rotation.y += piece.angularVelocity.y * dt;
             piece.mesh.rotation.z += piece.angularVelocity.z * dt;
 
-            const bottomY = getDebrisBottomY(piece);
+            piece.groundProbeCooldown = Math.max(0, (piece.groundProbeCooldown || 0) - dt);
+            const horizontalSpeedSqCurrent =
+                piece.velocity.x * piece.velocity.x + piece.velocity.z * piece.velocity.z;
+            const movingSlowEnoughForPreciseProbe =
+                Math.abs(piece.velocity.y) < 2.4 || horizontalSpeedSqCurrent < 22;
+            let bottomY = getDebrisBottomY(piece, {
+                precise: false,
+            });
             const groundY = getDebrisGroundHeightAt(
                 piece,
                 piece.mesh.position.x,
                 piece.mesh.position.z
             );
-            const groundPenetration = groundY - bottomY;
+            let groundPenetration = groundY - bottomY;
+            const usePreciseBottomProbe =
+                piece.groundProbeCooldown <= 0 &&
+                movingSlowEnoughForPreciseProbe &&
+                groundPenetration > -DEBRIS_PRECISE_PROBE_NEAR_GROUND_THRESHOLD;
+            if (usePreciseBottomProbe) {
+                bottomY = getDebrisBottomY(piece, {
+                    precise: true,
+                });
+                groundPenetration = groundY - bottomY;
+                piece.groundProbeCooldown = DEBRIS_PRECISE_GROUND_PROBE_INTERVAL;
+            }
             const nearGroundContact = groundPenetration >= -0.0025;
             if (groundPenetration > 0) {
                 piece.mesh.position.y += groundPenetration;
@@ -1453,8 +1567,12 @@ export function createCrashDebrisController({
                     maxDrop: 0.22,
                 });
 
-                const horizontalSpeed = Math.hypot(piece.velocity.x, piece.velocity.z);
-                const angularSpeed = piece.angularVelocity.length();
+                const horizontalSpeedSq =
+                    piece.velocity.x * piece.velocity.x + piece.velocity.z * piece.velocity.z;
+                const angularSpeedSq =
+                    piece.angularVelocity.x * piece.angularVelocity.x +
+                    piece.angularVelocity.y * piece.angularVelocity.y +
+                    piece.angularVelocity.z * piece.angularVelocity.z;
                 const settleHorizontalThreshold = piece.wheelRoll
                     ? DEBRIS_SETTLE_HORIZONTAL_SPEED * 1.6
                     : piece.suspensionRest
@@ -1465,12 +1583,15 @@ export function createCrashDebrisController({
                     : piece.suspensionRest
                       ? DEBRIS_SETTLE_ANGULAR_SPEED * 1.44
                       : DEBRIS_SETTLE_ANGULAR_SPEED;
+                const settleHorizontalThresholdSq =
+                    settleHorizontalThreshold * settleHorizontalThreshold;
+                const settleAngularThresholdSq = settleAngularThreshold * settleAngularThreshold;
                 const wheelStillRolling = Boolean(piece.wheelRoll && piece.wheelRoll.drive > 0.08);
                 if (
                     !wheelStillRolling &&
                     Math.abs(piece.velocity.y) <= DEBRIS_SETTLE_VERTICAL_SPEED &&
-                    horizontalSpeed <= settleHorizontalThreshold &&
-                    angularSpeed <= settleAngularThreshold
+                    horizontalSpeedSq <= settleHorizontalThresholdSq &&
+                    angularSpeedSq <= settleAngularThresholdSq
                 ) {
                     piece.velocity.set(0, 0, 0);
                     piece.angularVelocity.set(0, 0, 0);
@@ -1488,6 +1609,7 @@ export function createCrashDebrisController({
                     stickDebrisToGround(piece, {
                         allowDrop: true,
                         forceSnap: true,
+                        precise: true,
                     });
                     piece.settled = true;
                 }
@@ -1513,6 +1635,88 @@ export function createCrashDebrisController({
         debrisPieceById.clear();
 
         detachExplosionLight();
+    }
+
+    function warmupGraphics(renderer, camera = null) {
+        if (!renderer || typeof renderer.compile !== 'function') {
+            return false;
+        }
+        if (!Array.isArray(crashParts) || crashParts.length === 0) {
+            return false;
+        }
+
+        const compileCamera = camera?.isCamera
+            ? camera
+            : new THREE.PerspectiveCamera(55, 1, 0.1, 220);
+        const warmupOrigin = new THREE.Vector3(car.position.x, car.position.y, car.position.z);
+        const warmupMeshes = [];
+        const maxWarmupParts = Math.min(6, crashParts.length);
+        let spawnedCount = 0;
+
+        for (let i = 0; i < crashParts.length && spawnedCount < maxWarmupParts; i += 1) {
+            const part = crashParts[i];
+            if (!part?.source || !part?.id) {
+                continue;
+            }
+            part.source.updateWorldMatrix(true, false);
+            const mesh = acquireDebrisMesh(part.id, part.source);
+            if (!mesh) {
+                continue;
+            }
+            const offsetX = (spawnedCount - (maxWarmupParts - 1) * 0.5) * 1.05;
+            const offsetZ = -1.6 - spawnedCount * 0.45;
+            mesh.position.set(
+                warmupOrigin.x + offsetX,
+                warmupOrigin.y + 1.05 + spawnedCount * 0.04,
+                warmupOrigin.z + offsetZ
+            );
+            mesh.rotation.set(0.18 * spawnedCount, 0.21 * spawnedCount, 0.12 * spawnedCount);
+            scene.add(mesh);
+            warmupMeshes.push({
+                partId: part.id,
+                mesh,
+            });
+            spawnedCount += 1;
+        }
+
+        const activeExplosionLight = ensureExplosionLightAttached();
+        activeExplosionLight.position.set(
+            warmupOrigin.x,
+            warmupOrigin.y + 1.25,
+            warmupOrigin.z - 2.2
+        );
+        activeExplosionLight.intensity = 4.8;
+        activeExplosionLight.distance = 50;
+        explosionLightLife = EXPLOSION_LIGHT_MAX_LIFE;
+
+        if (!camera?.isCamera) {
+            compileCamera.position.set(
+                warmupOrigin.x + 4.8,
+                warmupOrigin.y + 3.5,
+                warmupOrigin.z + 6.4
+            );
+            compileCamera.lookAt(warmupOrigin.x, warmupOrigin.y + 1.1, warmupOrigin.z - 2.2);
+            compileCamera.updateProjectionMatrix();
+        }
+
+        let warmedUp = false;
+        try {
+            scene.updateMatrixWorld(true);
+            compileCamera.updateMatrixWorld(true);
+            renderer.compile(scene, compileCamera);
+            warmedUp = true;
+        } catch {
+            warmedUp = false;
+        } finally {
+            for (let i = 0; i < warmupMeshes.length; i += 1) {
+                const entry = warmupMeshes[i];
+                scene.remove(entry.mesh);
+                recycleDebrisMesh(entry.partId, entry.mesh);
+            }
+            detachExplosionLight();
+        }
+
+        return warmedUp;
     }
 
     function removeDebrisPieceAtIndex(index) {

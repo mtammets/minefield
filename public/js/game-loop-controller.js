@@ -127,6 +127,7 @@ export function createGameLoopController(options = {}) {
     let running = false;
     let animationFrameId = null;
     const botMineDecisionById = new Map();
+    const vehicleCollisionSnapshotBuffer = [];
 
     return {
         start() {
@@ -258,7 +259,10 @@ export function createGameLoopController(options = {}) {
                                   car.position
                               )
                             : [];
-                    const vehicleCollisionSnapshots = botCollisionSnapshots.concat(
+                    vehicleCollisionSnapshotBuffer.length = 0;
+                    appendCollisionSnapshots(vehicleCollisionSnapshotBuffer, botCollisionSnapshots);
+                    appendCollisionSnapshots(
+                        vehicleCollisionSnapshotBuffer,
                         multiplayerCollisionSnapshots
                     );
                     if (isBatteryDepleted) {
@@ -275,7 +279,7 @@ export function createGameLoopController(options = {}) {
                             physicsStep,
                             worldBounds,
                             staticObstacles,
-                            vehicleCollisionSnapshots,
+                            vehicleCollisionSnapshotBuffer,
                             getGroundHeightAt
                         );
                         physicsAccumulator -= physicsStep;
@@ -426,12 +430,21 @@ export function createGameLoopController(options = {}) {
             playerPosition: car.position,
             playerHeading: car.rotation.y,
             playerSpeedKph: Math.abs(getVehicleState()?.speed || 0),
-            pickups: visiblePickups || collectibleSystem.getVisiblePickups(),
-            botDescriptors: readBotsEnabled()
-                ? getBotTrafficSystem()?.getCollectorDescriptors?.() || []
-                : [],
-            remotePlayers: multiplayerController?.getCollisionSnapshots?.() || [],
-            mines: mineSystemController?.getMineMarkers?.() || [],
+            getPickups() {
+                return visiblePickups || collectibleSystem.getVisiblePickups();
+            },
+            getBotDescriptors() {
+                if (!readBotsEnabled()) {
+                    return [];
+                }
+                return getBotTrafficSystem()?.getCollectorDescriptors?.() || [];
+            },
+            getRemotePlayers() {
+                return multiplayerController?.getCollisionSnapshots?.() || [];
+            },
+            getMines() {
+                return mineSystemController?.getMineMarkers?.() || [];
+            },
             gameMode: readGameMode(),
             welcomeVisible: readWelcomeModalVisible(),
             raceIntroActive: raceIntroController.isActive(),
@@ -631,6 +644,15 @@ export function createGameLoopController(options = {}) {
             }
         }
         return filtered || snapshots;
+    }
+
+    function appendCollisionSnapshots(buffer, snapshots = []) {
+        if (!Array.isArray(buffer) || !Array.isArray(snapshots) || snapshots.length === 0) {
+            return;
+        }
+        for (let i = 0; i < snapshots.length; i += 1) {
+            buffer.push(snapshots[i]);
+        }
     }
 
     function createPlayerHudState() {

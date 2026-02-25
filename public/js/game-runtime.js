@@ -132,12 +132,11 @@ const GRAPHICS_PRESET_MODE_ORDER = [
     GRAPHICS_QUALITY_MODES.performance,
     GRAPHICS_QUALITY_MODES.balanced,
     GRAPHICS_QUALITY_MODES.quality,
+    GRAPHICS_QUALITY_MODES.auto,
 ];
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
-const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
-    GRAPHICS_QUALITY_MODES.balanced
-);
+const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(GRAPHICS_QUALITY_MODES.balanced);
 const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persistedGraphicsQualityMode)
     ? persistedGraphicsQualityMode
     : GRAPHICS_QUALITY_MODES.balanced;
@@ -146,6 +145,7 @@ const runtimeState = createGameRuntimeState({
     batteryMax: BATTERY_MAX,
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
+let runtimeGraphicsWarmupReady = false;
 runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
 
@@ -171,12 +171,76 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         onPrepareStart: prepareRuntimeForSessionStart,
     });
 
-async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null) {
+async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null, options = null) {
+    const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
+    const reportProgress = (payload = null) => {
+        if (!onProgress || !payload || typeof payload !== 'object') {
+            return;
+        }
+        try {
+            onProgress(payload);
+        } catch {
+            // External progress handlers must not interrupt startup.
+        }
+    };
+    const reportAudioProgress = (preloadState = null) => {
+        const snapshot =
+            preloadState && typeof preloadState === 'object'
+                ? preloadState
+                : runtimeState.audioController?.getPreloadState?.() || null;
+        if (!snapshot || typeof snapshot !== 'object') {
+            return;
+        }
+
+        const filesTotal = Math.max(0, Math.round(Number(snapshot.filesTotal) || 0));
+        const filesReady = Math.max(0, Math.round(Number(snapshot.filesReady) || 0));
+        const filesFailed = Math.max(0, Math.round(Number(snapshot.filesFailed) || 0));
+        const fallbackDone = filesReady + filesFailed;
+        const filesDone = Math.min(
+            filesTotal,
+            Math.max(0, Math.round(Number(snapshot.filesDone) || fallbackDone))
+        );
+        const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
+
+        reportProgress({
+            stage: 'audio',
+            progress: Math.min(1, Math.max(0, progress)),
+            filesTotal,
+            filesReady,
+            filesFailed,
+            filesDone,
+            complete: filesDone >= filesTotal,
+        });
+    };
+
     const normalizedMode = mode === 'online' ? 'online' : 'bots';
     const canPrepareOnlineRoomFlow = Boolean(startContext && typeof startContext === 'object');
     const preparationTasks = [waitForAnimationFrames(2)];
-    if (typeof runtimeState.audioController?.unlock === 'function') {
-        preparationTasks.push(runtimeState.audioController.unlock());
+    reportProgress({
+        stage: 'prepare',
+        progress: 0,
+    });
+    reportAudioProgress();
+    preparationTasks.push(
+        prepareGraphicsForSessionStart(normalizedMode, {
+            reportProgress,
+        })
+    );
+
+    if (typeof runtimeState.audioController?.prepareForGameplay === 'function') {
+        preparationTasks.push(
+            runtimeState.audioController.prepareForGameplay({
+                onProgress(preloadState) {
+                    reportAudioProgress(preloadState);
+                },
+            })
+        );
+    } else if (typeof runtimeState.audioController?.unlock === 'function') {
+        preparationTasks.push(
+            runtimeState.audioController
+                .unlock({ waitForPreload: true })
+                .finally(() => reportAudioProgress())
+        );
     }
     if (normalizedMode === 'online' && canPrepareOnlineRoomFlow) {
         runtimeState.multiplayerController?.setPanelVisible?.(true);
@@ -187,6 +251,11 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null)
         }
     }
     await Promise.allSettled(preparationTasks);
+    reportAudioProgress();
+    reportProgress({
+        stage: 'complete',
+        progress: 1,
+    });
 }
 
 function waitForAnimationFrames(frameCount = 1) {
@@ -203,6 +272,89 @@ function waitForAnimationFrames(frameCount = 1) {
         };
         window.requestAnimationFrame(tick);
     });
+}
+
+async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
+    const reportProgress =
+        typeof options?.reportProgress === 'function' ? options.reportProgress : () => {};
+    if (runtimeGraphicsWarmupReady) {
+        reportProgress({
+            stage: 'graphics',
+            progress: 1,
+            complete: true,
+        });
+        return true;
+    }
+
+    reportProgress({
+        stage: 'graphics',
+        progress: 0,
+    });
+
+    try {
+        runtimeState.collectibleSystem?.prewarmEffects?.();
+
+        const collectors = [{ id: 'player', position: car.position }];
+        if (mode === 'bots') {
+            collectors.push(...(runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || []));
+        }
+        runtimeState.collectibleSystem?.primeForCollectors?.(collectors);
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.2,
+        });
+
+        await waitForAnimationFrames(1);
+        const warmedCollectibleShaders = runtimeState.collectibleSystem?.warmupGraphics?.(
+            renderer,
+            camera
+        );
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.45,
+        });
+
+        await waitForAnimationFrames(1);
+        const warmedMineShaders = runtimeState.mineController?.warmupGraphics?.(renderer, camera);
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.68,
+        });
+
+        await waitForAnimationFrames(1);
+        const warmedCrashShaders = runtimeState.crashDebrisController?.warmupGraphics?.(
+            renderer,
+            camera
+        );
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.86,
+        });
+
+        await waitForAnimationFrames(1);
+        if (typeof renderer?.compile === 'function') {
+            renderer.compile(scene, camera);
+        }
+        await waitForAnimationFrames(1);
+
+        const warmupResults = [warmedCollectibleShaders, warmedMineShaders, warmedCrashShaders];
+        runtimeGraphicsWarmupReady = warmupResults.every(
+            (value) => value === undefined || Boolean(value)
+        );
+        reportProgress({
+            stage: 'graphics',
+            progress: 1,
+            complete: runtimeGraphicsWarmupReady,
+        });
+        return runtimeGraphicsWarmupReady;
+    } catch {
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.9,
+            complete: false,
+        });
+        return false;
+    }
 }
 
 let mapUiController = null;
@@ -822,6 +974,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     getGroundHeightAt,
     staticObstacles,
 });
+runtimeState.collectibleSystem = collectibleSystem;
 runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
     botCount: 3,
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,

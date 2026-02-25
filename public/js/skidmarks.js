@@ -364,14 +364,21 @@ export function createSkidMarkController(scene, options = {}) {
     }
 
     function removeSmokeParticle(index) {
+        const lastIndex = smokeParticles.length - 1;
+        if (index < 0 || index > lastIndex) {
+            return;
+        }
         const particle = smokeParticles[index];
-        if (!particle) {
+        if (!particle?.mesh) {
             return;
         }
         if (particle.mesh?.parent) {
             particle.mesh.parent.remove(particle.mesh);
         }
-        smokeParticles.splice(index, 1);
+        if (index !== lastIndex) {
+            smokeParticles[index] = smokeParticles[lastIndex];
+        }
+        smokeParticles.pop();
         recycleSmokeParticle(particle);
     }
 

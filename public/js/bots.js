@@ -56,12 +56,13 @@ const BOT_ROAD_TARGET_REACH = 6;
 const BOT_DETOUR_CLEARANCE = BOT_RADIUS + 3.2;
 const BOT_DETOUR_REACH_RADIUS = 6;
 const BOT_AVOIDANCE_BLEND = 1.08;
+const BOT_REACTIVE_NAVIGATION_ONLY = true;
 const BOT_NAV_CELL_SIZE = 4;
 const BOT_OBSTACLE_QUERY_RADIUS = BOT_BUILDING_AVOID_RADIUS + 6;
 const BOT_OBSTACLE_GRID_CELL_SIZE = 12;
 const BOT_NAV_OBSTACLE_PADDING = BOT_RADIUS + 0.96;
-const BOT_NAV_MAX_EXPANSIONS = 4200;
-const BOT_PATH_REPLAN_COOLDOWN = 0.35;
+const BOT_NAV_MAX_EXPANSIONS = 2600;
+const BOT_PATH_REPLAN_COOLDOWN = 0.55;
 const BOT_NAV_PATH_CACHE_LIMIT = 320;
 const BOT_NAV_MAX_BUILDS_PER_FRAME = 1;
 const BOT_SIM_NEAR_DISTANCE = 38;
@@ -80,6 +81,8 @@ const BOT_DEBRIS_DRAG = 1.7;
 const BOT_DEBRIS_BOUNCE = 0.3;
 const BOT_DEBRIS_GROUND_OFFSET = 0.04;
 const BOT_DEBRIS_MAX_PIECES = 420;
+const BOT_DEBRIS_POOL_PER_PART = 4;
+const BOT_MINE_EXPLOSION_DEBRIS_BUDGET = 8;
 const BOT_LIVES_PER_ROUND = 2;
 const BOT_RESPAWN_DELAY_MIN_MS = 3000;
 const BOT_RESPAWN_DELAY_MAX_MS = 4000;
@@ -114,11 +117,18 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         onPartDetached = null,
     } = options;
     const handlePartDetached = typeof onPartDetached === 'function' ? onPartDetached : null;
-    const navigationPlanner = createNavigationPlanner(worldBounds, staticObstacles);
-    const buildingObstacles = navigationPlanner?.buildingObstacles || [];
+    const navigationPlanner = BOT_REACTIVE_NAVIGATION_ONLY
+        ? null
+        : createNavigationPlanner(worldBounds, staticObstacles);
+    const buildingObstacles =
+        navigationPlanner?.buildingObstacles ||
+        staticObstacles.filter(
+            (obstacle) => obstacle?.type === 'aabb' && obstacle.category === 'building'
+        );
     let resolvedSharedTargetColorHex = sharedTargetColorHex;
     let enabled = true;
     const detachedDebrisPieces = [];
+    const detachedDebrisMeshPoolByPartKey = new Map();
 
     const bots = [];
     const botsByCollectorId = new Map();
@@ -144,6 +154,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         bots.push(bot);
         botsByCollectorId.set(bot.collectorId, bot);
     }
+    prewarmDetachedDebrisMeshes();
 
     return {
         update(playerPosition, visiblePickups = [], deltaTime = 1 / 60) {
@@ -319,6 +330,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!bot || bot.destroyed || isBotSpawnProtected(bot)) {
                 return false;
             }
+            const mineCrashContext = createMineCrashContext(context?.crashContext);
 
             // Mine hit is a total loss for bot: detach visible parts first, then remove bot car.
             for (let i = 0; i < bot.crashParts.length; i += 1) {
@@ -326,7 +338,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 if (!part?.source?.visible || bot.detachedPartIds.has(part.id)) {
                     continue;
                 }
-                detachBotPart(bot, part, context?.crashContext || null);
+                detachBotPart(bot, part, mineCrashContext);
             }
             destroyBot(bot);
             return true;
@@ -382,10 +394,14 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         if (!part?.source) {
             return;
         }
+        if (!consumeCrashContextDebrisBudget(crashContext)) {
+            return;
+        }
 
         const source = part.source;
-        source.updateWorldMatrix(true, true);
-        const debrisMesh = cloneBotPartMesh(source);
+        const partKey = resolveBotDebrisPartKey(bot, part);
+        source.updateWorldMatrix(true, false);
+        const debrisMesh = acquireDetachedBotDebrisMesh(partKey, source);
         source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
         scene.add(debrisMesh);
 
@@ -424,6 +440,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         );
 
         detachedDebrisPieces.push({
+            partKey,
             mesh: debrisMesh,
             velocity,
             angularVelocity,
@@ -486,7 +503,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 continue;
             }
             scene.remove(oldest.mesh);
-            disposeObject3d(oldest.mesh);
+            recycleDetachedBotDebrisMesh(oldest.partKey, oldest.mesh);
         }
     }
 
@@ -497,8 +514,101 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 continue;
             }
             scene.remove(piece.mesh);
-            disposeObject3d(piece.mesh);
+            recycleDetachedBotDebrisMesh(piece.partKey, piece.mesh);
         }
+    }
+
+    function createMineCrashContext(value) {
+        const source = value && typeof value === 'object' ? value : null;
+        const crashContext = source ? { ...source } : {};
+        const configuredBudget = Number(crashContext.debrisSpawnBudget);
+        crashContext.debrisSpawnBudget = Number.isFinite(configuredBudget)
+            ? Math.max(0, Math.floor(configuredBudget))
+            : BOT_MINE_EXPLOSION_DEBRIS_BUDGET;
+        return crashContext;
+    }
+
+    function consumeCrashContextDebrisBudget(crashContext) {
+        if (!crashContext || typeof crashContext !== 'object') {
+            return true;
+        }
+        if (!Number.isFinite(crashContext.debrisSpawnBudget)) {
+            return true;
+        }
+        if (crashContext.debrisSpawnBudget <= 0) {
+            return false;
+        }
+        crashContext.debrisSpawnBudget -= 1;
+        return true;
+    }
+
+    function resolveBotDebrisPartKey(bot, part) {
+        const botId =
+            typeof bot?.collectorId === 'string' && bot.collectorId
+                ? bot.collectorId
+                : 'unknown-bot';
+        const partId =
+            typeof part?.id === 'string' && part.id
+                ? part.id
+                : typeof part?.source?.uuid === 'string' && part.source.uuid
+                  ? part.source.uuid
+                  : 'unknown-part';
+        return `${botId}:${partId}`;
+    }
+
+    function prewarmDetachedDebrisMeshes() {
+        for (let i = 0; i < bots.length; i += 1) {
+            const bot = bots[i];
+            if (!bot?.crashParts) {
+                continue;
+            }
+            for (let partIndex = 0; partIndex < bot.crashParts.length; partIndex += 1) {
+                const part = bot.crashParts[partIndex];
+                if (!part?.source) {
+                    continue;
+                }
+                const partKey = resolveBotDebrisPartKey(bot, part);
+                const pool = detachedDebrisMeshPoolByPartKey.get(partKey) || [];
+                if (!detachedDebrisMeshPoolByPartKey.has(partKey)) {
+                    detachedDebrisMeshPoolByPartKey.set(partKey, pool);
+                }
+                if (pool.length > 0) {
+                    continue;
+                }
+                pool.push(cloneBotPartMesh(part.source));
+            }
+        }
+    }
+
+    function acquireDetachedBotDebrisMesh(partKey, source) {
+        const key = typeof partKey === 'string' ? partKey : '';
+        const pool = detachedDebrisMeshPoolByPartKey.get(key);
+        if (pool && pool.length > 0) {
+            const mesh = pool.pop();
+            mesh.visible = true;
+            return mesh;
+        }
+        return cloneBotPartMesh(source);
+    }
+
+    function recycleDetachedBotDebrisMesh(partKey, mesh) {
+        if (!mesh) {
+            return;
+        }
+        const key = typeof partKey === 'string' ? partKey : '';
+        const pool = detachedDebrisMeshPoolByPartKey.get(key) || [];
+        if (!detachedDebrisMeshPoolByPartKey.has(key)) {
+            detachedDebrisMeshPoolByPartKey.set(key, pool);
+        }
+        mesh.visible = false;
+        mesh.position.set(0, -1000, 0);
+        mesh.rotation.set(0, 0, 0);
+        mesh.scale.set(1, 1, 1);
+        if (pool.length < BOT_DEBRIS_POOL_PER_PART) {
+            pool.push(mesh);
+            return;
+        }
+        disposeObject3d(mesh);
     }
 
     function cloneBotPartMesh(source) {
@@ -821,15 +931,17 @@ function updateBot(
     const targetZ = targetPickup ? targetPickup.z : bot.wanderTarget.z;
     const baseTarget = { x: targetX, z: targetZ };
     updateStuckState(bot, baseTarget, dt);
-    const roadTarget = resolveRoadTarget(
-        bot,
-        baseTarget,
-        worldBounds,
-        cityMapLayout,
-        staticObstacles,
-        navigationPlanner,
-        dt
-    );
+    const roadTarget = BOT_REACTIVE_NAVIGATION_ONLY
+        ? null
+        : resolveRoadTarget(
+              bot,
+              baseTarget,
+              worldBounds,
+              cityMapLayout,
+              staticObstacles,
+              navigationPlanner,
+              dt
+          );
     const navTarget = roadTarget || baseTarget;
     const detourTarget = resolveDetourTarget(bot, navTarget, worldBounds, buildingObstacles);
     const resolvedTarget = detourTarget || navTarget;
@@ -1909,6 +2021,18 @@ function resolveRoadTarget(
     navigationPlanner,
     dt = 0
 ) {
+    if (BOT_REACTIVE_NAVIGATION_ONLY) {
+        if (bot) {
+            bot.roadTarget = null;
+            bot.roadPath = null;
+            bot.roadPathIndex = 0;
+            bot.roadPathKey = null;
+            bot.roadPathBuildCooldown = 0;
+            bot.forcePathReplan = false;
+        }
+        return null;
+    }
+
     if (!bot || !target) {
         if (bot) {
             bot.roadTarget = null;

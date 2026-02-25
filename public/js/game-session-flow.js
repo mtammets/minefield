@@ -123,6 +123,17 @@ export function createGameSessionController({
             isPlayer: true,
         };
     }
+
+    function primeCollectiblesForCurrentCollectors({ botsEnabled = false } = {}) {
+        if (typeof collectibleSystem?.primeForCollectors !== 'function') {
+            return;
+        }
+        const collectors = [{ id: 'player', position: car.position }];
+        if (botsEnabled) {
+            collectors.push(...(getBotSystem()?.getCollectorDescriptors?.() || []));
+        }
+        collectibleSystem.primeForCollectors(collectors);
+    }
     return {
         clearDriveKeys,
         enforceDriveLockMode,
@@ -647,6 +658,9 @@ export function createGameSessionController({
         snapCarToGround();
         car.rotation.set(0, playerSpawnState.rotationY, 0);
         collectibleSystem.setEnabled(true);
+        primeCollectiblesForCurrentCollectors({
+            botsEnabled: normalizeGameMode(getGameMode()) === 'bots',
+        });
         setPlayerCarsRemaining(PLAYER_CAR_POOL_SIZE);
         setPlayerBattery(BATTERY_MAX);
         setPlayerBatteryLevel(getPlayerBattery() / BATTERY_MAX);
@@ -711,6 +725,7 @@ export function createGameSessionController({
         if (botsEnabled) {
             getBotSystem()?.reset?.({ sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX });
         }
+        primeCollectiblesForCurrentCollectors({ botsEnabled });
         botStatusUi.render(getBotHudStateWithScores(), createPlayerHudState());
 
         crashDebrisController.resetPlayerDamageState();

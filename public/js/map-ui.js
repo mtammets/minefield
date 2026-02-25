@@ -307,9 +307,24 @@ export function createMapUiController(options = {}) {
             return;
         }
 
-        state.pickups = normalizePickups(frameState.pickups);
-        state.vehicles = normalizeVehicles(frameState.botDescriptors, frameState.remotePlayers);
-        state.mines = normalizeMines(frameState.mines);
+        const pickupsPayload =
+            typeof frameState.getPickups === 'function'
+                ? frameState.getPickups()
+                : frameState.pickups;
+        const botDescriptorsPayload =
+            typeof frameState.getBotDescriptors === 'function'
+                ? frameState.getBotDescriptors()
+                : frameState.botDescriptors;
+        const remotePlayersPayload =
+            typeof frameState.getRemotePlayers === 'function'
+                ? frameState.getRemotePlayers()
+                : frameState.remotePlayers;
+        const minesPayload =
+            typeof frameState.getMines === 'function' ? frameState.getMines() : frameState.mines;
+
+        state.pickups = normalizePickups(pickupsPayload);
+        state.vehicles = normalizeVehicles(botDescriptorsPayload, remotePlayersPayload);
+        state.mines = normalizeMines(minesPayload);
     }
 
     function rebuildRoute() {

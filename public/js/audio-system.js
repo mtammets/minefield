@@ -247,6 +247,10 @@ const SOUND_DEFINITIONS = Object.freeze({
         loop: true,
     },
 });
+const SOUND_DEFINITION_IDS = Object.freeze(Object.keys(SOUND_DEFINITIONS));
+const LOOP_SOUND_IDS = Object.freeze(
+    SOUND_DEFINITION_IDS.filter((soundId) => Boolean(SOUND_DEFINITIONS[soundId]?.loop))
+);
 
 const VARIANT_GROUPS = Object.freeze({
     uiClickSoft: ['uiClickSoft01', 'uiClickSoft02'],
@@ -292,6 +296,7 @@ const EVENT_COOLDOWNS = Object.freeze({
 const AUDIO_FETCH_CACHE_MODES = Object.freeze(['default', 'reload']);
 const WELCOME_MENU_AMBIENCE_GAIN = 0;
 const WELCOME_MENU_CROWD_GAIN = 0;
+const AUDIO_PRELOAD_BATCH_SIZE = 2;
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -306,12 +311,14 @@ export function createAudioSystem({ camera = null } = {}) {
     const pendingLoads = new Map();
     const eventCooldowns = new Map();
     const unlockListeners = [];
+    const preloadProgressSubscribers = new Set();
 
     let context = null;
     let mixer = null;
     let ui = null;
     let unlocked = false;
     let preloadPromise = null;
+    let gameplayReady = false;
     let disposed = false;
 
     const runtime = {
@@ -327,6 +334,11 @@ export function createAudioSystem({ camera = null } = {}) {
         dispose,
         update,
         unlock: unlockAudio,
+        prepareForGameplay,
+        getPreloadState,
+        isGameplayReady() {
+            return gameplayReady;
+        },
         isUnlocked() {
             return unlocked;
         },
@@ -351,6 +363,8 @@ export function createAudioSystem({ camera = null } = {}) {
         if (disposed) {
             return;
         }
+        ensureAudioContext();
+        startPreload();
         ui = createAudioUi(prefs, {
             onToggleMute() {
                 prefs.muted = !prefs.muted;
@@ -378,6 +392,7 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
         disposed = true;
+        gameplayReady = false;
         removeUnlockListeners();
         if (ui?.root?.parentElement) {
             ui.root.parentElement.removeChild(ui.root);
@@ -398,7 +413,7 @@ export function createAudioSystem({ camera = null } = {}) {
         }
     }
 
-    async function unlockAudio() {
+    async function unlockAudio({ waitForPreload = false } = {}) {
         if (disposed) {
             return false;
         }
@@ -416,15 +431,49 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         unlocked = audioContext.state === 'running';
-        if (unlocked && !preloadPromise) {
-            preloadPromise = preloadAllBuffers();
+        if (unlocked) {
+            startPreload();
         }
         applyBusVolumes();
         refreshUi();
-        if (preloadPromise) {
+        if (waitForPreload && preloadPromise) {
             await preloadPromise;
         }
         return unlocked;
+    }
+
+    async function prepareForGameplay(options = {}) {
+        if (disposed) {
+            return false;
+        }
+        const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
+        const unsubscribeProgress = subscribePreloadProgress(onProgress);
+        try {
+            const unlockedNow = await unlockAudio({ waitForPreload: false });
+            startPreload();
+            if (preloadPromise) {
+                await preloadPromise;
+            }
+            if (!unlockedNow) {
+                gameplayReady = false;
+                refreshUi();
+                notifyPreloadProgress();
+                return false;
+            }
+            const preloadState = getPreloadState();
+            gameplayReady =
+                preloadState.filesTotal > 0 &&
+                preloadState.filesReady > 0 &&
+                preloadState.filesDone >= preloadState.filesTotal;
+            if (gameplayReady) {
+                primeLoopInstances();
+            }
+            refreshUi();
+            notifyPreloadProgress();
+            return gameplayReady;
+        } finally {
+            unsubscribeProgress();
+        }
     }
 
     function ensureAudioContext() {
@@ -478,10 +527,73 @@ export function createAudioSystem({ camera = null } = {}) {
         return context;
     }
 
+    function getPreloadState() {
+        const filesTotal = SOUND_DEFINITION_IDS.length;
+        const filesReady = buffers.size;
+        const filesFailed = failedBuffers.size;
+        const filesDone = Math.min(filesTotal, filesReady + filesFailed);
+        const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
+        return {
+            filesTotal,
+            filesReady,
+            filesFailed,
+            filesDone,
+            progress,
+            complete: filesDone >= filesTotal,
+        };
+    }
+
+    function subscribePreloadProgress(listener) {
+        if (typeof listener !== 'function') {
+            return () => {};
+        }
+        preloadProgressSubscribers.add(listener);
+        try {
+            listener(getPreloadState());
+        } catch {
+            // Progress consumers must not break runtime.
+        }
+        return () => {
+            preloadProgressSubscribers.delete(listener);
+        };
+    }
+
+    function notifyPreloadProgress() {
+        if (preloadProgressSubscribers.size === 0) {
+            return;
+        }
+        const preloadState = getPreloadState();
+        for (const listener of preloadProgressSubscribers) {
+            try {
+                listener(preloadState);
+            } catch {
+                // Progress consumers must not break runtime.
+            }
+        }
+    }
+
+    function startPreload() {
+        if (preloadPromise) {
+            notifyPreloadProgress();
+            return preloadPromise;
+        }
+        preloadPromise = preloadAllBuffers();
+        notifyPreloadProgress();
+        return preloadPromise;
+    }
+
     async function preloadAllBuffers() {
-        const ids = Object.keys(SOUND_DEFINITIONS);
-        await Promise.all(ids.map((id) => loadBuffer(id)));
+        const ids = SOUND_DEFINITION_IDS;
+        for (let i = 0; i < ids.length; i += 1) {
+            await loadBuffer(ids[i]);
+            notifyPreloadProgress();
+            if ((i + 1) % AUDIO_PRELOAD_BATCH_SIZE === 0) {
+                refreshUi();
+                await waitForAnimationFrame();
+            }
+        }
         refreshUi();
+        notifyPreloadProgress();
     }
 
     async function loadBuffer(soundId) {
@@ -496,6 +608,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const definition = SOUND_DEFINITIONS[soundId];
         if (!definition) {
             failedBuffers.add(soundId);
+            notifyPreloadProgress();
             return null;
         }
 
@@ -525,6 +638,7 @@ export function createAudioSystem({ camera = null } = {}) {
                 }
             }
             failedBuffers.add(soundId);
+            notifyPreloadProgress();
             return null;
         })();
 
@@ -555,9 +669,10 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
 
-        const filesTotal = Object.keys(SOUND_DEFINITIONS).length;
-        const filesReady = buffers.size;
-        const filesFailed = failedBuffers.size;
+        const preloadState = getPreloadState();
+        const filesTotal = preloadState.filesTotal;
+        const filesReady = preloadState.filesReady;
+        const filesFailed = preloadState.filesFailed;
         const canUseAudio = Boolean(context);
         const statusTone = !canUseAudio
             ? 'offline'
@@ -569,11 +684,17 @@ export function createAudioSystem({ camera = null } = {}) {
 
         ui.root.dataset.tone = statusTone;
         ui.muteBtn.textContent = prefs.muted ? 'UNMUTE' : 'MUTE';
-        ui.status.textContent = canUseAudio
-            ? unlocked
-                ? `Audio ready (${filesReady}/${filesTotal})`
-                : 'Tap/click to unlock audio'
-            : 'Audio unavailable in this browser';
+        if (!canUseAudio) {
+            ui.status.textContent = 'Audio unavailable in this browser';
+        } else if (!unlocked) {
+            ui.status.textContent = 'Tap/click to unlock audio';
+        } else if (preloadPromise && !preloadState.complete) {
+            ui.status.textContent = `Preparing gameplay audio (${filesReady}/${filesTotal})`;
+        } else if (gameplayReady) {
+            ui.status.textContent = `Audio ready (${filesReady}/${filesTotal})`;
+        } else {
+            ui.status.textContent = `Audio primed (${filesReady}/${filesTotal})`;
+        }
         if (filesFailed > 0) {
             ui.status.textContent += ` | Missing/invalid: ${filesFailed}`;
         }
@@ -630,7 +751,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
         tickEventCooldowns(dt);
 
-        if (!unlocked || !context || !mixer || context.state !== 'running') {
+        if (!isRealtimeAudioReady()) {
             return;
         }
 
@@ -767,6 +888,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onVehicleCollisionContacts(contacts = []) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         if (!Array.isArray(contacts) || contacts.length === 0) {
             return;
         }
@@ -801,6 +925,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onObstacleCrash(collision = null) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         if (!isEventReady('obstacleCrash', EVENT_COOLDOWNS.obstacleCrash)) {
             return;
         }
@@ -813,6 +940,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onPickupCollected() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         if (!isEventReady('pickupCollect', EVENT_COOLDOWNS.pickupCollect)) {
             return;
         }
@@ -823,6 +953,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onMineDeployed({ thrown = false } = {}) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot(thrown ? 'mineDeployThrow01' : 'mineDeployDrop01', {
             gain: thrown ? 0.92 : 0.82,
             rateScale: randomRange(0.95, 1.05),
@@ -835,6 +968,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onMineDetonated({ localHit = false, distanceMeters = 0 } = {}) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         if (!isEventReady('mineDetonation', EVENT_COOLDOWNS.mineDetonation)) {
             return;
         }
@@ -849,6 +985,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onPlayerExplosion({ impactSpeed = 0 } = {}) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playVariant('vehicleExplosion', {
             gain: clampNumber(0.72 + Math.abs(impactSpeed) / 72, 0.62, 1.25, 0.9),
             rateScale: randomRange(0.95, 1.05),
@@ -861,6 +1000,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onRoundFinished() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot('roundFinished01', {
             gain: 0.88,
             rateScale: randomRange(0.98, 1.03),
@@ -868,6 +1010,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onPlayerRespawn() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot('respawn01', {
             gain: 0.74,
             rateScale: randomRange(0.98, 1.02),
@@ -875,6 +1020,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onBatteryDepleted() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot('batteryDepleted01', {
             gain: 0.86,
             rateScale: randomRange(0.96, 1.03),
@@ -882,6 +1030,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onBatteryRestored() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot('batteryRestored01', {
             gain: 0.78,
             rateScale: randomRange(0.98, 1.04),
@@ -890,6 +1041,9 @@ export function createAudioSystem({ camera = null } = {}) {
 
     function onPauseChanged(paused) {
         runtime.paused = Boolean(paused);
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot(paused ? 'uiToggleOff01' : 'uiToggleOn01', {
             gain: 0.72,
         });
@@ -897,6 +1051,9 @@ export function createAudioSystem({ camera = null } = {}) {
 
     function onWelcomeVisibilityChanged(visible) {
         runtime.welcomeVisible = Boolean(visible);
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         if (!runtime.welcomeVisible) {
             playOneShot('uiConfirm01', {
                 gain: 0.72,
@@ -906,12 +1063,18 @@ export function createAudioSystem({ camera = null } = {}) {
 
     function onWorldMapVisibilityChanged(visible) {
         runtime.worldMapVisible = Boolean(visible);
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playVariant('uiClickSoft', {
             gain: 0.62,
         });
     }
 
     function onRaceIntroStep(step = null) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         const label = typeof step?.label === 'string' ? step.label : '';
         if (label === '3' || label === '2' || label === '1') {
             playOneShot('countdownBeep01', {
@@ -922,6 +1085,9 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function onRaceIntroGo() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
         playOneShot('countdownGo01', {
             gain: 0.94,
             rateScale: 1,
@@ -951,7 +1117,7 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function ensureLoopInstance(soundId) {
-        if (!context || !mixer || !unlocked) {
+        if (!isRealtimeAudioReady()) {
             return null;
         }
 
@@ -965,7 +1131,6 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         const buffer = buffers.get(soundId);
         if (!buffer) {
-            void loadBuffer(soundId);
             return null;
         }
 
@@ -993,6 +1158,23 @@ export function createAudioSystem({ camera = null } = {}) {
         return instance;
     }
 
+    function primeLoopInstances() {
+        if (!isRealtimeAudioReady() || !context) {
+            return 0;
+        }
+        let primed = 0;
+        for (let i = 0; i < LOOP_SOUND_IDS.length; i += 1) {
+            const soundId = LOOP_SOUND_IDS[i];
+            const instance = ensureLoopInstance(soundId);
+            if (!instance) {
+                continue;
+            }
+            instance.gain.gain.setValueAtTime(0, context.currentTime);
+            primed += 1;
+        }
+        return primed;
+    }
+
     function playVariant(variantGroupKey, options = {}) {
         const variants = VARIANT_GROUPS[variantGroupKey];
         if (!Array.isArray(variants) || variants.length === 0) {
@@ -1003,7 +1185,7 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function playOneShot(soundId, options = {}) {
-        if (!unlocked || !context || !mixer || context.state !== 'running') {
+        if (!isRealtimeAudioReady()) {
             return false;
         }
 
@@ -1014,7 +1196,6 @@ export function createAudioSystem({ camera = null } = {}) {
 
         const buffer = buffers.get(soundId);
         if (!buffer) {
-            void loadBuffer(soundId);
             return false;
         }
 
@@ -1053,6 +1234,16 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
+    function isRealtimeAudioReady() {
+        return (
+            gameplayReady &&
+            unlocked &&
+            Boolean(context) &&
+            Boolean(mixer) &&
+            context.state === 'running'
+        );
+    }
+
     function isEventReady(eventKey, cooldownSec = 0) {
         const cooldownLeft = eventCooldowns.get(eventKey) || 0;
         if (cooldownLeft > 0) {
@@ -1074,6 +1265,14 @@ export function createAudioSystem({ camera = null } = {}) {
                 eventCooldowns.set(eventKey, next);
             }
         }
+    }
+
+    function waitForAnimationFrame() {
+        return new Promise((resolve) => {
+            window.requestAnimationFrame(() => {
+                resolve();
+            });
+        });
     }
 }
 
@@ -1274,6 +1473,22 @@ function createNoopAudioSystem() {
         update() {},
         unlock() {
             return Promise.resolve(false);
+        },
+        prepareForGameplay() {
+            return Promise.resolve(false);
+        },
+        getPreloadState() {
+            return {
+                filesTotal: 0,
+                filesReady: 0,
+                filesFailed: 0,
+                filesDone: 0,
+                progress: 1,
+                complete: true,
+            };
+        },
+        isGameplayReady() {
+            return false;
         },
         isUnlocked() {
             return false;

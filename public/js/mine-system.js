@@ -33,6 +33,8 @@ const MINE_DETONATION_SHOCKWAVE_BASE_SCALE = 0.2;
 const MINE_DETONATION_HOT_COLOR = new THREE.Color(0xffcf89);
 const MINE_DETONATION_WARM_COLOR = new THREE.Color(0xff8d4f);
 const MINE_DETONATION_COOL_COLOR = new THREE.Color(0xff4a32);
+const MINE_MESH_POOL_MAX = 24;
+const MINE_MESH_POOL_PREWARM_COUNT = 10;
 const DEFAULT_TARGET_COLLISION_RADIUS = 1.34;
 const POSITION_HISTORY_MAX_AGE_MS = 260;
 const POSITION_HISTORY_RETENTION_MS = 4000;
@@ -73,10 +75,22 @@ export function createMineSystemController(options = {}) {
     const recentDetonations = new Map();
     const ownerLastDeployAtMs = new Map();
     const previousPositionByEntityKey = new Map();
+    const mineMeshPool = [];
     let mineSequence = 0;
     let collisionWasEnabledLastFrame = false;
+    const activeEntityKeysScratch = new Set();
+    const otherMovementTargetsScratch = [];
+    const localMineSweepMovement = {
+        entityKey: '',
+        fromX: 0,
+        fromZ: 0,
+        toX: 0,
+        toZ: 0,
+        collisionRadius: DEFAULT_TARGET_COLLISION_RADIUS,
+    };
 
     prewarmDetonationEffects();
+    prewarmMineMeshes();
 
     return {
         deployMine,
@@ -87,6 +101,7 @@ export function createMineSystemController(options = {}) {
         handleRemoteMinePlaced,
         handleRemoteMineDetonated,
         clearAll,
+        warmupGraphics,
     };
 
     function deployMine(mode = 'drop') {
@@ -306,7 +321,8 @@ export function createMineSystemController(options = {}) {
             context.localCollisionRadius,
             DEFAULT_TARGET_COLLISION_RADIUS
         );
-        const activeEntityKeys = new Set();
+        const activeEntityKeys = activeEntityKeysScratch;
+        activeEntityKeys.clear();
         const allowSweep = enableLocalCollision && collisionWasEnabledLastFrame;
         let localMovement = null;
         if (localPlayerId) {
@@ -324,7 +340,8 @@ export function createMineSystemController(options = {}) {
             }
         }
 
-        const otherMovementTargets = [];
+        const otherMovementTargets = otherMovementTargetsScratch;
+        otherMovementTargets.length = 0;
         for (let targetIndex = 0; targetIndex < otherVehicleTargets.length; targetIndex += 1) {
             const target = otherVehicleTargets[targetIndex];
             if (!target?.position || typeof target.position !== 'object') {
@@ -406,13 +423,16 @@ export function createMineSystemController(options = {}) {
             let detonatedThisFrame = false;
             if (localMovement && localTriggerActive) {
                 const ownMineCollision = Boolean(ownerLocalTriggerEnabled);
-                const localMovementForMine = ownMineCollision
-                    ? {
-                          ...localMovement,
-                          fromX: localMovement.toX,
-                          fromZ: localMovement.toZ,
-                      }
-                    : localMovement;
+                let localMovementForMine = localMovement;
+                if (ownMineCollision) {
+                    localMineSweepMovement.entityKey = localMovement.entityKey;
+                    localMineSweepMovement.fromX = localMovement.toX;
+                    localMineSweepMovement.fromZ = localMovement.toZ;
+                    localMineSweepMovement.toX = localMovement.toX;
+                    localMineSweepMovement.toZ = localMovement.toZ;
+                    localMineSweepMovement.collisionRadius = localMovement.collisionRadius;
+                    localMovementForMine = localMineSweepMovement;
+                }
                 if (
                     movementIntersectsMineRadius({
                         movement: localMovementForMine,
@@ -674,7 +694,7 @@ export function createMineSystemController(options = {}) {
     }
 
     function createMineRuntime(snapshot) {
-        const meshBundle = createMineMeshBundle();
+        const meshBundle = acquireMineMeshBundle();
         meshBundle.group.position.set(snapshot.x, snapshot.y, snapshot.z);
         return {
             id: snapshot.mineId,
@@ -690,6 +710,7 @@ export function createMineSystemController(options = {}) {
             landed: !snapshot.thrown,
             velocity: new THREE.Vector3(snapshot.velocityX, snapshot.velocityY, snapshot.velocityZ),
             mesh: meshBundle.group,
+            meshBundle,
             ledMaterial: meshBundle.ledMaterial,
             pulsePhase: Math.random() * Math.PI * 2,
         };
@@ -701,7 +722,7 @@ export function createMineSystemController(options = {}) {
             return;
         }
         scene.remove(mine.mesh);
-        disposeObject3d(mine.mesh);
+        recycleMineMeshBundle(mine.meshBundle);
         minesById.delete(mineId);
     }
 
@@ -721,6 +742,61 @@ export function createMineSystemController(options = {}) {
         ownerLastDeployAtMs.clear();
         previousPositionByEntityKey.clear();
         collisionWasEnabledLastFrame = false;
+    }
+
+    function warmupGraphics(renderer, camera = null) {
+        if (!renderer || typeof renderer.compile !== 'function') {
+            return false;
+        }
+
+        const warmupPosition = new THREE.Vector3(car.position.x, car.position.y, car.position.z);
+        const groundY = getGroundHeightAt(warmupPosition.x, warmupPosition.z);
+        warmupPosition.y =
+            (Number.isFinite(groundY) ? groundY : warmupPosition.y) + MINE_SURFACE_OFFSET;
+
+        const mineBundle = acquireMineMeshBundle();
+        mineBundle.group.position.copy(warmupPosition);
+        mineBundle.group.position.x += 2.2;
+        mineBundle.group.position.z -= 2.2;
+        scene.add(mineBundle.group);
+
+        spawnDetonationEffect(warmupPosition, { preferLight: true });
+        const warmupEffect = detonationEffects.pop() || null;
+
+        const compileCamera = camera?.isCamera
+            ? camera
+            : new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+        if (!camera?.isCamera) {
+            compileCamera.position.set(
+                warmupPosition.x + 5.4,
+                warmupPosition.y + 3.4,
+                warmupPosition.z + 6.2
+            );
+            compileCamera.lookAt(warmupPosition.x, warmupPosition.y + 0.2, warmupPosition.z);
+            compileCamera.updateProjectionMatrix();
+        }
+
+        let warmedUp = false;
+        try {
+            scene.updateMatrixWorld(true);
+            compileCamera.updateMatrixWorld(true);
+            renderer.compile(scene, compileCamera);
+            warmedUp = true;
+        } catch {
+            warmedUp = false;
+        } finally {
+            scene.remove(mineBundle.group);
+            recycleMineMeshBundle(mineBundle);
+            if (warmupEffect) {
+                scene.remove(warmupEffect.light);
+                scene.remove(warmupEffect.shockwave);
+                scene.remove(warmupEffect.coreSprite);
+                scene.remove(warmupEffect.haloSprite);
+                recycleDetonationEffect(warmupEffect);
+            }
+        }
+
+        return warmedUp;
     }
 
     function getMineMarkers() {
@@ -749,6 +825,51 @@ export function createMineSystemController(options = {}) {
             }
         }
         return count;
+    }
+
+    function prewarmMineMeshes() {
+        for (let i = 0; i < MINE_MESH_POOL_PREWARM_COUNT; i += 1) {
+            mineMeshPool.push(createMineMeshBundle());
+        }
+    }
+
+    function acquireMineMeshBundle() {
+        if (mineMeshPool.length > 0) {
+            const bundle = mineMeshPool.pop();
+            resetMineMeshBundle(bundle);
+            return bundle;
+        }
+        return createMineMeshBundle();
+    }
+
+    function recycleMineMeshBundle(bundle) {
+        if (!bundle?.group) {
+            return;
+        }
+        resetMineMeshBundle(bundle);
+        if (mineMeshPool.length < MINE_MESH_POOL_MAX) {
+            mineMeshPool.push(bundle);
+            return;
+        }
+        disposeMineMeshBundle(bundle);
+    }
+
+    function resetMineMeshBundle(bundle) {
+        bundle.group.visible = true;
+        bundle.group.position.set(0, -1000, 0);
+        bundle.group.rotation.set(0, 0, 0);
+        bundle.group.scale.set(1, 1, 1);
+        if (bundle.ledMaterial) {
+            bundle.ledMaterial.color.setHex(0x8fa7c8);
+            bundle.ledMaterial.emissiveIntensity = 0.42;
+        }
+    }
+
+    function disposeMineMeshBundle(bundle) {
+        if (!bundle?.group) {
+            return;
+        }
+        disposeObject3d(bundle.group);
     }
 
     function spawnDetonationEffect(position, { preferLight = false } = {}) {
@@ -1449,5 +1570,8 @@ function createNoopMineSystemController() {
         handleRemoteMinePlaced() {},
         handleRemoteMineDetonated() {},
         clearAll() {},
+        warmupGraphics() {
+            return false;
+        },
     };
 }

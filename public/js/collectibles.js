@@ -93,6 +93,9 @@ const haloMaterials = shapeColors.map(
 
 const effectBurstGeometry = new THREE.IcosahedronGeometry(0.7, 1);
 const effectRingGeometry = new THREE.TorusGeometry(1.2, 0.12, 12, 40);
+const COLLECT_EFFECT_LIFETIME_SEC = 0.6;
+const COLLECT_EFFECT_POOL_PREWARM_COUNT = 10;
+const MAX_COLLECT_EFFECT_POOL_SIZE = 28;
 
 export function createCollectibleSystem(scene, worldBounds = null, options = {}) {
     const {
@@ -185,6 +188,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     const pickups = new Map();
     const pickupCooldownUntil = new Map();
     const effects = [];
+    const collectEffectPool = [];
     const activePickupIds = new Set();
     const visiblePickupCache = [];
     const worldCellBounds = worldBounds ? getWorldCellBounds(worldBounds) : null;
@@ -204,6 +208,10 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     let enabled = true;
     let elapsedTime = 0;
     let lastSyncSignature = '';
+
+    if (resolvedEnableEffects) {
+        prewarmCollectEffects(collectEffectPool, COLLECT_EFFECT_POOL_PREWARM_COUNT);
+    }
 
     emitTargetColorChanged();
 
@@ -226,37 +234,12 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
 
             if (!enabled || collectors.length === 0) {
                 if (resolvedEnableEffects) {
-                    updateEffects(effects, effectGroup, dt);
+                    updateEffects(effects, effectGroup, collectEffectPool, dt);
                 }
                 return;
             }
 
-            if (finiteMode) {
-                spawnFinitePickupsIntoActiveSlots();
-            } else {
-                const syncTick = Math.floor(elapsedTime * 2);
-                const syncSignature = `${buildCollectorCellSignature(collectors)}|${syncTick}`;
-                if (syncSignature !== lastSyncSignature) {
-                    syncPickupsAroundCollectors({
-                        pickups,
-                        pickupGroup,
-                        pickupCooldownUntil,
-                        collectors,
-                        activePickupIds,
-                        worldBounds,
-                        worldCellBounds,
-                        idPrefix: resolvedIdPrefix,
-                        seedOffset: resolvedSeedOffset,
-                        activeCellRadius: resolvedActiveCellRadius,
-                        singleType: resolvedSingleType,
-                        singleShapeIndex: resolvedSingleShapeIndex,
-                        elapsedTime,
-                        maxActivePickups: resolvedMaxActivePickups,
-                        getGroundHeightAt,
-                    });
-                    lastSyncSignature = syncSignature;
-                }
-            }
+            primePickupsForCollectors(collectors);
 
             for (const [pickupId, pickup] of pickups) {
                 const expireAt = Number.isFinite(pickup.expireAt)
@@ -291,7 +274,13 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 const pickupPosition = pickup.mesh.position.clone();
 
                 if (resolvedEnableEffects) {
-                    createCollectEffect(effectGroup, effects, pickupPosition, pickup.color);
+                    createCollectEffect(
+                        effectGroup,
+                        effects,
+                        collectEffectPool,
+                        pickupPosition,
+                        pickup.color
+                    );
                 }
 
                 removePickup(pickupId, pickup, true);
@@ -331,7 +320,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             }
 
             if (resolvedEnableEffects) {
-                updateEffects(effects, effectGroup, dt);
+                updateEffects(effects, effectGroup, collectEffectPool, dt);
             }
         },
         setEnabled(nextEnabled) {
@@ -395,6 +384,19 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 exhausted: finiteRoundState.exhausted,
             };
         },
+        primeForCollectors(collectorEntries) {
+            return primePickupsForCollectors(collectorEntries);
+        },
+        prewarmEffects(targetCount = COLLECT_EFFECT_POOL_PREWARM_COUNT) {
+            if (!resolvedEnableEffects) {
+                return 0;
+            }
+            prewarmCollectEffects(collectEffectPool, targetCount);
+            return collectEffectPool.length;
+        },
+        warmupGraphics(renderer, camera = null) {
+            return warmupCollectibleGraphics(renderer, camera);
+        },
     };
 
     function clearPickups(applyCooldown) {
@@ -409,11 +411,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         }
         for (let i = effects.length - 1; i >= 0; i -= 1) {
             const effect = effects[i];
-            effectGroup.remove(effect.burst);
-            effectGroup.remove(effect.ring);
-            effectGroup.remove(effect.light);
-            effect.burst.material.dispose();
-            effect.ring.material.dispose();
+            recycleCollectEffect(effectGroup, collectEffectPool, effect);
             effects.splice(i, 1);
         }
     }
@@ -488,6 +486,121 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 finiteRoundState.spawned += 1;
             }
         }
+    }
+
+    function primePickupsForCollectors(collectorEntries) {
+        const collectors = normalizeCollectors(collectorEntries);
+        if (!enabled || collectors.length === 0) {
+            return pickups.size;
+        }
+        if (finiteMode) {
+            spawnFinitePickupsIntoActiveSlots();
+            return pickups.size;
+        }
+
+        const syncTick = Math.floor(elapsedTime * 2);
+        const syncSignature = `${buildCollectorCellSignature(collectors)}|${syncTick}`;
+        if (syncSignature === lastSyncSignature) {
+            return pickups.size;
+        }
+
+        syncPickupsAroundCollectors({
+            pickups,
+            pickupGroup,
+            pickupCooldownUntil,
+            collectors,
+            activePickupIds,
+            worldBounds,
+            worldCellBounds,
+            idPrefix: resolvedIdPrefix,
+            seedOffset: resolvedSeedOffset,
+            activeCellRadius: resolvedActiveCellRadius,
+            singleType: resolvedSingleType,
+            singleShapeIndex: resolvedSingleShapeIndex,
+            elapsedTime,
+            maxActivePickups: resolvedMaxActivePickups,
+            getGroundHeightAt,
+        });
+        lastSyncSignature = syncSignature;
+        return pickups.size;
+    }
+
+    function warmupCollectibleGraphics(renderer, camera = null) {
+        if (!renderer || typeof renderer.compile !== 'function') {
+            return false;
+        }
+
+        const warmupShapeIndex = resolvedSingleType ? resolvedSingleShapeIndex : targetColorIndex;
+        const warmupPosition = new THREE.Vector3(0, PICKUP_HEIGHT_ABOVE_GROUND, 0);
+        const warmupForward = new THREE.Vector3(0, 0, -1);
+        if (camera?.isCamera) {
+            warmupPosition.copy(camera.position);
+            if (typeof camera.getWorldDirection === 'function') {
+                camera.getWorldDirection(warmupForward);
+            } else if (camera.quaternion) {
+                warmupForward.applyQuaternion(camera.quaternion).normalize();
+            }
+            if (warmupForward.lengthSq() < 0.0001) {
+                warmupForward.set(0, 0, -1);
+            }
+            warmupPosition.addScaledVector(warmupForward.normalize(), 6.2);
+            warmupPosition.y = Math.max(warmupPosition.y, PICKUP_HEIGHT_ABOVE_GROUND + 0.65);
+        }
+
+        const warmupPickup = createPickup(
+            warmupPosition.x,
+            warmupPosition.y,
+            warmupPosition.z,
+            warmupShapeIndex,
+            0.19
+        );
+        pickupGroup.add(warmupPickup.mesh);
+
+        let warmupEffect = null;
+        if (resolvedEnableEffects) {
+            prewarmCollectEffects(collectEffectPool, 1);
+            warmupEffect = acquireCollectEffect(collectEffectPool);
+            activateCollectEffect(
+                effectGroup,
+                warmupEffect,
+                warmupPickup.mesh.position,
+                warmupPickup.color
+            );
+            warmupEffect.elapsed = warmupEffect.lifetime * 0.35;
+            applyCollectEffectFrame(warmupEffect, warmupEffect.elapsed / warmupEffect.lifetime, 0);
+        }
+
+        const warmupCamera = camera?.isCamera
+            ? camera
+            : new THREE.PerspectiveCamera(55, 1, 0.1, 100);
+        if (!camera?.isCamera) {
+            warmupCamera.position.set(
+                warmupPosition.x + 4.8,
+                warmupPosition.y + 2.1,
+                warmupPosition.z + 6.2
+            );
+            warmupCamera.lookAt(warmupPosition.x, warmupPosition.y + 0.15, warmupPosition.z);
+            warmupCamera.aspect = 1;
+            warmupCamera.updateProjectionMatrix();
+        }
+        warmupCamera.updateMatrixWorld(true);
+        scene.updateMatrixWorld(true);
+
+        let warmedUp = false;
+        try {
+            renderer.compile(scene, warmupCamera);
+            warmedUp = true;
+        } catch {
+            warmedUp = false;
+        }
+
+        if (warmupEffect) {
+            recycleCollectEffect(effectGroup, collectEffectPool, warmupEffect);
+        }
+        pickupGroup.remove(warmupPickup.mesh);
+        disposePickup(warmupPickup);
+
+        return warmedUp;
     }
 
     function emitTargetColorChanged() {
@@ -962,74 +1075,175 @@ function disposePickup(pickup) {
     pickup.mesh.clear();
 }
 
-function createCollectEffect(effectGroup, effects, position, colorHex) {
-    const burstMaterial = new THREE.MeshBasicMaterial({
-        color: colorHex,
-        transparent: true,
-        opacity: 0.95,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-    });
-
-    const burst = new THREE.Mesh(effectBurstGeometry, burstMaterial);
-    const ringMaterial = new THREE.MeshBasicMaterial({
-        color: colorHex,
-        transparent: true,
-        opacity: 0.7,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-    });
-    const ring = new THREE.Mesh(effectRingGeometry, ringMaterial);
-    burst.position.copy(position);
-    effectGroup.add(burst);
-
-    ring.position.copy(position);
-    ring.rotation.x = Math.PI / 2;
-    effectGroup.add(ring);
-
-    const light = new THREE.PointLight(colorHex, 2.6, 42, 2);
-    light.position.copy(position);
-    effectGroup.add(light);
-
-    effects.push({
-        burst,
-        ring,
-        light,
-        lifetime: 0.6,
-        elapsed: 0,
-    });
+function createCollectEffect(effectGroup, effects, effectPool, position, colorHex) {
+    const effect = acquireCollectEffect(effectPool);
+    activateCollectEffect(effectGroup, effect, position, colorHex);
+    effects.push(effect);
 }
 
-function updateEffects(effects, effectGroup, dt) {
+function updateEffects(effects, effectGroup, effectPool, dt) {
     for (let i = effects.length - 1; i >= 0; i -= 1) {
         const effect = effects[i];
         effect.elapsed += dt;
         const t = THREE.MathUtils.clamp(effect.elapsed / effect.lifetime, 0, 1);
-        const fade = 1 - t;
-
-        const burstScale = 1 + t * 4.2;
-        effect.burst.scale.setScalar(burstScale);
-        effect.burst.material.opacity = 0.95 * fade;
-        effect.burst.rotation.x += dt * 3.5;
-        effect.burst.rotation.y += dt * 4.1;
-
-        const ringScale = 1 + t * 5.5;
-        effect.ring.scale.setScalar(ringScale);
-        effect.ring.material.opacity = 0.7 * fade;
-        effect.ring.rotation.z += dt * 2.5;
-
-        effect.light.intensity = 2.8 * fade;
-        effect.light.distance = 18 + t * 36;
+        applyCollectEffectFrame(effect, t, dt);
 
         if (t >= 1) {
-            effectGroup.remove(effect.burst);
-            effectGroup.remove(effect.ring);
-            effectGroup.remove(effect.light);
-            effect.burst.material.dispose();
-            effect.ring.material.dispose();
+            recycleCollectEffect(effectGroup, effectPool, effect);
             effects.splice(i, 1);
         }
     }
+}
+
+function prewarmCollectEffects(effectPool, targetCount = COLLECT_EFFECT_POOL_PREWARM_COUNT) {
+    if (!Array.isArray(effectPool)) {
+        return;
+    }
+    const normalizedTarget = THREE.MathUtils.clamp(
+        Math.floor(normalizePositiveNumber(targetCount, COLLECT_EFFECT_POOL_PREWARM_COUNT)),
+        0,
+        MAX_COLLECT_EFFECT_POOL_SIZE
+    );
+    for (let i = effectPool.length; i < normalizedTarget; i += 1) {
+        effectPool.push(createCollectEffectBundle());
+    }
+}
+
+function acquireCollectEffect(effectPool) {
+    if (Array.isArray(effectPool) && effectPool.length > 0) {
+        return effectPool.pop();
+    }
+    return createCollectEffectBundle();
+}
+
+function recycleCollectEffect(effectGroup, effectPool, effect) {
+    if (!effect) {
+        return;
+    }
+    effectGroup?.remove?.(effect.burst);
+    effectGroup?.remove?.(effect.ring);
+    effectGroup?.remove?.(effect.light);
+    resetCollectEffectBundle(effect);
+
+    if (!Array.isArray(effectPool)) {
+        disposeCollectEffectBundle(effect);
+        return;
+    }
+    if (effectPool.length < MAX_COLLECT_EFFECT_POOL_SIZE) {
+        effectPool.push(effect);
+        return;
+    }
+    disposeCollectEffectBundle(effect);
+}
+
+function createCollectEffectBundle() {
+    const burstMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    const burst = new THREE.Mesh(effectBurstGeometry, burstMaterial);
+    burst.visible = true;
+    burst.castShadow = false;
+    burst.receiveShadow = false;
+
+    const ringMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.7,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    const ring = new THREE.Mesh(effectRingGeometry, ringMaterial);
+    ring.visible = true;
+    ring.castShadow = false;
+    ring.receiveShadow = false;
+
+    const light = new THREE.PointLight(0xffffff, 2.8, 18, 2);
+    light.visible = true;
+
+    const effect = {
+        burst,
+        ring,
+        light,
+        lifetime: COLLECT_EFFECT_LIFETIME_SEC,
+        elapsed: 0,
+    };
+    resetCollectEffectBundle(effect);
+    return effect;
+}
+
+function activateCollectEffect(effectGroup, effect, position, colorHex) {
+    if (!effect || !position) {
+        return;
+    }
+    resetCollectEffectBundle(effect);
+    effect.burst.material.color.setHex(colorHex >>> 0);
+    effect.ring.material.color.setHex(colorHex >>> 0);
+    effect.light.color.setHex(colorHex >>> 0);
+    effect.burst.position.copy(position);
+    effect.ring.position.copy(position);
+    effect.light.position.copy(position);
+    effectGroup?.add?.(effect.burst);
+    effectGroup?.add?.(effect.ring);
+    effectGroup?.add?.(effect.light);
+}
+
+function resetCollectEffectBundle(effect) {
+    if (!effect) {
+        return;
+    }
+    effect.elapsed = 0;
+    effect.lifetime = COLLECT_EFFECT_LIFETIME_SEC;
+    effect.burst.visible = true;
+    effect.burst.position.set(0, 0, 0);
+    effect.burst.rotation.set(0, 0, 0);
+    effect.burst.scale.setScalar(1);
+    effect.burst.material.opacity = 0.95;
+    effect.ring.visible = true;
+    effect.ring.position.set(0, 0, 0);
+    effect.ring.rotation.set(Math.PI / 2, 0, 0);
+    effect.ring.scale.setScalar(1);
+    effect.ring.material.opacity = 0.7;
+    effect.light.visible = true;
+    effect.light.position.set(0, 0, 0);
+    effect.light.intensity = 2.8;
+    effect.light.distance = 18;
+}
+
+function applyCollectEffectFrame(effect, t, dt) {
+    const clampedT = THREE.MathUtils.clamp(t, 0, 1);
+    const fade = 1 - clampedT;
+
+    const burstScale = 1 + clampedT * 4.2;
+    effect.burst.scale.setScalar(burstScale);
+    effect.burst.material.opacity = 0.95 * fade;
+    if (dt > 0) {
+        effect.burst.rotation.x += dt * 3.5;
+        effect.burst.rotation.y += dt * 4.1;
+    }
+
+    const ringScale = 1 + clampedT * 5.5;
+    effect.ring.scale.setScalar(ringScale);
+    effect.ring.material.opacity = 0.7 * fade;
+    if (dt > 0) {
+        effect.ring.rotation.z += dt * 2.5;
+    }
+
+    effect.light.intensity = 2.8 * fade;
+    effect.light.distance = 18 + clampedT * 36;
+}
+
+function disposeCollectEffectBundle(effect) {
+    if (!effect) {
+        return;
+    }
+    effect.burst.material.dispose();
+    effect.ring.material.dispose();
 }
 
 function createPickupGlowTexture() {

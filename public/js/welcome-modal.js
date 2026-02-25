@@ -432,11 +432,24 @@ export function createWelcomeModalController({
         launchSequenceState.progress = 0;
         setStartButtonsDisabled(true);
         setStartSequenceUiVisible(true);
-        setLaunchCopy(normalizedMode, 0);
+        setLaunchCopy(normalizedMode, 0, null);
         setLaunchProgress(0);
 
         let preparationDone = false;
-        resolveStartPreparation(normalizedMode, startContext).finally(() => {
+        let preparationProgress = 0;
+        let hasPreparationProgress = false;
+        let latestPreparationUpdate = null;
+        resolveStartPreparation(normalizedMode, startContext, {
+            onProgress(update) {
+                latestPreparationUpdate = update;
+                const normalizedProgress = resolvePreparationProgress(update);
+                if (!Number.isFinite(normalizedProgress)) {
+                    return;
+                }
+                hasPreparationProgress = true;
+                preparationProgress = Math.max(preparationProgress, normalizedProgress);
+            },
+        }).finally(() => {
             preparationDone = true;
         });
 
@@ -448,9 +461,17 @@ export function createWelcomeModalController({
             const cap = preparationDone
                 ? WELCOME_START_SEQUENCE_READY_CAP
                 : WELCOME_START_SEQUENCE_PREP_CAP;
-            const nextProgress = Math.max(launchSequenceState.progress, rampedProgress * cap);
+            const fallbackProgress = rampedProgress * cap;
+            const timedFloor = hasPreparationProgress ? rampedProgress * 0.18 : fallbackProgress;
+            const sourceProgress = hasPreparationProgress
+                ? Math.max(preparationProgress, timedFloor)
+                : fallbackProgress;
+            const nextProgress = Math.max(
+                launchSequenceState.progress,
+                clampNumber(sourceProgress, 0, cap)
+            );
             setLaunchProgress(nextProgress);
-            setLaunchCopy(normalizedMode, nextProgress);
+            setLaunchCopy(normalizedMode, nextProgress, latestPreparationUpdate);
             if (preparationDone && elapsedMs >= WELCOME_START_SEQUENCE_MIN_MS) {
                 break;
             }
@@ -462,7 +483,7 @@ export function createWelcomeModalController({
         }
 
         setLaunchProgress(1);
-        setLaunchCopy(normalizedMode, 1);
+        setLaunchCopy(normalizedMode, 1, latestPreparationUpdate);
         await sleep(WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS);
 
         if (launchSequenceState.token !== token) {
@@ -477,12 +498,12 @@ export function createWelcomeModalController({
         }
     }
 
-    function resolveStartPreparation(mode, startContext = null) {
+    function resolveStartPreparation(mode, startContext = null, options = null) {
         if (typeof onPrepareStart !== 'function') {
             return Promise.resolve();
         }
         try {
-            return Promise.resolve(onPrepareStart(mode, startContext)).catch(() => {});
+            return Promise.resolve(onPrepareStart(mode, startContext, options)).catch(() => {});
         } catch {
             return Promise.resolve();
         }
@@ -554,7 +575,7 @@ export function createWelcomeModalController({
         }
     }
 
-    function setLaunchCopy(mode, progress) {
+    function setLaunchCopy(mode, progress, preparationUpdate = null) {
         const normalizedMode = mode === 'online' ? 'online' : 'bots';
         if (launchTitleEl) {
             launchTitleEl.textContent =
@@ -563,11 +584,18 @@ export function createWelcomeModalController({
         if (!launchStatusEl) {
             return;
         }
-        launchStatusEl.textContent = resolveLaunchStatus(normalizedMode, progress);
+        launchStatusEl.textContent = resolveLaunchStatus(normalizedMode, progress, preparationUpdate);
     }
 
-    function resolveLaunchStatus(mode, progress) {
+    function resolveLaunchStatus(mode, progress, preparationUpdate = null) {
         const normalizedProgress = clampNumber(progress, 0, 1);
+        const preparationStage =
+            typeof preparationUpdate?.stage === 'string' ? preparationUpdate.stage : '';
+        const audioFilesTotal = Math.max(0, Math.round(Number(preparationUpdate?.filesTotal) || 0));
+        const audioFilesDone = Math.max(0, Math.round(Number(preparationUpdate?.filesDone) || 0));
+        if (preparationStage === 'audio' && audioFilesTotal > 0 && audioFilesDone < audioFilesTotal) {
+            return `Loading gameplay audio (${audioFilesDone}/${audioFilesTotal})...`;
+        }
         if (normalizedProgress >= 1) {
             return mode === 'online'
                 ? 'Room link confirmed. Starting now...'
@@ -586,6 +614,27 @@ export function createWelcomeModalController({
         return mode === 'online'
             ? 'Initializing online session...'
             : 'Initializing race systems...';
+    }
+
+    function resolvePreparationProgress(update) {
+        if (Number.isFinite(update)) {
+            return clampNumber(update, 0, 1);
+        }
+        if (!update || typeof update !== 'object') {
+            return Number.NaN;
+        }
+
+        const progressValue = Number(update.progress);
+        if (Number.isFinite(progressValue)) {
+            return clampNumber(progressValue, 0, 1);
+        }
+
+        const fallbackValue = Number(update.value);
+        if (Number.isFinite(fallbackValue)) {
+            return clampNumber(fallbackValue, 0, 1);
+        }
+
+        return Number.NaN;
     }
 
     function clampNumber(value, min, max) {
