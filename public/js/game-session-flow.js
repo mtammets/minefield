@@ -868,6 +868,22 @@ export function createGameSessionController({
         if (!fullscreenRoot || typeof fullscreenRoot.requestFullscreen !== 'function') {
             return;
         }
+        let requestPromise = null;
+        try {
+            requestPromise = fullscreenRoot.requestFullscreen({
+                navigationUI: 'hide',
+            });
+        } catch {
+            requestPromise = null;
+        }
+        if (requestPromise && typeof requestPromise.catch === 'function') {
+            void requestPromise.catch(() => {
+                void fullscreenRoot.requestFullscreen().catch(() => {
+                    // Ignore browser/user-denied fullscreen attempts.
+                });
+            });
+            return;
+        }
         void fullscreenRoot.requestFullscreen().catch(() => {
             // Ignore browser/user-denied fullscreen attempts.
         });

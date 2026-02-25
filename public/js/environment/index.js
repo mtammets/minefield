@@ -1,3 +1,4 @@
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import {
     sceneBackgroundColor,
     sceneFog,
@@ -13,19 +14,62 @@ import { getGroundHeightAt, createGround, updateGroundMotionRuntime } from './te
 import { createCityScenery } from './city-scenery.js';
 import { createWorldBoundary } from './boundary.js';
 
-const groundTexture = createGroundTexture();
-const ground = createGround({
-    texture: groundTexture,
-    size: [worldBounds.size + 120, worldBounds.size + 120],
-    positionY: 0,
-});
-const cityScenery = createCityScenery();
-const worldBoundary = createWorldBoundary();
+const ground = new THREE.Group();
+const cityScenery = new THREE.Group();
+const worldBoundary = new THREE.Group();
+ground.name = 'world_ground_root';
+cityScenery.name = 'world_city_scenery_root';
+worldBoundary.name = 'world_boundary_root';
+
+let environmentBuilt = false;
+let runtimeGround = ground;
+let runtimeCityScenery = cityScenery;
+let runtimeWorldBoundary = worldBoundary;
+
+function ensureWorldBuilt() {
+    if (environmentBuilt) {
+        return {
+            ground: runtimeGround,
+            cityScenery: runtimeCityScenery,
+            worldBoundary: runtimeWorldBoundary,
+        };
+    }
+
+    const groundTexture = createGroundTexture();
+    const builtGround = createGround({
+        texture: groundTexture,
+        size: [worldBounds.size + 120, worldBounds.size + 120],
+        positionY: 0,
+    });
+    const builtCityScenery = createCityScenery();
+    const builtWorldBoundary = createWorldBoundary();
+
+    ground.clear();
+    cityScenery.clear();
+    worldBoundary.clear();
+    ground.add(builtGround);
+    cityScenery.add(builtCityScenery);
+    worldBoundary.add(builtWorldBoundary);
+
+    runtimeGround = builtGround;
+    runtimeCityScenery = builtCityScenery;
+    runtimeWorldBoundary = builtWorldBoundary;
+    environmentBuilt = true;
+
+    return {
+        ground: runtimeGround,
+        cityScenery: runtimeCityScenery,
+        worldBoundary: runtimeWorldBoundary,
+    };
+}
 
 function updateGroundMotion(playerPosition, playerSpeed = 0) {
+    if (!environmentBuilt) {
+        return;
+    }
     updateGroundMotionRuntime({
-        ground,
-        cityScenery,
+        ground: runtimeGround,
+        cityScenery: runtimeCityScenery,
         playerSpeed,
         playerPosition,
     });
@@ -45,6 +89,7 @@ export {
     ground,
     cityScenery,
     worldBoundary,
+    ensureWorldBuilt,
     getGroundHeightAt,
     updateGroundMotion,
     chargingZones,

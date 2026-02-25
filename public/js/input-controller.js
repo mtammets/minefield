@@ -477,8 +477,15 @@ export function createInputController(options = {}) {
     function toggleFullscreen() {
         const fullscreenRoot = document.documentElement;
         if (!document.fullscreenElement) {
-            fullscreenRoot
-                .requestFullscreen()
+            let requestPromise = null;
+            try {
+                requestPromise = fullscreenRoot.requestFullscreen({
+                    navigationUI: 'hide',
+                });
+            } catch {
+                requestPromise = fullscreenRoot.requestFullscreen();
+            }
+            Promise.resolve(requestPromise)
                 .then(() => lockEscapeKeyInFullscreen())
                 .catch(console.error);
         } else {
@@ -502,6 +509,7 @@ export function createInputController(options = {}) {
     }
 
     function onFullscreenChange() {
+        onWindowResize();
         if (document.fullscreenElement) {
             void lockEscapeKeyInFullscreen();
             return;

@@ -13,6 +13,7 @@ import {
     ground,
     cityScenery,
     worldBoundary,
+    ensureWorldBuilt,
     getGroundHeightAt,
     updateGroundMotion,
     chargingZones,
@@ -243,6 +244,28 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
     });
     reportAudioProgress();
     const preparationTasks = [waitForAnimationFrames(2)];
+
+    preparationTasks.push(
+        (async () => {
+            reportProgress({
+                stage: 'world',
+                progress: 0,
+            });
+            await waitForAnimationFrames(1);
+            ensureWorldBuilt();
+            await waitForAnimationFrames(1);
+            reportProgress({
+                stage: 'world',
+                progress: 1,
+                complete: true,
+            });
+            return {
+                task: 'world',
+                ready: true,
+                message: '',
+            };
+        })()
+    );
 
     preparationTasks.push(
         (async () => {

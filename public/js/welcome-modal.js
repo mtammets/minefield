@@ -409,11 +409,6 @@ export function createWelcomeModalController({
             return;
         }
         const normalizedMode = mode === 'online' ? 'online' : 'bots';
-        try {
-            onStartRequested?.(normalizedMode, startContext);
-        } catch {
-            // Ignore pre-start hook failures so launch can continue.
-        }
         const hasLaunchUi = Boolean(
             launchOverlayEl &&
             launchTitleEl &&
@@ -434,6 +429,15 @@ export function createWelcomeModalController({
         setStartSequenceUiVisible(true);
         setLaunchCopy(normalizedMode, 0, null);
         setLaunchProgress(0);
+        try {
+            onStartRequested?.(normalizedMode, startContext);
+        } catch {
+            // Ignore pre-start hook failures so launch can continue.
+        }
+        await waitForNextFrame();
+        if (launchSequenceState.token !== token) {
+            return;
+        }
 
         let preparationDone = false;
         let preparationFailed = false;
@@ -651,6 +655,11 @@ export function createWelcomeModalController({
         );
         if (preparationStage === 'error') {
             return preparationMessage || 'Session preparation failed. Please try again.';
+        }
+        if (preparationStage === 'world') {
+            return mode === 'online'
+                ? 'Building city world and online track state...'
+                : 'Building city world and race track...';
         }
         if (preparationStage === 'audio' && audioFilesFailed > 0) {
             return `Gameplay audio missing (${audioFilesFailed}/${audioFilesTotal}).`;
