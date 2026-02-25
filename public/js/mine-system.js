@@ -21,6 +21,18 @@ const MAX_POOLED_DETONATION_EFFECTS = 48;
 const MAX_ACTIVE_DETONATION_EFFECTS = 28;
 const MAX_ACTIVE_DETONATION_LIGHTS = 6;
 const DETONATION_EFFECT_POOL_PREWARM_COUNT = MAX_ACTIVE_DETONATION_EFFECTS;
+const DETONATION_SPAWN_BUDGET_PER_FRAME = 2;
+const DETONATION_SPAWN_BUDGET_UNDER_LOAD = 1;
+const DETONATION_SPAWN_BUDGET_SEVERE_LOAD = 0;
+const MAX_PENDING_DETONATION_SPAWNS = 72;
+const DETONATION_BURST_WINDOW_MS = 240;
+const DETONATION_BURST_STAGGER_MS = 18;
+const DETONATION_BACKLOG_STAGGER_MS = 6;
+const DETONATION_MAX_QUEUE_DELAY_MS = 900;
+const DETONATION_MIN_QUEUE_DELAY_MS = 14;
+const DETONATION_CULL_DISTANCE = 118;
+const DETONATION_CULL_DISTANCE_SQ = DETONATION_CULL_DISTANCE * DETONATION_CULL_DISTANCE;
+const MINE_DETONATION_ENABLE_POINT_LIGHTS = false;
 const MINE_DETONATION_LIGHT_INTENSITY = 7.2;
 const MINE_DETONATION_LIGHT_DISTANCE = 44;
 const MINE_DETONATION_LIGHT_NEAR_DISTANCE = 34;
@@ -50,6 +62,7 @@ const POSITION_HISTORY_RETENTION_MS = 4000;
 const mineForward = new THREE.Vector3();
 const mineThrowVelocity = new THREE.Vector3();
 const mineGroundPosition = new THREE.Vector3();
+const queuedDetonationPosition = new THREE.Vector3();
 
 export function createMineSystemController(options = {}) {
     const {
@@ -85,9 +98,14 @@ export function createMineSystemController(options = {}) {
     const previousPositionByEntityKey = new Map();
     const mineMeshPool = [];
     const mineMarkerBuffer = [];
+    const pendingDetonationSpawns = [];
     let mineSequence = 0;
     let collisionWasEnabledLastFrame = false;
     let activeDetonationLightCount = 0;
+    let pendingDetonationSpawnReadIndex = 0;
+    let detonationBurstCount = 0;
+    let lastDetonationQueuedAtMs = -100_000;
+    let droppedQueuedDetonations = 0;
     const activeEntityKeysScratch = new Set();
     const otherMovementTargetsScratch = [];
     const localMineSweepMovement = {
@@ -110,6 +128,7 @@ export function createMineSystemController(options = {}) {
         applyRoomMineSnapshot,
         handleRemoteMinePlaced,
         handleRemoteMineDetonated,
+        getPerformanceSnapshot,
         clearAll,
         warmupGraphics,
     };
@@ -321,6 +340,9 @@ export function createMineSystemController(options = {}) {
         }
 
         const now = Date.now();
+        if (now - lastDetonationQueuedAtMs > DETONATION_BURST_WINDOW_MS) {
+            detonationBurstCount = 0;
+        }
         const localPlayerId = sanitizePlayerId(context.localPlayerId || getLocalPlayerId());
         const localCarPosition = context.localCarPosition || car.position;
         const enableLocalCollision = Boolean(context.enableLocalCollision);
@@ -502,6 +524,7 @@ export function createMineSystemController(options = {}) {
             }
         }
 
+        processPendingDetonationSpawns(dt, now);
         updateDetonationEffects(dt);
         pruneRecentDetonations(now);
         if (localMovement) {
@@ -627,9 +650,9 @@ export function createMineSystemController(options = {}) {
         }
 
         recentDetonations.set(mineId, now);
-        spawnDetonationEffect(detonationPosition, {
+        queueDetonationEffectSpawn(detonationPosition, {
             preferLight: Boolean(context.localHit),
-        });
+        }, now);
         onMineDetonated({
             mineId,
             position: detonationPosition,
@@ -674,6 +697,19 @@ export function createMineSystemController(options = {}) {
                 target: context.otherTarget,
             });
         }
+    }
+
+    function getPerformanceSnapshot() {
+        return {
+            pendingDetonationSpawns: Math.max(
+                0,
+                pendingDetonationSpawns.length - pendingDetonationSpawnReadIndex
+            ),
+            activeDetonationEffects: detonationEffects.length,
+            activeDetonationLights: activeDetonationLightCount,
+            detonationBurstCount: detonationBurstCount,
+            droppedDetonationEffects: droppedQueuedDetonations,
+        };
     }
 
     function upsertMine(snapshot, options = {}) {
@@ -740,6 +776,11 @@ export function createMineSystemController(options = {}) {
         for (const mineId of Array.from(minesById.keys())) {
             removeMine(mineId);
         }
+        pendingDetonationSpawns.length = 0;
+        pendingDetonationSpawnReadIndex = 0;
+        detonationBurstCount = 0;
+        droppedQueuedDetonations = 0;
+        lastDetonationQueuedAtMs = -100_000;
         while (detonationEffects.length > 0) {
             removeActiveDetonationEffectAt(detonationEffects.length - 1);
         }
@@ -860,6 +901,137 @@ export function createMineSystemController(options = {}) {
         disposeMineMeshBundle(bundle);
     }
 
+    function queueDetonationEffectSpawn(position, options = {}, now = Date.now()) {
+        if (!position) {
+            return;
+        }
+        const preferLight = Boolean(options?.preferLight);
+        const distanceSq = getDistanceSqToCar(position);
+        if (!preferLight && distanceSq > MINE_DETONATION_VISUAL_DISTANCE_SQ) {
+            return;
+        }
+
+        if (now - lastDetonationQueuedAtMs <= DETONATION_BURST_WINDOW_MS) {
+            detonationBurstCount = Math.min(16, detonationBurstCount + 1);
+        } else {
+            detonationBurstCount = 0;
+        }
+        lastDetonationQueuedAtMs = now;
+
+        const activePendingCount =
+            pendingDetonationSpawns.length - pendingDetonationSpawnReadIndex;
+        if (activePendingCount >= MAX_PENDING_DETONATION_SPAWNS) {
+            const dropped = dropQueuedDetonationEntry({ preferLight, distanceSq });
+            if (!dropped) {
+                droppedQueuedDetonations += 1;
+                return;
+            }
+        }
+
+        const spawnDelayMs =
+            DETONATION_MIN_QUEUE_DELAY_MS +
+            (preferLight
+                ? 0
+                : Math.min(
+                      140,
+                      detonationBurstCount * DETONATION_BURST_STAGGER_MS +
+                          activePendingCount * DETONATION_BACKLOG_STAGGER_MS
+                  ));
+        pendingDetonationSpawns.push({
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            distanceSq,
+            preferLight,
+            burstIndex: detonationBurstCount,
+            queuedAtMs: now,
+            dueAtMs: now + spawnDelayMs,
+        });
+    }
+
+    function dropQueuedDetonationEntry({ preferLight = false, distanceSq = Infinity } = {}) {
+        for (
+            let index = pendingDetonationSpawnReadIndex;
+            index < pendingDetonationSpawns.length;
+            index += 1
+        ) {
+            const entry = pendingDetonationSpawns[index];
+            if (!entry || entry.preferLight) {
+                continue;
+            }
+            if (!preferLight && Number(entry.distanceSq) < Number(distanceSq)) {
+                continue;
+            }
+            pendingDetonationSpawns.splice(index, 1);
+            return true;
+        }
+        return false;
+    }
+
+    function processPendingDetonationSpawns(dt, now = Date.now()) {
+        if (pendingDetonationSpawns.length - pendingDetonationSpawnReadIndex <= 0) {
+            return;
+        }
+
+        let budget = resolvePendingDetonationSpawnBudget(dt);
+        while (pendingDetonationSpawnReadIndex < pendingDetonationSpawns.length) {
+            const entry = pendingDetonationSpawns[pendingDetonationSpawnReadIndex];
+            if (!entry) {
+                pendingDetonationSpawnReadIndex += 1;
+                continue;
+            }
+
+            const queueDelayMs = Math.max(0, now - entry.queuedAtMs);
+            const localPriority = entry.preferLight && queueDelayMs >= 80;
+            if (!localPriority && now < entry.dueAtMs) {
+                break;
+            }
+            if (!localPriority && budget <= 0) {
+                break;
+            }
+            pendingDetonationSpawnReadIndex += 1;
+
+            if (
+                !entry.preferLight &&
+                queueDelayMs > DETONATION_MAX_QUEUE_DELAY_MS &&
+                Number(entry.distanceSq) > DETONATION_CULL_DISTANCE_SQ
+            ) {
+                droppedQueuedDetonations += 1;
+                continue;
+            }
+
+            queuedDetonationPosition.set(entry.x, entry.y, entry.z);
+            spawnDetonationEffect(queuedDetonationPosition, {
+                preferLight: entry.preferLight,
+                burstIndex: entry.burstIndex,
+                queueDelayMs,
+            });
+            if (!localPriority) {
+                budget -= 1;
+            }
+        }
+
+        if (pendingDetonationSpawnReadIndex >= pendingDetonationSpawns.length) {
+            pendingDetonationSpawns.length = 0;
+            pendingDetonationSpawnReadIndex = 0;
+            return;
+        }
+        if (pendingDetonationSpawnReadIndex >= 16) {
+            pendingDetonationSpawns.splice(0, pendingDetonationSpawnReadIndex);
+            pendingDetonationSpawnReadIndex = 0;
+        }
+    }
+
+    function resolvePendingDetonationSpawnBudget(dt) {
+        if (dt > 1 / 32 || detonationEffects.length >= Math.floor(MAX_ACTIVE_DETONATION_EFFECTS * 0.9)) {
+            return DETONATION_SPAWN_BUDGET_SEVERE_LOAD;
+        }
+        if (dt > 1 / 44 || detonationEffects.length >= Math.floor(MAX_ACTIVE_DETONATION_EFFECTS * 0.72)) {
+            return DETONATION_SPAWN_BUDGET_UNDER_LOAD;
+        }
+        return DETONATION_SPAWN_BUDGET_PER_FRAME;
+    }
+
     function resetMineMeshBundle(bundle) {
         bundle.group.visible = true;
         bundle.group.position.set(0, -1000, 0);
@@ -878,14 +1050,20 @@ export function createMineSystemController(options = {}) {
         disposeObject3d(bundle.group);
     }
 
-    function spawnDetonationEffect(position, { preferLight = false } = {}) {
+    function spawnDetonationEffect(position, { preferLight = false, burstIndex = 0, queueDelayMs = 0 } = {}) {
         const deltaX = position.x - car.position.x;
         const deltaZ = position.z - car.position.z;
         const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
         if (!preferLight && distanceSq > MINE_DETONATION_VISUAL_DISTANCE_SQ) {
             return;
         }
-        const fullDetail = Boolean(preferLight) || distanceSq <= MINE_DETONATION_FULL_DETAIL_DISTANCE_SQ;
+        const burstLevel = Math.max(0, Math.floor(Number(burstIndex) || 0));
+        const detailSuppressed = burstLevel >= 2 && !preferLight;
+        const fullDetail =
+            (Boolean(preferLight) || distanceSq <= MINE_DETONATION_FULL_DETAIL_DISTANCE_SQ) &&
+            !detailSuppressed;
+        const lifeScale = burstLevel >= 4 ? 0.72 : burstLevel >= 2 ? 0.84 : 1;
+        const opacityScale = queueDelayMs >= 240 ? 0.86 : 1;
 
         if (detonationEffects.length >= MAX_ACTIVE_DETONATION_EFFECTS) {
             removeActiveDetonationEffectAt(0);
@@ -894,17 +1072,30 @@ export function createMineSystemController(options = {}) {
         if (!effect) {
             return;
         }
+        ensureDetonationEffectVisualsAttached(effect);
+        const maxLightSlots =
+            burstLevel >= 4
+                ? Math.max(1, MAX_ACTIVE_DETONATION_LIGHTS - 3)
+                : burstLevel >= 2
+                  ? Math.max(2, MAX_ACTIVE_DETONATION_LIGHTS - 2)
+                  : MAX_ACTIVE_DETONATION_LIGHTS;
+        const allowBurstLight = preferLight || burstLevel <= 1;
         const shouldSpawnLight =
+            MINE_DETONATION_ENABLE_POINT_LIGHTS &&
+            allowBurstLight &&
             (Boolean(preferLight) || distanceSq <= MINE_DETONATION_LIGHT_NEAR_DISTANCE_SQ) &&
-            activeDetonationLightCount < MAX_ACTIVE_DETONATION_LIGHTS;
+            activeDetonationLightCount < maxLightSlots;
+        const lightLife = MINE_DETONATION_LIGHT_LIFE * (burstLevel >= 3 ? 0.76 : 1);
+        const ringLife = MINE_DETONATION_RING_LIFE * lifeScale;
 
         effect.light.position.copy(position);
         effect.light.position.y += 0.42;
-        effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
-        effect.light.userData.life = shouldSpawnLight ? MINE_DETONATION_LIGHT_LIFE : 0;
+        effect.light.userData.maxLife = lightLife;
+        effect.light.userData.life = shouldSpawnLight ? lightLife : 0;
         effect.light.intensity = shouldSpawnLight ? MINE_DETONATION_LIGHT_INTENSITY : 0;
         effect.light.distance = shouldSpawnLight ? MINE_DETONATION_LIGHT_DISTANCE : 0;
         effect.light.userData.active = shouldSpawnLight;
+        effect.light.visible = shouldSpawnLight;
         if (shouldSpawnLight) {
             scene.add(effect.light);
             activeDetonationLightCount += 1;
@@ -914,35 +1105,35 @@ export function createMineSystemController(options = {}) {
         effect.shockwave.position.y += 0.05;
         effect.shockwave.rotation.z = Math.random() * Math.PI * 2;
         effect.shockwave.scale.setScalar(MINE_DETONATION_SHOCKWAVE_BASE_SCALE);
-        effect.shockwave.userData.life = MINE_DETONATION_RING_LIFE;
-        effect.shockwave.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.shockwave.material.opacity = MINE_DETONATION_SHOCKWAVE_BASE_OPACITY;
+        effect.shockwave.userData.life = ringLife;
+        effect.shockwave.userData.maxLife = ringLife;
+        effect.shockwave.material.opacity = MINE_DETONATION_SHOCKWAVE_BASE_OPACITY * opacityScale;
         effect.shockwave.material.color.copy(MINE_DETONATION_HOT_COLOR);
-        scene.add(effect.shockwave);
+        effect.shockwave.visible = true;
 
         effect.coreSprite.position.copy(position);
         effect.coreSprite.position.y += 0.28;
         effect.coreSprite.scale.setScalar(MINE_DETONATION_CORE_BASE_SCALE);
         effect.coreSprite.material.rotation = Math.random() * Math.PI * 2;
-        effect.coreSprite.userData.life = fullDetail ? MINE_DETONATION_RING_LIFE : 0;
-        effect.coreSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.coreSprite.material.opacity = fullDetail ? MINE_DETONATION_CORE_BASE_OPACITY : 0;
+        effect.coreSprite.userData.life = fullDetail ? ringLife : 0;
+        effect.coreSprite.userData.maxLife = ringLife;
+        effect.coreSprite.material.opacity = fullDetail
+            ? MINE_DETONATION_CORE_BASE_OPACITY * opacityScale
+            : 0;
         effect.coreSprite.material.color.copy(MINE_DETONATION_HOT_COLOR);
-        if (fullDetail) {
-            scene.add(effect.coreSprite);
-        }
+        effect.coreSprite.visible = fullDetail;
 
         effect.haloSprite.position.copy(position);
         effect.haloSprite.position.y += 0.16;
         effect.haloSprite.scale.setScalar(MINE_DETONATION_HALO_BASE_SCALE);
         effect.haloSprite.material.rotation = Math.random() * Math.PI * 2;
-        effect.haloSprite.userData.life = fullDetail ? MINE_DETONATION_RING_LIFE : 0;
-        effect.haloSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
-        effect.haloSprite.material.opacity = fullDetail ? MINE_DETONATION_HALO_BASE_OPACITY : 0;
+        effect.haloSprite.userData.life = fullDetail ? ringLife : 0;
+        effect.haloSprite.userData.maxLife = ringLife;
+        effect.haloSprite.material.opacity = fullDetail
+            ? MINE_DETONATION_HALO_BASE_OPACITY * opacityScale
+            : 0;
         effect.haloSprite.material.color.copy(MINE_DETONATION_WARM_COLOR);
-        if (fullDetail) {
-            scene.add(effect.haloSprite);
-        }
+        effect.haloSprite.visible = fullDetail;
 
         detonationEffects.push(effect);
     }
@@ -1037,7 +1228,9 @@ export function createMineSystemController(options = {}) {
             MAX_POOLED_DETONATION_EFFECTS
         );
         for (let i = detonationEffectPool.length; i < targetCount; i += 1) {
-            detonationEffectPool.push(createDetonationEffectBundle());
+            const effect = createDetonationEffectBundle();
+            ensureDetonationEffectVisualsAttached(effect);
+            detonationEffectPool.push(effect);
         }
     }
 
@@ -1052,10 +1245,6 @@ export function createMineSystemController(options = {}) {
             effect.light.userData.active = false;
             activeDetonationLightCount = Math.max(0, activeDetonationLightCount - 1);
         }
-        scene.remove(effect.light);
-        scene.remove(effect.shockwave);
-        scene.remove(effect.coreSprite);
-        scene.remove(effect.haloSprite);
         recycleDetonationEffect(effect);
 
         const lastIndex = detonationEffects.length - 1;
@@ -1074,6 +1263,7 @@ export function createMineSystemController(options = {}) {
 
     function createDetonationEffectBundle() {
         const light = new THREE.PointLight(0xffab6c, MINE_DETONATION_LIGHT_INTENSITY, 48, 2);
+        light.visible = false;
         light.userData.active = false;
         const shockwaveMaterial = new THREE.MeshBasicMaterial({
             color: 0xff9560,
@@ -1087,6 +1277,7 @@ export function createMineSystemController(options = {}) {
         });
         const shockwave = new THREE.Mesh(detonationShockwaveGeometry, shockwaveMaterial);
         shockwave.rotation.x = -Math.PI / 2;
+        shockwave.visible = false;
         const coreMaterial = new THREE.SpriteMaterial({
             map: detonationCoreTexture,
             color: MINE_DETONATION_HOT_COLOR,
@@ -1097,6 +1288,7 @@ export function createMineSystemController(options = {}) {
             depthWrite: false,
         });
         const coreSprite = new THREE.Sprite(coreMaterial);
+        coreSprite.visible = false;
         const haloMaterial = new THREE.SpriteMaterial({
             map: detonationHaloTexture,
             color: MINE_DETONATION_WARM_COLOR,
@@ -1107,31 +1299,39 @@ export function createMineSystemController(options = {}) {
             depthWrite: false,
         });
         const haloSprite = new THREE.Sprite(haloMaterial);
-        return { light, shockwave, coreSprite, haloSprite };
+        haloSprite.visible = false;
+        return { light, shockwave, coreSprite, haloSprite, visualsAttached: false };
     }
 
     function recycleDetonationEffect(effect) {
         if (!effect) {
             return;
         }
+        if (effect.light.parent) {
+            effect.light.parent.remove(effect.light);
+        }
         effect.light.userData.life = 0;
         effect.light.userData.maxLife = MINE_DETONATION_LIGHT_LIFE;
         effect.light.userData.active = false;
+        effect.light.visible = false;
         effect.light.intensity = 0;
         effect.light.position.set(0, -1000, 0);
         effect.light.distance = 0;
         effect.shockwave.userData.life = 0;
         effect.shockwave.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.shockwave.visible = false;
         effect.shockwave.material.opacity = 0;
         effect.shockwave.scale.setScalar(0.0001);
         effect.shockwave.position.set(0, -1000, 0);
         effect.coreSprite.userData.life = 0;
         effect.coreSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.coreSprite.visible = false;
         effect.coreSprite.material.opacity = 0;
         effect.coreSprite.scale.setScalar(0.0001);
         effect.coreSprite.position.set(0, -1000, 0);
         effect.haloSprite.userData.life = 0;
         effect.haloSprite.userData.maxLife = MINE_DETONATION_RING_LIFE;
+        effect.haloSprite.visible = false;
         effect.haloSprite.material.opacity = 0;
         effect.haloSprite.scale.setScalar(0.0001);
         effect.haloSprite.position.set(0, -1000, 0);
@@ -1139,10 +1339,40 @@ export function createMineSystemController(options = {}) {
         if (detonationEffectPool.length < MAX_POOLED_DETONATION_EFFECTS) {
             detonationEffectPool.push(effect);
         } else {
+            detachDetonationEffectVisuals(effect);
             effect.shockwave.material.dispose();
             effect.coreSprite.material.dispose();
             effect.haloSprite.material.dispose();
         }
+    }
+
+    function ensureDetonationEffectVisualsAttached(effect) {
+        if (!effect || effect.visualsAttached) {
+            return;
+        }
+        scene.add(effect.shockwave);
+        scene.add(effect.coreSprite);
+        scene.add(effect.haloSprite);
+        effect.visualsAttached = true;
+    }
+
+    function detachDetonationEffectVisuals(effect) {
+        if (!effect) {
+            return;
+        }
+        if (effect.light?.parent) {
+            effect.light.parent.remove(effect.light);
+        }
+        if (effect.shockwave?.parent) {
+            effect.shockwave.parent.remove(effect.shockwave);
+        }
+        if (effect.coreSprite?.parent) {
+            effect.coreSprite.parent.remove(effect.coreSprite);
+        }
+        if (effect.haloSprite?.parent) {
+            effect.haloSprite.parent.remove(effect.haloSprite);
+        }
+        effect.visualsAttached = false;
     }
 
     function pruneRecentDetonations(now) {
@@ -1151,6 +1381,15 @@ export function createMineSystemController(options = {}) {
                 recentDetonations.delete(mineId);
             }
         }
+    }
+
+    function getDistanceSqToCar(position) {
+        const dx = Number(position?.x) - car.position.x;
+        const dz = Number(position?.z) - car.position.z;
+        if (!Number.isFinite(dx) || !Number.isFinite(dz)) {
+            return Number.POSITIVE_INFINITY;
+        }
+        return dx * dx + dz * dz;
     }
 }
 
@@ -1614,6 +1853,15 @@ function createNoopMineSystemController() {
         applyRoomMineSnapshot() {},
         handleRemoteMinePlaced() {},
         handleRemoteMineDetonated() {},
+        getPerformanceSnapshot() {
+            return {
+                pendingDetonationSpawns: 0,
+                activeDetonationEffects: 0,
+                activeDetonationLights: 0,
+                detonationBurstCount: 0,
+                droppedDetonationEffects: 0,
+            };
+        },
         clearAll() {},
         warmupGraphics() {
             return false;

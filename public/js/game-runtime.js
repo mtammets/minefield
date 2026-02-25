@@ -119,6 +119,7 @@ import {
     createGraphicsQualityController,
     GRAPHICS_QUALITY_MODES,
 } from './graphics-quality-controller.js';
+import { createPerformanceDiagnosticsController } from './performance-diagnostics-ui.js';
 import {
     INPUT_CONTEXTS,
     WORLD_MAP_DRIVE_LOCK_MODES,
@@ -140,11 +141,18 @@ const BOT_MINE_DEBRIS_BUDGET_MID = 2;
 const BOT_MINE_DEBRIS_BUDGET_FAR = 0;
 const BOT_MINE_DEBRIS_NEAR_DISTANCE = 52;
 const BOT_MINE_DEBRIS_MID_DISTANCE = 84;
-const BOT_MINE_DEBRIS_NEAR_DISTANCE_SQ = BOT_MINE_DEBRIS_NEAR_DISTANCE * BOT_MINE_DEBRIS_NEAR_DISTANCE;
+const BOT_MINE_DEBRIS_NEAR_DISTANCE_SQ =
+    BOT_MINE_DEBRIS_NEAR_DISTANCE * BOT_MINE_DEBRIS_NEAR_DISTANCE;
 const BOT_MINE_DEBRIS_MID_DISTANCE_SQ = BOT_MINE_DEBRIS_MID_DISTANCE * BOT_MINE_DEBRIS_MID_DISTANCE;
+const STARTUP_SECTOR_PREWARM_RADIUS = 38;
+const STARTUP_SECTOR_PREWARM_HEIGHT = 18;
+const STARTUP_SECTOR_PREWARM_LOOKAT_HEIGHT = 1.8;
+const STARTUP_SECTOR_PREWARM_DIRECTIONS = Object.freeze([0, 45, 90, 135, 180, 225, 270, 315]);
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
-const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(GRAPHICS_QUALITY_MODES.balanced);
+const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
+    GRAPHICS_QUALITY_MODES.balanced
+);
 const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persistedGraphicsQualityMode)
     ? persistedGraphicsQualityMode
     : GRAPHICS_QUALITY_MODES.balanced;
@@ -156,6 +164,7 @@ const runtimeState = createGameRuntimeState({
 let runtimeGraphicsWarmupReady = false;
 runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
+const performanceDiagnosticsController = createPerformanceDiagnosticsController();
 
 setPlayerCarBodyColor(runtimeState.selectedCarColorHex);
 setPlayerTopSpeedLimitKph(
@@ -177,6 +186,7 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         getGameSessionController: () => runtimeState.gameSessionController,
         getInputController: () => runtimeState.inputController,
         onPrepareStart: prepareRuntimeForSessionStart,
+        onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
     });
 
 async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null, options = null) {
@@ -209,6 +219,9 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
             Math.max(0, Math.round(Number(snapshot.filesDone) || fallbackDone))
         );
         const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
+        const completeNoFailures =
+            Boolean(snapshot.completeNoFailures) ||
+            (filesTotal > 0 && filesReady >= filesTotal && filesFailed === 0);
 
         reportProgress({
             stage: 'audio',
@@ -217,53 +230,139 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
             filesReady,
             filesFailed,
             filesDone,
-            complete: filesDone >= filesTotal,
+            complete: completeNoFailures,
         });
     };
 
     const normalizedMode = mode === 'online' ? 'online' : 'bots';
     const canPrepareOnlineRoomFlow = Boolean(startContext && typeof startContext === 'object');
-    const preparationTasks = [waitForAnimationFrames(2)];
+    clearDeferredMineKillUiTasks({ resetCounters: true });
     reportProgress({
         stage: 'prepare',
         progress: 0,
     });
     reportAudioProgress();
+    const preparationTasks = [waitForAnimationFrames(2)];
+
     preparationTasks.push(
-        prepareGraphicsForSessionStart(normalizedMode, {
-            reportProgress,
-        })
+        (async () => {
+            const ready = await prepareGraphicsForSessionStart(normalizedMode, {
+                reportProgress,
+            });
+            return {
+                task: 'graphics',
+                ready: Boolean(ready),
+                message: 'Graphics warmup failed. Please reload and try again.',
+            };
+        })()
     );
 
     if (typeof runtimeState.audioController?.prepareForGameplay === 'function') {
         preparationTasks.push(
-            runtimeState.audioController.prepareForGameplay({
-                onProgress(preloadState) {
-                    reportAudioProgress(preloadState);
-                },
-            })
+            (async () => {
+                const audioReady = await runtimeState.audioController.prepareForGameplay({
+                    requireAllFiles: true,
+                    onProgress(preloadState) {
+                        reportAudioProgress(preloadState);
+                    },
+                });
+                const preloadState = runtimeState.audioController?.getPreloadState?.() || null;
+                const filesTotal = Math.max(0, Math.round(Number(preloadState?.filesTotal) || 0));
+                const filesReady = Math.max(0, Math.round(Number(preloadState?.filesReady) || 0));
+                const filesFailed = Math.max(0, Math.round(Number(preloadState?.filesFailed) || 0));
+                const ready =
+                    filesTotal <= 0 ||
+                    (Boolean(audioReady) && filesReady >= filesTotal && filesFailed === 0);
+                return {
+                    task: 'audio',
+                    ready,
+                    message:
+                        filesTotal > 0 && filesFailed > 0
+                            ? `Gameplay audio failed to load (${filesFailed}/${filesTotal} missing).`
+                            : 'Gameplay audio could not be fully prepared.',
+                };
+            })()
         );
     } else if (typeof runtimeState.audioController?.unlock === 'function') {
         preparationTasks.push(
-            runtimeState.audioController
-                .unlock({ waitForPreload: true })
-                .finally(() => reportAudioProgress())
+            (async () => {
+                const unlocked = await runtimeState.audioController.unlock({
+                    waitForPreload: true,
+                });
+                reportAudioProgress();
+                const preloadState = runtimeState.audioController?.getPreloadState?.() || null;
+                const filesTotal = Math.max(0, Math.round(Number(preloadState?.filesTotal) || 0));
+                const filesReady = Math.max(0, Math.round(Number(preloadState?.filesReady) || 0));
+                const filesFailed = Math.max(0, Math.round(Number(preloadState?.filesFailed) || 0));
+                const ready =
+                    filesTotal <= 0 ||
+                    (Boolean(unlocked) && filesReady >= filesTotal && filesFailed === 0);
+                return {
+                    task: 'audio',
+                    ready,
+                    message: 'Gameplay audio could not be fully prepared.',
+                };
+            })()
         );
     }
+
     if (normalizedMode === 'online' && canPrepareOnlineRoomFlow) {
         runtimeState.multiplayerController?.setPanelVisible?.(true);
         if (typeof runtimeState.multiplayerController?.prepareOnlineRoomFlow === 'function') {
             preparationTasks.push(
-                runtimeState.multiplayerController.prepareOnlineRoomFlow(startContext)
+                (async () => {
+                    const ready =
+                        await runtimeState.multiplayerController.prepareOnlineRoomFlow(
+                            startContext
+                        );
+                    return {
+                        task: 'online',
+                        ready: Boolean(ready),
+                        message: 'Online room is not ready yet. Please try again.',
+                    };
+                })()
             );
         }
     }
-    await Promise.allSettled(preparationTasks);
+
+    try {
+        const results = await Promise.all(preparationTasks);
+        const failedTask = results.find((entry) => entry && entry.ready === false);
+        if (failedTask) {
+            const failureMessage =
+                typeof failedTask.message === 'string' && failedTask.message.trim()
+                    ? failedTask.message.trim()
+                    : 'Session preparation failed.';
+            reportAudioProgress();
+            reportProgress({
+                stage: 'error',
+                progress: 0.98,
+                message: failureMessage,
+            });
+            throw new Error(failureMessage);
+        }
+    } catch (error) {
+        const failureMessage =
+            typeof error?.message === 'string' && error.message.trim()
+                ? error.message.trim()
+                : 'Session preparation failed.';
+        reportAudioProgress();
+        reportProgress({
+            stage: 'error',
+            progress: 0.98,
+            message: failureMessage,
+        });
+        throw error;
+    }
+
     reportAudioProgress();
     reportProgress({
         stage: 'complete',
         progress: 1,
     });
+    return {
+        ok: true,
+    };
 }
 
 function waitForAnimationFrames(frameCount = 1) {
@@ -280,6 +379,50 @@ function waitForAnimationFrames(frameCount = 1) {
         };
         window.requestAnimationFrame(tick);
     });
+}
+
+async function prewarmSceneSectors(renderer, camera, origin, options = {}) {
+    if (!renderer || typeof renderer.render !== 'function' || !camera?.isCamera || !origin) {
+        return false;
+    }
+    const reportProgress =
+        typeof options?.reportProgress === 'function' ? options.reportProgress : () => {};
+    const directions = STARTUP_SECTOR_PREWARM_DIRECTIONS;
+    if (!Array.isArray(directions) || directions.length === 0) {
+        return false;
+    }
+
+    const warmupCamera = camera.clone?.() || new THREE.PerspectiveCamera(55, 1, 0.1, 260);
+    warmupCamera.near = camera.near;
+    warmupCamera.far = camera.far;
+    warmupCamera.fov = camera.fov;
+    warmupCamera.aspect = camera.aspect;
+    warmupCamera.updateProjectionMatrix();
+
+    let warmedPasses = 0;
+    for (let i = 0; i < directions.length; i += 1) {
+        const angleRad = THREE.MathUtils.degToRad(directions[i]);
+        const targetX = origin.x + Math.cos(angleRad) * STARTUP_SECTOR_PREWARM_RADIUS;
+        const targetZ = origin.z + Math.sin(angleRad) * STARTUP_SECTOR_PREWARM_RADIUS;
+        warmupCamera.position.set(targetX, origin.y + STARTUP_SECTOR_PREWARM_HEIGHT, targetZ);
+        warmupCamera.lookAt(origin.x, origin.y + STARTUP_SECTOR_PREWARM_LOOKAT_HEIGHT, origin.z);
+        warmupCamera.updateMatrixWorld(true);
+        scene.updateMatrixWorld(true);
+
+        try {
+            renderer.render(scene, warmupCamera);
+            warmedPasses += 1;
+        } catch {
+            // Ignore individual sector render failures and continue.
+        }
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.92 + ((i + 1) / directions.length) * 0.04,
+        });
+        await waitForAnimationFrames(1);
+    }
+
+    return warmedPasses > 0;
 }
 
 async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
@@ -302,6 +445,7 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
     try {
         runtimeState.collectibleSystem?.prewarmEffects?.();
         skidMarkController?.prewarmParticles?.();
+        const warmedMineKillUiFlow = prewarmMineKillUiFlow();
 
         const collectors = [{ id: 'player', position: car.position }];
         if (mode === 'bots') {
@@ -337,14 +481,29 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
         );
         reportProgress({
             stage: 'graphics',
-            progress: 0.74,
+            progress: 0.72,
+        });
+
+        await waitForAnimationFrames(1);
+        const warmedBotDebrisShaders =
+            mode === 'bots'
+                ? runtimeState.botTrafficSystem?.warmupGraphics?.(renderer, camera)
+                : true;
+        reportProgress({
+            stage: 'graphics',
+            progress: 0.84,
         });
 
         await waitForAnimationFrames(1);
         const warmedSkidShaders = skidMarkController?.warmupGraphics?.(renderer, camera);
         reportProgress({
             stage: 'graphics',
-            progress: 0.88,
+            progress: 0.92,
+        });
+
+        await waitForAnimationFrames(1);
+        const warmedSceneSectors = await prewarmSceneSectors(renderer, camera, car.position, {
+            reportProgress,
         });
 
         await waitForAnimationFrames(1);
@@ -357,7 +516,10 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
             warmedCollectibleShaders,
             warmedMineShaders,
             warmedCrashShaders,
+            warmedBotDebrisShaders,
             warmedSkidShaders,
+            warmedSceneSectors,
+            warmedMineKillUiFlow,
         ];
         runtimeGraphicsWarmupReady = warmupResults.every(
             (value) => value === undefined || Boolean(value)
@@ -409,7 +571,9 @@ const scene = initializeScene({
 });
 const renderer = initializeRenderer({ renderSettings });
 runtimeState.audioController = createAudioSystem({ camera });
-runtimeState.audioController.initialize();
+runtimeState.audioController.initialize({
+    preloadOnInitialize: false,
+});
 
 const chargingZoneController = createChargingZoneController(scene, chargingZones, {
     activationDelaySec: CHARGING_ZONE_ACTIVATION_DELAY_SEC,
@@ -499,6 +663,19 @@ const starsController = addStars(scene);
 const SHOW_ONLY_LOCAL_SCORE_POPUPS = true;
 const SCORE_AUDIT_PEAK_COMBO_MIN = 1;
 const SCORE_AUDIT_PEAK_CHAIN_MIN = 1;
+const FAR_MINE_KILL_UI_DEFER_DISTANCE_SQ = BOT_MINE_DEBRIS_MID_DISTANCE_SQ;
+const DEFERRED_MINE_KILL_UI_QUEUE_MAX = 24;
+const DEFERRED_MINE_KILL_UI_TASKS_PER_FRAME = 1;
+const DEFERRED_MINE_KILL_UI_BASE_DELAY_FRAMES = 1;
+const DEFERRED_MINE_KILL_UI_POPUP_DELAY_FRAMES = 1;
+const DEFERRED_MINE_KILL_UI_INFO_DELAY_FRAMES = 2;
+const DEFERRED_MINE_KILL_UI_TASK_MAX_AGE_MS = 1800;
+const deferredMineKillUiTasks = [];
+let deferredMineKillUiRafHandle = null;
+let deferredMineKillUiFrameTick = 0;
+let deferredMineKillUiDroppedCount = 0;
+let deferredMineKillUiExecutedCount = 0;
+let mineKillUiFlowPrewarmed = false;
 
 function resolveCollectorWorldPosition(collectorId = 'player') {
     if (collectorId === 'player') {
@@ -529,6 +706,7 @@ function spawnScorePopup({
     if (SHOW_ONLY_LOCAL_SCORE_POPUPS && !isLocalCollectorId(collectorId)) {
         return;
     }
+    runtimeState.scorePopupController?.prewarm?.();
     runtimeState.scorePopupController?.spawn?.({
         collectorId,
         pointsAwarded: awarded,
@@ -542,12 +720,131 @@ function spawnScorePopup({
     });
 }
 
+function prewarmMineKillUiFlow() {
+    if (mineKillUiFlowPrewarmed) {
+        return true;
+    }
+    const popupPrewarmed = runtimeState.scorePopupController?.prewarm?.() !== false;
+    mineKillUiFlowPrewarmed = Boolean(popupPrewarmed);
+    return mineKillUiFlowPrewarmed;
+}
+
+function queueDeferredMineKillUiTask(taskHandler = null, options = {}) {
+    if (typeof taskHandler !== 'function') {
+        return false;
+    }
+    const delayFrames = THREE.MathUtils.clamp(
+        Math.round(Number(options?.delayFrames) || DEFERRED_MINE_KILL_UI_BASE_DELAY_FRAMES),
+        0,
+        8
+    );
+    const label =
+        typeof options?.label === 'string' && options.label.trim()
+            ? options.label.trim()
+            : 'mine_kill_ui_task';
+    if (deferredMineKillUiTasks.length >= DEFERRED_MINE_KILL_UI_QUEUE_MAX) {
+        deferredMineKillUiTasks.shift();
+        deferredMineKillUiDroppedCount += 1;
+    }
+    deferredMineKillUiTasks.push({
+        taskHandler,
+        dueFrame: deferredMineKillUiFrameTick + delayFrames,
+        queuedAtMs: performance.now(),
+        label,
+    });
+    ensureDeferredMineKillUiTaskPump();
+    return true;
+}
+
+function ensureDeferredMineKillUiTaskPump() {
+    if (deferredMineKillUiRafHandle != null) {
+        return;
+    }
+    deferredMineKillUiRafHandle = window.requestAnimationFrame(processDeferredMineKillUiTasksFrame);
+}
+
+function processDeferredMineKillUiTasksFrame() {
+    deferredMineKillUiRafHandle = null;
+    deferredMineKillUiFrameTick += 1;
+    const nowMs = performance.now();
+    let processed = 0;
+    let index = 0;
+    while (index < deferredMineKillUiTasks.length && processed < DEFERRED_MINE_KILL_UI_TASKS_PER_FRAME) {
+        const task = deferredMineKillUiTasks[index];
+        if (!task || typeof task.taskHandler !== 'function') {
+            deferredMineKillUiTasks.splice(index, 1);
+            deferredMineKillUiDroppedCount += 1;
+            continue;
+        }
+        if ((Number(task.dueFrame) || 0) > deferredMineKillUiFrameTick) {
+            index += 1;
+            continue;
+        }
+        const ageMs = Math.max(0, nowMs - (Number(task.queuedAtMs) || nowMs));
+        if (
+            ageMs > DEFERRED_MINE_KILL_UI_TASK_MAX_AGE_MS ||
+            runtimeState.pickupRoundFinished ||
+            runtimeState.isWelcomeModalVisible
+        ) {
+            deferredMineKillUiTasks.splice(index, 1);
+            deferredMineKillUiDroppedCount += 1;
+            continue;
+        }
+        try {
+            task.taskHandler();
+            deferredMineKillUiExecutedCount += 1;
+        } catch (error) {
+            console.error('Deferred mine kill UI task failed:', error);
+            deferredMineKillUiDroppedCount += 1;
+        }
+        deferredMineKillUiTasks.splice(index, 1);
+        processed += 1;
+    }
+    if (deferredMineKillUiTasks.length > 0) {
+        ensureDeferredMineKillUiTaskPump();
+    }
+}
+
+function clearDeferredMineKillUiTasks({ resetCounters = false } = {}) {
+    if (deferredMineKillUiRafHandle != null) {
+        window.cancelAnimationFrame(deferredMineKillUiRafHandle);
+    }
+    deferredMineKillUiRafHandle = null;
+    deferredMineKillUiTasks.length = 0;
+    deferredMineKillUiFrameTick = 0;
+    if (resetCounters) {
+        deferredMineKillUiDroppedCount = 0;
+        deferredMineKillUiExecutedCount = 0;
+    }
+}
+
 function isLocalCollectorId(collectorId) {
     if (collectorId === 'player') {
         return true;
     }
     const selfOnlineId = runtimeState.multiplayerController?.getSelfId?.() || '';
     return Boolean(selfOnlineId && collectorId === selfOnlineId);
+}
+
+function recordPerformanceDiagnosticEvent(type = '', payload = null, options = null) {
+    if (typeof performanceDiagnosticsController?.recordEvent !== 'function') {
+        return null;
+    }
+    return performanceDiagnosticsController.recordEvent(type, payload, options);
+}
+
+function serializeEventPosition(position = null) {
+    const x = Number(position?.x);
+    const y = Number(position?.y);
+    const z = Number(position?.z);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        return null;
+    }
+    return {
+        x: Number(x.toFixed(3)),
+        y: Number(y.toFixed(3)),
+        z: Number(z.toFixed(3)),
+    };
 }
 
 function buildPickupStatusContext(pointsAwarded, scoring) {
@@ -858,6 +1155,14 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             colorHex: pickupColorHex,
             wrong: false,
         });
+        recordPerformanceDiagnosticEvent('pickup_collected', {
+            gameMode: runtimeState.gameMode,
+            collectorId,
+            localCollector: isLocalCollectorId(collectorId),
+            pickupId: typeof pickupId === 'string' ? pickupId : '',
+            pickupColorHex,
+            position: serializeEventPosition(position),
+        });
 
         if (collectorId === 'player') {
             const onlineAuthoritativeRoundActive =
@@ -901,6 +1206,18 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                             pointsAwarded: response.pointsAwarded,
                             scoring: response.scoring,
                         });
+                        recordPerformanceDiagnosticEvent('pickup_scored_online', {
+                            collectorId: 'player',
+                            pointsAwarded: Math.max(
+                                0,
+                                Math.round(Number(response?.pointsAwarded) || 0)
+                            ),
+                            totalScore: runtimeState.totalScore,
+                            comboCount: Math.max(
+                                0,
+                                Math.round(Number(response?.scoring?.comboCount) || 0)
+                            ),
+                        });
                         spawnScorePopup({
                             collectorId: 'player',
                             pointsAwarded: response.pointsAwarded,
@@ -937,6 +1254,14 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                 collectorId: 'player',
                 onlineAuthoritative: false,
             });
+            recordPerformanceDiagnosticEvent('pickup_scored_local', {
+                collectorId: 'player',
+                pointsAwarded: Math.max(0, Math.round(Number(scoreEvent?.pointsAwarded) || 0)),
+                totalScore: runtimeState.totalScore,
+                playerScore: runtimeState.playerScore,
+                totalCollectedCount: runtimeState.totalCollectedCount,
+                comboCount: Math.max(0, Math.round(Number(scoreEvent?.scoring?.comboCount) || 0)),
+            });
             spawnScorePopup({
                 collectorId: 'player',
                 pointsAwarded: scoreEvent?.pointsAwarded || 0,
@@ -964,6 +1289,13 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             });
             runtimeState.totalCollectedCount = nextTotalCollected;
             runtimeState.botTrafficSystem?.registerCollected(collectorId);
+            recordPerformanceDiagnosticEvent('pickup_scored_local', {
+                collectorId,
+                pointsAwarded: Math.max(0, Math.round(Number(scoreEvent?.pointsAwarded) || 0)),
+                totalScore: runtimeState.totalScore,
+                totalCollectedCount: runtimeState.totalCollectedCount,
+                comboCount: Math.max(0, Math.round(Number(scoreEvent?.scoring?.comboCount) || 0)),
+            });
             spawnScorePopup({
                 collectorId,
                 pointsAwarded: scoreEvent?.pointsAwarded || 0,
@@ -978,6 +1310,12 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         ) {
             return;
         }
+        recordPerformanceDiagnosticEvent('round_pickups_exhausted', {
+            totalPickups: Math.max(0, Math.round(Number(totalPickups) || 0)),
+            collectedPickups: Math.max(0, Math.round(Number(collectedPickups) || 0)),
+            totalScore: runtimeState.totalScore,
+            gameMode: runtimeState.gameMode,
+        });
         runtimeState.gameSessionController.finalizePickupRound(totalPickups, collectedPickups, {
             totalScore: runtimeState.totalScore,
         });
@@ -1001,6 +1339,27 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
     getGroundHeightAt,
     cityMapLayout,
+    onBotDestroyed(botEvent = null) {
+        recordPerformanceDiagnosticEvent('bot_destroyed', {
+            collectorId: typeof botEvent?.collectorId === 'string' ? botEvent.collectorId : '',
+            name: typeof botEvent?.name === 'string' ? botEvent.name : '',
+            livesRemaining: Math.max(0, Math.round(Number(botEvent?.livesRemaining) || 0)),
+            respawnAtMs: Number.isFinite(botEvent?.respawnAtMs) ? botEvent.respawnAtMs : 0,
+            position: serializeEventPosition(botEvent?.position),
+        });
+    },
+    onBotRespawn(botEvent = null) {
+        recordPerformanceDiagnosticEvent('bot_respawned', {
+            collectorId: typeof botEvent?.collectorId === 'string' ? botEvent.collectorId : '',
+            name: typeof botEvent?.name === 'string' ? botEvent.name : '',
+            livesRemaining: Math.max(0, Math.round(Number(botEvent?.livesRemaining) || 0)),
+            spawnProtectionMs: Math.max(
+                0,
+                Math.round(Number(botEvent?.spawnProtectionMsRemaining) || 0)
+            ),
+            position: serializeEventPosition(botEvent?.position),
+        });
+    },
 });
 const replayController = createReplayController(car, camera);
 runtimeState.crashDebrisController = createCrashDebrisController({
@@ -1040,7 +1399,8 @@ runtimeState.mineController = createMineSystemController({
             mineOtherVehicleTargetsBuffer.length = 0;
             return mineOtherVehicleTargetsBuffer;
         }
-        const descriptors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
+        const descriptors =
+            runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
         let targetCount = 0;
         for (let i = 0; i < descriptors.length; i += 1) {
             const entry = descriptors[i];
@@ -1091,6 +1451,14 @@ runtimeState.mineController = createMineSystemController({
                 mineId: mineSnapshot?.mineId,
             });
         }
+        recordPerformanceDiagnosticEvent('mine_deployed', {
+            gameMode: runtimeState.gameMode,
+            ownerCollectorId,
+            mineId: typeof mineSnapshot?.mineId === 'string' ? mineSnapshot.mineId : '',
+            thrown: mode === 'throw' || Boolean(mineSnapshot?.thrown),
+            mode: typeof mode === 'string' ? mode : '',
+            position: serializeEventPosition(mineSnapshot?.position),
+        });
         runtimeState.audioController?.onMineDeployed?.({
             thrown: mode === 'throw' || Boolean(mineSnapshot?.thrown),
         });
@@ -1112,6 +1480,16 @@ runtimeState.mineController = createMineSystemController({
         });
         const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
         const targetCollectorId = normalizeOptionalScoreAuditCollectorId(targetPlayerId);
+        recordPerformanceDiagnosticEvent('mine_detonated', {
+            gameMode: runtimeState.gameMode,
+            mineId: typeof mineId === 'string' ? mineId : '',
+            ownerCollectorId,
+            targetCollectorId,
+            localHit: Boolean(localHit),
+            distanceMeters: Number.isFinite(distanceMeters) ? Number(distanceMeters.toFixed(2)) : 0,
+            position: serializeEventPosition(position),
+            ownerPointsAwarded: Math.max(0, Math.round(Number(ownerPointsAwarded) || 0)),
+        });
         recordMineDetonationAudit({
             mineId,
             ownerCollectorId,
@@ -1151,6 +1529,11 @@ runtimeState.mineController = createMineSystemController({
             return;
         }
         const ownerLabel = ownerName ? `${ownerName}'s` : "an opponent's";
+        recordPerformanceDiagnosticEvent('player_mine_hit', {
+            ownerName: typeof ownerName === 'string' ? ownerName : '',
+            gameMode: runtimeState.gameMode,
+            position: serializeEventPosition(position),
+        });
         const vehicleState = getVehicleState();
         const impactNormal = new THREE.Vector3().subVectors(car.position, position).setY(0);
         if (impactNormal.lengthSq() < 0.0001) {
@@ -1193,6 +1576,16 @@ runtimeState.mineController = createMineSystemController({
                 debrisSpawnBudget,
             },
         });
+        recordPerformanceDiagnosticEvent('bot_mine_hit', {
+            targetCollectorId: typeof target?.id === 'string' ? target.id : '',
+            targetLabel: typeof target?.label === 'string' ? target.label : '',
+            ownerCollectorId: resolveMineOwnerCollectorId(ownerId),
+            gameMode: runtimeState.gameMode,
+            destroyed: Boolean(destroyed),
+            position: serializeEventPosition(position),
+            playerDistanceSq: hasDistance ? Number(distanceSq.toFixed(2)) : null,
+            debrisSpawnBudget,
+        });
         if (destroyed) {
             const targetCollectorId = typeof target?.id === 'string' ? target.id : '';
             const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
@@ -1204,22 +1597,63 @@ runtimeState.mineController = createMineSystemController({
                 0,
                 Math.round(Number(mineScoreEvent?.pointsAwarded) || 0)
             );
+            const shouldDeferMineKillUi =
+                ownerCollectorId === 'player' &&
+                hasDistance &&
+                distanceSq > FAR_MINE_KILL_UI_DEFER_DISTANCE_SQ;
+            if (shouldDeferMineKillUi) {
+                prewarmMineKillUiFlow();
+            }
             if (pointsAwarded > 0) {
-                spawnScorePopup({
+                const popupPayload = {
                     collectorId: ownerCollectorId,
                     pointsAwarded,
                     scoring: buildMinePopupScoring(mineScoreEvent?.scoring || null),
                     sourceLabel: 'mine kill',
-                });
+                };
+                if (shouldDeferMineKillUi) {
+                    queueDeferredMineKillUiTask(() => {
+                        spawnScorePopup(popupPayload);
+                    }, {
+                        delayFrames: DEFERRED_MINE_KILL_UI_POPUP_DELAY_FRAMES,
+                        label: 'mine_kill_popup',
+                    });
+                } else {
+                    spawnScorePopup(popupPayload);
+                }
             }
             if (ownerCollectorId === 'player' && pointsAwarded > 0) {
-                objectiveUi.showInfo(
-                    `Mine kill on ${target.label || target.id}: +${pointsAwarded} pts.`,
-                    1500
-                );
+                const statusMessage = `Mine kill on ${target.label || target.id}: +${pointsAwarded} pts.`;
+                if (shouldDeferMineKillUi) {
+                    queueDeferredMineKillUiTask(() => {
+                        objectiveUi.showInfo(statusMessage, 1500);
+                    }, {
+                        delayFrames: DEFERRED_MINE_KILL_UI_INFO_DELAY_FRAMES,
+                        label: 'mine_kill_status',
+                    });
+                    recordPerformanceDiagnosticEvent('mine_kill_ui_deferred', {
+                        gameMode: runtimeState.gameMode,
+                        ownerCollectorId,
+                        targetCollectorId,
+                        pointsAwarded,
+                        playerDistanceSq: Number(distanceSq.toFixed(2)),
+                        pendingTasks: deferredMineKillUiTasks.length,
+                    });
+                } else {
+                    objectiveUi.showInfo(statusMessage, 1500);
+                }
             } else if (!hasDistance || distanceSq <= BOT_MINE_DEBRIS_MID_DISTANCE_SQ) {
                 objectiveUi.showInfo(`Mine hit ${target.label || target.id}.`, 1400);
             }
+            recordPerformanceDiagnosticEvent('bot_destroyed_by_mine', {
+                targetCollectorId,
+                ownerCollectorId,
+                pointsAwarded,
+                gameMode: runtimeState.gameMode,
+                position: serializeEventPosition(position),
+                uiDeferred: shouldDeferMineKillUi,
+                playerDistanceSq: hasDistance ? Number(distanceSq.toFixed(2)) : null,
+            });
         }
     },
 });
@@ -1246,9 +1680,20 @@ runtimeState.multiplayerController = createMultiplayerController({
                 mineId: snapshot?.mineId,
             });
         }
+        recordPerformanceDiagnosticEvent('mine_placed_remote', {
+            ownerCollectorId,
+            mineId: typeof snapshot?.mineId === 'string' ? snapshot.mineId : '',
+            position: serializeEventPosition(snapshot?.position),
+        });
         runtimeState.mineController?.handleRemoteMinePlaced?.(snapshot);
     },
     onMineDetonated(snapshot) {
+        recordPerformanceDiagnosticEvent('mine_detonated_remote', {
+            mineId: typeof snapshot?.mineId === 'string' ? snapshot.mineId : '',
+            ownerCollectorId: resolveMineOwnerCollectorId(snapshot?.ownerId),
+            targetCollectorId: normalizeOptionalScoreAuditCollectorId(snapshot?.targetPlayerId),
+            position: serializeEventPosition(snapshot?.position),
+        });
         runtimeState.mineController?.handleRemoteMineDetonated?.(snapshot);
     },
     onAuthoritativeRoundState(authoritativeState) {
@@ -1325,6 +1770,12 @@ runtimeState.multiplayerController = createMultiplayerController({
             roundState?.finished &&
             Number.isFinite(roundState.totalPickups)
         ) {
+            recordPerformanceDiagnosticEvent('round_finished_authoritative', {
+                totalPickups: Math.max(0, Math.round(Number(roundState?.totalPickups) || 0)),
+                totalCollected: Math.max(0, Math.round(Number(roundState?.totalCollected) || 0)),
+                totalScore: Math.max(0, Math.round(Number(roundState?.totalScore) || 0)),
+                scoreboardEntries: scoreboardEntries.length,
+            });
             runtimeState.gameSessionController?.finalizePickupRound(
                 roundState.totalPickups,
                 roundState.totalCollected,
@@ -1419,12 +1870,56 @@ runtimeState.gameSessionController = createGameSessionController({
         runtimeState.scoredMineDeployIds.clear();
         runtimeState.scoredMineDetonationIds.clear();
         runtimeState.authoritativeScoreByPlayerId.clear();
+        clearDeferredMineKillUiTasks();
     },
     onAutoCollectBonusAwarded({ collectorId = 'player', pointsAwarded = 0, pickupCount = 0 } = {}) {
         recordAutoCollectScoreAudit({
             collectorId,
             pointsAwarded,
             pickupCount,
+        });
+        recordPerformanceDiagnosticEvent('autocollect_bonus_awarded', {
+            collectorId,
+            pointsAwarded: Math.max(0, Math.round(Number(pointsAwarded) || 0)),
+            pickupCount: Math.max(0, Math.round(Number(pickupCount) || 0)),
+            totalScore: runtimeState.totalScore,
+        });
+    },
+    onRoundFinalized(event = null) {
+        clearDeferredMineKillUiTasks();
+        recordPerformanceDiagnosticEvent('round_finalized', {
+            gameMode: runtimeState.gameMode,
+            finishReason: typeof event?.finishReason === 'string' ? event.finishReason : '',
+            finishLabel: typeof event?.finishLabel === 'string' ? event.finishLabel : '',
+            winnerLabel: typeof event?.winnerLabel === 'string' ? event.winnerLabel : '',
+            topScore: Math.max(0, Math.round(Number(event?.topScore) || 0)),
+            totalPickups: Math.max(0, Math.round(Number(event?.totalPickups) || 0)),
+            totalCollected: Math.max(0, Math.round(Number(event?.totalCollected) || 0)),
+            totalScore: Math.max(0, Math.round(Number(event?.totalScore) || 0)),
+            bonusPointsAwarded: Math.max(0, Math.round(Number(event?.bonusPointsAwarded) || 0)),
+            bonusPickupsAwarded: Math.max(0, Math.round(Number(event?.bonusPickupsAwarded) || 0)),
+            scoreboardEntries: Math.max(0, Math.round(Number(event?.scoreboardEntries) || 0)),
+        });
+    },
+    onPlayerRespawned(event = null) {
+        recordPerformanceDiagnosticEvent('player_respawned', {
+            carsRemaining: Math.max(0, Math.round(Number(event?.carsRemaining) || 0)),
+            maxCars: Math.max(0, Math.round(Number(event?.maxCars) || 0)),
+            position: serializeEventPosition(event?.position),
+        });
+    },
+    onPlayerExplosion(event = null) {
+        recordPerformanceDiagnosticEvent('player_exploded', {
+            statusText: typeof event?.statusText === 'string' ? event.statusText : '',
+            obstacleCategory:
+                typeof event?.obstacleCategory === 'string' ? event.obstacleCategory : '',
+            impactSpeed: Number.isFinite(event?.impactSpeed)
+                ? Number(event.impactSpeed.toFixed(2))
+                : 0,
+            carsRemaining: Math.max(0, Math.round(Number(event?.carsRemaining) || 0)),
+            maxCars: Math.max(0, Math.round(Number(event?.maxCars) || 0)),
+            position: serializeEventPosition(event?.position),
+            collision: sanitizeSerializable(event?.collision, null),
         });
     },
     getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
@@ -1581,6 +2076,145 @@ function cycleGraphicsQualityMode(step = 1, options = {}) {
     return finalizeGraphicsQualitySnapshot(snapshot, options);
 }
 
+function downloadPerformanceDiagnosticsLog(roundSnapshot = null) {
+    const diagnosticsPayload = {
+        trigger: 'round_complete',
+        generatedAtIso: new Date().toISOString(),
+        gameMode: runtimeState.gameMode === 'online' ? 'online' : 'bots',
+        roundSnapshot: sanitizeSerializable(roundSnapshot),
+        runtimeSnapshot: createRuntimeDiagnosticsSnapshot(),
+        scoreAudit: createScoreAuditSnapshot(),
+    };
+
+    const fallbackFilename = createDiagnosticsLogFilename();
+    const result =
+        typeof performanceDiagnosticsController?.downloadLog === 'function'
+            ? performanceDiagnosticsController.downloadLog(diagnosticsPayload, {
+                  filename: fallbackFilename,
+              })
+            : null;
+
+    if (result?.ok) {
+        objectiveUi.showInfo(`Diagnostics log downloaded (${result.filename}).`, 2200);
+        return result;
+    }
+
+    objectiveUi.showInfo('Diagnostics log download failed.', 2200);
+    return {
+        ok: false,
+        filename: result?.filename || fallbackFilename,
+        error: result?.error || 'Download failed.',
+    };
+}
+
+function createRuntimeDiagnosticsSnapshot() {
+    const multiplayerSelfId =
+        typeof runtimeState.multiplayerController?.getSelfId === 'function'
+            ? runtimeState.multiplayerController.getSelfId() || ''
+            : '';
+
+    return {
+        gameMode: runtimeState.gameMode === 'online' ? 'online' : 'bots',
+        player: {
+            collectedCount: Math.max(0, Math.round(Number(runtimeState.playerCollectedCount) || 0)),
+            score: Math.max(0, Math.round(Number(runtimeState.playerScore) || 0)),
+            batteryPercent: Math.max(0, Math.round(Number(runtimeState.playerBattery) || 0)),
+            batteryDepleted: Boolean(runtimeState.isBatteryDepleted),
+            carsRemaining: Math.max(0, Math.round(Number(runtimeState.playerCarsRemaining) || 0)),
+            isCarDestroyed: Boolean(runtimeState.isCarDestroyed),
+        },
+        round: {
+            pickupRoundFinished: Boolean(runtimeState.pickupRoundFinished),
+            totalCollectedCount: Math.max(
+                0,
+                Math.round(Number(runtimeState.totalCollectedCount) || 0)
+            ),
+            totalScore: Math.max(0, Math.round(Number(runtimeState.totalScore) || 0)),
+            totalPickupsConfigured: ROUND_TOTAL_PICKUPS,
+        },
+        ui: {
+            welcomeVisible: Boolean(runtimeState.isWelcomeModalVisible),
+            paused: Boolean(runtimeState.isGamePaused),
+            worldMapOpen: Boolean(runtimeState.isWorldMapOpen),
+            worldMapDriveLockMode:
+                typeof runtimeState.worldMapDriveLockMode === 'string'
+                    ? runtimeState.worldMapDriveLockMode
+                    : 'none',
+        },
+        systems: {
+            graphics: sanitizeSerializable(graphicsQualityController?.getSnapshot?.() || null),
+            audio: {
+                preload: sanitizeSerializable(
+                    runtimeState.audioController?.getPreloadState?.() || null
+                ),
+                gameplayReady: Boolean(runtimeState.audioController?.isGameplayReady?.()),
+                unlocked: Boolean(runtimeState.audioController?.isUnlocked?.()),
+            },
+            deferredUi: {
+                pendingMineKillTasks: deferredMineKillUiTasks.length,
+                droppedMineKillTasks: deferredMineKillUiDroppedCount,
+                executedMineKillTasks: deferredMineKillUiExecutedCount,
+                mineKillUiFlowPrewarmed: mineKillUiFlowPrewarmed,
+            },
+            multiplayer: {
+                inRoom: Boolean(runtimeState.multiplayerController?.isInRoom?.()),
+                selfId: typeof multiplayerSelfId === 'string' ? multiplayerSelfId : '',
+            },
+        },
+    };
+}
+
+function createScoreAuditSnapshot() {
+    const collectorEntries = [];
+    for (const collectorId of runtimeState.scoreAuditByCollectorId.keys()) {
+        const entry = getCollectorScoreAuditSnapshot(collectorId);
+        if (entry) {
+            collectorEntries.push(entry);
+        }
+    }
+    collectorEntries.sort((left, right) => {
+        if (left.collectorId === 'player' && right.collectorId !== 'player') {
+            return -1;
+        }
+        if (right.collectorId === 'player' && left.collectorId !== 'player') {
+            return 1;
+        }
+        return (
+            right.pickupPoints + right.mineKillPoints - (left.pickupPoints + left.mineKillPoints)
+        );
+    });
+    return {
+        collectors: collectorEntries,
+        collectorCount: collectorEntries.length,
+        scoredMineDeployIdsCount: runtimeState.scoredMineDeployIds.size,
+        scoredMineDetonationIdsCount: runtimeState.scoredMineDetonationIds.size,
+        authoritativeScoreEntries: runtimeState.authoritativeScoreByPlayerId.size,
+    };
+}
+
+function createDiagnosticsLogFilename() {
+    return `auto-performance-log-${runtimeState.gameMode === 'online' ? 'online' : 'bots'}-${formatDiagnosticsTimestamp(new Date())}.json`;
+}
+
+function formatDiagnosticsTimestamp(date) {
+    const iso = date instanceof Date ? date.toISOString() : new Date().toISOString();
+    return iso
+        .replace(/[-:]/g, '')
+        .replace(/\.\d{3}Z$/, 'Z')
+        .replace('T', '-');
+}
+
+function sanitizeSerializable(value, fallback = null) {
+    if (value === undefined) {
+        return fallback;
+    }
+    try {
+        return JSON.parse(JSON.stringify(value));
+    } catch {
+        return fallback;
+    }
+}
+
 mapUiController = createMapUiController({
     worldBounds,
     cityMapLayout,
@@ -1725,6 +2359,7 @@ runtimeState.gameLoopController = createGameLoopController({
     audioController: runtimeState.audioController,
     mapUiController,
     graphicsQualityController,
+    performanceDiagnosticsController,
     gameSessionController: runtimeState.gameSessionController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getVehicleState,

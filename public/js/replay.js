@@ -313,7 +313,10 @@ export function createReplayController(car, camera) {
             if (events.length > 0) {
                 const oldestFrameTime = frames.length > 0 ? frames[0].time : time;
                 let staleEventCount = 0;
-                while (staleEventCount < events.length && events[staleEventCount].time < oldestFrameTime) {
+                while (
+                    staleEventCount < events.length &&
+                    events[staleEventCount].time < oldestFrameTime
+                ) {
                     staleEventCount += 1;
                 }
                 if (staleEventCount > 0) {

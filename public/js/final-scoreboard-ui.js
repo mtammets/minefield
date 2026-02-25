@@ -1,4 +1,4 @@
-export function createFinalScoreboardController({ onRestart, onExit } = {}) {
+export function createFinalScoreboardController({ onRestart, onExit, onDownloadLog } = {}) {
     const rootEl = document.getElementById('finalLeaderboard');
     const titleEl = document.getElementById('leaderboardTitle');
     const summaryEl = document.getElementById('leaderboardSummary');
@@ -12,10 +12,12 @@ export function createFinalScoreboardController({ onRestart, onExit } = {}) {
     const breakdownListEl = document.getElementById('leaderboardBreakdownList');
     const listEl = document.getElementById('leaderboardList');
     const restartBtnEl = document.getElementById('leaderboardRestartBtn');
+    const downloadLogBtnEl = document.getElementById('leaderboardDownloadLogBtn');
     const exitBtnEl = document.getElementById('leaderboardExitBtn');
     const numberFormatter = new Intl.NumberFormat('en-US');
     let detailsVisible = false;
     let detailsAvailable = false;
+    let lastRoundSnapshot = null;
 
     if (!rootEl || !summaryEl || !listEl || !titleEl) {
         return {
@@ -28,6 +30,9 @@ export function createFinalScoreboardController({ onRestart, onExit } = {}) {
     }
     restartBtnEl?.addEventListener('click', () => {
         onRestart?.();
+    });
+    downloadLogBtnEl?.addEventListener('click', () => {
+        onDownloadLog?.(lastRoundSnapshot);
     });
     exitBtnEl?.addEventListener('click', () => {
         onExit?.();
@@ -146,6 +151,30 @@ export function createFinalScoreboardController({ onRestart, onExit } = {}) {
             detailsVisible = false;
             detailsAvailable = Boolean(scoringModelEl?.textContent || normalizedEntries.length > 0);
             syncDetailsVisibility();
+            lastRoundSnapshot = {
+                title: titleEl.textContent || 'ROUND COMPLETE',
+                summaryText: summaryEl.textContent || '',
+                finishLabel,
+                winnerLabel: resolvedWinnerLabel,
+                topScore: resolvedTopScore,
+                totalCollected: resolvedTotalCollected,
+                totalPickups: resolvedTotalPickups,
+                totalScore: resolvedTotalScore,
+                bonusPointsAwarded: Math.max(0, Math.round(Number(bonusPointsAwarded) || 0)),
+                bonusPickupsAwarded: Math.max(0, Math.round(Number(bonusPickupsAwarded) || 0)),
+                entries: normalizedEntries.map((entry) => ({
+                    collectorId: typeof entry?.collectorId === 'string' ? entry.collectorId : '',
+                    name: resolveEntryName(entry),
+                    score: Math.max(0, Math.round(Number(entry?.score) || 0)),
+                    collectedCount: Math.max(0, Math.round(Number(entry?.collectedCount) || 0)),
+                    stats:
+                        entry?.stats && typeof entry.stats === 'object' ? { ...entry.stats } : null,
+                })),
+            };
+            if (downloadLogBtnEl) {
+                downloadLogBtnEl.hidden = typeof onDownloadLog !== 'function';
+                downloadLogBtnEl.disabled = typeof onDownloadLog !== 'function';
+            }
             rootEl.hidden = false;
         },
         hide() {
@@ -174,6 +203,11 @@ export function createFinalScoreboardController({ onRestart, onExit } = {}) {
             }
             detailsVisible = false;
             detailsAvailable = false;
+            lastRoundSnapshot = null;
+            if (downloadLogBtnEl) {
+                downloadLogBtnEl.hidden = typeof onDownloadLog !== 'function';
+                downloadLogBtnEl.disabled = typeof onDownloadLog !== 'function';
+            }
             syncDetailsVisibility();
         },
         isVisible() {

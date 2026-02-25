@@ -85,6 +85,9 @@ export function createGameSessionController({
     startOnlineRoomFlow = () => {},
     clearScorePopups = () => {},
     onAutoCollectBonusAwarded = () => {},
+    onRoundFinalized = () => {},
+    onPlayerRespawned = () => {},
+    onPlayerExplosion = () => {},
     audioController = null,
 } = {}) {
     const getBotSystem =
@@ -294,6 +297,15 @@ export function createGameSessionController({
             2300
         );
         audioController?.onPlayerRespawn?.();
+        onPlayerRespawned({
+            carsRemaining: getPlayerCarsRemaining(),
+            maxCars: PLAYER_CAR_POOL_SIZE,
+            position: {
+                x: car.position.x,
+                y: car.position.y,
+                z: car.position.z,
+            },
+        });
     }
 
     function setBatteryDepletedState(nextDepleted, options = {}) {
@@ -551,6 +563,20 @@ export function createGameSessionController({
             bonusPointsAwarded,
             bonusPickupsAwarded,
         });
+        onRoundFinalized({
+            finishReason,
+            finishLabel,
+            tiePrefix,
+            winnerLabel,
+            winnersCount: winners.length,
+            topScore,
+            totalPickups: resolvedTotal,
+            totalCollected: resolvedCollected,
+            totalScore: resolvedTotalScore,
+            bonusPointsAwarded,
+            bonusPickupsAwarded,
+            scoreboardEntries: scoreboard.length,
+        });
         audioController?.onRoundFinished?.({
             scoreboardEntries: scoreboard,
             topScore,
@@ -593,12 +619,31 @@ export function createGameSessionController({
         car.visible = false;
         clearDriveKeys();
 
-        setPlayerCarsRemaining(Math.max(0, getPlayerCarsRemaining() - 1));
-        resetPlayerPickupCombo();
-
         const crashReason =
             options.statusText ||
             `Wrong (${colorNameFromHex(pickupColorHex)})! Correct was ${colorNameFromHex(targetColorHex)}.`;
+        setPlayerCarsRemaining(Math.max(0, getPlayerCarsRemaining() - 1));
+        resetPlayerPickupCombo();
+        onPlayerExplosion({
+            statusText: crashReason,
+            obstacleCategory: options?.collision?.obstacleCategory || 'generic',
+            impactSpeed: Number(options?.collision?.impactSpeed) || 0,
+            carsRemaining: getPlayerCarsRemaining(),
+            maxCars: PLAYER_CAR_POOL_SIZE,
+            position: {
+                x: hitPosition?.x || 0,
+                y: hitPosition?.y || 0,
+                z: hitPosition?.z || 0,
+            },
+            collision: options?.collision
+                ? {
+                      obstacleCategory: options.collision.obstacleCategory,
+                      impactSpeed: Number(options.collision.impactSpeed) || 0,
+                      impactNormalX: Number(options.collision?.impactNormal?.x) || 0,
+                      impactNormalZ: Number(options.collision?.impactNormal?.z) || 0,
+                  }
+                : null,
+        });
         crashDebrisController.spawnCarDebris(hitPosition, options.collision || null);
         audioController?.onPlayerExplosion?.({
             impactSpeed: Number(options?.collision?.impactSpeed) || 0,

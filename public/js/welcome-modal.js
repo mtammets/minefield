@@ -436,6 +436,8 @@ export function createWelcomeModalController({
         setLaunchProgress(0);
 
         let preparationDone = false;
+        let preparationFailed = false;
+        let preparationFailureMessage = '';
         let preparationProgress = 0;
         let hasPreparationProgress = false;
         let latestPreparationUpdate = null;
@@ -449,9 +451,31 @@ export function createWelcomeModalController({
                 hasPreparationProgress = true;
                 preparationProgress = Math.max(preparationProgress, normalizedProgress);
             },
-        }).finally(() => {
-            preparationDone = true;
-        });
+        })
+            .then((result) => {
+                if (!isPreparationFailureResult(result)) {
+                    return;
+                }
+                preparationFailed = true;
+                preparationFailureMessage = resolvePreparationFailureMessage(result);
+                latestPreparationUpdate = {
+                    stage: 'error',
+                    message: preparationFailureMessage,
+                    progress: launchSequenceState.progress,
+                };
+            })
+            .catch((error) => {
+                preparationFailed = true;
+                preparationFailureMessage = resolvePreparationFailureMessage(error);
+                latestPreparationUpdate = {
+                    stage: 'error',
+                    message: preparationFailureMessage,
+                    progress: launchSequenceState.progress,
+                };
+            })
+            .finally(() => {
+                preparationDone = true;
+            });
 
         const startTime = performance.now();
         while (launchSequenceState.token === token) {
@@ -472,13 +496,35 @@ export function createWelcomeModalController({
             );
             setLaunchProgress(nextProgress);
             setLaunchCopy(normalizedMode, nextProgress, latestPreparationUpdate);
-            if (preparationDone && elapsedMs >= WELCOME_START_SEQUENCE_MIN_MS) {
+            if (
+                preparationDone &&
+                (preparationFailed || elapsedMs >= WELCOME_START_SEQUENCE_MIN_MS)
+            ) {
                 break;
             }
             await waitForNextFrame();
         }
 
         if (launchSequenceState.token !== token) {
+            return;
+        }
+
+        if (preparationFailed) {
+            const failureMessage =
+                preparationFailureMessage || 'Session preparation failed. Please try again.';
+            latestPreparationUpdate = {
+                stage: 'error',
+                message: failureMessage,
+                progress: launchSequenceState.progress,
+            };
+            setLaunchCopy(normalizedMode, launchSequenceState.progress, latestPreparationUpdate);
+            await sleep(900);
+            if (launchSequenceState.token !== token) {
+                return;
+            }
+            launchSequenceState.active = false;
+            setStartButtonsDisabled(false);
+            resetStartSequenceUi();
             return;
         }
 
@@ -503,9 +549,9 @@ export function createWelcomeModalController({
             return Promise.resolve();
         }
         try {
-            return Promise.resolve(onPrepareStart(mode, startContext, options)).catch(() => {});
-        } catch {
-            return Promise.resolve();
+            return Promise.resolve(onPrepareStart(mode, startContext, options));
+        } catch (error) {
+            return Promise.reject(error);
         }
     }
 
@@ -584,16 +630,36 @@ export function createWelcomeModalController({
         if (!launchStatusEl) {
             return;
         }
-        launchStatusEl.textContent = resolveLaunchStatus(normalizedMode, progress, preparationUpdate);
+        launchStatusEl.textContent = resolveLaunchStatus(
+            normalizedMode,
+            progress,
+            preparationUpdate
+        );
     }
 
     function resolveLaunchStatus(mode, progress, preparationUpdate = null) {
         const normalizedProgress = clampNumber(progress, 0, 1);
         const preparationStage =
             typeof preparationUpdate?.stage === 'string' ? preparationUpdate.stage : '';
+        const preparationMessage =
+            typeof preparationUpdate?.message === 'string' ? preparationUpdate.message.trim() : '';
         const audioFilesTotal = Math.max(0, Math.round(Number(preparationUpdate?.filesTotal) || 0));
         const audioFilesDone = Math.max(0, Math.round(Number(preparationUpdate?.filesDone) || 0));
-        if (preparationStage === 'audio' && audioFilesTotal > 0 && audioFilesDone < audioFilesTotal) {
+        const audioFilesFailed = Math.max(
+            0,
+            Math.round(Number(preparationUpdate?.filesFailed) || 0)
+        );
+        if (preparationStage === 'error') {
+            return preparationMessage || 'Session preparation failed. Please try again.';
+        }
+        if (preparationStage === 'audio' && audioFilesFailed > 0) {
+            return `Gameplay audio missing (${audioFilesFailed}/${audioFilesTotal}).`;
+        }
+        if (
+            preparationStage === 'audio' &&
+            audioFilesTotal > 0 &&
+            audioFilesDone < audioFilesTotal
+        ) {
             return `Loading gameplay audio (${audioFilesDone}/${audioFilesTotal})...`;
         }
         if (normalizedProgress >= 1) {
@@ -635,6 +701,31 @@ export function createWelcomeModalController({
         }
 
         return Number.NaN;
+    }
+
+    function isPreparationFailureResult(result) {
+        if (result === false) {
+            return true;
+        }
+        if (!result || typeof result !== 'object') {
+            return false;
+        }
+        return result.ok === false;
+    }
+
+    function resolvePreparationFailureMessage(payload) {
+        if (typeof payload === 'string' && payload.trim()) {
+            return payload.trim();
+        }
+        if (payload && typeof payload === 'object') {
+            if (typeof payload.message === 'string' && payload.message.trim()) {
+                return payload.message.trim();
+            }
+            if (typeof payload.error === 'string' && payload.error.trim()) {
+                return payload.error.trim();
+            }
+        }
+        return 'Session preparation failed. Please try again.';
     }
 
     function clampNumber(value, min, max) {

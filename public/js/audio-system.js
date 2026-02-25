@@ -317,6 +317,7 @@ export function createAudioSystem({ camera = null } = {}) {
     let mixer = null;
     let ui = null;
     let unlocked = false;
+    let preloadEnabled = false;
     let preloadPromise = null;
     let gameplayReady = false;
     let disposed = false;
@@ -359,12 +360,16 @@ export function createAudioSystem({ camera = null } = {}) {
         onRaceIntroGo,
     };
 
-    function initialize() {
+    function initialize(options = {}) {
         if (disposed) {
             return;
         }
+        const preloadOnInitialize = Boolean(options?.preloadOnInitialize);
+        preloadEnabled = preloadEnabled || preloadOnInitialize;
         ensureAudioContext();
-        startPreload();
+        if (preloadEnabled) {
+            startPreload();
+        }
         ui = createAudioUi(prefs, {
             onToggleMute() {
                 prefs.muted = !prefs.muted;
@@ -431,7 +436,7 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         unlocked = audioContext.state === 'running';
-        if (unlocked) {
+        if (unlocked && preloadEnabled) {
             startPreload();
         }
         applyBusVolumes();
@@ -447,6 +452,8 @@ export function createAudioSystem({ camera = null } = {}) {
             return false;
         }
         const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
+        const requireAllFiles = Boolean(options?.requireAllFiles);
+        preloadEnabled = true;
         const unsubscribeProgress = subscribePreloadProgress(onProgress);
         try {
             const unlockedNow = await unlockAudio({ waitForPreload: false });
@@ -461,10 +468,12 @@ export function createAudioSystem({ camera = null } = {}) {
                 return false;
             }
             const preloadState = getPreloadState();
-            gameplayReady =
-                preloadState.filesTotal > 0 &&
-                preloadState.filesReady > 0 &&
-                preloadState.filesDone >= preloadState.filesTotal;
+            const preloadComplete = requireAllFiles
+                ? isPreloadStrictlyComplete(preloadState)
+                : preloadState.filesTotal > 0 &&
+                  preloadState.filesDone >= preloadState.filesTotal &&
+                  preloadState.filesFailed === 0;
+            gameplayReady = unlockedNow && preloadComplete;
             if (gameplayReady) {
                 primeLoopInstances();
             }
@@ -533,14 +542,27 @@ export function createAudioSystem({ camera = null } = {}) {
         const filesFailed = failedBuffers.size;
         const filesDone = Math.min(filesTotal, filesReady + filesFailed);
         const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
+        const complete = filesDone >= filesTotal;
+        const completeNoFailures = complete && filesFailed === 0 && filesReady >= filesTotal;
         return {
             filesTotal,
             filesReady,
             filesFailed,
             filesDone,
             progress,
-            complete: filesDone >= filesTotal,
+            complete,
+            completeNoFailures,
         };
+    }
+
+    function isPreloadStrictlyComplete(preloadState = null) {
+        const filesTotal = Math.max(0, Math.round(Number(preloadState?.filesTotal) || 0));
+        const filesReady = Math.max(0, Math.round(Number(preloadState?.filesReady) || 0));
+        const filesFailed = Math.max(0, Math.round(Number(preloadState?.filesFailed) || 0));
+        if (filesTotal <= 0) {
+            return false;
+        }
+        return filesReady >= filesTotal && filesFailed === 0;
     }
 
     function subscribePreloadProgress(listener) {

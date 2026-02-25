@@ -96,6 +96,25 @@ const effectRingGeometry = new THREE.TorusGeometry(1.2, 0.12, 12, 40);
 const COLLECT_EFFECT_LIFETIME_SEC = 0.6;
 const COLLECT_EFFECT_POOL_PREWARM_COUNT = 10;
 const MAX_COLLECT_EFFECT_POOL_SIZE = 28;
+const COLLECT_EFFECT_SPAWN_PER_FRAME = 3;
+const COLLECT_EFFECT_SPAWN_PER_FRAME_UNDER_LOAD = 1;
+const COLLECT_EFFECT_SPAWN_PER_FRAME_SEVERE_LOAD = 0;
+const MAX_PENDING_COLLECT_EFFECTS = 36;
+const COLLECT_EFFECT_MAX_QUEUE_DELAY_SEC = 0.45;
+const COLLECT_EFFECT_MIN_QUEUE_DELAY_SEC = 1 / 72;
+const COLLECT_EFFECT_ENABLE_POINT_LIGHT = false;
+const COLLECT_EFFECT_REMOTE_ALWAYS_DISTANCE = 30;
+const COLLECT_EFFECT_REMOTE_ALWAYS_DISTANCE_SQ =
+    COLLECT_EFFECT_REMOTE_ALWAYS_DISTANCE * COLLECT_EFFECT_REMOTE_ALWAYS_DISTANCE;
+const COLLECT_EFFECT_REMOTE_THROTTLE_DISTANCE = 44;
+const COLLECT_EFFECT_REMOTE_THROTTLE_DISTANCE_SQ =
+    COLLECT_EFFECT_REMOTE_THROTTLE_DISTANCE * COLLECT_EFFECT_REMOTE_THROTTLE_DISTANCE;
+const COLLECT_EFFECT_REMOTE_MAX_DISTANCE = 62;
+const COLLECT_EFFECT_REMOTE_MAX_DISTANCE_SQ =
+    COLLECT_EFFECT_REMOTE_MAX_DISTANCE * COLLECT_EFFECT_REMOTE_MAX_DISTANCE;
+const COLLECT_EFFECT_REMOTE_MAX_ACTIVE = 6;
+const COLLECT_EFFECT_REMOTE_MAX_PENDING = 5;
+const queuedCollectEffectPosition = new THREE.Vector3();
 
 export function createCollectibleSystem(scene, worldBounds = null, options = {}) {
     const {
@@ -189,6 +208,10 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     const pickupCooldownUntil = new Map();
     const effects = [];
     const collectEffectPool = [];
+    const pendingCollectEffects = [];
+    let pendingCollectEffectReadIndex = 0;
+    let droppedQueuedCollectEffects = 0;
+    let skippedRemoteCollectEffects = 0;
     const activePickupIds = new Set();
     const visiblePickupCache = [];
     const worldCellBounds = worldBounds ? getWorldCellBounds(worldBounds) : null;
@@ -232,9 +255,16 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             const dt = Math.min(deltaTime, 0.05);
             elapsedTime += dt;
             const collectors = normalizeCollectors(collectorEntries);
+            const localCollector = resolveLocalCollector(collectors);
+            const localCollectorId =
+                typeof localCollector?.id === 'string' && localCollector.id.trim()
+                    ? localCollector.id.trim()
+                    : 'player';
+            const localCollectorPosition = localCollector?.position || null;
 
             if (!enabled || collectors.length === 0) {
                 if (resolvedEnableEffects) {
+                    processPendingCollectEffects(dt);
                     updateEffects(effects, effectGroup, collectEffectPool, dt);
                 }
                 return;
@@ -275,13 +305,18 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 const pickupPosition = pickup.mesh.position;
 
                 if (resolvedEnableEffects) {
-                    createCollectEffect(
-                        effectGroup,
-                        effects,
-                        collectEffectPool,
-                        pickupPosition,
-                        pickup.color
-                    );
+                    if (
+                        shouldQueueCollectEffectForCollector(
+                            collector,
+                            pickupPosition,
+                            localCollectorId,
+                            localCollectorPosition
+                        )
+                    ) {
+                        queueCollectEffect(pickupPosition, pickup.color);
+                    } else {
+                        skippedRemoteCollectEffects += 1;
+                    }
                 }
 
                 removePickup(pickupId, pickup, true);
@@ -321,6 +356,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             }
 
             if (resolvedEnableEffects) {
+                processPendingCollectEffects(dt);
                 updateEffects(effects, effectGroup, collectEffectPool, dt);
             }
         },
@@ -386,6 +422,17 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 exhausted: finiteRoundState.exhausted,
             };
         },
+        getPerformanceSnapshot() {
+            return {
+                pendingCollectEffects: Math.max(
+                    0,
+                    pendingCollectEffects.length - pendingCollectEffectReadIndex
+                ),
+                activeCollectEffects: effects.length,
+                droppedCollectEffects: droppedQueuedCollectEffects,
+                skippedRemoteCollectEffects,
+            };
+        },
         primeForCollectors(collectorEntries) {
             return primePickupsForCollectors(collectorEntries);
         },
@@ -408,6 +455,10 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     }
 
     function clearEffectsNow() {
+        pendingCollectEffects.length = 0;
+        pendingCollectEffectReadIndex = 0;
+        droppedQueuedCollectEffects = 0;
+        skippedRemoteCollectEffects = 0;
         if (!resolvedEnableEffects || effects.length === 0) {
             return;
         }
@@ -415,6 +466,131 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             const effect = effects.pop();
             recycleCollectEffect(effectGroup, collectEffectPool, effect);
         }
+    }
+
+    function queueCollectEffect(position, colorHex) {
+        if (!position) {
+            return;
+        }
+        const activePendingCount = pendingCollectEffects.length - pendingCollectEffectReadIndex;
+        if (activePendingCount >= MAX_PENDING_COLLECT_EFFECTS) {
+            droppedQueuedCollectEffects += 1;
+            return;
+        }
+        pendingCollectEffects.push({
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            colorHex: colorHex >>> 0,
+            queuedAtSec: elapsedTime,
+            dueAtSec: elapsedTime + COLLECT_EFFECT_MIN_QUEUE_DELAY_SEC,
+        });
+    }
+
+    function processPendingCollectEffects(dt) {
+        if (pendingCollectEffects.length - pendingCollectEffectReadIndex <= 0) {
+            return;
+        }
+        let budget = resolveCollectEffectSpawnBudget(dt, effects.length);
+        while (budget > 0 && pendingCollectEffectReadIndex < pendingCollectEffects.length) {
+            const entry = pendingCollectEffects[pendingCollectEffectReadIndex];
+            if (Number.isFinite(entry?.dueAtSec) && elapsedTime < entry.dueAtSec) {
+                break;
+            }
+            pendingCollectEffectReadIndex += 1;
+            if (!entry) {
+                continue;
+            }
+            const queuedAtSec = Number(entry.queuedAtSec);
+            if (
+                Number.isFinite(queuedAtSec) &&
+                elapsedTime - queuedAtSec > COLLECT_EFFECT_MAX_QUEUE_DELAY_SEC
+            ) {
+                droppedQueuedCollectEffects += 1;
+                continue;
+            }
+            queuedCollectEffectPosition.set(entry.x, entry.y, entry.z);
+            createCollectEffect(
+                effectGroup,
+                effects,
+                collectEffectPool,
+                queuedCollectEffectPosition,
+                entry.colorHex
+            );
+            budget -= 1;
+        }
+        if (pendingCollectEffectReadIndex >= pendingCollectEffects.length) {
+            pendingCollectEffects.length = 0;
+            pendingCollectEffectReadIndex = 0;
+            return;
+        }
+        if (pendingCollectEffectReadIndex >= 16) {
+            pendingCollectEffects.splice(0, pendingCollectEffectReadIndex);
+            pendingCollectEffectReadIndex = 0;
+        }
+    }
+
+    function resolveCollectEffectSpawnBudget(dt, activeEffectCount = 0) {
+        if (dt > 1 / 32 || activeEffectCount >= Math.floor(MAX_COLLECT_EFFECT_POOL_SIZE * 0.9)) {
+            return COLLECT_EFFECT_SPAWN_PER_FRAME_SEVERE_LOAD;
+        }
+        if (
+            dt > 1 / 42 ||
+            activeEffectCount >= Math.floor(MAX_COLLECT_EFFECT_POOL_SIZE * 0.75)
+        ) {
+            return COLLECT_EFFECT_SPAWN_PER_FRAME_UNDER_LOAD;
+        }
+        return COLLECT_EFFECT_SPAWN_PER_FRAME;
+    }
+
+    function shouldQueueCollectEffectForCollector(
+        collector,
+        pickupPosition,
+        localCollectorId,
+        localCollectorPosition
+    ) {
+        if (!collector || !pickupPosition) {
+            return false;
+        }
+        if (
+            !localCollectorPosition ||
+            !Number.isFinite(localCollectorPosition.x) ||
+            !Number.isFinite(localCollectorPosition.z)
+        ) {
+            return true;
+        }
+
+        const collectorId =
+            typeof collector.id === 'string' && collector.id.trim() ? collector.id.trim() : '';
+        if (collectorId === localCollectorId || collectorId === 'player') {
+            return true;
+        }
+
+        const deltaX = pickupPosition.x - localCollectorPosition.x;
+        const deltaZ = pickupPosition.z - localCollectorPosition.z;
+        const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+        if (!Number.isFinite(distanceSq)) {
+            return true;
+        }
+        if (distanceSq <= COLLECT_EFFECT_REMOTE_ALWAYS_DISTANCE_SQ) {
+            return true;
+        }
+        if (distanceSq > COLLECT_EFFECT_REMOTE_MAX_DISTANCE_SQ) {
+            return false;
+        }
+
+        const pendingEffectCount = Math.max(
+            0,
+            pendingCollectEffects.length - pendingCollectEffectReadIndex
+        );
+        if (
+            distanceSq > COLLECT_EFFECT_REMOTE_THROTTLE_DISTANCE_SQ &&
+            (effects.length >= COLLECT_EFFECT_REMOTE_MAX_ACTIVE ||
+                pendingEffectCount >= COLLECT_EFFECT_REMOTE_MAX_PENDING)
+        ) {
+            return false;
+        }
+        return true;
     }
 
     function removePickup(pickupId, pickup, applyCooldown) {
@@ -624,6 +800,20 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         disposePickup(warmupPickup);
 
         return warmedUp;
+    }
+
+    function resolveLocalCollector(collectors) {
+        if (!Array.isArray(collectors) || collectors.length === 0) {
+            return null;
+        }
+        for (let i = 0; i < collectors.length; i += 1) {
+            const collector = collectors[i];
+            if (!collector || collector.id !== 'player') {
+                continue;
+            }
+            return collector;
+        }
+        return collectors[0] || null;
     }
 
     function emitTargetColorChanged() {
@@ -1170,12 +1360,10 @@ function recycleCollectEffect(effectGroup, effectPool, effect) {
     if (!effect) {
         return;
     }
-    effectGroup?.remove?.(effect.burst);
-    effectGroup?.remove?.(effect.ring);
-    effectGroup?.remove?.(effect.light);
     resetCollectEffectBundle(effect);
 
     if (!Array.isArray(effectPool)) {
+        detachCollectEffectObjects(effect);
         disposeCollectEffectBundle(effect);
         return;
     }
@@ -1183,6 +1371,7 @@ function recycleCollectEffect(effectGroup, effectPool, effect) {
         effectPool.push(effect);
         return;
     }
+    detachCollectEffectObjects(effect);
     disposeCollectEffectBundle(effect);
 }
 
@@ -1196,7 +1385,7 @@ function createCollectEffectBundle() {
         toneMapped: false,
     });
     const burst = new THREE.Mesh(effectBurstGeometry, burstMaterial);
-    burst.visible = true;
+    burst.visible = false;
     burst.castShadow = false;
     burst.receiveShadow = false;
 
@@ -1209,12 +1398,16 @@ function createCollectEffectBundle() {
         toneMapped: false,
     });
     const ring = new THREE.Mesh(effectRingGeometry, ringMaterial);
-    ring.visible = true;
+    ring.visible = false;
     ring.castShadow = false;
     ring.receiveShadow = false;
 
-    const light = new THREE.PointLight(0xffffff, 2.8, 18, 2);
-    light.visible = true;
+    const light = COLLECT_EFFECT_ENABLE_POINT_LIGHT
+        ? new THREE.PointLight(0xffffff, 2.8, 18, 2)
+        : null;
+    if (light) {
+        light.visible = false;
+    }
 
     const effect = {
         burst,
@@ -1234,13 +1427,28 @@ function activateCollectEffect(effectGroup, effect, position, colorHex) {
     resetCollectEffectBundle(effect);
     effect.burst.material.color.setHex(colorHex >>> 0);
     effect.ring.material.color.setHex(colorHex >>> 0);
-    effect.light.color.setHex(colorHex >>> 0);
+    if (effect.light) {
+        effect.light.color.setHex(colorHex >>> 0);
+    }
     effect.burst.position.copy(position);
     effect.ring.position.copy(position);
-    effect.light.position.copy(position);
-    effectGroup?.add?.(effect.burst);
-    effectGroup?.add?.(effect.ring);
-    effectGroup?.add?.(effect.light);
+    if (effect.light) {
+        effect.light.position.copy(position);
+    }
+    if (effectGroup && effect.burst.parent !== effectGroup) {
+        effectGroup.add(effect.burst);
+    }
+    if (effectGroup && effect.ring.parent !== effectGroup) {
+        effectGroup.add(effect.ring);
+    }
+    if (effect.light) {
+        if (effectGroup && effect.light.parent !== effectGroup) {
+            effectGroup.add(effect.light);
+        }
+        effect.light.visible = true;
+    }
+    effect.burst.visible = true;
+    effect.ring.visible = true;
 }
 
 function resetCollectEffectBundle(effect) {
@@ -1249,20 +1457,22 @@ function resetCollectEffectBundle(effect) {
     }
     effect.elapsed = 0;
     effect.lifetime = COLLECT_EFFECT_LIFETIME_SEC;
-    effect.burst.visible = true;
+    effect.burst.visible = false;
     effect.burst.position.set(0, 0, 0);
     effect.burst.rotation.set(0, 0, 0);
     effect.burst.scale.setScalar(1);
-    effect.burst.material.opacity = 0.95;
-    effect.ring.visible = true;
+    effect.burst.material.opacity = 0;
+    effect.ring.visible = false;
     effect.ring.position.set(0, 0, 0);
     effect.ring.rotation.set(Math.PI / 2, 0, 0);
     effect.ring.scale.setScalar(1);
-    effect.ring.material.opacity = 0.7;
-    effect.light.visible = true;
-    effect.light.position.set(0, 0, 0);
-    effect.light.intensity = 2.8;
-    effect.light.distance = 18;
+    effect.ring.material.opacity = 0;
+    if (effect.light) {
+        effect.light.visible = false;
+        effect.light.position.set(0, 0, 0);
+        effect.light.intensity = 0;
+        effect.light.distance = 0;
+    }
 }
 
 function applyCollectEffectFrame(effect, t, dt) {
@@ -1284,16 +1494,27 @@ function applyCollectEffectFrame(effect, t, dt) {
         effect.ring.rotation.z += dt * 2.5;
     }
 
-    effect.light.intensity = 2.8 * fade;
-    effect.light.distance = 18 + clampedT * 36;
+    if (effect.light) {
+        effect.light.intensity = 2.8 * fade;
+        effect.light.distance = 18 + clampedT * 36;
+    }
 }
 
 function disposeCollectEffectBundle(effect) {
     if (!effect) {
         return;
     }
+    detachCollectEffectObjects(effect);
     effect.burst.material.dispose();
     effect.ring.material.dispose();
+}
+
+function detachCollectEffectObjects(effect) {
+    effect?.burst?.parent?.remove?.(effect.burst);
+    effect?.ring?.parent?.remove?.(effect.ring);
+    if (effect?.light) {
+        effect.light.parent?.remove?.(effect.light);
+    }
 }
 
 function createPickupGlowTexture() {

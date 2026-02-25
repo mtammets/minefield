@@ -9,6 +9,19 @@ const AUTO_UPGRADE_THRESHOLD_MS = 15.4;
 const AUTO_DEGRADE_HOLD_SEC = 0.36;
 const AUTO_UPGRADE_HOLD_SEC = 1.18;
 const FRAME_TIME_SMOOTHING = 0.12;
+const STALL_GUARD_MIN_SCALE = 0.62;
+const STALL_GUARD_BASE_STEP = 0.12;
+const STALL_GUARD_MAX_STEP = 0.24;
+const STALL_GUARD_FRAME_THRESHOLD_MS = 72;
+const STALL_GUARD_RENDER_THRESHOLD_MS = 64;
+const STALL_GUARD_COOLDOWN_SEC = 0.18;
+const STALL_GUARD_RECOVER_DELAY_SEC = 2;
+const STALL_GUARD_RECOVER_STEP = 0.03;
+const STALL_GUARD_RECOVER_STEP_INTERVAL_SEC = 0.35;
+const STALL_GUARD_ENABLE_IN_MANUAL_MODES = false;
+const PIXEL_RATIO_APPLY_EPSILON = 0.02;
+const PIXEL_RATIO_FORCE_APPLY_DELTA = 0.05;
+const PIXEL_RATIO_APPLY_MIN_INTERVAL_MS = 180;
 
 const QUALITY_PROFILES = {
     quality: {
@@ -117,12 +130,19 @@ export function createGraphicsQualityController({
         appliedPixelRatio: Number.NaN,
         mapUiController,
         skidMarkController,
+        stallGuardScale: 1,
+        stallGuardCooldownSec: 0,
+        stallGuardRecoverDelaySec: 0,
+        stallGuardRecoverAccumulatorSec: 0,
+        stallGuardTriggerCount: 0,
+        lastPixelRatioApplyAtMs: Number(performance.now()) || 0,
     };
 
     applyCurrentQuality();
 
     return {
         sampleFrame,
+        reportRenderStall,
         setMode,
         cycleMode,
         attachMapUiController,
@@ -145,6 +165,8 @@ export function createGraphicsQualityController({
         const frameMs = dt * 1000;
         state.smoothedFrameMs += (frameMs - state.smoothedFrameMs) * FRAME_TIME_SMOOTHING;
         state.fpsEstimate = state.smoothedFrameMs > 0.001 ? 1000 / state.smoothedFrameMs : 0;
+        state.stallGuardCooldownSec = Math.max(0, state.stallGuardCooldownSec - dt);
+        state.stallGuardRecoverDelaySec = Math.max(0, state.stallGuardRecoverDelaySec - dt);
 
         let shouldApply = false;
         if (state.mode === GRAPHICS_QUALITY_MODES.auto) {
@@ -188,6 +210,22 @@ export function createGraphicsQualityController({
                 state.lowLoadTimeSec = Math.max(0, state.lowLoadTimeSec - dt * 2);
             }
         }
+        if (state.stallGuardRecoverDelaySec <= 0 && state.stallGuardScale < 1) {
+            state.stallGuardRecoverAccumulatorSec += dt;
+            if (state.stallGuardRecoverAccumulatorSec >= STALL_GUARD_RECOVER_STEP_INTERVAL_SEC) {
+                state.stallGuardRecoverAccumulatorSec = 0;
+                const nextScale = clamp(
+                    state.stallGuardScale + STALL_GUARD_RECOVER_STEP,
+                    STALL_GUARD_MIN_SCALE,
+                    1
+                );
+                if (Math.abs(nextScale - state.stallGuardScale) > 1e-6) {
+                    state.stallGuardScale = nextScale;
+                }
+            }
+        } else {
+            state.stallGuardRecoverAccumulatorSec = 0;
+        }
 
         if (shouldApply) {
             applyCurrentQuality();
@@ -195,6 +233,86 @@ export function createGraphicsQualityController({
             applyPixelRatioCap(computePixelRatioCap());
         }
         return getSnapshot();
+    }
+
+    function reportRenderStall({ frameMs = 0, renderMs = 0, force = false } = {}) {
+        const resolvedFrameMs = Math.max(0, Number(frameMs) || 0);
+        const resolvedRenderMs = Math.max(0, Number(renderMs) || 0);
+        const autoMode = state.mode === GRAPHICS_QUALITY_MODES.auto;
+        if (!force && !autoMode && !STALL_GUARD_ENABLE_IN_MANUAL_MODES) {
+            return {
+                triggered: false,
+                applied: false,
+                stallGuardScale: state.stallGuardScale,
+                pixelRatioCap: state.activePixelRatioCap,
+            };
+        }
+        if (!force) {
+            if (
+                resolvedFrameMs < STALL_GUARD_FRAME_THRESHOLD_MS &&
+                resolvedRenderMs < STALL_GUARD_RENDER_THRESHOLD_MS
+            ) {
+                return {
+                    triggered: false,
+                    applied: false,
+                    stallGuardScale: state.stallGuardScale,
+                    pixelRatioCap: state.activePixelRatioCap,
+                };
+            }
+            if (state.stallGuardCooldownSec > 0) {
+                return {
+                    triggered: false,
+                    applied: false,
+                    stallGuardScale: state.stallGuardScale,
+                    pixelRatioCap: state.activePixelRatioCap,
+                };
+            }
+        }
+
+        const frameSeverity = resolvedFrameMs / Math.max(1, STALL_GUARD_FRAME_THRESHOLD_MS);
+        const renderSeverity = resolvedRenderMs / Math.max(1, STALL_GUARD_RENDER_THRESHOLD_MS);
+        const severity = clamp(Math.max(frameSeverity, renderSeverity, 1), 1, 2.6);
+        const reductionStep = clamp(
+            STALL_GUARD_BASE_STEP * severity,
+            STALL_GUARD_BASE_STEP,
+            STALL_GUARD_MAX_STEP
+        );
+        const nextScale = clamp(
+            state.stallGuardScale - reductionStep,
+            STALL_GUARD_MIN_SCALE,
+            1
+        );
+        const scaleChanged = Math.abs(nextScale - state.stallGuardScale) > 1e-6;
+        if (scaleChanged) {
+            state.stallGuardScale = nextScale;
+        }
+
+        if (state.mode === GRAPHICS_QUALITY_MODES.auto) {
+            const autoReduction = AUTO_DEGRADE_STEP * Math.min(2, severity);
+            const nextAutoScale = clamp(
+                state.autoScale - autoReduction,
+                AUTO_MIN_SCALE,
+                AUTO_MAX_SCALE
+            );
+            if (Math.abs(nextAutoScale - state.autoScale) > 1e-6) {
+                state.autoScale = nextAutoScale;
+            }
+            state.highLoadTimeSec = Math.max(state.highLoadTimeSec, AUTO_DEGRADE_HOLD_SEC);
+            state.lowLoadTimeSec = 0;
+        }
+
+        state.stallGuardCooldownSec = STALL_GUARD_COOLDOWN_SEC;
+        state.stallGuardRecoverDelaySec = STALL_GUARD_RECOVER_DELAY_SEC;
+        state.stallGuardRecoverAccumulatorSec = 0;
+        state.stallGuardTriggerCount += 1;
+
+        applyCurrentQuality();
+        return {
+            triggered: true,
+            applied: scaleChanged,
+            stallGuardScale: state.stallGuardScale,
+            pixelRatioCap: state.activePixelRatioCap,
+        };
     }
 
     function setMode(nextMode) {
@@ -205,6 +323,10 @@ export function createGraphicsQualityController({
         state.mode = resolvedMode;
         state.highLoadTimeSec = 0;
         state.lowLoadTimeSec = 0;
+        state.stallGuardScale = 1;
+        state.stallGuardCooldownSec = 0;
+        state.stallGuardRecoverDelaySec = 0;
+        state.stallGuardRecoverAccumulatorSec = 0;
         if (resolvedMode === GRAPHICS_QUALITY_MODES.auto) {
             state.autoScale = 1;
         }
@@ -259,12 +381,16 @@ export function createGraphicsQualityController({
     }
 
     function computePixelRatioCap() {
+        const stallScale =
+            state.mode !== GRAPHICS_QUALITY_MODES.auto && !STALL_GUARD_ENABLE_IN_MANUAL_MODES
+                ? 1
+                : clamp(state.stallGuardScale, STALL_GUARD_MIN_SCALE, 1);
         if (state.mode !== GRAPHICS_QUALITY_MODES.auto) {
-            return QUALITY_PROFILES[state.mode].pixelRatioCap;
+            return QUALITY_PROFILES[state.mode].pixelRatioCap * stallScale;
         }
         const baseCap = QUALITY_PROFILES[AUTO_BASE_PROFILE_KEY].pixelRatioCap;
         const maxCap = QUALITY_PROFILES.quality.pixelRatioCap;
-        return clamp(baseCap * state.autoScale, 0.45, maxCap);
+        return clamp(baseCap * state.autoScale * stallScale, 0.45, maxCap);
     }
 
     function applyPixelRatioCap(pixelRatioCap) {
@@ -272,17 +398,32 @@ export function createGraphicsQualityController({
         renderSettings.maxPixelRatio = clampedCap;
         const devicePixelRatio = resolveDevicePixelRatio();
         const appliedPixelRatio = Math.min(devicePixelRatio, clampedCap);
-
-        if (
-            !Number.isFinite(state.activePixelRatioCap) ||
-            Math.abs(state.activePixelRatioCap - clampedCap) >= 0.01 ||
-            !Number.isFinite(state.appliedPixelRatio) ||
-            Math.abs(state.appliedPixelRatio - appliedPixelRatio) >= 0.01
-        ) {
-            renderer.setPixelRatio(appliedPixelRatio);
-            state.activePixelRatioCap = clampedCap;
-            state.appliedPixelRatio = appliedPixelRatio;
+        const nowMs = Number(performance.now()) || 0;
+        const capDelta = Number.isFinite(state.activePixelRatioCap)
+            ? Math.abs(state.activePixelRatioCap - clampedCap)
+            : Number.POSITIVE_INFINITY;
+        const appliedDelta = Number.isFinite(state.appliedPixelRatio)
+            ? Math.abs(state.appliedPixelRatio - appliedPixelRatio)
+            : Number.POSITIVE_INFINITY;
+        const hasMeaningfulDelta =
+            capDelta >= PIXEL_RATIO_APPLY_EPSILON || appliedDelta >= PIXEL_RATIO_APPLY_EPSILON;
+        if (!hasMeaningfulDelta) {
+            return;
         }
+        const forceApply =
+            capDelta >= PIXEL_RATIO_FORCE_APPLY_DELTA ||
+            appliedDelta >= PIXEL_RATIO_FORCE_APPLY_DELTA;
+        if (
+            !forceApply &&
+            nowMs - (Number(state.lastPixelRatioApplyAtMs) || 0) < PIXEL_RATIO_APPLY_MIN_INTERVAL_MS
+        ) {
+            return;
+        }
+
+        renderer.setPixelRatio(appliedPixelRatio);
+        state.activePixelRatioCap = clampedCap;
+        state.appliedPixelRatio = appliedPixelRatio;
+        state.lastPixelRatioApplyAtMs = nowMs;
     }
 
     function getSnapshot() {
@@ -307,6 +448,10 @@ export function createGraphicsQualityController({
             frameMs,
             autoScale: state.autoScale,
             pixelRatioCap: state.activePixelRatioCap,
+            stallGuardActive: state.stallGuardScale < 0.999,
+            stallGuardScale: state.stallGuardScale,
+            stallGuardScalePercent: Math.max(10, Math.round(state.stallGuardScale * 100)),
+            stallGuardTriggerCount: Math.max(0, Math.round(state.stallGuardTriggerCount || 0)),
             renderScalePercent,
             titleText: `Graphics: ${modeLabel}${autoProfileHint}`,
             detailText:
@@ -344,6 +489,14 @@ function createNoopController() {
     return {
         sampleFrame() {
             return null;
+        },
+        reportRenderStall() {
+            return {
+                triggered: false,
+                applied: false,
+                stallGuardScale: 1,
+                pixelRatioCap: 1,
+            };
         },
         setMode() {
             return null;

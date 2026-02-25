@@ -15,6 +15,7 @@ export function createRuntimeUiControllers({
     getGameSessionController,
     getInputController,
     onPrepareStart,
+    onDownloadPerformanceLog = null,
 }) {
     const objectiveUi = createObjectiveUiController({
         toCssHex,
@@ -31,6 +32,9 @@ export function createRuntimeUiControllers({
     const finalScoreboardUi = createFinalScoreboardController({
         onRestart() {
             getGameSessionController()?.restartGameWithCountdown();
+        },
+        onDownloadLog(roundSnapshot = null) {
+            onDownloadPerformanceLog?.(roundSnapshot);
         },
         onExit() {
             getInputController()?.returnToWelcomeFromPauseMenu();

@@ -13,6 +13,7 @@ const VEHICLE_COLLISION_CULL_DISTANCE = 52;
 const VEHICLE_COLLISION_CULL_DISTANCE_SQ =
     VEHICLE_COLLISION_CULL_DISTANCE * VEHICLE_COLLISION_CULL_DISTANCE;
 const BOT_STATUS_UPDATE_INTERVAL_SEC = 1 / 12;
+const RENDER_STALL_GUARD_EVENT_COOLDOWN_MS = 900;
 const EMPTY_ARRAY = Object.freeze([]);
 
 export function createGameLoopController(options = {}) {
@@ -38,6 +39,7 @@ export function createGameLoopController(options = {}) {
         mineSystemController,
         mapUiController,
         graphicsQualityController,
+        performanceDiagnosticsController = null,
         getPlayerTopSpeedLimit,
         crashDebrisController,
         replayEffectsController,
@@ -198,6 +200,7 @@ export function createGameLoopController(options = {}) {
     let botHudUpdateTimer = BOT_STATUS_UPDATE_INTERVAL_SEC;
     let botMineDecisionStamp = 0;
     let botHudEntryStamp = 0;
+    let lastRenderStallGuardEventAtMs = -Number.POSITIVE_INFINITY;
 
     return {
         start() {
@@ -219,15 +222,133 @@ export function createGameLoopController(options = {}) {
         },
     };
 
+    function collectRuntimePerfHints() {
+        const hints = {};
+        const crashPerf = crashDebrisController?.getPerformanceSnapshot?.() || null;
+        const minePerf = mineSystemController?.getPerformanceSnapshot?.() || null;
+        const botPerf = getBotTrafficSystem?.()?.getPerformanceSnapshot?.() || null;
+        const collectiblePerf = collectibleSystem?.getPerformanceSnapshot?.() || null;
+        const graphicsPerf = graphicsQualityController?.getSnapshot?.() || null;
+
+        assignPerfHint(hints, 'pendingCrashDebrisSpawns', crashPerf?.pendingDebrisSpawns);
+        assignPerfHint(
+            hints,
+            'pendingCrashExplosionDetaches',
+            crashPerf?.pendingExplosionDetaches
+        );
+        assignPerfHint(hints, 'activeCrashDebrisPieces', crashPerf?.activeDebrisPieces);
+        assignPerfHint(hints, 'visibleCrashDebrisPieces', crashPerf?.visibleDebrisPieces);
+        assignPerfHint(hints, 'droppedCrashDebrisSpawns', crashPerf?.droppedPendingDebrisSpawns);
+        assignPerfHint(
+            hints,
+            'droppedCrashExplosionDetaches',
+            crashPerf?.droppedPendingExplosionDetaches
+        );
+
+        assignPerfHint(hints, 'pendingMineDetonationSpawns', minePerf?.pendingDetonationSpawns);
+        assignPerfHint(hints, 'activeMineDetonationEffects', minePerf?.activeDetonationEffects);
+        assignPerfHint(hints, 'activeMineDetonationLights', minePerf?.activeDetonationLights);
+        assignPerfHint(hints, 'mineDetonationBurstCount', minePerf?.detonationBurstCount);
+        assignPerfHint(hints, 'droppedMineDetonationEffects', minePerf?.droppedDetonationEffects);
+
+        assignPerfHint(hints, 'pendingBotMineDebris', botPerf?.pendingMineDebris);
+        assignPerfHint(hints, 'activeBotDetachedDebris', botPerf?.activeDetachedDebris);
+        assignPerfHint(hints, 'visibleBotDetachedDebris', botPerf?.visibleDetachedDebris);
+        assignPerfHint(hints, 'droppedBotMineDebris', botPerf?.droppedPendingMineDebris);
+
+        assignPerfHint(hints, 'pendingCollectEffects', collectiblePerf?.pendingCollectEffects);
+        assignPerfHint(hints, 'activeCollectEffects', collectiblePerf?.activeCollectEffects);
+        assignPerfHint(hints, 'droppedCollectEffects', collectiblePerf?.droppedCollectEffects);
+        assignPerfHint(
+            hints,
+            'skippedRemoteCollectEffects',
+            collectiblePerf?.skippedRemoteCollectEffects
+        );
+        assignPerfHint(hints, 'graphicsRenderScalePercent', graphicsPerf?.renderScalePercent);
+        assignPerfHint(
+            hints,
+            'graphicsStallGuardScalePercent',
+            graphicsPerf?.stallGuardScalePercent
+        );
+        assignPerfHint(
+            hints,
+            'graphicsStallGuardTriggerCount',
+            graphicsPerf?.stallGuardTriggerCount
+        );
+        assignPerfHint(
+            hints,
+            'graphicsStallGuardActive',
+            graphicsPerf?.stallGuardActive ? 1 : 0
+        );
+        return hints;
+    }
+
+    function assignPerfHint(target, key, value) {
+        if (!target || typeof target !== 'object' || typeof key !== 'string' || !key) {
+            return;
+        }
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return;
+        }
+        target[key] = Math.max(0, Math.round(numeric));
+    }
+
+    function reportFrameDiagnostics(frameStartMs, frameDelta, stageDurations = {}, context = {}) {
+        if (typeof performanceDiagnosticsController?.update !== 'function') {
+            return;
+        }
+        const frameMs = Math.max(0, performance.now() - frameStartMs);
+        const renderInfo = renderer?.info?.render || null;
+        const runtimePerfHints = collectRuntimePerfHints();
+        performanceDiagnosticsController.update({
+            frameMs,
+            frameDeltaSec: Math.max(0, Number(frameDelta) || 0),
+            stageDurations,
+            context: {
+                ...context,
+                ...runtimePerfHints,
+                maxPhysicsSteps: maxPhysicsStepsPerFrame,
+                drawCalls: Math.max(0, Math.round(Number(renderInfo?.calls) || 0)),
+                triangles: Math.max(0, Math.round(Number(renderInfo?.triangles) || 0)),
+                points: Math.max(0, Math.round(Number(renderInfo?.points) || 0)),
+            },
+        });
+    }
+
     function frame() {
         if (!running) {
             return;
         }
         animationFrameId = requestAnimationFrame(frame);
 
+        const frameStartMs = performance.now();
+        const stageDurations = Object.create(null);
+        const addStageDuration = (stageKey, durationMs) => {
+            const resolvedKey = typeof stageKey === 'string' ? stageKey : '';
+            const resolvedDuration = Number(durationMs);
+            if (!resolvedKey || !Number.isFinite(resolvedDuration) || resolvedDuration <= 0) {
+                return;
+            }
+            stageDurations[resolvedKey] = (stageDurations[resolvedKey] || 0) + resolvedDuration;
+        };
+        const measureStage = (stageKey, callback = null) => {
+            const startMs = performance.now();
+            try {
+                if (typeof callback === 'function') {
+                    return callback();
+                }
+                return undefined;
+            } finally {
+                addStageDuration(stageKey, performance.now() - startMs);
+            }
+        };
+
         const frameDelta = Math.min(clock.getDelta(), 0.05);
         const isEditModeActive = carEditModeController.isActive();
+        const isWelcomeVisible = readWelcomeModalVisible();
         const worldMapDriveLockMode = readWorldMapDriveLockMode();
+        const gamePaused = readGamePaused();
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;
@@ -238,11 +359,87 @@ export function createGameLoopController(options = {}) {
         let botCollectorDescriptors = EMPTY_ARRAY;
         let botHudState = EMPTY_ARRAY;
         let multiplayerSnapshotsCaptured = false;
+        let frameReplayActive = false;
+        let framePhysicsSteps = 0;
+        let frameVehicleContactsCount = 0;
+        let frameCrashCollisionTriggered = false;
+        let frameBotCollectorCount = 0;
 
         welcomeModalUi.update(frameDelta);
-        multiplayerController?.update?.(frameDelta);
+        if (isWelcomeVisible && !isEditModeActive) {
+            const welcomeStageStartMs = performance.now();
+            chargingZoneController.update(car.position, frameDelta, { enabled: false });
 
-        if (!readGamePaused() && !isEditModeActive) {
+            chargingHudFrameState.enabled = false;
+            chargingHudFrameState.isCharging = false;
+            chargingHudFrameState.chargingLevel = 0;
+            chargingHudFrameState.batteryDepleted = readBatteryDepleted();
+            chargingProgressHudController.update(frameDelta, chargingHudFrameState);
+
+            skidMarkFrameState.enabled = false;
+            skidMarkFrameState.vehicleState = null;
+            skidMarkController.update(frameDelta, skidMarkFrameState);
+
+            mineFrameState.localPlayerId = readLocalPlayerId();
+            mineFrameState.enableLocalCollision = false;
+            mineSystemController?.update?.(frameDelta, mineFrameState);
+
+            mapFrameCache.pickups = EMPTY_ARRAY;
+            mapFrameCache.botDescriptors = EMPTY_ARRAY;
+            mapFrameCache.remotePlayers = EMPTY_ARRAY;
+            mapFrameCache.mines = mineSystemController?.getMineMarkers?.() || EMPTY_ARRAY;
+            mapFrameState.playerHeading = car.rotation.y;
+            mapFrameState.playerSpeedKph = 0;
+            mapFrameState.gameMode = readGameMode();
+            mapFrameState.welcomeVisible = true;
+            mapFrameState.raceIntroActive = raceIntroController.isActive();
+            mapFrameState.editModeActive = false;
+            mapUiController?.update?.(frameDelta, mapFrameState);
+
+            audioFrameState.vehicleState = getVehicleState();
+            audioFrameState.isPaused = true;
+            audioFrameState.welcomeVisible = true;
+            audioFrameState.editModeActive = false;
+            audioFrameState.raceIntroActive = raceIntroController.isActive();
+            audioFrameState.replayActive = replayController.isPlaybackActive();
+            audioFrameState.isCarDestroyed = readCarDestroyed();
+            audioFrameState.pickupRoundFinished = readPickupRoundFinished();
+            audioFrameState.isBatteryDepleted = readBatteryDepleted();
+            audioFrameState.isChargingActive = false;
+            audioFrameState.chargingLevel = 0;
+            audioFrameState.worldMapVisible = readWorldMapOpen();
+            audioFrameState.gameMode = readGameMode();
+            audioController?.update?.(frameDelta, audioFrameState);
+            scorePopupController?.update?.(camera, frameDelta);
+
+            if (typeof renderer.clear === 'function') {
+                measureStage('render', () => {
+                    renderer.clear();
+                });
+            }
+            addStageDuration('welcome', performance.now() - welcomeStageStartMs);
+            reportFrameDiagnostics(frameStartMs, frameDelta, stageDurations, {
+                welcomeVisible: true,
+                gameMode: readGameMode(),
+                worldMapOpen: readWorldMapOpen(),
+                paused: true,
+                editModeActive: false,
+                replayActive: replayController.isPlaybackActive(),
+                physicsSteps: 0,
+                vehicleContactsCount: 0,
+                crashCollisionTriggered: false,
+                botCollectorCount: 0,
+                mineCollisionEnabled: false,
+            });
+            return;
+        }
+
+        measureStage('multiplayer', () => {
+            multiplayerController?.update?.(frameDelta);
+        });
+
+        const simulationStageStartMs = performance.now();
+        if (!gamePaused && !isEditModeActive) {
             if (worldMapDriveLockMode === WORLD_MAP_DRIVE_LOCK_MODES.autobrake) {
                 gameSessionController?.enforceDriveLockMode?.(WORLD_MAP_DRIVE_LOCK_MODES.autobrake);
             }
@@ -266,6 +463,7 @@ export function createGameLoopController(options = {}) {
 
                 const vehicleState = getVehicleState();
                 const replayActive = replayController.isPlaybackActive();
+                frameReplayActive = replayActive;
                 const isCarDestroyed = readCarDestroyed();
                 const pickupRoundFinished = readPickupRoundFinished();
                 const isBatteryDepleted = readBatteryDepleted();
@@ -292,7 +490,9 @@ export function createGameLoopController(options = {}) {
 
                 if (replayActive) {
                     writePhysicsAccumulator(0);
-                    const replayFrame = replayController.updatePlayback(frameDelta);
+                    const replayFrame = measureStage('replay', () =>
+                        replayController.updatePlayback(frameDelta)
+                    );
                     if (replayFrame?.vehicleState) {
                         visualState = replayFrame.vehicleState;
                     }
@@ -359,6 +559,7 @@ export function createGameLoopController(options = {}) {
                     }
 
                     let physicsSteps = 0;
+                    const physicsStageStartMs = performance.now();
                     while (
                         physicsAccumulator >= physicsStep &&
                         physicsSteps < maxPhysicsStepsPerFrame
@@ -374,6 +575,8 @@ export function createGameLoopController(options = {}) {
                         physicsAccumulator -= physicsStep;
                         physicsSteps += 1;
                     }
+                    addStageDuration('physics', performance.now() - physicsStageStartMs);
+                    framePhysicsSteps = physicsSteps;
 
                     if (
                         physicsSteps === maxPhysicsStepsPerFrame &&
@@ -384,6 +587,7 @@ export function createGameLoopController(options = {}) {
                     writePhysicsAccumulator(physicsAccumulator);
 
                     const vehicleContacts = consumeVehicleCollisionContacts(vehicleContactsBuffer);
+                    frameVehicleContactsCount = vehicleContacts.length;
                     if (vehicleContacts.length > 0) {
                         crashDebrisController.processVehicleCollisionContacts(vehicleContacts);
                         audioController?.onVehicleCollisionContacts?.(vehicleContacts);
@@ -395,6 +599,7 @@ export function createGameLoopController(options = {}) {
 
                     const crashCollision = consumeCrashCollision();
                     if (crashCollision && !readCarDestroyed()) {
+                        frameCrashCollisionTriggered = true;
                         audioController?.onObstacleCrash?.(crashCollision);
                         gameSessionController.triggerObstacleCrash(crashCollision);
                     }
@@ -411,11 +616,15 @@ export function createGameLoopController(options = {}) {
                         skidMarkVehicleState = vehicleState;
                     } else {
                         writePhysicsAccumulator(0);
-                        crashDebrisController.updateDebris(frameDelta);
+                        measureStage('crashDebris', () => {
+                            crashDebrisController.updateDebris(frameDelta);
+                        });
                     }
                 } else {
                     writePhysicsAccumulator(0);
-                    crashDebrisController.updateDebris(frameDelta);
+                    measureStage('crashDebris', () => {
+                        crashDebrisController.updateDebris(frameDelta);
+                    });
                 }
 
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
@@ -429,13 +638,16 @@ export function createGameLoopController(options = {}) {
                     const botsEnabled = readBotsEnabled();
                     visiblePickups = collectibleSystem.getVisiblePickups();
                     if (botsEnabled) {
+                        const botTrafficStageStartMs = performance.now();
                         botTrafficSystem?.update?.(car.position, visiblePickups, frameDelta);
                         updateBotMineDeployment(
                             botTrafficSystem?.getCollisionSnapshots?.() || EMPTY_ARRAY,
                             frameDelta
                         );
+                        addStageDuration('botTraffic', performance.now() - botTrafficStageStartMs);
                         botCollectorDescriptors =
                             botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
+                        frameBotCollectorCount = botCollectorDescriptors.length;
                         botHudState = botTrafficSystem?.getHudState?.() || EMPTY_ARRAY;
                     } else {
                         botMineDecisionById.clear();
@@ -445,7 +657,9 @@ export function createGameLoopController(options = {}) {
                     if (botsEnabled) {
                         appendCollisionSnapshots(collectorBuffer, botCollectorDescriptors);
                     }
-                    collectibleSystem.updateForCollectors(collectorBuffer, frameDelta);
+                    measureStage('collectibles', () => {
+                        collectibleSystem.updateForCollectors(collectorBuffer, frameDelta);
+                    });
                     if (botsEnabled) {
                         gameSessionController?.maybeFinalizeOnBotElimination?.({
                             totalPickups: roundTotalPickups,
@@ -477,7 +691,9 @@ export function createGameLoopController(options = {}) {
                     (replayActive || !readCarDestroyed()) &&
                     crashDebrisController.hasActiveDebrisOrExplosion()
                 ) {
-                    crashDebrisController.updateDebris(frameDelta);
+                    measureStage('crashDebris', () => {
+                        crashDebrisController.updateDebris(frameDelta);
+                    });
                 }
             }
         } else if (isEditModeActive) {
@@ -494,6 +710,7 @@ export function createGameLoopController(options = {}) {
         } else {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
         }
+        addStageDuration('simulation', performance.now() - simulationStageStartMs);
 
         chargingHudFrameState.enabled = chargingHudEnabled;
         chargingHudFrameState.isCharging = chargingHudActive;
@@ -507,7 +724,9 @@ export function createGameLoopController(options = {}) {
 
         mineFrameState.localPlayerId = readLocalPlayerId();
         mineFrameState.enableLocalCollision = mineCollisionEnabled;
-        mineSystemController?.update?.(frameDelta, mineFrameState);
+        measureStage('mineSystem', () => {
+            mineSystemController?.update?.(frameDelta, mineFrameState);
+        });
 
         if (!multiplayerSnapshotsCaptured) {
             latestMultiplayerCollisionSnapshots.length = 0;
@@ -532,10 +751,12 @@ export function createGameLoopController(options = {}) {
         mapFrameState.welcomeVisible = readWelcomeModalVisible();
         mapFrameState.raceIntroActive = raceIntroController.isActive();
         mapFrameState.editModeActive = isEditModeActive;
-        mapUiController?.update?.(frameDelta, mapFrameState);
+        measureStage('mapUi', () => {
+            mapUiController?.update?.(frameDelta, mapFrameState);
+        });
 
         audioFrameState.vehicleState = getVehicleState();
-        audioFrameState.isPaused = readGamePaused();
+        audioFrameState.isPaused = gamePaused;
         audioFrameState.welcomeVisible = readWelcomeModalVisible();
         audioFrameState.editModeActive = isEditModeActive;
         audioFrameState.raceIntroActive = raceIntroController.isActive();
@@ -547,18 +768,100 @@ export function createGameLoopController(options = {}) {
         audioFrameState.chargingLevel = chargingHudLevel;
         audioFrameState.worldMapVisible = readWorldMapOpen();
         audioFrameState.gameMode = readGameMode();
-        audioController?.update?.(frameDelta, audioFrameState);
-        scorePopupController?.update?.(camera, frameDelta);
+        measureStage('audio', () => {
+            audioController?.update?.(frameDelta, audioFrameState);
+        });
+        measureStage('scorePopup', () => {
+            scorePopupController?.update?.(camera, frameDelta);
+        });
 
         updateSunLightPosition();
-        renderer.render(scene, camera);
-        graphicsQualityController?.sampleFrame?.(frameDelta, {
-            allowAdaptive:
-                !readGamePaused() &&
-                !isEditModeActive &&
-                !readWelcomeModalVisible() &&
-                !readWorldMapOpen(),
+        measureStage('render', () => {
+            renderer.render(scene, camera);
         });
+        const qualityAdaptiveAllowed =
+            !gamePaused &&
+            !isEditModeActive &&
+            !readWelcomeModalVisible() &&
+            !readWorldMapOpen();
+        maybeApplyRenderStallGuard({
+            frameStartMs,
+            renderStageMs: stageDurations.render,
+            adaptiveAllowed: qualityAdaptiveAllowed,
+            gameMode: readGameMode(),
+            worldMapOpen: readWorldMapOpen(),
+        });
+        measureStage('quality', () => {
+            graphicsQualityController?.sampleFrame?.(frameDelta, {
+                allowAdaptive: qualityAdaptiveAllowed,
+            });
+        });
+
+        reportFrameDiagnostics(frameStartMs, frameDelta, stageDurations, {
+            welcomeVisible: isWelcomeVisible,
+            gameMode: readGameMode(),
+            worldMapOpen: readWorldMapOpen(),
+            paused: gamePaused,
+            editModeActive: isEditModeActive,
+            replayActive: frameReplayActive || replayController.isPlaybackActive(),
+            physicsSteps: framePhysicsSteps,
+            vehicleContactsCount: frameVehicleContactsCount,
+            crashCollisionTriggered: frameCrashCollisionTriggered,
+            botCollectorCount: frameBotCollectorCount,
+            mineCollisionEnabled,
+            chargingActive: chargingHudActive,
+        });
+    }
+
+    function maybeApplyRenderStallGuard({
+        frameStartMs = 0,
+        renderStageMs = 0,
+        adaptiveAllowed = false,
+        gameMode = 'bots',
+        worldMapOpen = false,
+    } = {}) {
+        if (!adaptiveAllowed) {
+            return;
+        }
+        const resolvedRenderStageMs = Math.max(0, Number(renderStageMs) || 0);
+        if (resolvedRenderStageMs <= 0) {
+            return;
+        }
+        const frameMs = Math.max(0, performance.now() - Math.max(0, Number(frameStartMs) || 0));
+        const stallGuardResult = graphicsQualityController?.reportRenderStall?.({
+            frameMs,
+            renderMs: resolvedRenderStageMs,
+        });
+        if (!stallGuardResult?.triggered) {
+            return;
+        }
+
+        const nowMs = performance.now();
+        if (nowMs - lastRenderStallGuardEventAtMs < RENDER_STALL_GUARD_EVENT_COOLDOWN_MS) {
+            return;
+        }
+        lastRenderStallGuardEventAtMs = nowMs;
+        const renderInfo = renderer?.info?.render || null;
+        performanceDiagnosticsController?.recordEvent?.(
+            'graphics_stall_guard_triggered',
+            {
+                frameMs: Number(frameMs.toFixed(2)),
+                renderMs: Number(resolvedRenderStageMs.toFixed(2)),
+                drawCalls: Math.max(0, Math.round(Number(renderInfo?.calls) || 0)),
+                triangles: Math.max(0, Math.round(Number(renderInfo?.triangles) || 0)),
+                pixelRatioCap: Number((Number(stallGuardResult.pixelRatioCap) || 0).toFixed(3)),
+                stallGuardScalePercent: Math.max(
+                    10,
+                    Math.round((Number(stallGuardResult.stallGuardScale) || 1) * 100)
+                ),
+                gameMode: typeof gameMode === 'string' ? gameMode : 'bots',
+                worldMapOpen: Boolean(worldMapOpen),
+            },
+            {
+                label: 'graphics stall guard',
+                severity: 'warning',
+            }
+        );
     }
 
     function updateBotMineDeployment(snapshots = [], frameDelta) {

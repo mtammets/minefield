@@ -84,10 +84,28 @@ const BOT_DEBRIS_MAX_PIECES = 240;
 const BOT_DEBRIS_DESPAWN_DISTANCE = 120;
 const BOT_DEBRIS_DESPAWN_DISTANCE_SQ = BOT_DEBRIS_DESPAWN_DISTANCE * BOT_DEBRIS_DESPAWN_DISTANCE;
 const BOT_DEBRIS_POOL_PER_PART = 4;
+const BOT_DEBRIS_RENDER_DISTANCE = 90;
+const BOT_DEBRIS_RENDER_DISTANCE_SQ = BOT_DEBRIS_RENDER_DISTANCE * BOT_DEBRIS_RENDER_DISTANCE;
+const BOT_DEBRIS_ALWAYS_VISIBLE_DISTANCE = 28;
+const BOT_DEBRIS_ALWAYS_VISIBLE_DISTANCE_SQ =
+    BOT_DEBRIS_ALWAYS_VISIBLE_DISTANCE * BOT_DEBRIS_ALWAYS_VISIBLE_DISTANCE;
+const BOT_DEBRIS_MAX_VISIBLE = 6;
+const BOT_DEBRIS_MAX_VISIBLE_UNDER_LOAD = 4;
+const BOT_DEBRIS_MAX_VISIBLE_SEVERE_LOAD = 3;
+const BOT_DEBRIS_TARGET_ACTIVE_COUNT = 10;
+const BOT_DEBRIS_BURST_BUDGET_ACTIVE_HIGH = 4;
+const BOT_DEBRIS_BURST_BUDGET_ACTIVE_SEVERE = 2;
+const BOT_DEBRIS_MAX_LIFETIME_SEC = 17;
+const BOT_DEBRIS_MAX_LIFETIME_JITTER_SEC = 6;
 const BOT_MINE_EXPLOSION_DEBRIS_BUDGET = 6;
-const BOT_MINE_DEBRIS_SPAWN_PER_FRAME = 4;
-const BOT_MINE_DEBRIS_SPAWN_PER_FRAME_UNDER_LOAD = 2;
+const BOT_MINE_DEBRIS_SPAWN_PER_FRAME = 3;
+const BOT_MINE_DEBRIS_SPAWN_PER_FRAME_UNDER_LOAD = 1;
+const BOT_MINE_DEBRIS_SPAWN_PER_FRAME_SEVERE_LOAD = 0;
 const BOT_MAX_PENDING_MINE_DEBRIS_PARTS = 64;
+const BOT_PENDING_MINE_DEBRIS_MAX_AGE_MS = 850;
+const BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE = 92;
+const BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE_SQ =
+    BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE * BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE;
 const BOT_LIVES_PER_ROUND = 2;
 const BOT_RESPAWN_DELAY_MIN_MS = 3000;
 const BOT_RESPAWN_DELAY_MAX_MS = 4000;
@@ -125,8 +143,12 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         getGroundHeightAt = null,
         cityMapLayout = null,
         onPartDetached = null,
+        onBotRespawn = null,
+        onBotDestroyed = null,
     } = options;
     const handlePartDetached = typeof onPartDetached === 'function' ? onPartDetached : null;
+    const handleBotRespawn = typeof onBotRespawn === 'function' ? onBotRespawn : null;
+    const handleBotDestroyed = typeof onBotDestroyed === 'function' ? onBotDestroyed : null;
     const navigationPlanner = BOT_REACTIVE_NAVIGATION_ONLY
         ? null
         : createNavigationPlanner(worldBounds, staticObstacles);
@@ -143,9 +165,12 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     let resolvedSharedTargetColorHex = sharedTargetColorHex;
     let enabled = true;
     const detachedDebrisPieces = [];
+    const detachedDebrisVisibilityCandidates = [];
     const detachedDebrisMeshPoolByPartKey = new Map();
     const pendingMineDebrisParts = [];
     let pendingMineDebrisReadIndex = 0;
+    let droppedPendingMineDebris = 0;
+    let visibleDetachedDebrisCount = 0;
 
     const bots = [];
     const botsByCollectorId = new Map();
@@ -169,7 +194,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     spawnDetachedBotDebris(bot, part, crashContext);
                 }
                 return true;
-            }
+            },
+            handleBotDestroyed
         );
         bots.push(bot);
         botsByCollectorId.set(bot.collectorId, bot);
@@ -180,8 +206,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         update(playerPosition, visiblePickups = [], deltaTime = 1 / 60) {
             const dt = Math.min(deltaTime, 0.05);
             const nowMs = Date.now();
-            processPendingMineDebrisSpawns(dt);
+            processPendingMineDebrisSpawns(dt, playerPosition);
             updateDetachedDebris(dt, playerPosition);
+            applyDetachedDebrisVisibilityBudget(dt, playerPosition);
             navigationPlanner?.beginFrame?.();
             if (!enabled) {
                 return;
@@ -379,6 +406,20 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         isEnabled() {
             return enabled;
         },
+        getPerformanceSnapshot() {
+            return {
+                pendingMineDebris: Math.max(
+                    0,
+                    pendingMineDebrisParts.length - pendingMineDebrisReadIndex
+                ),
+                activeDetachedDebris: detachedDebrisPieces.length,
+                visibleDetachedDebris: visibleDetachedDebrisCount,
+                droppedPendingMineDebris,
+            };
+        },
+        warmupGraphics(renderer, camera = null) {
+            return warmupDetachedDebrisGraphics(renderer, camera);
+        },
         triggerMineHit(collectorId, context = {}) {
             if (!enabled) {
                 return false;
@@ -426,6 +467,19 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 respawnProtectionMs: BOT_RESPAWN_PROTECTION_MS,
             }
         );
+        if (handleBotRespawn) {
+            try {
+                handleBotRespawn({
+                    collectorId: bot.collectorId,
+                    name: bot.name,
+                    livesRemaining: bot.livesRemaining,
+                    spawnProtectionMsRemaining: Math.max(0, bot.spawnProtectionEndsAtMs - nowMs),
+                    position: bot.car.position,
+                });
+            } catch (error) {
+                console.error('Bot respawn callback failed:', error);
+            }
+        }
     }
 
     function applyEnabledVisibility() {
@@ -443,12 +497,17 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         if (!bot?.crashParts || bot.crashParts.length === 0) {
             return;
         }
-        const budget = Number.isFinite(crashContext?.debrisSpawnBudget)
+        const configuredBudget = Number.isFinite(crashContext?.debrisSpawnBudget)
             ? Math.max(0, Math.floor(crashContext.debrisSpawnBudget))
             : BOT_MINE_EXPLOSION_DEBRIS_BUDGET;
+        const adaptiveBurstBudget = resolveAdaptiveMineDebrisBurstBudget();
+        const budget = Math.min(configuredBudget, adaptiveBurstBudget);
         if (budget <= 0) {
             return;
         }
+        const queuedAtMs = Date.now();
+        const originX = bot.car.position.x;
+        const originZ = bot.car.position.z;
 
         let queuedCount = 0;
         for (let i = 0; i < bot.crashParts.length && queuedCount < budget; i += 1) {
@@ -467,28 +526,29 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 bot,
                 part,
                 crashContext,
+                queuedAtMs,
+                originX,
+                originZ,
             });
             queuedCount += 1;
         }
-
     }
 
-    function processPendingMineDebrisSpawns(dt) {
+    function processPendingMineDebrisSpawns(dt, playerPosition = null) {
         if (pendingMineDebrisParts.length - pendingMineDebrisReadIndex <= 0) {
             return;
         }
 
-        let budget = BOT_MINE_DEBRIS_SPAWN_PER_FRAME;
-        if (
-            dt > 1 / 40 ||
-            detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.8)
-        ) {
-            budget = BOT_MINE_DEBRIS_SPAWN_PER_FRAME_UNDER_LOAD;
-        }
+        let budget = resolvePendingMineDebrisSpawnBudget(dt);
+        const nowMs = Date.now();
 
         while (budget > 0 && pendingMineDebrisReadIndex < pendingMineDebrisParts.length) {
             const entry = pendingMineDebrisParts[pendingMineDebrisReadIndex];
             pendingMineDebrisReadIndex += 1;
+            if (shouldDropPendingMineDebrisEntry(entry, playerPosition, nowMs)) {
+                droppedPendingMineDebris += 1;
+                continue;
+            }
             if (entry?.bot && entry?.part) {
                 spawnDetachedBotDebris(entry.bot, entry.part, entry.crashContext);
             }
@@ -506,6 +566,58 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         }
     }
 
+    function resolvePendingMineDebrisSpawnBudget(dt) {
+        if (
+            dt > 1 / 32 ||
+            detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.9)
+        ) {
+            return BOT_MINE_DEBRIS_SPAWN_PER_FRAME_SEVERE_LOAD;
+        }
+        if (
+            dt > 1 / 40 ||
+            detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.8)
+        ) {
+            return BOT_MINE_DEBRIS_SPAWN_PER_FRAME_UNDER_LOAD;
+        }
+        return BOT_MINE_DEBRIS_SPAWN_PER_FRAME;
+    }
+
+    function shouldDropPendingMineDebrisEntry(entry, playerPosition, nowMs) {
+        if (!entry || !playerPosition || !Number.isFinite(nowMs)) {
+            return false;
+        }
+        const queuedAtMs = Number(entry.queuedAtMs);
+        if (!Number.isFinite(queuedAtMs) || nowMs - queuedAtMs <= BOT_PENDING_MINE_DEBRIS_MAX_AGE_MS) {
+            return false;
+        }
+        const playerX = Number(playerPosition?.x);
+        const playerZ = Number(playerPosition?.z);
+        const originX = Number(entry.originX);
+        const originZ = Number(entry.originZ);
+        if (
+            !Number.isFinite(playerX) ||
+            !Number.isFinite(playerZ) ||
+            !Number.isFinite(originX) ||
+            !Number.isFinite(originZ)
+        ) {
+            return false;
+        }
+        const dx = originX - playerX;
+        const dz = originZ - playerZ;
+        return dx * dx + dz * dz > BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE_SQ;
+    }
+
+    function resolveAdaptiveMineDebrisBurstBudget() {
+        const activeCount = detachedDebrisPieces.length;
+        if (activeCount >= BOT_DEBRIS_TARGET_ACTIVE_COUNT + 6) {
+            return BOT_DEBRIS_BURST_BUDGET_ACTIVE_SEVERE;
+        }
+        if (activeCount >= BOT_DEBRIS_TARGET_ACTIVE_COUNT) {
+            return BOT_DEBRIS_BURST_BUDGET_ACTIVE_HIGH;
+        }
+        return BOT_MINE_EXPLOSION_DEBRIS_BUDGET;
+    }
+
     function spawnDetachedBotDebris(bot, part, crashContext = null) {
         if (!part?.source) {
             return;
@@ -521,12 +633,18 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
         scene.add(debrisMesh);
 
-        const forward = botDebrisForwardScratch.set(0, 0, -1).applyQuaternion(bot.car.quaternion).setY(0);
+        const forward = botDebrisForwardScratch
+            .set(0, 0, -1)
+            .applyQuaternion(bot.car.quaternion)
+            .setY(0);
         if (forward.lengthSq() < 0.0001) {
             forward.set(0, 0, -1);
         }
         forward.normalize();
-        const right = botDebrisRightScratch.set(1, 0, 0).applyQuaternion(bot.car.quaternion).setY(0);
+        const right = botDebrisRightScratch
+            .set(1, 0, 0)
+            .applyQuaternion(bot.car.quaternion)
+            .setY(0);
         if (right.lengthSq() < 0.0001) {
             right.set(1, 0, 0);
         }
@@ -561,10 +679,12 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
 
         detachedDebrisPieces.push({
             partKey,
+            partType: part.type || '',
             mesh: debrisMesh,
             velocity,
             angularVelocity,
             settled: false,
+            lifeSec: BOT_DEBRIS_MAX_LIFETIME_SEC + Math.random() * BOT_DEBRIS_MAX_LIFETIME_JITTER_SEC,
         });
         trimDetachedDebrisLimit();
     }
@@ -579,7 +699,18 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!piece) {
                 continue;
             }
-            if (playerPosition && Number.isFinite(playerPosition.x) && Number.isFinite(playerPosition.z)) {
+            if (Number.isFinite(piece.lifeSec)) {
+                piece.lifeSec -= dt;
+                if (piece.lifeSec <= 0) {
+                    removeDetachedDebrisPieceAt(i);
+                    continue;
+                }
+            }
+            if (
+                playerPosition &&
+                Number.isFinite(playerPosition.x) &&
+                Number.isFinite(playerPosition.z)
+            ) {
                 const deltaX = piece.mesh.position.x - playerPosition.x;
                 const deltaZ = piece.mesh.position.z - playerPosition.z;
                 if (deltaX * deltaX + deltaZ * deltaZ > BOT_DEBRIS_DESPAWN_DISTANCE_SQ) {
@@ -635,6 +766,81 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         }
     }
 
+    function applyDetachedDebrisVisibilityBudget(dt, playerPosition = null) {
+        if (detachedDebrisPieces.length === 0) {
+            visibleDetachedDebrisCount = 0;
+            return;
+        }
+        const playerX = Number(playerPosition?.x);
+        const playerZ = Number(playerPosition?.z);
+        const hasPlayerPosition = Number.isFinite(playerX) && Number.isFinite(playerZ);
+        const visibleBudget = resolveDetachedDebrisVisibleBudget(dt, detachedDebrisPieces.length);
+        const candidates = detachedDebrisVisibilityCandidates;
+        candidates.length = 0;
+
+        for (let i = 0; i < detachedDebrisPieces.length; i += 1) {
+            const piece = detachedDebrisPieces[i];
+            if (!piece?.mesh) {
+                continue;
+            }
+            let distanceSq = 0;
+            if (hasPlayerPosition) {
+                const deltaX = piece.mesh.position.x - playerX;
+                const deltaZ = piece.mesh.position.z - playerZ;
+                distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+                if (distanceSq > BOT_DEBRIS_RENDER_DISTANCE_SQ) {
+                    piece.mesh.visible = false;
+                    continue;
+                }
+            }
+
+            let score = piece.settled ? 0 : 1000;
+            if (piece.partType === 'wheel') {
+                score += 80;
+            } else if (piece.partType === 'suspension_link') {
+                score += 52;
+            } else {
+                score += 34;
+            }
+            if (hasPlayerPosition) {
+                if (distanceSq <= BOT_DEBRIS_ALWAYS_VISIBLE_DISTANCE_SQ) {
+                    score += 540;
+                }
+                score += Math.max(0, 320 - distanceSq * 0.08);
+            }
+            candidates.push({
+                piece,
+                score,
+            });
+        }
+
+        if (candidates.length === 0) {
+            visibleDetachedDebrisCount = 0;
+            return;
+        }
+
+        candidates.sort((left, right) => right.score - left.score);
+        let visibleCount = 0;
+        for (let i = 0; i < candidates.length; i += 1) {
+            const shouldRender = visibleCount < visibleBudget;
+            candidates[i].piece.mesh.visible = shouldRender;
+            if (shouldRender) {
+                visibleCount += 1;
+            }
+        }
+        visibleDetachedDebrisCount = visibleCount;
+    }
+
+    function resolveDetachedDebrisVisibleBudget(dt, activeCount = 0) {
+        if (dt > 1 / 32 || activeCount >= BOT_DEBRIS_TARGET_ACTIVE_COUNT + 4) {
+            return BOT_DEBRIS_MAX_VISIBLE_SEVERE_LOAD;
+        }
+        if (dt > 1 / 42 || activeCount >= BOT_DEBRIS_TARGET_ACTIVE_COUNT) {
+            return BOT_DEBRIS_MAX_VISIBLE_UNDER_LOAD;
+        }
+        return BOT_DEBRIS_MAX_VISIBLE;
+    }
+
     function trimDetachedDebrisLimit() {
         while (detachedDebrisPieces.length > BOT_DEBRIS_MAX_PIECES) {
             let removalIndex = -1;
@@ -670,6 +876,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     function clearDetachedDebris() {
         pendingMineDebrisParts.length = 0;
         pendingMineDebrisReadIndex = 0;
+        droppedPendingMineDebris = 0;
+        visibleDetachedDebrisCount = 0;
+        detachedDebrisVisibilityCandidates.length = 0;
         while (detachedDebrisPieces.length > 0) {
             const piece = detachedDebrisPieces.pop();
             if (!piece?.mesh) {
@@ -740,6 +949,94 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 pool.push(cloneBotPartMesh(part.source));
             }
         }
+    }
+
+    function warmupDetachedDebrisGraphics(renderer, camera = null) {
+        if (!renderer || typeof renderer.compile !== 'function') {
+            return false;
+        }
+        if (!Array.isArray(bots) || bots.length === 0) {
+            return false;
+        }
+
+        const compileCamera = camera?.isCamera
+            ? camera
+            : new THREE.PerspectiveCamera(55, 1, 0.1, 220);
+        const warmupOrigin = new THREE.Vector3();
+        if (camera?.isCamera) {
+            const forward = new THREE.Vector3(0, 0, -1);
+            if (typeof camera.getWorldDirection === 'function') {
+                camera.getWorldDirection(forward);
+            } else if (camera.quaternion) {
+                forward.applyQuaternion(camera.quaternion).normalize();
+            }
+            if (forward.lengthSq() < 0.0001) {
+                forward.set(0, 0, -1);
+            }
+            warmupOrigin.copy(camera.position).addScaledVector(forward.normalize(), 6.4);
+            warmupOrigin.y = Math.max(warmupOrigin.y, BOT_RIDE_HEIGHT + 1.2);
+        } else {
+            warmupOrigin.copy(bots[0].car.position);
+            warmupOrigin.y += 1.1;
+            compileCamera.position.set(
+                warmupOrigin.x + 5.2,
+                warmupOrigin.y + 3.4,
+                warmupOrigin.z + 6.6
+            );
+            compileCamera.lookAt(warmupOrigin.x, warmupOrigin.y + 0.8, warmupOrigin.z - 2.6);
+            compileCamera.updateProjectionMatrix();
+        }
+
+        const warmedMeshes = [];
+        const maxWarmupParts = 8;
+        let spawnedCount = 0;
+        for (let botIndex = 0; botIndex < bots.length && spawnedCount < maxWarmupParts; botIndex += 1) {
+            const bot = bots[botIndex];
+            if (!Array.isArray(bot?.crashParts) || bot.crashParts.length === 0) {
+                continue;
+            }
+            for (
+                let partIndex = 0;
+                partIndex < bot.crashParts.length && spawnedCount < maxWarmupParts;
+                partIndex += 1
+            ) {
+                const part = bot.crashParts[partIndex];
+                if (!part?.source) {
+                    continue;
+                }
+                const partKey = resolveBotDebrisPartKey(bot, part);
+                const mesh = acquireDetachedBotDebrisMesh(partKey, part.source);
+                const offsetX = (spawnedCount - (maxWarmupParts - 1) * 0.5) * 0.92;
+                const offsetZ = -2.1 - spawnedCount * 0.38;
+                mesh.position.set(
+                    warmupOrigin.x + offsetX,
+                    warmupOrigin.y + 0.62 + spawnedCount * 0.04,
+                    warmupOrigin.z + offsetZ
+                );
+                mesh.rotation.set(0.15 * spawnedCount, 0.2 * spawnedCount, 0.08 * spawnedCount);
+                scene.add(mesh);
+                warmedMeshes.push({ partKey, mesh });
+                spawnedCount += 1;
+            }
+        }
+
+        let warmedUp = false;
+        try {
+            scene.updateMatrixWorld(true);
+            compileCamera.updateMatrixWorld(true);
+            renderer.compile(scene, compileCamera);
+            warmedUp = true;
+        } catch {
+            warmedUp = false;
+        } finally {
+            for (let i = 0; i < warmedMeshes.length; i += 1) {
+                const entry = warmedMeshes[i];
+                scene.remove(entry.mesh);
+                recycleDetachedBotDebrisMesh(entry.partKey, entry.mesh);
+            }
+        }
+
+        return warmedUp;
     }
 
     function acquireDetachedBotDebrisMesh(partKey, source) {
@@ -916,7 +1213,8 @@ function createBot(
     sharedTargetColorHex,
     getGroundHeightAt,
     cityMapLayout,
-    onPartDetached
+    onPartDetached,
+    onDestroyed = null
 ) {
     const name = BOT_NAMES[index] || `BOT-${index + 1}`;
     const bodyColor = BOT_BODY_COLORS[index % BOT_BODY_COLORS.length];
@@ -973,6 +1271,7 @@ function createBot(
         bodyDamageVisual: { left: 0, right: 0, front: 0, rear: 0 },
         bodyPartBaselines: new Map(),
         onPartDetached,
+        onDestroyed,
         lastDamageAtMs: 0,
         destroyed: false,
         livesRemaining: BOT_LIVES_PER_ROUND,
@@ -1303,14 +1602,23 @@ function updateBot(
     bot.updateVisuals(bot.state, dt);
 }
 
-function resolveNearbyBotObstacles(position, staticObstacles, navigationPlanner, obstacleQueryGrid) {
+function resolveNearbyBotObstacles(
+    position,
+    staticObstacles,
+    navigationPlanner,
+    obstacleQueryGrid
+) {
     const x = Number(position?.x);
     const z = Number(position?.z);
     if (!Number.isFinite(x) || !Number.isFinite(z)) {
         return staticObstacles;
     }
 
-    let nearbyObstacles = navigationPlanner?.queryNearbyObstacles?.(x, z, BOT_OBSTACLE_QUERY_RADIUS);
+    let nearbyObstacles = navigationPlanner?.queryNearbyObstacles?.(
+        x,
+        z,
+        BOT_OBSTACLE_QUERY_RADIUS
+    );
     if (!Array.isArray(nearbyObstacles) || nearbyObstacles.length === 0) {
         nearbyObstacles = queryObstacleGrid(obstacleQueryGrid, x, z, BOT_OBSTACLE_QUERY_RADIUS);
     }
@@ -1789,6 +2097,20 @@ function destroyBot(bot) {
     bot.car.visible = false;
     if (bot.indicator?.root) {
         bot.indicator.root.visible = false;
+    }
+    if (typeof bot.onDestroyed === 'function') {
+        try {
+            bot.onDestroyed({
+                collectorId: bot.collectorId,
+                name: bot.name,
+                livesRemaining: bot.livesRemaining,
+                respawnAtMs: bot.respawnAtMs,
+                position: bot.car.position,
+                occurredAtMs: nowMs,
+            });
+        } catch (error) {
+            console.error('Bot destroyed callback failed:', error);
+        }
     }
 }
 

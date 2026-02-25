@@ -18,6 +18,17 @@ const COLLISION_RELAY_INTERVAL_MS = 90;
 const CRASH_REPLICATION_SEND_INTERVAL_MS = 190;
 const VEHICLE_STATUS_SEND_INTERVAL_MS = 140;
 const ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS = 9000;
+const REMOTE_CRASH_FULL_DETAIL_DISTANCE = 52;
+const REMOTE_CRASH_MID_DETAIL_DISTANCE = 96;
+const REMOTE_CRASH_FULL_DETAIL_DISTANCE_SQ =
+    REMOTE_CRASH_FULL_DETAIL_DISTANCE * REMOTE_CRASH_FULL_DETAIL_DISTANCE;
+const REMOTE_CRASH_MID_DETAIL_DISTANCE_SQ =
+    REMOTE_CRASH_MID_DETAIL_DISTANCE * REMOTE_CRASH_MID_DETAIL_DISTANCE;
+const REMOTE_CRASH_MAX_DEBRIS_NEAR = 20;
+const REMOTE_CRASH_MAX_DEBRIS_MID = 7;
+const REMOTE_CRASH_SIM_INTERVAL_NEAR_SEC = 0;
+const REMOTE_CRASH_SIM_INTERVAL_MID_SEC = 1 / 22;
+const REMOTE_CRASH_SIM_INTERVAL_FAR_SEC = 1 / 10;
 const EMPTY_ARRAY = Object.freeze([]);
 
 export function createMultiplayerController(options = {}) {
@@ -669,20 +680,111 @@ export function createMultiplayerController(options = {}) {
         });
     }
 
+    function resolveRemoteDistanceSq(remote) {
+        if (!remote?.targetPosition) {
+            return Number.POSITIVE_INFINITY;
+        }
+        const localX = Number(car.position?.x);
+        const localZ = Number(car.position?.z);
+        const remoteX = Number(remote.targetPosition.x);
+        const remoteZ = Number(remote.targetPosition.z);
+        if (
+            !Number.isFinite(localX) ||
+            !Number.isFinite(localZ) ||
+            !Number.isFinite(remoteX) ||
+            !Number.isFinite(remoteZ)
+        ) {
+            return Number.POSITIVE_INFINITY;
+        }
+        const dx = remoteX - localX;
+        const dz = remoteZ - localZ;
+        return dx * dx + dz * dz;
+    }
+
+    function resolveRemoteCrashVisualProfile(distanceSq = Number.POSITIVE_INFINITY) {
+        if (distanceSq <= REMOTE_CRASH_FULL_DETAIL_DISTANCE_SQ) {
+            return {
+                maxDebrisPieces: REMOTE_CRASH_MAX_DEBRIS_NEAR,
+                allowExplosion: true,
+                allowFallbackExplosion: true,
+                simIntervalSec: REMOTE_CRASH_SIM_INTERVAL_NEAR_SEC,
+            };
+        }
+        if (distanceSq <= REMOTE_CRASH_MID_DETAIL_DISTANCE_SQ) {
+            return {
+                maxDebrisPieces: REMOTE_CRASH_MAX_DEBRIS_MID,
+                allowExplosion: true,
+                allowFallbackExplosion: false,
+                simIntervalSec: REMOTE_CRASH_SIM_INTERVAL_MID_SEC,
+            };
+        }
+        return {
+            maxDebrisPieces: 0,
+            allowExplosion: false,
+            allowFallbackExplosion: false,
+            simIntervalSec: REMOTE_CRASH_SIM_INTERVAL_FAR_SEC,
+        };
+    }
+
+    function clearRemoteCrashVisuals(remote) {
+        if (!remote) {
+            return;
+        }
+        remote.crashDebrisController?.clearDebris?.();
+        remote.crashDebrisSimAccumulator = 0;
+        remote.crashVisualSuppressed = true;
+    }
+
+    function updateRemoteCrashDebris(remote, dt) {
+        if (!remote) {
+            return;
+        }
+        const crashProfile = resolveRemoteCrashVisualProfile(resolveRemoteDistanceSq(remote));
+        if (!crashProfile.allowExplosion && crashProfile.maxDebrisPieces <= 0) {
+            if (!remote.crashVisualSuppressed) {
+                clearRemoteCrashVisuals(remote);
+            }
+            return;
+        }
+        remote.crashVisualSuppressed = false;
+        const hasActiveCrashVisuals = Boolean(
+            remote.crashDebrisController?.hasActiveDebrisOrExplosion?.()
+        );
+        if (!hasActiveCrashVisuals) {
+            remote.crashDebrisSimAccumulator = 0;
+            return;
+        }
+        const intervalSec = Math.max(0, Number(crashProfile.simIntervalSec) || 0);
+        if (intervalSec <= 0) {
+            remote.crashDebrisSimAccumulator = 0;
+            remote.crashDebrisController?.updateDebris?.(dt);
+            return;
+        }
+        remote.crashDebrisSimAccumulator =
+            Math.max(0, Number(remote.crashDebrisSimAccumulator) || 0) +
+            Math.max(0, Number(dt) || 0);
+        if (remote.crashDebrisSimAccumulator < intervalSec) {
+            return;
+        }
+        const simulatedDt = Math.min(intervalSec * 2, remote.crashDebrisSimAccumulator);
+        remote.crashDebrisSimAccumulator = 0;
+        remote.crashDebrisController?.updateDebris?.(simulatedDt);
+    }
+
     function updateRemoteCars(dt) {
         const now = performance.now();
         for (const remote of remotePlayers.values()) {
             if (now - remote.lastStateAt > REMOTE_STATE_TIMEOUT_MS) {
                 remote.car.visible = false;
                 remote.skidMarkController?.update?.(dt, { enabled: false });
-                remote.crashDebrisController?.updateDebris?.(dt);
+                updateRemoteCrashDebris(remote, dt);
                 continue;
             }
 
             remote.car.visible = !remote.isDestroyed;
             if (!remote.hasState) {
                 remote.skidMarkController?.update?.(dt, { enabled: false });
-                remote.crashDebrisController?.updateDebris?.(dt);
+                updateRemoteCrashDebris(remote, dt);
                 continue;
             }
 
@@ -703,7 +805,7 @@ export function createMultiplayerController(options = {}) {
                 vehicleState: remote.visualState,
                 inputState: remote.inputState,
             });
-            remote.crashDebrisController?.updateDebris?.(dt);
+            updateRemoteCrashDebris(remote, dt);
         }
     }
 
@@ -824,6 +926,8 @@ export function createMultiplayerController(options = {}) {
             hasState: false,
             isDestroyed: false,
             wasDestroyed: false,
+            crashDebrisSimAccumulator: 0,
+            crashVisualSuppressed: true,
             lastStateAt: 0,
             lastRotationSampleY: carRig.car.rotation.y,
             lastRotationSampleAt: performance.now(),
@@ -1009,12 +1113,30 @@ export function createMultiplayerController(options = {}) {
         const wasDestroyed = Boolean(remote.isDestroyed);
         remote.isDestroyed = Boolean(state.isDestroyed);
         if (!wasDestroyed && remote.isDestroyed) {
+            const crashProfile = resolveRemoteCrashVisualProfile(resolveRemoteDistanceSq(remote));
             remote.crashDebrisController?.clearDebris?.();
             remote.crashDebrisController?.resetPlayerDamageState?.();
-            remote.crashDebrisController?.spawnCarDebris?.(remote.targetPosition.clone(), null);
+            remote.crashDebrisSimAccumulator = 0;
+            if (!crashProfile.allowExplosion && crashProfile.maxDebrisPieces <= 0) {
+                remote.crashVisualSuppressed = true;
+            } else {
+                remote.crashVisualSuppressed = false;
+                if (crashProfile.allowFallbackExplosion) {
+                    remote.crashDebrisController?.spawnCarDebris?.(
+                        remote.targetPosition.clone(),
+                        null,
+                        {
+                            suppressDebris: true,
+                            maxDebrisPieces: crashProfile.maxDebrisPieces,
+                        }
+                    );
+                }
+            }
         } else if (wasDestroyed && !remote.isDestroyed) {
             remote.crashDebrisController?.clearDebris?.();
             remote.crashDebrisController?.resetPlayerDamageState?.();
+            remote.crashDebrisSimAccumulator = 0;
+            remote.crashVisualSuppressed = false;
         }
         remote.lastRotationSampleY = remote.targetRotationY;
         remote.lastRotationSampleAt = now;
@@ -1032,7 +1154,16 @@ export function createMultiplayerController(options = {}) {
         if (!remote || !crashReplicationState || typeof crashReplicationState !== 'object') {
             return;
         }
-        remote.crashDebrisController?.applyReplicationState?.(crashReplicationState);
+        const crashProfile = resolveRemoteCrashVisualProfile(resolveRemoteDistanceSq(remote));
+        if (!crashProfile.allowExplosion && crashProfile.maxDebrisPieces <= 0) {
+            clearRemoteCrashVisuals(remote);
+            return;
+        }
+        remote.crashVisualSuppressed = false;
+        remote.crashDebrisController?.applyReplicationState?.(crashReplicationState, {
+            maxDebrisPieces: crashProfile.maxDebrisPieces,
+            allowExplosion: crashProfile.allowExplosion,
+        });
     }
 
     function emitAuthoritativeRoundState(snapshot = room) {
