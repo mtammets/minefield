@@ -9,6 +9,7 @@ import {
     MINE_THROW_VERTICAL_SPEED,
     MINE_THROW_GRAVITY,
 } from './constants.js';
+import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
 const MINE_SURFACE_OFFSET = 0.06;
 const MINE_DROP_BACK_OFFSET = 2.8;
@@ -792,7 +793,7 @@ export function createMineSystemController(options = {}) {
     }
 
     function warmupGraphics(renderer, camera = null) {
-        if (!renderer || typeof renderer.compile !== 'function') {
+        if (!renderer || typeof renderer.render !== 'function') {
             return false;
         }
 
@@ -826,7 +827,10 @@ export function createMineSystemController(options = {}) {
         try {
             scene.updateMatrixWorld(true);
             compileCamera.updateMatrixWorld(true);
-            renderer.compile(scene, compileCamera);
+            if (typeof renderer.compile === 'function') {
+                renderer.compile(scene, compileCamera);
+            }
+            renderer.render(scene, compileCamera);
             warmedUp = true;
         } catch {
             warmedUp = false;
@@ -989,16 +993,25 @@ export function createMineSystemController(options = {}) {
             if (!localPriority && budget <= 0) {
                 break;
             }
-            pendingDetonationSpawnReadIndex += 1;
 
             if (
                 !entry.preferLight &&
                 queueDelayMs > DETONATION_MAX_QUEUE_DELAY_MS &&
                 Number(entry.distanceSq) > DETONATION_CULL_DISTANCE_SQ
             ) {
+                pendingDetonationSpawnReadIndex += 1;
                 droppedQueuedDetonations += 1;
                 continue;
             }
+            const heavyTokenCost = entry.preferLight ? 2 : 1;
+            if (!tryConsumeHeavyEventToken(heavyTokenCost)) {
+                entry.dueAtMs = Math.max(
+                    Number(entry.dueAtMs) || now,
+                    now + Math.max(DETONATION_BACKLOG_STAGGER_MS, DETONATION_MIN_QUEUE_DELAY_MS)
+                );
+                break;
+            }
+            pendingDetonationSpawnReadIndex += 1;
 
             queuedDetonationPosition.set(entry.x, entry.y, entry.z);
             spawnDetonationEffect(queuedDetonationPosition, {

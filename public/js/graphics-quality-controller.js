@@ -19,6 +19,12 @@ const STALL_GUARD_RECOVER_DELAY_SEC = 2;
 const STALL_GUARD_RECOVER_STEP = 0.03;
 const STALL_GUARD_RECOVER_STEP_INTERVAL_SEC = 0.35;
 const STALL_GUARD_ENABLE_IN_MANUAL_MODES = false;
+const PRE_RENDER_PRESSURE_TRIGGER_SCORE = 4.6;
+const PRE_RENDER_PRESSURE_STRONG_SCORE = 8.8;
+const PRE_RENDER_GUARD_BASE_STEP = 0.055;
+const PRE_RENDER_GUARD_MAX_STEP = 0.14;
+const PRE_RENDER_GUARD_COOLDOWN_SEC = 0.28;
+const PRE_RENDER_GUARD_RECOVER_DELAY_SEC = 1.35;
 const PIXEL_RATIO_APPLY_EPSILON = 0.02;
 const PIXEL_RATIO_FORCE_APPLY_DELTA = 0.05;
 const PIXEL_RATIO_APPLY_MIN_INTERVAL_MS = 180;
@@ -135,6 +141,7 @@ export function createGraphicsQualityController({
         stallGuardRecoverDelaySec: 0,
         stallGuardRecoverAccumulatorSec: 0,
         stallGuardTriggerCount: 0,
+        preRenderGuardTriggerCount: 0,
         lastPixelRatioApplyAtMs: Number(performance.now()) || 0,
     };
 
@@ -142,6 +149,7 @@ export function createGraphicsQualityController({
 
     return {
         sampleFrame,
+        reportPreRenderPressure,
         reportRenderStall,
         setMode,
         cycleMode,
@@ -315,6 +323,92 @@ export function createGraphicsQualityController({
         };
     }
 
+    function reportPreRenderPressure({ pressureScore = 0, force = false } = {}) {
+        const resolvedScore = Math.max(0, Number(pressureScore) || 0);
+        const autoMode = state.mode === GRAPHICS_QUALITY_MODES.auto;
+        if (!force && !autoMode && !STALL_GUARD_ENABLE_IN_MANUAL_MODES) {
+            return {
+                triggered: false,
+                applied: false,
+                stallGuardScale: state.stallGuardScale,
+                pixelRatioCap: state.activePixelRatioCap,
+            };
+        }
+        if (resolvedScore < PRE_RENDER_PRESSURE_TRIGGER_SCORE) {
+            return {
+                triggered: false,
+                applied: false,
+                stallGuardScale: state.stallGuardScale,
+                pixelRatioCap: state.activePixelRatioCap,
+            };
+        }
+        if (
+            !force &&
+            state.stallGuardCooldownSec > 0 &&
+            resolvedScore < PRE_RENDER_PRESSURE_STRONG_SCORE
+        ) {
+            return {
+                triggered: false,
+                applied: false,
+                stallGuardScale: state.stallGuardScale,
+                pixelRatioCap: state.activePixelRatioCap,
+            };
+        }
+
+        const normalizedPressure = clamp(
+            (resolvedScore - PRE_RENDER_PRESSURE_TRIGGER_SCORE) /
+                Math.max(0.1, PRE_RENDER_PRESSURE_STRONG_SCORE - PRE_RENDER_PRESSURE_TRIGGER_SCORE),
+            0,
+            1
+        );
+        const severity = 1 + normalizedPressure * 1.4;
+        const reductionStep = clamp(
+            PRE_RENDER_GUARD_BASE_STEP * severity,
+            PRE_RENDER_GUARD_BASE_STEP,
+            PRE_RENDER_GUARD_MAX_STEP
+        );
+        const nextScale = clamp(state.stallGuardScale - reductionStep, STALL_GUARD_MIN_SCALE, 1);
+        const scaleChanged = Math.abs(nextScale - state.stallGuardScale) > 1e-6;
+        if (scaleChanged) {
+            state.stallGuardScale = nextScale;
+        }
+
+        if (state.mode === GRAPHICS_QUALITY_MODES.auto) {
+            const autoReduction = AUTO_DEGRADE_STEP * (0.35 + normalizedPressure * 0.75);
+            const nextAutoScale = clamp(
+                state.autoScale - autoReduction,
+                AUTO_MIN_SCALE,
+                AUTO_MAX_SCALE
+            );
+            if (Math.abs(nextAutoScale - state.autoScale) > 1e-6) {
+                state.autoScale = nextAutoScale;
+            }
+            state.highLoadTimeSec = Math.max(state.highLoadTimeSec, AUTO_DEGRADE_HOLD_SEC);
+            state.lowLoadTimeSec = 0;
+        }
+
+        state.stallGuardCooldownSec = Math.max(
+            state.stallGuardCooldownSec,
+            PRE_RENDER_GUARD_COOLDOWN_SEC
+        );
+        state.stallGuardRecoverDelaySec = Math.max(
+            state.stallGuardRecoverDelaySec,
+            PRE_RENDER_GUARD_RECOVER_DELAY_SEC
+        );
+        state.stallGuardRecoverAccumulatorSec = 0;
+        state.preRenderGuardTriggerCount += 1;
+
+        applyCurrentQuality();
+        return {
+            triggered: true,
+            applied: scaleChanged,
+            stallGuardScale: state.stallGuardScale,
+            pixelRatioCap: state.activePixelRatioCap,
+            pressureScore: resolvedScore,
+            pressureSeverity: severity,
+        };
+    }
+
     function setMode(nextMode) {
         const resolvedMode = resolveMode(nextMode, state.mode);
         if (resolvedMode === state.mode) {
@@ -452,6 +546,10 @@ export function createGraphicsQualityController({
             stallGuardScale: state.stallGuardScale,
             stallGuardScalePercent: Math.max(10, Math.round(state.stallGuardScale * 100)),
             stallGuardTriggerCount: Math.max(0, Math.round(state.stallGuardTriggerCount || 0)),
+            preRenderGuardTriggerCount: Math.max(
+                0,
+                Math.round(state.preRenderGuardTriggerCount || 0)
+            ),
             renderScalePercent,
             titleText: `Graphics: ${modeLabel}${autoProfileHint}`,
             detailText:
@@ -491,6 +589,14 @@ function createNoopController() {
             return null;
         },
         reportRenderStall() {
+            return {
+                triggered: false,
+                applied: false,
+                stallGuardScale: 1,
+                pixelRatioCap: 1,
+            };
+        },
+        reportPreRenderPressure() {
             return {
                 triggered: false,
                 applied: false,

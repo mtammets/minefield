@@ -9,7 +9,7 @@ const DEFAULT_MAX_RECENT_FRAMES = 360;
 const DEFAULT_MAX_EVENT_HISTORY = 1400;
 const DEFAULT_EVENT_MATCH_WINDOW_MS = 500;
 const DEFAULT_SPIKE_WINDOW_MS = 500;
-const MAX_CONTEXT_KEYS = 32;
+const MAX_CONTEXT_KEYS = 56;
 const MAX_STAGE_DURATION_KEYS = 24;
 const MAX_EVENT_LINKS_PER_SPIKE = 24;
 const MAX_SPIKE_WINDOW_FRAMES = 220;
@@ -547,6 +547,10 @@ function resolveCause(dominantEntry, context = {}) {
         0,
         Math.round(Number(context?.visibleCrashDebrisPieces) || 0)
     );
+    const droppedCrashDebrisPoolMisses = Math.max(
+        0,
+        Math.round(Number(context?.droppedCrashDebrisPoolMisses) || 0)
+    );
     const pendingMineDetonationSpawns = Math.max(
         0,
         Math.round(Number(context?.pendingMineDetonationSpawns) || 0)
@@ -572,6 +576,10 @@ function resolveCause(dominantEntry, context = {}) {
         0,
         Math.round(Number(context?.visibleBotDetachedDebris) || 0)
     );
+    const droppedBotDebrisPoolMisses = Math.max(
+        0,
+        Math.round(Number(context?.droppedBotDebrisPoolMisses) || 0)
+    );
     const pendingCollectEffects = Math.max(
         0,
         Math.round(Number(context?.pendingCollectEffects) || 0)
@@ -595,6 +603,10 @@ function resolveCause(dominantEntry, context = {}) {
     const graphicsStallGuardTriggerCount = Math.max(
         0,
         Math.round(Number(context?.graphicsStallGuardTriggerCount) || 0)
+    );
+    const graphicsPreRenderGuardTriggerCount = Math.max(
+        0,
+        Math.round(Number(context?.graphicsPreRenderGuardTriggerCount) || 0)
     );
     const graphicsStallGuardActive =
         Math.max(0, Math.round(Number(context?.graphicsStallGuardActive) || 0)) > 0;
@@ -639,12 +651,21 @@ function resolveCause(dominantEntry, context = {}) {
                 `crash q${pendingCrashDebrisSpawns}/a${activeCrashDebrisPieces}/v${visibleCrashDebrisPieces}`
             );
         }
+        if (droppedBotDebrisPoolMisses > 0 || droppedCrashDebrisPoolMisses > 0) {
+            queueNotes.push(
+                `pool bot${droppedBotDebrisPoolMisses}/crash${droppedCrashDebrisPoolMisses}`
+            );
+        }
         if (pendingCollectEffects > 0 || activeCollectEffects > 0) {
             const skipNote =
                 skippedRemoteCollectEffects > 0 ? `/skip${skippedRemoteCollectEffects}` : '';
             queueNotes.push(`pickup q${pendingCollectEffects}/a${activeCollectEffects}${skipNote}`);
         }
-        if (graphicsStallGuardActive || graphicsStallGuardTriggerCount > 0) {
+        if (
+            graphicsStallGuardActive ||
+            graphicsStallGuardTriggerCount > 0 ||
+            graphicsPreRenderGuardTriggerCount > 0
+        ) {
             const renderScaleText =
                 graphicsRenderScalePercent > 0 ? `render${graphicsRenderScalePercent}%` : 'render?';
             const stallScaleText =
@@ -652,7 +673,7 @@ function resolveCause(dominantEntry, context = {}) {
                     ? `guard${graphicsStallGuardScalePercent}%`
                     : 'guard?';
             queueNotes.push(
-                `${renderScaleText}/${stallScaleText}/t${graphicsStallGuardTriggerCount}`
+                `${renderScaleText}/${stallScaleText}/t${graphicsStallGuardTriggerCount}/p${graphicsPreRenderGuardTriggerCount}`
             );
         }
         const queueNote = queueNotes.length > 0 ? ` | fx ${queueNotes.join(', ')}` : '';

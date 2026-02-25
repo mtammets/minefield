@@ -12,9 +12,11 @@ import {
     BODY_PANEL_ORIENTATION_ALIGN_RATE,
 } from './constants.js';
 import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
+import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
 const EXPLOSION_LIGHT_MAX_LIFE = 0.7;
 const MAX_DEBRIS_MESH_POOL_PER_PART = 18;
+const DEBRIS_POOL_PREWARM_PER_PART = Math.min(MAX_DEBRIS_MESH_POOL_PER_PART, 4);
 const DEFAULT_DEBRIS_BOTTOM_OFFSET = 0.12;
 const SUSPENSION_CORNER_DAMAGE_SCALE = 0.65;
 const WHEEL_DEBRIS_GROUND_CLEARANCE_SCALE = 0.52;
@@ -101,6 +103,7 @@ export function createCrashDebrisController({
     let explosionDetachFrameTick = 0;
     let droppedPendingDebrisSpawns = 0;
     let droppedPendingExplosionDetaches = 0;
+    let droppedDebrisPoolMisses = 0;
     let visibleDebrisPiecesCount = 0;
 
     let explosionLight = null;
@@ -147,6 +150,7 @@ export function createCrashDebrisController({
                 visibleDebrisPieces: visibleDebrisPiecesCount,
                 droppedPendingDebrisSpawns,
                 droppedPendingExplosionDetaches,
+                droppedDebrisPoolMisses,
             };
         },
         hasActiveDebrisOrExplosion() {
@@ -664,8 +668,8 @@ export function createCrashDebrisController({
             if ((Number(entry?.dueFrame) || 0) > explosionDetachFrameTick) {
                 break;
             }
-            pendingExplosionDetachReadIndex += 1;
             if (!entry?.part || !entry?.crashContext) {
+                pendingExplosionDetachReadIndex += 1;
                 droppedPendingExplosionDetaches += 1;
                 continue;
             }
@@ -674,9 +678,14 @@ export function createCrashDebrisController({
                 Number.isFinite(queuedFrame) &&
                 explosionDetachFrameTick - queuedFrame > EXPLOSION_DETACH_MAX_AGE_FRAMES
             ) {
+                pendingExplosionDetachReadIndex += 1;
                 droppedPendingExplosionDetaches += 1;
                 continue;
             }
+            if (!tryConsumeHeavyEventToken(1)) {
+                break;
+            }
+            pendingExplosionDetachReadIndex += 1;
             detachCrashPart(entry.part, entry.crashContext, entry.options || {});
             budget -= 1;
         }
@@ -736,10 +745,16 @@ export function createCrashDebrisController({
         let budget = resolvePendingDebrisSpawnBudget(dt);
         while (budget > 0 && pendingDebrisSpawnReadIndex < pendingDebrisSpawns.length) {
             const entry = pendingDebrisSpawns[pendingDebrisSpawnReadIndex];
-            pendingDebrisSpawnReadIndex += 1;
-            if (entry?.part && entry?.crashContext) {
-                spawnCrashPartDebris(entry.part, entry.crashContext);
+            if (!entry?.part || !entry?.crashContext) {
+                pendingDebrisSpawnReadIndex += 1;
+                droppedPendingDebrisSpawns += 1;
+                continue;
             }
+            if (!tryConsumeHeavyEventToken(1)) {
+                break;
+            }
+            pendingDebrisSpawnReadIndex += 1;
+            spawnCrashPartDebris(entry.part, entry.crashContext);
             budget -= 1;
         }
         if (pendingDebrisSpawnReadIndex >= pendingDebrisSpawns.length) {
@@ -930,6 +945,10 @@ export function createCrashDebrisController({
                 const source = part.source;
                 source.updateWorldMatrix(true, false);
                 const debrisMesh = acquireDebrisMesh(partId, source);
+                if (!debrisMesh) {
+                    droppedDebrisPoolMisses += 1;
+                    continue;
+                }
                 source.matrixWorld.decompose(
                     debrisMesh.position,
                     debrisMesh.quaternion,
@@ -1208,6 +1227,10 @@ export function createCrashDebrisController({
         source.updateWorldMatrix(true, false);
         const partId = part.id || '';
         const debrisMesh = acquireDebrisMesh(partId, source);
+        if (!debrisMesh) {
+            droppedDebrisPoolMisses += 1;
+            return;
+        }
         source.matrixWorld.decompose(debrisMesh.position, debrisMesh.quaternion, debrisMesh.scale);
         scene.add(debrisMesh);
 
@@ -1363,7 +1386,7 @@ export function createCrashDebrisController({
         return lifetime;
     }
 
-    function acquireDebrisMesh(partId, source) {
+    function acquireDebrisMesh(partId, _source) {
         const key = typeof partId === 'string' ? partId : '';
         const pool = debrisMeshPoolByPartId.get(key);
         if (pool && pool.length > 0) {
@@ -1371,7 +1394,7 @@ export function createCrashDebrisController({
             mesh.visible = true;
             return mesh;
         }
-        return cloneCrashPartSource(source);
+        return null;
     }
 
     function prewarmDebrisMeshPool() {
@@ -1385,10 +1408,9 @@ export function createCrashDebrisController({
             if (!debrisMeshPoolByPartId.has(key)) {
                 debrisMeshPoolByPartId.set(key, pool);
             }
-            if (pool.length > 0) {
-                continue;
+            while (pool.length < DEBRIS_POOL_PREWARM_PER_PART) {
+                pool.push(cloneCrashPartSource(part.source));
             }
-            pool.push(cloneCrashPartSource(part.source));
         }
     }
 
@@ -1980,6 +2002,7 @@ export function createCrashDebrisController({
         pendingExplosionDetaches.length = 0;
         pendingExplosionDetachReadIndex = 0;
         droppedPendingExplosionDetaches = 0;
+        droppedDebrisPoolMisses = 0;
         explosionDetachFrameTick = 0;
         visibleDebrisPiecesCount = 0;
         debrisVisibilityCandidates.length = 0;
@@ -1993,7 +2016,7 @@ export function createCrashDebrisController({
     }
 
     function warmupGraphics(renderer, camera = null) {
-        if (!renderer || typeof renderer.compile !== 'function') {
+        if (!renderer || typeof renderer.render !== 'function') {
             return false;
         }
         if (!Array.isArray(crashParts) || crashParts.length === 0) {
@@ -2005,7 +2028,7 @@ export function createCrashDebrisController({
             : new THREE.PerspectiveCamera(55, 1, 0.1, 220);
         const warmupOrigin = new THREE.Vector3(car.position.x, car.position.y, car.position.z);
         const warmupMeshes = [];
-        const maxWarmupParts = Math.min(6, crashParts.length);
+        const maxWarmupParts = Math.min(12, crashParts.length);
         let spawnedCount = 0;
 
         for (let i = 0; i < crashParts.length && spawnedCount < maxWarmupParts; i += 1) {
@@ -2058,7 +2081,10 @@ export function createCrashDebrisController({
         try {
             scene.updateMatrixWorld(true);
             compileCamera.updateMatrixWorld(true);
-            renderer.compile(scene, compileCamera);
+            if (typeof renderer.compile === 'function') {
+                renderer.compile(scene, compileCamera);
+            }
+            renderer.render(scene, compileCamera);
             warmedUp = true;
         } catch {
             warmedUp = false;

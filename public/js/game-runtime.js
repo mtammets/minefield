@@ -144,7 +144,7 @@ const BOT_MINE_DEBRIS_MID_DISTANCE = 84;
 const BOT_MINE_DEBRIS_NEAR_DISTANCE_SQ =
     BOT_MINE_DEBRIS_NEAR_DISTANCE * BOT_MINE_DEBRIS_NEAR_DISTANCE;
 const BOT_MINE_DEBRIS_MID_DISTANCE_SQ = BOT_MINE_DEBRIS_MID_DISTANCE * BOT_MINE_DEBRIS_MID_DISTANCE;
-const STARTUP_SECTOR_PREWARM_RADIUS = 38;
+const STARTUP_SECTOR_PREWARM_RADII = Object.freeze([38, 72, 96]);
 const STARTUP_SECTOR_PREWARM_HEIGHT = 18;
 const STARTUP_SECTOR_PREWARM_LOOKAT_HEIGHT = 1.8;
 const STARTUP_SECTOR_PREWARM_DIRECTIONS = Object.freeze([0, 45, 90, 135, 180, 225, 270, 315]);
@@ -391,6 +391,21 @@ async function prewarmSceneSectors(renderer, camera, origin, options = {}) {
     if (!Array.isArray(directions) || directions.length === 0) {
         return false;
     }
+    const worldHalfSize = Math.max(0, Number(worldBounds?.size) * 0.5 || 0);
+    const maxAllowedRadius = worldHalfSize > 8 ? worldHalfSize - 6 : Number.POSITIVE_INFINITY;
+    const radii = STARTUP_SECTOR_PREWARM_RADII.filter(
+        (radius) =>
+            Number.isFinite(radius) &&
+            radius > 0 &&
+            (Number.isFinite(maxAllowedRadius) ? radius <= maxAllowedRadius : true)
+    );
+    if (!Array.isArray(radii) || radii.length === 0) {
+        return false;
+    }
+    const prewarmOrigins = buildStartupPrewarmOrigins(origin);
+    if (!Array.isArray(prewarmOrigins) || prewarmOrigins.length === 0) {
+        return false;
+    }
 
     const warmupCamera = camera.clone?.() || new THREE.PerspectiveCamera(55, 1, 0.1, 260);
     warmupCamera.near = camera.near;
@@ -399,30 +414,108 @@ async function prewarmSceneSectors(renderer, camera, origin, options = {}) {
     warmupCamera.aspect = camera.aspect;
     warmupCamera.updateProjectionMatrix();
 
+    const totalPasses = Math.max(1, prewarmOrigins.length * radii.length * directions.length);
     let warmedPasses = 0;
-    for (let i = 0; i < directions.length; i += 1) {
-        const angleRad = THREE.MathUtils.degToRad(directions[i]);
-        const targetX = origin.x + Math.cos(angleRad) * STARTUP_SECTOR_PREWARM_RADIUS;
-        const targetZ = origin.z + Math.sin(angleRad) * STARTUP_SECTOR_PREWARM_RADIUS;
-        warmupCamera.position.set(targetX, origin.y + STARTUP_SECTOR_PREWARM_HEIGHT, targetZ);
-        warmupCamera.lookAt(origin.x, origin.y + STARTUP_SECTOR_PREWARM_LOOKAT_HEIGHT, origin.z);
-        warmupCamera.updateMatrixWorld(true);
-        scene.updateMatrixWorld(true);
+    let passIndex = 0;
+    for (let originIndex = 0; originIndex < prewarmOrigins.length; originIndex += 1) {
+        const prewarmOrigin = prewarmOrigins[originIndex];
+        for (let radiusIndex = 0; radiusIndex < radii.length; radiusIndex += 1) {
+            const radius = radii[radiusIndex];
+            for (let directionIndex = 0; directionIndex < directions.length; directionIndex += 1) {
+                const angleRad = THREE.MathUtils.degToRad(directions[directionIndex]);
+                const targetX = prewarmOrigin.x + Math.cos(angleRad) * radius;
+                const targetZ = prewarmOrigin.z + Math.sin(angleRad) * radius;
+                warmupCamera.position.set(
+                    targetX,
+                    prewarmOrigin.y + STARTUP_SECTOR_PREWARM_HEIGHT,
+                    targetZ
+                );
+                warmupCamera.lookAt(
+                    prewarmOrigin.x,
+                    prewarmOrigin.y + STARTUP_SECTOR_PREWARM_LOOKAT_HEIGHT,
+                    prewarmOrigin.z
+                );
+                warmupCamera.updateMatrixWorld(true);
+                scene.updateMatrixWorld(true);
 
-        try {
-            renderer.render(scene, warmupCamera);
-            warmedPasses += 1;
-        } catch {
-            // Ignore individual sector render failures and continue.
+                try {
+                    renderer.render(scene, warmupCamera);
+                    warmedPasses += 1;
+                } catch {
+                    // Ignore individual sector render failures and continue.
+                }
+                passIndex += 1;
+                reportProgress({
+                    stage: 'graphics',
+                    progress: 0.92 + (passIndex / totalPasses) * 0.04,
+                });
+                await waitForAnimationFrames(1);
+            }
         }
-        reportProgress({
-            stage: 'graphics',
-            progress: 0.92 + ((i + 1) / directions.length) * 0.04,
-        });
-        await waitForAnimationFrames(1);
     }
 
     return warmedPasses > 0;
+}
+
+function buildStartupPrewarmOrigins(origin = null) {
+    const originX = Number(origin?.x);
+    const originY = Number(origin?.y);
+    const originZ = Number(origin?.z);
+    if (!Number.isFinite(originX) || !Number.isFinite(originY) || !Number.isFinite(originZ)) {
+        return [];
+    }
+
+    const boundsMinX = Number(worldBounds?.minX);
+    const boundsMaxX = Number(worldBounds?.maxX);
+    const boundsMinZ = Number(worldBounds?.minZ);
+    const boundsMaxZ = Number(worldBounds?.maxZ);
+    const hasBounds =
+        Number.isFinite(boundsMinX) &&
+        Number.isFinite(boundsMaxX) &&
+        Number.isFinite(boundsMinZ) &&
+        Number.isFinite(boundsMaxZ) &&
+        boundsMinX < boundsMaxX &&
+        boundsMinZ < boundsMaxZ;
+    const margin = 6;
+    const clampX = (value) =>
+        hasBounds
+            ? THREE.MathUtils.clamp(value, boundsMinX + margin, boundsMaxX - margin)
+            : value;
+    const clampZ = (value) =>
+        hasBounds
+            ? THREE.MathUtils.clamp(value, boundsMinZ + margin, boundsMaxZ - margin)
+            : value;
+    const centerX = hasBounds ? (boundsMinX + boundsMaxX) * 0.5 : 0;
+    const centerZ = hasBounds ? (boundsMinZ + boundsMaxZ) * 0.5 : 0;
+    const mirroredX = hasBounds ? centerX * 2 - originX : originX;
+    const mirroredZ = hasBounds ? centerZ * 2 - originZ : originZ;
+    const minDistanceSq = 14 * 14;
+    const result = [];
+    const addUniqueOrigin = (x, z) => {
+        if (!Number.isFinite(x) || !Number.isFinite(z)) {
+            return;
+        }
+        const nextX = clampX(x);
+        const nextZ = clampZ(z);
+        for (let i = 0; i < result.length; i += 1) {
+            const entry = result[i];
+            const dx = entry.x - nextX;
+            const dz = entry.z - nextZ;
+            if (dx * dx + dz * dz < minDistanceSq) {
+                return;
+            }
+        }
+        result.push({
+            x: nextX,
+            y: originY,
+            z: nextZ,
+        });
+    };
+
+    addUniqueOrigin(originX, originZ);
+    addUniqueOrigin(centerX, centerZ);
+    addUniqueOrigin(mirroredX, mirroredZ);
+    return result;
 }
 
 async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {

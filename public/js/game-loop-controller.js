@@ -1,4 +1,8 @@
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
+import {
+    beginHeavyEventFrame,
+    getHeavyEventBudgetSnapshot,
+} from './frame-heavy-event-budget.js';
 
 const BOT_MINE_DEPLOY_MIN_SPEED = 8;
 const BOT_MINE_DEPLOY_MAX_DISTANCE = 24;
@@ -14,6 +18,10 @@ const VEHICLE_COLLISION_CULL_DISTANCE_SQ =
     VEHICLE_COLLISION_CULL_DISTANCE * VEHICLE_COLLISION_CULL_DISTANCE;
 const BOT_STATUS_UPDATE_INTERVAL_SEC = 1 / 12;
 const RENDER_STALL_GUARD_EVENT_COOLDOWN_MS = 900;
+const PRE_RENDER_LOAD_SHED_EVENT_COOLDOWN_MS = 900;
+const PRE_RENDER_LOAD_SHED_SCORE_THRESHOLD = 4.6;
+const HEAVY_EVENT_TOKENS_PER_FRAME = 2;
+const HEAVY_EVENT_TOKENS_PER_FRAME_UNDER_LOAD = 1;
 const EMPTY_ARRAY = Object.freeze([]);
 
 export function createGameLoopController(options = {}) {
@@ -201,6 +209,8 @@ export function createGameLoopController(options = {}) {
     let botMineDecisionStamp = 0;
     let botHudEntryStamp = 0;
     let lastRenderStallGuardEventAtMs = -Number.POSITIVE_INFINITY;
+    let lastPreRenderLoadShedEventAtMs = -Number.POSITIVE_INFINITY;
+    let frameSequence = 0;
 
     return {
         start() {
@@ -229,6 +239,7 @@ export function createGameLoopController(options = {}) {
         const botPerf = getBotTrafficSystem?.()?.getPerformanceSnapshot?.() || null;
         const collectiblePerf = collectibleSystem?.getPerformanceSnapshot?.() || null;
         const graphicsPerf = graphicsQualityController?.getSnapshot?.() || null;
+        const heavyEventBudget = getHeavyEventBudgetSnapshot();
 
         assignPerfHint(hints, 'pendingCrashDebrisSpawns', crashPerf?.pendingDebrisSpawns);
         assignPerfHint(
@@ -244,6 +255,7 @@ export function createGameLoopController(options = {}) {
             'droppedCrashExplosionDetaches',
             crashPerf?.droppedPendingExplosionDetaches
         );
+        assignPerfHint(hints, 'droppedCrashDebrisPoolMisses', crashPerf?.droppedDebrisPoolMisses);
 
         assignPerfHint(hints, 'pendingMineDetonationSpawns', minePerf?.pendingDetonationSpawns);
         assignPerfHint(hints, 'activeMineDetonationEffects', minePerf?.activeDetonationEffects);
@@ -255,6 +267,11 @@ export function createGameLoopController(options = {}) {
         assignPerfHint(hints, 'activeBotDetachedDebris', botPerf?.activeDetachedDebris);
         assignPerfHint(hints, 'visibleBotDetachedDebris', botPerf?.visibleDetachedDebris);
         assignPerfHint(hints, 'droppedBotMineDebris', botPerf?.droppedPendingMineDebris);
+        assignPerfHint(
+            hints,
+            'droppedBotDebrisPoolMisses',
+            botPerf?.droppedDetachedDebrisPoolMisses
+        );
 
         assignPerfHint(hints, 'pendingCollectEffects', collectiblePerf?.pendingCollectEffects);
         assignPerfHint(hints, 'activeCollectEffects', collectiblePerf?.activeCollectEffects);
@@ -277,9 +294,18 @@ export function createGameLoopController(options = {}) {
         );
         assignPerfHint(
             hints,
+            'graphicsPreRenderGuardTriggerCount',
+            graphicsPerf?.preRenderGuardTriggerCount
+        );
+        assignPerfHint(
+            hints,
             'graphicsStallGuardActive',
             graphicsPerf?.stallGuardActive ? 1 : 0
         );
+        assignPerfHint(hints, 'heavyEventTokensPerFrame', heavyEventBudget?.tokensPerFrame);
+        assignPerfHint(hints, 'heavyEventTokensRemaining', heavyEventBudget?.tokensRemaining);
+        assignPerfHint(hints, 'heavyEventTokensConsumed', heavyEventBudget?.consumedThisFrame);
+        assignPerfHint(hints, 'heavyEventTokensDenied', heavyEventBudget?.deniedThisFrame);
         return hints;
     }
 
@@ -345,6 +371,12 @@ export function createGameLoopController(options = {}) {
         };
 
         const frameDelta = Math.min(clock.getDelta(), 0.05);
+        frameSequence = frameSequence >= 0x3fffffff ? 1 : frameSequence + 1;
+        const heavyEventTokenBudget =
+            frameDelta > 1 / 38
+                ? HEAVY_EVENT_TOKENS_PER_FRAME_UNDER_LOAD
+                : HEAVY_EVENT_TOKENS_PER_FRAME;
+        beginHeavyEventFrame(frameSequence, heavyEventTokenBudget);
         const isEditModeActive = carEditModeController.isActive();
         const isWelcomeVisible = readWelcomeModalVisible();
         const worldMapDriveLockMode = readWorldMapDriveLockMode();
@@ -673,6 +705,7 @@ export function createGameLoopController(options = {}) {
                             totalCollectedCount,
                             {
                                 totalScore: readTotalScore(),
+                                deferUiFrames: 2,
                             }
                         );
                     }
@@ -775,21 +808,29 @@ export function createGameLoopController(options = {}) {
             scorePopupController?.update?.(camera, frameDelta);
         });
 
-        updateSunLightPosition();
-        measureStage('render', () => {
-            renderer.render(scene, camera);
-        });
+        const worldMapOpen = readWorldMapOpen();
         const qualityAdaptiveAllowed =
             !gamePaused &&
             !isEditModeActive &&
             !readWelcomeModalVisible() &&
-            !readWorldMapOpen();
+            !worldMapOpen;
+        maybeApplyPreRenderLoadShed({
+            adaptiveAllowed: qualityAdaptiveAllowed,
+            gameMode: readGameMode(),
+            worldMapOpen,
+            crashCollisionTriggered: frameCrashCollisionTriggered,
+            vehicleContactsCount: frameVehicleContactsCount,
+        });
+        updateSunLightPosition();
+        measureStage('render', () => {
+            renderer.render(scene, camera);
+        });
         maybeApplyRenderStallGuard({
             frameStartMs,
             renderStageMs: stageDurations.render,
             adaptiveAllowed: qualityAdaptiveAllowed,
             gameMode: readGameMode(),
-            worldMapOpen: readWorldMapOpen(),
+            worldMapOpen,
         });
         measureStage('quality', () => {
             graphicsQualityController?.sampleFrame?.(frameDelta, {
@@ -800,7 +841,7 @@ export function createGameLoopController(options = {}) {
         reportFrameDiagnostics(frameStartMs, frameDelta, stageDurations, {
             welcomeVisible: isWelcomeVisible,
             gameMode: readGameMode(),
-            worldMapOpen: readWorldMapOpen(),
+            worldMapOpen,
             paused: gamePaused,
             editModeActive: isEditModeActive,
             replayActive: frameReplayActive || replayController.isPlaybackActive(),
@@ -811,6 +852,73 @@ export function createGameLoopController(options = {}) {
             mineCollisionEnabled,
             chargingActive: chargingHudActive,
         });
+    }
+
+    function maybeApplyPreRenderLoadShed({
+        adaptiveAllowed = false,
+        gameMode = 'bots',
+        worldMapOpen = false,
+        crashCollisionTriggered = false,
+        vehicleContactsCount = 0,
+    } = {}) {
+        if (!adaptiveAllowed) {
+            return;
+        }
+        const pressureState = collectPreRenderPressureState();
+        const pressureScore = computePreRenderPressureScore(pressureState, {
+            crashCollisionTriggered,
+            vehicleContactsCount,
+        });
+        if (pressureScore <= 0) {
+            return;
+        }
+
+        const loadShedResult = graphicsQualityController?.reportPreRenderPressure?.({
+            pressureScore,
+        });
+        if (!loadShedResult?.triggered) {
+            return;
+        }
+
+        const nowMs = performance.now();
+        if (nowMs - lastPreRenderLoadShedEventAtMs < PRE_RENDER_LOAD_SHED_EVENT_COOLDOWN_MS) {
+            return;
+        }
+        lastPreRenderLoadShedEventAtMs = nowMs;
+
+        performanceDiagnosticsController?.recordEvent?.(
+            'graphics_preemptive_load_shed',
+            {
+                pressureScore: Number(pressureScore.toFixed(2)),
+                pendingMineDetonationSpawns: pressureState.pendingMineDetonationSpawns,
+                activeMineDetonationEffects: pressureState.activeMineDetonationEffects,
+                pendingBotMineDebris: pressureState.pendingBotMineDebris,
+                activeBotDetachedDebris: pressureState.activeBotDetachedDebris,
+                pendingCrashDebrisSpawns: pressureState.pendingCrashDebrisSpawns,
+                pendingCrashExplosionDetaches: pressureState.pendingCrashExplosionDetaches,
+                activeCrashDebrisPieces: pressureState.activeCrashDebrisPieces,
+                pendingCollectEffects: pressureState.pendingCollectEffects,
+                activeCollectEffects: pressureState.activeCollectEffects,
+                heavyEventTokensRemaining: pressureState.heavyEventTokensRemaining,
+                heavyEventTokensDenied: pressureState.heavyEventTokensDenied,
+                crashCollisionTriggered: Boolean(crashCollisionTriggered),
+                vehicleContactsCount: Math.max(
+                    0,
+                    Math.round(Number(vehicleContactsCount) || 0)
+                ),
+                pixelRatioCap: Number((Number(loadShedResult.pixelRatioCap) || 0).toFixed(3)),
+                stallGuardScalePercent: Math.max(
+                    10,
+                    Math.round((Number(loadShedResult.stallGuardScale) || 1) * 100)
+                ),
+                gameMode: typeof gameMode === 'string' ? gameMode : 'bots',
+                worldMapOpen: Boolean(worldMapOpen),
+            },
+            {
+                label: 'graphics preemptive guard',
+                severity: 'info',
+            }
+        );
     }
 
     function maybeApplyRenderStallGuard({
@@ -862,6 +970,80 @@ export function createGameLoopController(options = {}) {
                 severity: 'warning',
             }
         );
+    }
+
+    function collectPreRenderPressureState() {
+        const crashPerf = crashDebrisController?.getPerformanceSnapshot?.() || null;
+        const minePerf = mineSystemController?.getPerformanceSnapshot?.() || null;
+        const botPerf = getBotTrafficSystem?.()?.getPerformanceSnapshot?.() || null;
+        const collectiblePerf = collectibleSystem?.getPerformanceSnapshot?.() || null;
+        const heavyEventBudget = getHeavyEventBudgetSnapshot() || null;
+        return {
+            pendingCrashDebrisSpawns: toPerfCount(crashPerf?.pendingDebrisSpawns),
+            pendingCrashExplosionDetaches: toPerfCount(crashPerf?.pendingExplosionDetaches),
+            activeCrashDebrisPieces: toPerfCount(crashPerf?.activeDebrisPieces),
+            pendingMineDetonationSpawns: toPerfCount(minePerf?.pendingDetonationSpawns),
+            activeMineDetonationEffects: toPerfCount(minePerf?.activeDetonationEffects),
+            pendingBotMineDebris: toPerfCount(botPerf?.pendingMineDebris),
+            activeBotDetachedDebris: toPerfCount(botPerf?.activeDetachedDebris),
+            pendingCollectEffects: toPerfCount(collectiblePerf?.pendingCollectEffects),
+            activeCollectEffects: toPerfCount(collectiblePerf?.activeCollectEffects),
+            heavyEventTokensPerFrame: toPerfCount(heavyEventBudget?.tokensPerFrame),
+            heavyEventTokensRemaining: toPerfCount(heavyEventBudget?.tokensRemaining),
+            heavyEventTokensConsumed: toPerfCount(heavyEventBudget?.consumedThisFrame),
+            heavyEventTokensDenied: toPerfCount(heavyEventBudget?.deniedThisFrame),
+        };
+    }
+
+    function computePreRenderPressureScore(pressureState, transientFrameState = {}) {
+        if (!pressureState || typeof pressureState !== 'object') {
+            return 0;
+        }
+        let score = 0;
+        score += Math.min(3, pressureState.pendingMineDetonationSpawns) * 1.8;
+        score += Math.min(6, pressureState.pendingBotMineDebris) * 0.8;
+        score += Math.min(8, pressureState.pendingCrashDebrisSpawns) * 0.75;
+        score += Math.min(8, pressureState.pendingCrashExplosionDetaches) * 0.45;
+        score += Math.min(8, pressureState.pendingCollectEffects) * 0.45;
+
+        score += Math.min(20, pressureState.activeMineDetonationEffects) * 0.08;
+        score += Math.min(12, pressureState.activeBotDetachedDebris) * 0.05;
+        score += Math.min(20, pressureState.activeCrashDebrisPieces) * 0.08;
+        score += Math.min(12, pressureState.activeCollectEffects) * 0.05;
+
+        const heavyBudgetFull =
+            pressureState.heavyEventTokensPerFrame > 0 &&
+            pressureState.heavyEventTokensConsumed >= pressureState.heavyEventTokensPerFrame;
+        if (pressureState.heavyEventTokensRemaining <= 0 && heavyBudgetFull) {
+            score += 1.4;
+        }
+        if (pressureState.heavyEventTokensDenied > 0) {
+            score += Math.min(2.2, pressureState.heavyEventTokensDenied * 1.1);
+        }
+
+        if (transientFrameState?.crashCollisionTriggered) {
+            score += 2.2;
+        }
+        const contactsCount = Math.max(
+            0,
+            Math.round(Number(transientFrameState?.vehicleContactsCount) || 0)
+        );
+        if (contactsCount > 0) {
+            score += Math.min(2.6, contactsCount * 0.45);
+        }
+
+        if (score < PRE_RENDER_LOAD_SHED_SCORE_THRESHOLD) {
+            return 0;
+        }
+        return score;
+    }
+
+    function toPerfCount(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+            return 0;
+        }
+        return Math.max(0, Math.round(numeric));
     }
 
     function updateBotMineDeployment(snapshots = [], frameDelta) {

@@ -14,6 +14,8 @@ import {
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 
 const ELIMINATION_AUTOCOLLECT_POINTS_PER_PICKUP = 100;
+const ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT = 2;
+const ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION = 3;
 const SCORE_MODEL_TEXT =
     'Pickup: 100 base x combo x (1 + risk + endgame). Mine kill: 220 base x chain x endgame x anti-farm.';
 
@@ -92,6 +94,8 @@ export function createGameSessionController({
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
+    let pendingRoundPresentationRafHandle = null;
+    let pendingRoundPresentationToken = 0;
     function getBotHudStateWithScores() {
         const botEntries = getBotSystem()?.getHudState?.() || [];
         return botEntries.map((bot) => ({
@@ -212,6 +216,7 @@ export function createGameSessionController({
         if (!getIsWelcomeModalVisible()) {
             return;
         }
+        clearPendingRoundPresentation();
         requestGameplayFullscreen();
         const mode = normalizeGameMode(nextMode);
         setGameMode(mode);
@@ -231,6 +236,7 @@ export function createGameSessionController({
     }
 
     function showWelcomeModal() {
+        clearPendingRoundPresentation();
         carEditModeController.setActive(false);
         raceIntroController.stop();
         setIsWelcomeModalVisible(true);
@@ -265,6 +271,14 @@ export function createGameSessionController({
         }
         clearTimeout(timeout);
         setPendingRespawnTimeout(null);
+    }
+
+    function clearPendingRoundPresentation() {
+        if (pendingRoundPresentationRafHandle != null) {
+            window.cancelAnimationFrame(pendingRoundPresentationRafHandle);
+        }
+        pendingRoundPresentationRafHandle = null;
+        pendingRoundPresentationToken += 1;
     }
 
     function snapCarToGround() {
@@ -434,6 +448,7 @@ export function createGameSessionController({
             finishReason: 'opponents-eliminated',
             bonusPointsAwarded,
             bonusPickupsAwarded: remainingPickups,
+            deferUiFrames: ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION,
         });
         return {
             ok: true,
@@ -546,43 +561,97 @@ export function createGameSessionController({
                 : '');
         const tiePrefix = winners.length > 1 ? 'Tie' : 'Winner';
         const winnerSummary = `${tiePrefix}: ${winnerLabel}`;
-
-        objectiveUi.showResult(
-            `${finishLabel} (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore} pts).`
-        );
-        finalScoreboardUi.show({
+        const presentationPayload = {
+            resultText: `${finishLabel} (${resolvedCollected}/${resolvedTotal}). ${tiePrefix}: ${winnerLabel} (${topScore} pts).`,
             summaryText,
-            entries: scoreboard,
+            scoreboard,
             topScore,
-            scoringModelText: SCORE_MODEL_TEXT,
-            winnerLabel: winnerSummary,
+            winnerSummary,
             finishLabel,
-            totalCollected: resolvedCollected,
-            totalPickups: resolvedTotal,
-            totalScore: resolvedTotalScore,
-            bonusPointsAwarded,
-            bonusPickupsAwarded,
-        });
-        onRoundFinalized({
             finishReason,
-            finishLabel,
             tiePrefix,
             winnerLabel,
             winnersCount: winners.length,
-            topScore,
             totalPickups: resolvedTotal,
             totalCollected: resolvedCollected,
             totalScore: resolvedTotalScore,
             bonusPointsAwarded,
             bonusPickupsAwarded,
             scoreboardEntries: scoreboard.length,
+        };
+        const defaultDeferFrames =
+            finishReason === 'opponents-eliminated'
+                ? ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION
+                : ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT;
+        const deferUiFrames = THREE.MathUtils.clamp(
+            Math.round(Number(options?.deferUiFrames) || defaultDeferFrames),
+            0,
+            6
+        );
+        scheduleRoundPresentation(presentationPayload, deferUiFrames);
+    }
+
+    function scheduleRoundPresentation(payload, deferFrames = ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT) {
+        if (!payload || typeof payload !== 'object') {
+            return;
+        }
+        clearPendingRoundPresentation();
+        const token = pendingRoundPresentationToken;
+        let remainingFrames = Math.max(0, Math.round(Number(deferFrames) || 0));
+        if (remainingFrames <= 0) {
+            presentRoundPresentation(payload);
+            return;
+        }
+        const tick = () => {
+            if (token !== pendingRoundPresentationToken) {
+                return;
+            }
+            remainingFrames -= 1;
+            if (remainingFrames <= 0) {
+                pendingRoundPresentationRafHandle = null;
+                presentRoundPresentation(payload);
+                return;
+            }
+            pendingRoundPresentationRafHandle = window.requestAnimationFrame(tick);
+        };
+        pendingRoundPresentationRafHandle = window.requestAnimationFrame(tick);
+    }
+
+    function presentRoundPresentation(payload) {
+        objectiveUi.showResult(payload.resultText);
+        finalScoreboardUi.show({
+            summaryText: payload.summaryText,
+            entries: payload.scoreboard,
+            topScore: payload.topScore,
+            scoringModelText: SCORE_MODEL_TEXT,
+            winnerLabel: payload.winnerSummary,
+            finishLabel: payload.finishLabel,
+            totalCollected: payload.totalCollected,
+            totalPickups: payload.totalPickups,
+            totalScore: payload.totalScore,
+            bonusPointsAwarded: payload.bonusPointsAwarded,
+            bonusPickupsAwarded: payload.bonusPickupsAwarded,
+        });
+        onRoundFinalized({
+            finishReason: payload.finishReason,
+            finishLabel: payload.finishLabel,
+            tiePrefix: payload.tiePrefix,
+            winnerLabel: payload.winnerLabel,
+            winnersCount: payload.winnersCount,
+            topScore: payload.topScore,
+            totalPickups: payload.totalPickups,
+            totalCollected: payload.totalCollected,
+            totalScore: payload.totalScore,
+            bonusPointsAwarded: payload.bonusPointsAwarded,
+            bonusPickupsAwarded: payload.bonusPickupsAwarded,
+            scoreboardEntries: payload.scoreboardEntries,
         });
         audioController?.onRoundFinished?.({
-            scoreboardEntries: scoreboard,
-            topScore,
-            totalPickups: resolvedTotal,
-            totalCollected: resolvedCollected,
-            totalScore: resolvedTotalScore,
+            scoreboardEntries: payload.scoreboard,
+            topScore: payload.topScore,
+            totalPickups: payload.totalPickups,
+            totalCollected: payload.totalCollected,
+            totalScore: payload.totalScore,
         });
     }
 
@@ -687,6 +756,7 @@ export function createGameSessionController({
     function resetRunStateForReplay() {
         raceIntroController.stop();
         setCameraKeyboardControlsEnabled(true);
+        clearPendingRoundPresentation();
         clearPendingRespawn();
         clearScorePopups();
         objectiveUi.resetStatus();
@@ -727,6 +797,7 @@ export function createGameSessionController({
         carEditModeController.setActive(false);
         setCameraKeyboardControlsEnabled(true);
         setPauseState(false);
+        clearPendingRoundPresentation();
         replayController.stopRecording();
         replayController.stopPlayback();
         replayController.clear();
