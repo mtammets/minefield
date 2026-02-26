@@ -31,6 +31,16 @@ body {
     color: white;
 }
 
+html:fullscreen,
+html:fullscreen * {
+    cursor: none !important;
+}
+
+html:-webkit-full-screen,
+html:-webkit-full-screen * {
+    cursor: none !important;
+}
+
 body::before {
     content: '';
     position: fixed;
@@ -2742,7 +2752,6 @@ body.race-intro-active #performancePanel {
     padding: 0;
     display: grid;
     place-items: center;
-    transform: translateY(-50%);
     color: rgba(236, 245, 252, 0.96);
     font-family: 'Sora', sans-serif;
     font-size: 24px;
@@ -2752,6 +2761,9 @@ body.race-intro-active #performancePanel {
     backdrop-filter: blur(8px) saturate(1.2);
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
     cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-50%) scale(0.94);
     transition:
         transform 140ms ease,
         opacity 140ms ease,
