@@ -835,7 +835,13 @@ export function createGameSessionController({
         const botsEnabled = normalizeGameMode(getGameMode()) === 'bots';
         setMultiplayerPanelVisible(!botsEnabled);
 
-        collectibleSystem.reset?.();
+        if (botsEnabled) {
+            collectibleSystem.reset?.({
+                seedOffset: Math.floor(Math.random() * 0x7fffffff),
+            });
+        } else {
+            collectibleSystem.reset?.({ seedOffset: 0 });
+        }
         collectibleSystem.setEnabled(true);
         getBotSystem()?.setEnabled?.(botsEnabled);
         if (botsEnabled) {

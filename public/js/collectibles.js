@@ -143,7 +143,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     } = options;
 
     const resolvedIdPrefix = typeof idPrefix === 'string' && idPrefix ? idPrefix : 'pickup';
-    const resolvedSeedOffset = Number.isFinite(seedOffset) ? Math.floor(seedOffset) : 0;
+    let runtimeSeedOffset = Number.isFinite(seedOffset) ? Math.floor(seedOffset) : 0;
     const resolvedActiveCellRadius = Number.isFinite(activeCellRadius)
         ? THREE.MathUtils.clamp(Math.floor(activeCellRadius), 1, 12)
         : ACTIVE_CELL_RADIUS;
@@ -215,13 +215,11 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     const activePickupIds = new Set();
     const visiblePickupCache = [];
     const worldCellBounds = worldBounds ? getWorldCellBounds(worldBounds) : null;
-    const finiteQueueTemplate = finiteMode
-        ? buildFinitePickupQueue(worldBounds, resolvedFiniteTotalPickups, resolvedSeedOffset)
-        : [];
-    const finiteSpawnQueue = finiteMode ? cloneFiniteQueueItems(finiteQueueTemplate) : [];
+    let finiteQueueTemplate = [];
+    const finiteSpawnQueue = [];
     let finiteSpawnQueueReadIndex = 0;
     const finiteRoundState = {
-        total: finiteQueueTemplate.length,
+        total: 0,
         spawned: 0,
         collected: 0,
         exhausted: false,
@@ -232,6 +230,10 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     let enabled = true;
     let elapsedTime = 0;
     let lastSyncSignature = '';
+
+    if (finiteMode) {
+        rebuildFiniteQueueTemplate();
+    }
 
     if (resolvedEnableEffects) {
         prewarmCollectEffects(collectEffectPool, COLLECT_EFFECT_POOL_PREWARM_COUNT);
@@ -367,26 +369,26 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 clearPickups(false);
             }
         },
-        reset() {
+        reset(resetOptions = null) {
             clearPickups(false);
             clearEffectsNow();
             pickupCooldownUntil.clear();
             activePickupIds.clear();
             visiblePickupCache.length = 0;
 
+            if (resetOptions && typeof resetOptions === 'object') {
+                const nextSeedOffset = Number(resetOptions.seedOffset);
+                if (Number.isFinite(nextSeedOffset)) {
+                    runtimeSeedOffset = Math.floor(nextSeedOffset);
+                }
+            }
+
             elapsedTime = 0;
             lastSyncSignature = '';
             enabled = true;
 
             if (finiteMode) {
-                finiteSpawnQueue.length = 0;
-                finiteSpawnQueue.push(...cloneFiniteQueueItems(finiteQueueTemplate));
-                finiteSpawnQueueReadIndex = 0;
-                finiteRoundState.total = finiteQueueTemplate.length;
-                finiteRoundState.spawned = 0;
-                finiteRoundState.collected = 0;
-                finiteRoundState.exhausted = false;
-                finiteSpawnedSerials.clear();
+                rebuildFiniteQueueTemplate();
             }
 
             targetColorIndex = initialResolvedTargetColorIndex;
@@ -466,6 +468,26 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             const effect = effects.pop();
             recycleCollectEffect(effectGroup, collectEffectPool, effect);
         }
+    }
+
+    function rebuildFiniteQueueTemplate() {
+        if (!finiteMode) {
+            return;
+        }
+
+        finiteQueueTemplate = buildFinitePickupQueue(
+            worldBounds,
+            resolvedFiniteTotalPickups,
+            runtimeSeedOffset
+        );
+        finiteSpawnQueue.length = 0;
+        finiteSpawnQueue.push(...cloneFiniteQueueItems(finiteQueueTemplate));
+        finiteSpawnQueueReadIndex = 0;
+        finiteRoundState.total = finiteQueueTemplate.length;
+        finiteRoundState.spawned = 0;
+        finiteRoundState.collected = 0;
+        finiteRoundState.exhausted = false;
+        finiteSpawnedSerials?.clear();
     }
 
     function queueCollectEffect(position, colorHex) {
@@ -604,7 +626,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                     pickup.cellX,
                     pickup.cellZ,
                     131,
-                    resolvedSeedOffset + Math.floor(elapsedTime * 100)
+                    runtimeSeedOffset + Math.floor(elapsedTime * 100)
                 ) *
                     resolvedPickupRespawnJitterSec;
             pickupCooldownUntil.set(pickupId, elapsedTime + cooldown);
@@ -626,7 +648,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 queueItem.cellX,
                 queueItem.cellZ,
                 worldBounds,
-                resolvedSeedOffset + queueItem.seedOffset,
+                runtimeSeedOffset + queueItem.seedOffset,
                 resolvedSingleType,
                 resolvedSingleShapeIndex,
                 getGroundHeightAt,
@@ -655,7 +677,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                     queueItem.cellX,
                     queueItem.cellZ,
                     199,
-                    resolvedSeedOffset + queueItem.seedOffset
+                    runtimeSeedOffset + queueItem.seedOffset
                 ) *
                 Math.PI *
                 2;
@@ -712,7 +734,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             worldBounds,
             worldCellBounds,
             idPrefix: resolvedIdPrefix,
-            seedOffset: resolvedSeedOffset,
+            seedOffset: runtimeSeedOffset,
             activeCellRadius: resolvedActiveCellRadius,
             singleType: resolvedSingleType,
             singleShapeIndex: resolvedSingleShapeIndex,
@@ -826,7 +848,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     function makePickupExpireAt(cellX, cellZ) {
         const lifetime =
             resolvedPickupLifetimeSec +
-            randomFromCell(cellX, cellZ, 171, resolvedSeedOffset + Math.floor(elapsedTime * 60)) *
+            randomFromCell(cellX, cellZ, 171, runtimeSeedOffset + Math.floor(elapsedTime * 60)) *
                 resolvedPickupLifetimeJitterSec;
         return elapsedTime + lifetime;
     }
@@ -941,50 +963,116 @@ function buildFinitePickupQueue(worldBounds, totalPickups, seedOffset = 0) {
               minCellZ: -10,
               maxCellZ: 10,
           };
-    const candidates = [];
+    const allCells = [];
 
     for (let x = bounds.minCellX; x <= bounds.maxCellX; x += 1) {
         for (let z = bounds.minCellZ; z <= bounds.maxCellZ; z += 1) {
-            if (!cellShouldHavePickup(x, z, seedOffset)) {
-                continue;
-            }
-            candidates.push({
+            allCells.push({
                 cellX: x,
                 cellZ: z,
             });
         }
     }
 
-    if (candidates.length === 0) {
-        for (let x = bounds.minCellX; x <= bounds.maxCellX; x += 1) {
-            for (let z = bounds.minCellZ; z <= bounds.maxCellZ; z += 1) {
-                candidates.push({
-                    cellX: x,
-                    cellZ: z,
-                });
-            }
-        }
+    if (allCells.length === 0) {
+        return queue;
     }
 
-    candidates.sort(
-        (a, b) =>
-            hashCell(a.cellX, a.cellZ, 457, seedOffset) -
-            hashCell(b.cellX, b.cellZ, 457, seedOffset)
-    );
-
-    let cursor = 0;
-    while (queue.length < totalPickups && candidates.length > 0) {
-        const candidate = candidates[cursor % candidates.length];
-        queue.push({
-            cellX: candidate.cellX,
-            cellZ: candidate.cellZ,
-            serial: queue.length,
-            seedOffset: Math.floor(cursor / candidates.length) * 971,
-        });
-        cursor += 1;
+    const normalizedSeedOffset = Number.isFinite(seedOffset) ? Math.floor(seedOffset) : 0;
+    let cycle = 0;
+    while (queue.length < totalPickups) {
+        const cycleSeedOffset = normalizedSeedOffset + cycle * 971;
+        const orderedCells = buildBalancedCellCycle(allCells, cycleSeedOffset);
+        for (let i = 0; i < orderedCells.length && queue.length < totalPickups; i += 1) {
+            const candidate = orderedCells[i];
+            queue.push({
+                cellX: candidate.cellX,
+                cellZ: candidate.cellZ,
+                serial: queue.length,
+                seedOffset: cycle * 971,
+            });
+        }
+        cycle += 1;
     }
 
     return queue;
+}
+
+function buildBalancedCellCycle(cells, seedOffset = 0) {
+    if (!Array.isArray(cells) || cells.length <= 1) {
+        return Array.isArray(cells) ? cells.slice() : [];
+    }
+
+    let minCellX = Number.POSITIVE_INFINITY;
+    let maxCellX = Number.NEGATIVE_INFINITY;
+    let minCellZ = Number.POSITIVE_INFINITY;
+    let maxCellZ = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i];
+        if (cell.cellX < minCellX) {
+            minCellX = cell.cellX;
+        }
+        if (cell.cellX > maxCellX) {
+            maxCellX = cell.cellX;
+        }
+        if (cell.cellZ < minCellZ) {
+            minCellZ = cell.cellZ;
+        }
+        if (cell.cellZ > maxCellZ) {
+            maxCellZ = cell.cellZ;
+        }
+    }
+
+    const centerCellX = (minCellX + maxCellX) * 0.5;
+    const centerCellZ = (minCellZ + maxCellZ) * 0.5;
+    const ranked = cells
+        .map((cell) => {
+            const dx = cell.cellX - centerCellX;
+            const dz = cell.cellZ - centerCellZ;
+            return {
+                cell,
+                distanceSq: dx * dx + dz * dz,
+            };
+        })
+        .sort((a, b) => a.distanceSq - b.distanceSq);
+
+    const totalCells = ranked.length;
+    const innerCount = THREE.MathUtils.clamp(Math.round(totalCells * 0.25), 1, totalCells);
+    const middleCount = THREE.MathUtils.clamp(
+        Math.round(totalCells * 0.35),
+        1,
+        Math.max(1, totalCells - innerCount)
+    );
+    const innerEnd = innerCount;
+    const middleEnd = Math.min(totalCells, innerEnd + middleCount);
+    const innerCells = ranked.slice(0, innerEnd).map((entry) => entry.cell);
+    const middleCells = ranked.slice(innerEnd, middleEnd).map((entry) => entry.cell);
+    const outerCells = ranked.slice(middleEnd).map((entry) => entry.cell);
+
+    const shuffledOuter = sortCellsBySeed(outerCells, 457, seedOffset);
+    const shuffledInner = sortCellsBySeed(innerCells, 521, seedOffset);
+    const shuffledMiddle = sortCellsBySeed(middleCells, 613, seedOffset);
+    const ordered = [];
+    const groups = [shuffledOuter, shuffledInner, shuffledMiddle];
+    let groupIndex = 1;
+
+    while (ordered.length < totalCells) {
+        const group = groups[groupIndex % groups.length];
+        if (group.length > 0) {
+            ordered.push(group.shift());
+        }
+        groupIndex += 1;
+    }
+
+    return ordered;
+}
+
+function sortCellsBySeed(cells, salt, seedOffset = 0) {
+    return cells.slice().sort(
+        (a, b) =>
+            hashCell(a.cellX, a.cellZ, salt, seedOffset) -
+            hashCell(b.cellX, b.cellZ, salt, seedOffset)
+    );
 }
 
 function cloneFiniteQueueItems(queueItems = []) {
