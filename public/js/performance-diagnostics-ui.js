@@ -21,7 +21,6 @@ const STAGE_LABELS = Object.freeze({
     multiplayer: 'multiplayer',
     simulation: 'simulation',
     physics: 'physics',
-    replay: 'replay',
     botTraffic: 'bot traffic',
     collectibles: 'collectibles',
     crashDebris: 'crash debris',
@@ -567,7 +566,10 @@ function resolveCause(dominantEntry, context = {}) {
         0,
         Math.round(Number(context?.mineDetonationBurstCount) || 0)
     );
-    const pendingBotMineDebris = Math.max(0, Math.round(Number(context?.pendingBotMineDebris) || 0));
+    const pendingBotMineDebris = Math.max(
+        0,
+        Math.round(Number(context?.pendingBotMineDebris) || 0)
+    );
     const activeBotDetachedDebris = Math.max(
         0,
         Math.round(Number(context?.activeBotDetachedDebris) || 0)
@@ -637,9 +639,7 @@ function resolveCause(dominantEntry, context = {}) {
         const triNote = triangles > 0 ? ` | tri ${triangles}` : '';
         const queueNotes = [];
         if (pendingMineDetonationSpawns > 0 || activeMineDetonationEffects > 0) {
-            queueNotes.push(
-                `mine q${pendingMineDetonationSpawns}/a${activeMineDetonationEffects}`
-            );
+            queueNotes.push(`mine q${pendingMineDetonationSpawns}/a${activeMineDetonationEffects}`);
         }
         if (pendingBotMineDebris > 0 || activeBotDetachedDebris > 0) {
             queueNotes.push(
@@ -702,7 +702,8 @@ function resolveCause(dominantEntry, context = {}) {
             activeMineDetonationLights > 0
                 ? ` | q${pendingMineDetonationSpawns}/a${activeMineDetonationEffects}/l${activeMineDetonationLights}`
                 : '';
-        const burstNote = mineDetonationBurstCount > 0 ? ` | burst ${mineDetonationBurstCount}` : '';
+        const burstNote =
+            mineDetonationBurstCount > 0 ? ` | burst ${mineDetonationBurstCount}` : '';
         return {
             label: 'Mine system update',
             detail: `${formatMs(stageMs)} | collision ${context?.mineCollisionEnabled ? 'on' : 'off'}${queueNote}${burstNote}`,
@@ -725,9 +726,7 @@ function resolveCause(dominantEntry, context = {}) {
         const queueNote =
             pendingCollectEffects > 0 || activeCollectEffects > 0
                 ? ` | q${pendingCollectEffects}/a${activeCollectEffects}${
-                      skippedRemoteCollectEffects > 0
-                          ? `/skip${skippedRemoteCollectEffects}`
-                          : ''
+                      skippedRemoteCollectEffects > 0 ? `/skip${skippedRemoteCollectEffects}` : ''
                   }`
                 : '';
         return {
@@ -774,13 +773,6 @@ function resolveCause(dominantEntry, context = {}) {
     if (stageKey === 'welcome') {
         return {
             label: 'Welcome/UI branch',
-            detail: formatMs(stageMs),
-        };
-    }
-
-    if (stageKey === 'replay') {
-        return {
-            label: 'Replay playback',
             detail: formatMs(stageMs),
         };
     }

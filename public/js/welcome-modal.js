@@ -9,10 +9,10 @@ import {
 } from './constants.js';
 
 const SWAP_TIMING = {
-    exitSec: 0.28,
-    gapSec: 0.08,
-    enterSec: 0.28,
-    settleSec: 0.12,
+    exitSec: 0.62,
+    gapSec: 0.02,
+    enterSec: 0.66,
+    settleSec: 0.22,
 };
 const WELCOME_TAGLINE_ROTATION_INTERVAL_SEC = 8.5;
 const WELCOME_TAGLINE_TRANSITION_OUT_MS = 180;
@@ -54,7 +54,6 @@ export function createWelcomeModalController({
         typeof getCurrentColorHex === 'function' ? getCurrentColorHex : () => initialColorHex;
 
     const rootEl = document.getElementById('welcomeModal');
-    const previewShellEl = document.getElementById('welcomePreviewShell');
     const startActionsEl = rootEl?.querySelector?.('.welcomeStartActions') || null;
     const startBtnEl = document.getElementById('welcomeStartBtn');
     const startOnlineBtnEl = document.getElementById('welcomeStartOnlineBtn');
@@ -211,6 +210,12 @@ export function createWelcomeModalController({
         previewRadius * 0.76,
         previewRadius * 1.85
     );
+    const swapOutgoingDistance = previewRadius * 3.6;
+    const swapIncomingDistance = previewRadius * 3.8;
+    const swapCurveOffset = 0;
+    const swapTurnYaw = 0;
+    const swapSettleDistance = 0;
+    const swapSettleYawOffset = 0;
     const showroomAtmosphere = createShowroomAtmosphere(previewScene, previewRadius);
 
     const transition = {
@@ -224,6 +229,13 @@ export function createWelcomeModalController({
         incomingVehicleIndex: 1,
         glowBoost: 0,
         cameraKick: 0,
+        baseYaw: previewSpinYaw,
+        outgoingDistance: swapOutgoingDistance,
+        incomingDistance: swapIncomingDistance,
+        curveOffset: swapCurveOffset,
+        turnYaw: swapTurnYaw,
+        settleDistance: swapSettleDistance,
+        settleYawOffset: swapSettleYawOffset,
         queue: null,
     };
 
@@ -332,7 +344,9 @@ export function createWelcomeModalController({
                 return;
             }
             const frameDt = Math.min(Math.max(dt || 0, 0), 0.05);
-            previewSpinYaw += frameDt * WELCOME_CAR_SPIN_SPEED;
+            if (!transition.active) {
+                previewSpinYaw += frameDt * WELCOME_CAR_SPIN_SPEED;
+            }
             updateTransition(frameDt);
             updatePreviewVisualState(frameDt);
             updateShowroomAtmosphere(frameDt);
@@ -1106,20 +1120,18 @@ export function createWelcomeModalController({
         transition.emitChange = emitChange;
         transition.outgoingVehicleIndex = outgoingVehicleIndex;
         transition.incomingVehicleIndex = incomingVehicleIndex;
-        transition.glowBoost = 0.26;
+        transition.baseYaw = previewSpinYaw;
+        transition.glowBoost = 0.24;
         transition.cameraKick = 0;
+        transition.outgoingDistance = swapOutgoingDistance;
+        transition.incomingDistance = swapIncomingDistance;
+        transition.curveOffset = swapCurveOffset;
+        transition.turnYaw = swapTurnYaw;
+        transition.settleDistance = swapSettleDistance;
+        transition.settleYawOffset = swapSettleYawOffset;
 
         renderSelectedVehicleLabel(targetIndex);
         updateVehicleButtonLabels(targetIndex);
-
-        previewShellEl?.classList.remove(
-            'vehicle-swap-active',
-            'vehicle-swap-left',
-            'vehicle-swap-right'
-        );
-        void previewShellEl?.offsetWidth;
-        previewShellEl?.classList.add('vehicle-swap-active');
-        previewShellEl?.classList.add(direction < 0 ? 'vehicle-swap-left' : 'vehicle-swap-right');
     }
 
     function updateTransition(dt) {
@@ -1141,9 +1153,10 @@ export function createWelcomeModalController({
                 0,
                 1
             );
-            transition.glowBoost = THREE.MathUtils.lerp(0.3, 1, easeInOutCubic(phaseProgress));
+            const eased = easeOutCubic(phaseProgress);
+            transition.glowBoost = THREE.MathUtils.lerp(0.24, 0.56, eased);
             transition.cameraKick =
-                transition.direction * THREE.MathUtils.lerp(0, 0.4, phaseProgress);
+                transition.direction * THREE.MathUtils.lerp(0, previewRadius * 0.06, eased);
             if (phaseProgress >= 1) {
                 transition.phase = 'gap';
                 transition.phaseTime = 0;
@@ -1158,9 +1171,10 @@ export function createWelcomeModalController({
                 0,
                 1
             );
-            transition.glowBoost = THREE.MathUtils.lerp(1, 0.6, phaseProgress);
+            transition.glowBoost = THREE.MathUtils.lerp(0.56, 0.34, phaseProgress);
             transition.cameraKick =
-                transition.direction * THREE.MathUtils.lerp(0.4, 0.06, phaseProgress);
+                transition.direction *
+                THREE.MathUtils.lerp(previewRadius * 0.06, previewRadius * 0.015, phaseProgress);
             if (phaseProgress >= 1) {
                 transition.phase = 'enter';
                 transition.phaseTime = 0;
@@ -1175,9 +1189,11 @@ export function createWelcomeModalController({
                 0,
                 1
             );
-            transition.glowBoost = THREE.MathUtils.lerp(0.6, 0.26, easeOutCubic(phaseProgress));
+            const eased = easeOutCubic(phaseProgress);
+            transition.glowBoost = THREE.MathUtils.lerp(0.34, 0.16, eased);
             transition.cameraKick =
-                transition.direction * THREE.MathUtils.lerp(0.06, -0.1, phaseProgress);
+                transition.direction *
+                THREE.MathUtils.lerp(previewRadius * 0.015, -previewRadius * 0.03, eased);
             if (phaseProgress >= 1) {
                 transition.phase = 'settle';
                 transition.phaseTime = 0;
@@ -1190,9 +1206,9 @@ export function createWelcomeModalController({
             0,
             1
         );
-        transition.glowBoost = THREE.MathUtils.lerp(0.26, 0.1, settleProgress);
+        transition.glowBoost = THREE.MathUtils.lerp(0.16, 0.07, settleProgress);
         transition.cameraKick =
-            transition.direction * THREE.MathUtils.lerp(-0.1, 0, settleProgress);
+            transition.direction * THREE.MathUtils.lerp(-previewRadius * 0.03, 0, settleProgress);
 
         if (settleProgress >= 1) {
             finishSwap();
@@ -1205,7 +1221,7 @@ export function createWelcomeModalController({
         transition.phase = 'idle';
         transition.phaseTime = 0;
         transition.cameraKick = 0;
-        transition.glowBoost = 0.14;
+        transition.glowBoost = 0.12;
 
         for (let i = 0; i < previewVehicles.length; i += 1) {
             const isActiveVehicle = i === activeVehicleIndex;
@@ -1213,12 +1229,6 @@ export function createWelcomeModalController({
         }
 
         applySelectedPreset(transition.targetIndex, transition.emitChange);
-
-        previewShellEl?.classList.remove(
-            'vehicle-swap-active',
-            'vehicle-swap-left',
-            'vehicle-swap-right'
-        );
 
         if (transition.queue) {
             const queued = transition.queue;
@@ -1257,6 +1267,11 @@ export function createWelcomeModalController({
             previewVehicles[transition.outgoingVehicleIndex] || previewVehicles[0];
         const incomingVehicle =
             previewVehicles[transition.incomingVehicleIndex] || previewVehicles[1];
+        const transitionYaw = transition.active ? transition.baseYaw : previewSpinYaw;
+        const forwardX = -Math.sin(transitionYaw);
+        const forwardZ = -Math.cos(transitionYaw);
+        const rightX = Math.cos(transitionYaw);
+        const rightZ = -Math.sin(transitionYaw);
 
         for (let i = 0; i < previewVehicles.length; i += 1) {
             const previewVehicle = previewVehicles[i];
@@ -1274,16 +1289,26 @@ export function createWelcomeModalController({
                 0,
                 1
             );
-            const eased = easeInOutCubic(phaseProgress);
+            const driveProgress = easeInCubic(phaseProgress);
+            const curveProgress = easeInOutCubic(phaseProgress);
+            const driveDistance = THREE.MathUtils.lerp(
+                0,
+                transition.outgoingDistance,
+                driveProgress
+            );
+            const curveShift =
+                transition.direction *
+                THREE.MathUtils.lerp(0, transition.curveOffset, curveProgress);
             outgoingVehicle.car.visible = true;
             outgoingVehicle.car.position.set(
-                THREE.MathUtils.lerp(0, -transition.direction * 2.56, eased),
+                forwardX * driveDistance + rightX * curveShift,
                 0,
-                THREE.MathUtils.lerp(0, -0.24, eased)
+                forwardZ * driveDistance + rightZ * curveShift
             );
             outgoingVehicle.car.rotation.y =
-                previewSpinYaw + THREE.MathUtils.lerp(0, transition.direction * 0.8, eased);
-            outgoingVehicle.car.scale.setScalar(THREE.MathUtils.lerp(1, 0.8, eased));
+                transitionYaw +
+                THREE.MathUtils.lerp(0, transition.direction * transition.turnYaw, curveProgress);
+            outgoingVehicle.car.scale.setScalar(1);
             incomingVehicle.car.visible = false;
         }
 
@@ -1298,16 +1323,32 @@ export function createWelcomeModalController({
                 0,
                 1
             );
-            const eased = easeOutBack(phaseProgress);
+            const driveProgress = easeOutCubic(phaseProgress);
+            const laneProgress = easeInOutCubic(phaseProgress);
+            const incomingStartDistance = transition.incomingDistance;
+            const settleStartDistance = transition.settleDistance;
+            const settleStartYawOffset = transition.direction * transition.settleYawOffset;
+            const driveDistance = THREE.MathUtils.lerp(
+                -incomingStartDistance,
+                settleStartDistance,
+                driveProgress
+            );
+            const startLaneShift = transition.direction * transition.curveOffset;
+            const laneShift = THREE.MathUtils.lerp(startLaneShift, 0, laneProgress);
             incomingVehicle.car.visible = true;
             incomingVehicle.car.position.set(
-                THREE.MathUtils.lerp(transition.direction * 2.56, 0, eased),
+                forwardX * driveDistance + rightX * laneShift,
                 0,
-                THREE.MathUtils.lerp(-0.24, 0, eased)
+                forwardZ * driveDistance + rightZ * laneShift
             );
             incomingVehicle.car.rotation.y =
-                previewSpinYaw + THREE.MathUtils.lerp(-transition.direction * 0.82, 0, eased);
-            incomingVehicle.car.scale.setScalar(THREE.MathUtils.lerp(0.8, 1, eased));
+                transitionYaw +
+                THREE.MathUtils.lerp(
+                    transition.direction * transition.turnYaw,
+                    settleStartYawOffset,
+                    laneProgress
+                );
+            incomingVehicle.car.scale.setScalar(1);
             outgoingVehicle.car.visible = false;
         }
 
@@ -1318,11 +1359,18 @@ export function createWelcomeModalController({
                 1
             );
             const eased = easeOutCubic(phaseProgress);
+            const settleStartDistance = transition.settleDistance;
+            const settleStartYawOffset = transition.direction * transition.settleYawOffset;
+            const settleDistance = THREE.MathUtils.lerp(settleStartDistance, 0, eased);
             incomingVehicle.car.visible = true;
-            incomingVehicle.car.position.set(0, 0, THREE.MathUtils.lerp(-0.04, 0, eased));
+            incomingVehicle.car.position.set(
+                forwardX * settleDistance,
+                0,
+                forwardZ * settleDistance
+            );
             incomingVehicle.car.rotation.y =
-                previewSpinYaw + THREE.MathUtils.lerp(-transition.direction * 0.06, 0, eased);
-            incomingVehicle.car.scale.setScalar(THREE.MathUtils.lerp(0.98, 1, eased));
+                transitionYaw + THREE.MathUtils.lerp(settleStartYawOffset, 0, eased);
+            incomingVehicle.car.scale.setScalar(1);
             outgoingVehicle.car.visible = false;
         }
 
@@ -1344,13 +1392,14 @@ export function createWelcomeModalController({
         transition.incomingVehicleIndex = activeVehicleIndex === 0 ? 1 : 0;
         transition.cameraKick = 0;
         transition.glowBoost = 0;
+        transition.baseYaw = previewSpinYaw;
+        transition.outgoingDistance = swapOutgoingDistance;
+        transition.incomingDistance = swapIncomingDistance;
+        transition.curveOffset = swapCurveOffset;
+        transition.turnYaw = swapTurnYaw;
+        transition.settleDistance = swapSettleDistance;
+        transition.settleYawOffset = swapSettleYawOffset;
         transition.queue = null;
-
-        previewShellEl?.classList.remove(
-            'vehicle-swap-active',
-            'vehicle-swap-left',
-            'vehicle-swap-right'
-        );
 
         for (let i = 0; i < previewVehicles.length; i += 1) {
             const previewVehicle = previewVehicles[i];
@@ -1737,16 +1786,13 @@ export function createWelcomeModalController({
         return 1 - Math.pow(-2 * value + 2, 3) / 2;
     }
 
+    function easeInCubic(value) {
+        return value * value * value;
+    }
+
     function easeOutCubic(value) {
         const inverse = 1 - value;
         return 1 - inverse * inverse * inverse;
-    }
-
-    function easeOutBack(value) {
-        const c1 = 1.70158;
-        const c3 = c1 + 1;
-        const shifted = value - 1;
-        return 1 + c3 * shifted * shifted * shifted + c1 * shifted * shifted;
     }
 
     function normalizeOnlineRoomCode(value) {

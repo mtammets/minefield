@@ -66,11 +66,9 @@ import {
 import { addStars } from './stars.js';
 import { createCollectibleSystem } from './collectibles.js';
 import { createBotTrafficSystem } from './bots.js';
-import { createReplayController } from './replay.js';
 import {
     MAX_PHYSICS_STEPS_PER_FRAME,
     PLAYER_RIDE_HEIGHT,
-    OBSTACLE_CRASH_MAX_SPEED,
     STATUS_DEFAULT_TEXT,
     ROOF_MENU_MODE_LABELS,
     SHARED_PICKUP_COLOR_INDEX,
@@ -80,8 +78,6 @@ import {
     CHARGING_BATTERY_GAIN_PER_SEC,
     ROUND_TOTAL_PICKUPS,
     PLAYER_CAR_POOL_SIZE,
-    REPLAY_EVENT_PICKUP,
-    REPLAY_EVENT_CRASH,
     RACE_INTRO_DURATION_SEC,
 } from './constants.js';
 import { toCssHex, colorNameFromHex } from './color-utils.js';
@@ -103,7 +99,6 @@ import {
 } from './charging-system.js';
 import { createSkidMarkController } from './skidmarks.js';
 import { createCrashDebrisController } from './crash-debris-system.js';
-import { createReplayEffectsController } from './replay-effects-system.js';
 import { createGameSessionController } from './game-session-flow.js';
 import { createInputController } from './input-controller.js';
 import { createGameLoopController } from './game-loop-controller.js';
@@ -501,13 +496,9 @@ function buildStartupPrewarmOrigins(origin = null) {
         boundsMinZ < boundsMaxZ;
     const margin = 6;
     const clampX = (value) =>
-        hasBounds
-            ? THREE.MathUtils.clamp(value, boundsMinX + margin, boundsMaxX - margin)
-            : value;
+        hasBounds ? THREE.MathUtils.clamp(value, boundsMinX + margin, boundsMaxX - margin) : value;
     const clampZ = (value) =>
-        hasBounds
-            ? THREE.MathUtils.clamp(value, boundsMinZ + margin, boundsMaxZ - margin)
-            : value;
+        hasBounds ? THREE.MathUtils.clamp(value, boundsMinZ + margin, boundsMaxZ - margin) : value;
     const centerX = hasBounds ? (boundsMinX + boundsMaxX) * 0.5 : 0;
     const centerZ = hasBounds ? (boundsMinZ + boundsMaxZ) * 0.5 : 0;
     const mirroredX = hasBounds ? centerX * 2 - originX : originX;
@@ -885,7 +876,10 @@ function processDeferredMineKillUiTasksFrame() {
     const nowMs = performance.now();
     let processed = 0;
     let index = 0;
-    while (index < deferredMineKillUiTasks.length && processed < DEFERRED_MINE_KILL_UI_TASKS_PER_FRAME) {
+    while (
+        index < deferredMineKillUiTasks.length &&
+        processed < DEFERRED_MINE_KILL_UI_TASKS_PER_FRAME
+    ) {
         const task = deferredMineKillUiTasks[index];
         if (!task || typeof task.taskHandler !== 'function') {
             deferredMineKillUiTasks.splice(index, 1);
@@ -1264,13 +1258,6 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         runtimeState.botTrafficSystem?.setSharedTargetColor(targetColorHex);
     },
     onCorrectPickup: ({ pickupId, pickupColorHex, collectorId, position }) => {
-        replayController.recordEvent(REPLAY_EVENT_PICKUP, {
-            x: position.x,
-            y: position.y,
-            z: position.z,
-            colorHex: pickupColorHex,
-            wrong: false,
-        });
         recordPerformanceDiagnosticEvent('pickup_collected', {
             gameMode: runtimeState.gameMode,
             collectorId,
@@ -1477,7 +1464,6 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
         });
     },
 });
-const replayController = createReplayController(car, camera);
 runtimeState.crashDebrisController = createCrashDebrisController({
     scene,
     car,
@@ -1496,14 +1482,6 @@ const appliedCrashDamageTuning =
     runtimeState.crashDebrisController.setCrashDamageTuning(persistedCrashDamageTuning) ||
     physicsCrashDamageTuning;
 persistCrashDamageTuning(appliedCrashDamageTuning);
-runtimeState.replayEffectsController = createReplayEffectsController({
-    scene,
-    car,
-    spawnCarDebris: (...args) => runtimeState.crashDebrisController.spawnCarDebris(...args),
-    replayEventPickup: REPLAY_EVENT_PICKUP,
-    replayEventCrash: REPLAY_EVENT_CRASH,
-    obstacleCrashMaxSpeed: OBSTACLE_CRASH_MAX_SPEED,
-});
 const mineOtherVehicleTargetsBuffer = [];
 runtimeState.mineController = createMineSystemController({
     scene,
@@ -1728,12 +1706,15 @@ runtimeState.mineController = createMineSystemController({
                     sourceLabel: 'mine kill',
                 };
                 if (shouldDeferMineKillUi) {
-                    queueDeferredMineKillUiTask(() => {
-                        spawnScorePopup(popupPayload);
-                    }, {
-                        delayFrames: DEFERRED_MINE_KILL_UI_POPUP_DELAY_FRAMES,
-                        label: 'mine_kill_popup',
-                    });
+                    queueDeferredMineKillUiTask(
+                        () => {
+                            spawnScorePopup(popupPayload);
+                        },
+                        {
+                            delayFrames: DEFERRED_MINE_KILL_UI_POPUP_DELAY_FRAMES,
+                            label: 'mine_kill_popup',
+                        }
+                    );
                 } else {
                     spawnScorePopup(popupPayload);
                 }
@@ -1741,12 +1722,15 @@ runtimeState.mineController = createMineSystemController({
             if (ownerCollectorId === 'player' && pointsAwarded > 0) {
                 const statusMessage = `Mine kill on ${target.label || target.id}: +${pointsAwarded} pts.`;
                 if (shouldDeferMineKillUi) {
-                    queueDeferredMineKillUiTask(() => {
-                        objectiveUi.showInfo(statusMessage, 1500);
-                    }, {
-                        delayFrames: DEFERRED_MINE_KILL_UI_INFO_DELAY_FRAMES,
-                        label: 'mine_kill_status',
-                    });
+                    queueDeferredMineKillUiTask(
+                        () => {
+                            objectiveUi.showInfo(statusMessage, 1500);
+                        },
+                        {
+                            delayFrames: DEFERRED_MINE_KILL_UI_INFO_DELAY_FRAMES,
+                            label: 'mine_kill_status',
+                        }
+                    );
                     recordPerformanceDiagnosticEvent('mine_kill_ui_deferred', {
                         gameMode: runtimeState.gameMode,
                         ownerCollectorId,
@@ -1928,7 +1912,6 @@ runtimeState.gameSessionController = createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
-    replayController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getCollectorScore(collectorId) {
         return runtimeState.scoringSystem?.getCollectorScore?.(collectorId) || 0;
@@ -1938,11 +1921,9 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     crashDebrisController: runtimeState.crashDebrisController,
     mineController: runtimeState.mineController,
-    replayEffectsController: runtimeState.replayEffectsController,
     setPhysicsAccumulator(value) {
         runtimeState.physicsAccumulator = value;
     },
-    replayEventCrash: REPLAY_EVENT_CRASH,
     colorNameFromHex,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     setIsCarDestroyed(value) {
@@ -2088,7 +2069,6 @@ function syncRuntimeInputContext() {
         editModeActive: carEditModeController.isActive(),
         raceIntroDriveLocked:
             raceIntroController.isActive() && !raceIntroController.isDrivingUnlocked(),
-        replayPlaybackActive: replayController.isPlaybackActive(),
     });
     return runtimeState.inputContext;
 }
@@ -2364,16 +2344,9 @@ runtimeState.inputController = createInputController({
     finalScoreboardUi,
     carEditModeController,
     raceIntroController,
-    replayController,
-    getVehicleState,
-    initializePlayerPhysics,
-    setPhysicsAccumulator(value) {
-        runtimeState.physicsAccumulator = value;
-    },
     getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
     getIsGamePaused: () => runtimeState.isGamePaused,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
-    getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
     onSetPauseState(nextPaused) {
         runtimeState.gameSessionController?.setPauseState(nextPaused);
     },
@@ -2382,21 +2355,6 @@ runtimeState.inputController = createInputController({
     },
     onRestartGameWithCountdown() {
         runtimeState.gameSessionController?.restartGameWithCountdown();
-    },
-    onClearPendingRespawn() {
-        runtimeState.gameSessionController?.clearPendingRespawn();
-    },
-    onClearReplayEffects() {
-        runtimeState.replayEffectsController?.clearReplayEffects();
-    },
-    onClearDebris() {
-        runtimeState.crashDebrisController?.clearDebris();
-    },
-    onResetPlayerDamageState() {
-        runtimeState.crashDebrisController?.resetPlayerDamageState();
-    },
-    onResetRunStateForReplay() {
-        runtimeState.gameSessionController?.resetRunStateForReplay();
     },
     onClearDriveKeys() {
         runtimeState.gameSessionController?.clearDriveKeys();
@@ -2463,7 +2421,6 @@ runtimeState.gameLoopController = createGameLoopController({
     objectiveUi,
     botStatusUi,
     collectibleSystem,
-    replayController,
     multiplayerController: runtimeState.multiplayerController,
     mineSystemController: runtimeState.mineController,
     scorePopupController: runtimeState.scorePopupController,
@@ -2471,7 +2428,6 @@ runtimeState.gameLoopController = createGameLoopController({
         return runtimeState.multiplayerController?.getCollisionSnapshots?.() || EMPTY_ARRAY;
     },
     crashDebrisController: runtimeState.crashDebrisController,
-    replayEffectsController: runtimeState.replayEffectsController,
     audioController: runtimeState.audioController,
     mapUiController,
     graphicsQualityController,
@@ -2479,7 +2435,6 @@ runtimeState.gameLoopController = createGameLoopController({
     gameSessionController: runtimeState.gameSessionController,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getVehicleState,
-    getPlayerTopSpeedLimit,
     getGroundHeightAt,
     updateGroundMotion,
     updateCarVisuals,
@@ -2488,7 +2443,6 @@ runtimeState.gameLoopController = createGameLoopController({
     setCameraKeyboardControlsEnabled,
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
-    initializePlayerPhysics,
     consumeVehicleCollisionContacts,
     consumeCrashCollision,
     worldBounds,

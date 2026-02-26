@@ -1,8 +1,5 @@
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
-import {
-    beginHeavyEventFrame,
-    getHeavyEventBudgetSnapshot,
-} from './frame-heavy-event-budget.js';
+import { beginHeavyEventFrame, getHeavyEventBudgetSnapshot } from './frame-heavy-event-budget.js';
 
 const BOT_MINE_DEPLOY_MIN_SPEED = 8;
 const BOT_MINE_DEPLOY_MAX_DISTANCE = 24;
@@ -42,15 +39,12 @@ export function createGameLoopController(options = {}) {
         objectiveUi,
         botStatusUi,
         collectibleSystem,
-        replayController,
         multiplayerController,
         mineSystemController,
         mapUiController,
         graphicsQualityController,
         performanceDiagnosticsController = null,
-        getPlayerTopSpeedLimit,
         crashDebrisController,
-        replayEffectsController,
         audioController,
         scorePopupController,
         gameSessionController,
@@ -65,7 +59,6 @@ export function createGameLoopController(options = {}) {
         setCameraKeyboardControlsEnabled,
         updatePlayerPhysics,
         applyInterpolatedPlayerTransform,
-        initializePlayerPhysics,
         consumeVehicleCollisionContacts,
         consumeCrashCollision,
         worldBounds,
@@ -180,7 +173,6 @@ export function createGameLoopController(options = {}) {
         welcomeVisible: false,
         editModeActive: false,
         raceIntroActive: false,
-        replayActive: false,
         isCarDestroyed: false,
         pickupRoundFinished: false,
         isBatteryDepleted: false,
@@ -242,11 +234,7 @@ export function createGameLoopController(options = {}) {
         const heavyEventBudget = getHeavyEventBudgetSnapshot();
 
         assignPerfHint(hints, 'pendingCrashDebrisSpawns', crashPerf?.pendingDebrisSpawns);
-        assignPerfHint(
-            hints,
-            'pendingCrashExplosionDetaches',
-            crashPerf?.pendingExplosionDetaches
-        );
+        assignPerfHint(hints, 'pendingCrashExplosionDetaches', crashPerf?.pendingExplosionDetaches);
         assignPerfHint(hints, 'activeCrashDebrisPieces', crashPerf?.activeDebrisPieces);
         assignPerfHint(hints, 'visibleCrashDebrisPieces', crashPerf?.visibleDebrisPieces);
         assignPerfHint(hints, 'droppedCrashDebrisSpawns', crashPerf?.droppedPendingDebrisSpawns);
@@ -297,11 +285,7 @@ export function createGameLoopController(options = {}) {
             'graphicsPreRenderGuardTriggerCount',
             graphicsPerf?.preRenderGuardTriggerCount
         );
-        assignPerfHint(
-            hints,
-            'graphicsStallGuardActive',
-            graphicsPerf?.stallGuardActive ? 1 : 0
-        );
+        assignPerfHint(hints, 'graphicsStallGuardActive', graphicsPerf?.stallGuardActive ? 1 : 0);
         assignPerfHint(hints, 'heavyEventTokensPerFrame', heavyEventBudget?.tokensPerFrame);
         assignPerfHint(hints, 'heavyEventTokensRemaining', heavyEventBudget?.tokensRemaining);
         assignPerfHint(hints, 'heavyEventTokensConsumed', heavyEventBudget?.consumedThisFrame);
@@ -391,7 +375,6 @@ export function createGameLoopController(options = {}) {
         let botCollectorDescriptors = EMPTY_ARRAY;
         let botHudState = EMPTY_ARRAY;
         let multiplayerSnapshotsCaptured = false;
-        let frameReplayActive = false;
         let framePhysicsSteps = 0;
         let frameVehicleContactsCount = 0;
         let frameCrashCollisionTriggered = false;
@@ -433,7 +416,6 @@ export function createGameLoopController(options = {}) {
             audioFrameState.welcomeVisible = true;
             audioFrameState.editModeActive = false;
             audioFrameState.raceIntroActive = raceIntroController.isActive();
-            audioFrameState.replayActive = replayController.isPlaybackActive();
             audioFrameState.isCarDestroyed = readCarDestroyed();
             audioFrameState.pickupRoundFinished = readPickupRoundFinished();
             audioFrameState.isBatteryDepleted = readBatteryDepleted();
@@ -456,7 +438,6 @@ export function createGameLoopController(options = {}) {
                 worldMapOpen: readWorldMapOpen(),
                 paused: true,
                 editModeActive: false,
-                replayActive: replayController.isPlaybackActive(),
                 physicsSteps: 0,
                 vehicleContactsCount: 0,
                 crashCollisionTriggered: false,
@@ -494,13 +475,10 @@ export function createGameLoopController(options = {}) {
                 crashDebrisController.tickImpactStatusCooldown(frameDelta);
 
                 const vehicleState = getVehicleState();
-                const replayActive = replayController.isPlaybackActive();
-                frameReplayActive = replayActive;
                 const isCarDestroyed = readCarDestroyed();
                 const pickupRoundFinished = readPickupRoundFinished();
                 const isBatteryDepleted = readBatteryDepleted();
-                const chargingContextEnabled =
-                    !replayActive && !isCarDestroyed && !pickupRoundFinished;
+                const chargingContextEnabled = !isCarDestroyed && !pickupRoundFinished;
                 mineCollisionEnabled = chargingContextEnabled;
                 const chargingSnapshot = chargingZoneController.update(car.position, frameDelta, {
                     enabled: chargingContextEnabled,
@@ -518,36 +496,9 @@ export function createGameLoopController(options = {}) {
                 if (chargingSnapshot.isChargingActive && chargingContextEnabled) {
                     gameSessionController.addBattery(chargingBatteryGainPerSec * frameDelta);
                 }
-                let visualState = vehicleState;
+                const visualState = vehicleState;
 
-                if (replayActive) {
-                    writePhysicsAccumulator(0);
-                    const replayFrame = measureStage('replay', () =>
-                        replayController.updatePlayback(frameDelta)
-                    );
-                    if (replayFrame?.vehicleState) {
-                        visualState = replayFrame.vehicleState;
-                    }
-                    const topSpeedTune =
-                        typeof getPlayerTopSpeedLimit === 'function'
-                            ? getPlayerTopSpeedLimit()
-                            : { topSpeedKph: 0, topSpeedPercent: 0 };
-                    visualState.topSpeedLimitKph = topSpeedTune.topSpeedKph;
-                    visualState.topSpeedLimitPercent = topSpeedTune.topSpeedPercent;
-                    visualState.chargingLevelNormalized = chargingSnapshot.visualLevel;
-                    visualState.batteryDepleted = false;
-                    updateCarVisuals(visualState, frameDelta);
-                    replayEffectsController.processReplayEvents(replayFrame?.events);
-
-                    if (!replayController.isPlaybackActive()) {
-                        replayEffectsController.clearReplayEffects();
-                        gameSessionController.clearPendingRespawn();
-                        initializePlayerPhysics(car);
-                        crashDebrisController.resetPlayerDamageState();
-                        writePhysicsAccumulator(0);
-                        objectiveUi.showInfo('TV replay ended.');
-                    }
-                } else if (!isCarDestroyed && !pickupRoundFinished) {
+                if (!isCarDestroyed && !pickupRoundFinished) {
                     let physicsAccumulator = readPhysicsAccumulator() + frameDelta;
                     const botTrafficSystem = getBotTrafficSystem();
                     const botsEnabled = readBotsEnabled();
@@ -643,7 +594,6 @@ export function createGameLoopController(options = {}) {
                         vehicleState.batteryDepleted = readBatteryDepleted();
                         updateCarVisuals(vehicleState, frameDelta);
                         gameSessionController.updateBattery(vehicleState, frameDelta);
-                        replayController.updateRecording(frameDelta, vehicleState);
                         skidMarksEnabled = true;
                         skidMarkVehicleState = vehicleState;
                     } else {
@@ -660,12 +610,10 @@ export function createGameLoopController(options = {}) {
                 }
 
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
-                if (!replayActive) {
-                    updateCamera(car, cameraSpeed, frameDelta);
-                }
+                updateCamera(car, cameraSpeed, frameDelta);
                 updateGroundMotion(car.position, cameraSpeed);
                 starsController.update(frameDelta);
-                if (!replayActive && !readPickupRoundFinished()) {
+                if (!readPickupRoundFinished()) {
                     const botTrafficSystem = getBotTrafficSystem();
                     const botsEnabled = readBotsEnabled();
                     visiblePickups = collectibleSystem.getVisiblePickups();
@@ -719,11 +667,7 @@ export function createGameLoopController(options = {}) {
                     }
                 }
 
-                replayEffectsController.updateReplayEffects(frameDelta);
-                if (
-                    (replayActive || !readCarDestroyed()) &&
-                    crashDebrisController.hasActiveDebrisOrExplosion()
-                ) {
+                if (!readCarDestroyed() && crashDebrisController.hasActiveDebrisOrExplosion()) {
                     measureStage('crashDebris', () => {
                         crashDebrisController.updateDebris(frameDelta);
                     });
@@ -793,7 +737,6 @@ export function createGameLoopController(options = {}) {
         audioFrameState.welcomeVisible = readWelcomeModalVisible();
         audioFrameState.editModeActive = isEditModeActive;
         audioFrameState.raceIntroActive = raceIntroController.isActive();
-        audioFrameState.replayActive = replayController.isPlaybackActive();
         audioFrameState.isCarDestroyed = readCarDestroyed();
         audioFrameState.pickupRoundFinished = readPickupRoundFinished();
         audioFrameState.isBatteryDepleted = readBatteryDepleted();
@@ -810,10 +753,7 @@ export function createGameLoopController(options = {}) {
 
         const worldMapOpen = readWorldMapOpen();
         const qualityAdaptiveAllowed =
-            !gamePaused &&
-            !isEditModeActive &&
-            !readWelcomeModalVisible() &&
-            !worldMapOpen;
+            !gamePaused && !isEditModeActive && !readWelcomeModalVisible() && !worldMapOpen;
         maybeApplyPreRenderLoadShed({
             adaptiveAllowed: qualityAdaptiveAllowed,
             gameMode: readGameMode(),
@@ -844,7 +784,6 @@ export function createGameLoopController(options = {}) {
             worldMapOpen,
             paused: gamePaused,
             editModeActive: isEditModeActive,
-            replayActive: frameReplayActive || replayController.isPlaybackActive(),
             physicsSteps: framePhysicsSteps,
             vehicleContactsCount: frameVehicleContactsCount,
             crashCollisionTriggered: frameCrashCollisionTriggered,
@@ -902,10 +841,7 @@ export function createGameLoopController(options = {}) {
                 heavyEventTokensRemaining: pressureState.heavyEventTokensRemaining,
                 heavyEventTokensDenied: pressureState.heavyEventTokensDenied,
                 crashCollisionTriggered: Boolean(crashCollisionTriggered),
-                vehicleContactsCount: Math.max(
-                    0,
-                    Math.round(Number(vehicleContactsCount) || 0)
-                ),
+                vehicleContactsCount: Math.max(0, Math.round(Number(vehicleContactsCount) || 0)),
                 pixelRatioCap: Number((Number(loadShedResult.pixelRatioCap) || 0).toFixed(3)),
                 stallGuardScalePercent: Math.max(
                     10,

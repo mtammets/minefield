@@ -12,22 +12,12 @@ export function createInputController(options = {}) {
         finalScoreboardUi,
         carEditModeController,
         raceIntroController,
-        replayController,
-        getVehicleState,
-        initializePlayerPhysics,
-        setPhysicsAccumulator = () => {},
         getIsWelcomeModalVisible = () => false,
         getIsGamePaused = () => false,
         getIsCarDestroyed = () => false,
-        getPlayerCarsRemaining = () => 0,
         onSetPauseState = () => {},
         onDismissWelcomeModal = () => {},
         onRestartGameWithCountdown = () => {},
-        onClearPendingRespawn = () => {},
-        onClearReplayEffects = () => {},
-        onClearDebris = () => {},
-        onResetPlayerDamageState = () => {},
-        onResetRunStateForReplay = () => {},
         onClearDriveKeys = () => {},
         onShowObjectiveInfo = () => {},
         onStartNewGame = () => {},
@@ -52,15 +42,7 @@ export function createInputController(options = {}) {
         escFullscreenFallbackWindowMs = 460,
     } = options;
 
-    if (
-        !renderer ||
-        !camera ||
-        !car ||
-        !keys ||
-        !carEditModeController ||
-        !raceIntroController ||
-        !replayController
-    ) {
+    if (!renderer || !camera || !car || !keys || !carEditModeController || !raceIntroController) {
         return {
             initialize() {},
             dispose() {},
@@ -109,9 +91,7 @@ export function createInputController(options = {}) {
         if (
             isKeyDown &&
             event.repeat &&
-            (key === 'k' ||
-                key === 'v' ||
-                key === 'f' ||
+            (key === 'f' ||
                 key === 'e' ||
                 key === 'q' ||
                 key === 'enter' ||
@@ -192,9 +172,6 @@ export function createInputController(options = {}) {
             key === 's' ||
             key === 'd' ||
             key === 'space';
-        if (isDriveKey && replayController.isPlaybackActive()) {
-            return;
-        }
         const setDriveInput = (driveKey) => {
             keys[driveKey] = isKeyDown;
         };
@@ -239,80 +216,6 @@ export function createInputController(options = {}) {
                     return;
                 }
                 onRestartGameWithCountdown();
-            },
-            k: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-
-                if (replayController.isPlaybackActive()) {
-                    replayController.stopPlayback();
-                    onClearPendingRespawn();
-                    onClearReplayEffects();
-                    onClearDebris();
-                    initializePlayerPhysics(car);
-                    onResetPlayerDamageState();
-                    setPhysicsAccumulator(0);
-                    onShowObjectiveInfo('Playback stopped.');
-                }
-
-                if (getIsCarDestroyed()) {
-                    onShowObjectiveInfo(
-                        getPlayerCarsRemaining() > 0
-                            ? 'A crash is in progress. Wait for the next car to spawn.'
-                            : 'No cars left. Press Q to restart.'
-                    );
-                    return;
-                }
-
-                if (replayController.isRecording()) {
-                    replayController.stopRecording();
-                    const duration = replayController.getDuration();
-                    if (duration > 0.2) {
-                        onShowObjectiveInfo(
-                            `Recording saved (${duration.toFixed(1)}s). Press V to play it back.`
-                        );
-                    } else {
-                        onShowObjectiveInfo('Recording too short. Drive longer and try again.');
-                    }
-                    return;
-                }
-
-                replayController.startRecording(getVehicleState());
-                onShowObjectiveInfo('Recording in progress. Press K to stop.');
-            },
-            v: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-
-                if (replayController.isRecording()) {
-                    replayController.stopRecording();
-                }
-
-                if (replayController.isPlaybackActive()) {
-                    replayController.stopPlayback();
-                    onClearPendingRespawn();
-                    onClearReplayEffects();
-                    onClearDebris();
-                    initializePlayerPhysics(car);
-                    onResetPlayerDamageState();
-                    setPhysicsAccumulator(0);
-                    onShowObjectiveInfo('Playback stopped.');
-                    return;
-                }
-
-                if (!replayController.hasReplay()) {
-                    onShowObjectiveInfo('No replay available. Press K to record a drive.');
-                    return;
-                }
-
-                onResetRunStateForReplay();
-                onClearDriveKeys();
-                if (replayController.startPlayback()) {
-                    onClearReplayEffects();
-                    onShowObjectiveInfo('TV replay started. V stops it, K starts a new recording.');
-                }
             },
             tab: () => {
                 if (!isKeyDown || isRaceIntroDriveLocked) {

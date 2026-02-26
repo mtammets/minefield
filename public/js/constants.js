@@ -89,9 +89,6 @@ export const MINE_THROW_SPEED = 24;
 export const MINE_THROW_VERTICAL_SPEED = 6.8;
 export const MINE_THROW_GRAVITY = 18;
 
-export const REPLAY_EVENT_PICKUP = 'pickup';
-export const REPLAY_EVENT_CRASH = 'crash';
-
 export const WELCOME_CAR_SPIN_SPEED = 0.62;
 export const WELCOME_PREVIEW_STATE_SPEED = 17;
 export const WELCOME_PREVIEW_REAR_LIGHT_Z = 2.045;

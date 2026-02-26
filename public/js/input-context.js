@@ -5,7 +5,6 @@ export const INPUT_CONTEXTS = Object.freeze({
     welcomeModal: 'welcome_modal',
     editMode: 'edit_mode',
     raceIntroLocked: 'race_intro_locked',
-    replayPlayback: 'replay_playback',
 });
 
 export const WORLD_MAP_DRIVE_LOCK_MODES = Object.freeze({
@@ -20,7 +19,6 @@ export function resolveGameplayInputContext({
     paused = false,
     editModeActive = false,
     raceIntroDriveLocked = false,
-    replayPlaybackActive = false,
 } = {}) {
     if (welcomeVisible) {
         return INPUT_CONTEXTS.welcomeModal;
@@ -36,9 +34,6 @@ export function resolveGameplayInputContext({
     }
     if (raceIntroDriveLocked) {
         return INPUT_CONTEXTS.raceIntroLocked;
-    }
-    if (replayPlaybackActive) {
-        return INPUT_CONTEXTS.replayPlayback;
     }
     return INPUT_CONTEXTS.gameplay;
 }

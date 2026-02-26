@@ -48,7 +48,6 @@ test('resolveGameplayInputContext keeps deterministic priority order', async () 
         resolveGameplayInputContext({
             paused: true,
             editModeActive: true,
-            replayPlaybackActive: true,
         }),
         INPUT_CONTEXTS.paused
     );
@@ -62,16 +61,8 @@ test('resolveGameplayInputContext keeps deterministic priority order', async () 
     assert.equal(
         resolveGameplayInputContext({
             raceIntroDriveLocked: true,
-            replayPlaybackActive: true,
         }),
         INPUT_CONTEXTS.raceIntroLocked
     );
-    assert.equal(
-        resolveGameplayInputContext({
-            replayPlaybackActive: true,
-        }),
-        INPUT_CONTEXTS.replayPlayback
-    );
     assert.equal(resolveGameplayInputContext({}), INPUT_CONTEXTS.gameplay);
 });
-

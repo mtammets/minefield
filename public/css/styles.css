@@ -2815,22 +2815,6 @@ body.race-intro-active #performancePanel {
     }
 }
 
-#welcomePreviewShell.vehicle-swap-active {
-    box-shadow:
-        0 0 0 1px rgba(204, 229, 245, 0.42),
-        0 0 28px rgba(113, 197, 242, 0.12),
-        0 34px 74px rgba(0, 0, 0, 0.56),
-        inset 0 1px 0 rgba(255, 255, 255, 0.09);
-}
-
-#welcomePreviewShell.vehicle-swap-left .welcomePreviewSweep {
-    animation: welcomeSwapSweepLeftModern 450ms ease-out;
-}
-
-#welcomePreviewShell.vehicle-swap-right .welcomePreviewSweep {
-    animation: welcomeSwapSweepRightModern 450ms ease-out;
-}
-
 @media (max-width: 1040px) {
     .welcomeShell {
         grid-template-columns: 1fr;
@@ -3014,34 +2998,6 @@ body.race-intro-active #performancePanel {
     50% {
         opacity: 0.5;
         transform: translateX(-50%) scale(1.02);
-    }
-}
-
-@keyframes welcomeSwapSweepRightModern {
-    0% {
-        opacity: 0;
-        transform: translateX(-48%);
-    }
-    34% {
-        opacity: 0.58;
-    }
-    100% {
-        opacity: 0;
-        transform: translateX(44%);
-    }
-}
-
-@keyframes welcomeSwapSweepLeftModern {
-    0% {
-        opacity: 0;
-        transform: translateX(48%);
-    }
-    34% {
-        opacity: 0.58;
-    }
-    100% {
-        opacity: 0;
-        transform: translateX(-44%);
     }
 }
 

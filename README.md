@@ -94,7 +94,6 @@ npm run check
 - `public/js/game-loop-controller.js`: render/update loop
 - `public/js/game-session-flow.js`: game lifecycle/session flow
 - `public/js/crash-debris-system.js`: crash, explosion, and debris behavior
-- `public/js/replay-effects-system.js`: replay-specific visual effects
 - `public/js/game-runtime-state.js`: central runtime state container
 - `public/js/game-runtime-ui.js`: UI controller composition
 - `public/js/game-bootstrap.js`: scene/renderer bootstrap

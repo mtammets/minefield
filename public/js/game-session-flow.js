@@ -43,15 +43,12 @@ export function createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
-    replayController,
     getBotTrafficSystem,
     getCollectorScore = () => 0,
     getCollectorRoundStats = () => null,
     crashDebrisController,
     mineController,
-    replayEffectsController,
     setPhysicsAccumulator,
-    replayEventCrash,
     colorNameFromHex,
     getIsCarDestroyed,
     setIsCarDestroyed,
@@ -160,7 +157,6 @@ export function createGameSessionController({
         finalizePickupRound,
         triggerCarExplosion,
         triggerObstacleCrash,
-        resetRunStateForReplay,
         startNewGame,
         setSelectedPlayerCarColor,
     };
@@ -591,7 +587,10 @@ export function createGameSessionController({
         scheduleRoundPresentation(presentationPayload, deferUiFrames);
     }
 
-    function scheduleRoundPresentation(payload, deferFrames = ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT) {
+    function scheduleRoundPresentation(
+        payload,
+        deferFrames = ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT
+    ) {
         if (!payload || typeof payload !== 'object') {
             return;
         }
@@ -660,26 +659,6 @@ export function createGameSessionController({
             return;
         }
         clearPendingRespawn();
-
-        const replayCollision = options.collision
-            ? {
-                  obstacleCategory: options.collision.obstacleCategory,
-                  impactSpeed: options.collision.impactSpeed,
-                  impactNormalX: options.collision.impactNormal?.x || 0,
-                  impactNormalZ: options.collision.impactNormal?.z || 0,
-              }
-            : null;
-
-        replayController.recordEvent(replayEventCrash, {
-            x: hitPosition.x,
-            y: hitPosition.y,
-            z: hitPosition.z,
-            pickupColorHex,
-            targetColorHex,
-            collision: replayCollision,
-        });
-        replayController.stopRecording();
-        replayController.stopPlayback();
         setIsCarDestroyed(true);
         setBatteryDepletedState(false, { showStatus: false });
         chargingZoneController.reset();
@@ -753,58 +732,15 @@ export function createGameSessionController({
         });
     }
 
-    function resetRunStateForReplay() {
-        raceIntroController.stop();
-        setCameraKeyboardControlsEnabled(true);
-        clearPendingRoundPresentation();
-        clearPendingRespawn();
-        clearScorePopups();
-        objectiveUi.resetStatus();
-        finalScoreboardUi.hide();
-        setPickupRoundFinished(false);
-        resetPickupScoring();
-        setPlayerCollectedCount(0);
-        setPlayerScore(0);
-        setTotalCollectedCount(0);
-        setTotalScore(0);
-        setIsCarDestroyed(false);
-        car.visible = true;
-        car.position.copy(playerSpawnState.position);
-        snapCarToGround();
-        car.rotation.set(0, playerSpawnState.rotationY, 0);
-        collectibleSystem.setEnabled(true);
-        primeCollectiblesForCurrentCollectors({
-            botsEnabled: normalizeGameMode(getGameMode()) === 'bots',
-        });
-        setPlayerCarsRemaining(PLAYER_CAR_POOL_SIZE);
-        setPlayerBattery(BATTERY_MAX);
-        setPlayerBatteryLevel(getPlayerBattery() / BATTERY_MAX);
-        setBatteryDepletedState(false, { showStatus: false });
-        chargingZoneController.reset();
-        chargingProgressHudController.reset();
-        skidMarkController.reset();
-        crashDebrisController.resetPlayerDamageState();
-        if (normalizeGameMode(getGameMode()) !== 'online') {
-            mineController?.clearAll?.();
-        }
-        clearDriveKeys();
-        replayEffectsController.clearReplayEffects();
-        crashDebrisController.clearDebris();
-    }
-
     function startNewGame() {
         raceIntroController.stop();
         carEditModeController.setActive(false);
         setCameraKeyboardControlsEnabled(true);
         setPauseState(false);
         clearPendingRoundPresentation();
-        replayController.stopRecording();
-        replayController.stopPlayback();
-        replayController.clear();
 
         clearPendingRespawn();
         clearScorePopups();
-        replayEffectsController.clearReplayEffects();
         crashDebrisController.clearDebris();
         if (normalizeGameMode(getGameMode()) !== 'online') {
             mineController?.clearAll?.();
