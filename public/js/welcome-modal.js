@@ -26,6 +26,9 @@ const WELCOME_START_SEQUENCE_MIN_MS = 2600;
 const WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS = 260;
 const WELCOME_START_SEQUENCE_PREP_CAP = 0.9;
 const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
+const WELCOME_REPLAY_IDLE_TRIGGER_MS = 5000;
+const WELCOME_REPLAY_RESTART_COOLDOWN_MS = 900;
+const WELCOME_REPLAY_POINTER_MOVE_THRESHOLD_PX = 10;
 const WELCOME_TAGLINE_VARIANTS = [
     'Master precision driving across high-stakes circuits. Tune your car, out-drift rivals, and climb the online leaderboard.',
     'Own every corner with elite handling, strategic mine plays, and relentless multiplayer competition.',
@@ -71,7 +74,9 @@ export function createWelcomeModalController({
     const launchProgressEl = document.getElementById('welcomeLaunchProgress');
     const launchProgressFillEl = document.getElementById('welcomeLaunchProgressFill');
     const launchPercentEl = document.getElementById('welcomeLaunchPercent');
+    const previewShellEl = document.getElementById('welcomePreviewShell');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
+    const replayVideoEl = document.getElementById('welcomeReplayVideo');
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
     const selectedColorNameEl = document.getElementById('welcomeSelectedColorName');
@@ -95,6 +100,8 @@ export function createWelcomeModalController({
             },
             setSelectedColorHex() {},
             selectNeighborColor() {},
+            setReplayClipSource() {},
+            clearReplayClipSource() {},
             getPreferredStartMode() {
                 return 'bots';
             },
@@ -185,6 +192,20 @@ export function createWelcomeModalController({
         transitionTimer: null,
         queuedIndex: null,
     };
+    const replayState = {
+        sourceUrl: '',
+        durationMs: 0,
+        byteSize: 0,
+        mimeType: '',
+        activationTimeout: null,
+        active: false,
+        pendingActivation: false,
+        lastUserActivityAtMs: 0,
+        cooldownUntilMs: 0,
+        pointerX: 0,
+        pointerY: 0,
+        hasPointerSample: false,
+    };
 
     const previewState = {
         speed: WELCOME_PREVIEW_STATE_SPEED,
@@ -246,6 +267,13 @@ export function createWelcomeModalController({
     applySelectedPreset(selectedColorIndex, false);
     resetStartSequenceUi();
     bindVehicleButtons();
+    setReplayShellState(false);
+    replayState.lastUserActivityAtMs = performance.now();
+    rootEl.addEventListener('pointerdown', handleReplayPointerDown, { passive: true });
+    rootEl.addEventListener('pointermove', handleReplayPointerMove, { passive: true });
+    rootEl.addEventListener('wheel', handleReplayWheel, { passive: true });
+    rootEl.addEventListener('touchstart', handleReplayTouchStart, { passive: true });
+    document.addEventListener('keydown', handleReplayKeydown);
 
     startBtnEl.addEventListener('click', () => {
         preferredStartMode = 'bots';
@@ -312,6 +340,8 @@ export function createWelcomeModalController({
         show() {
             cancelStartSequence();
             rootEl.hidden = false;
+            setReplayActive(false, { pauseVideo: true, resetTime: true });
+            replayState.hasPointerSample = false;
             resetStartSequenceUi();
             preferredStartMode = 'bots';
             if (hasOnlineStartFlow) {
@@ -327,10 +357,17 @@ export function createWelcomeModalController({
             updateShowroomAtmosphere(0);
             applyPreviewPose();
             renderPreview();
+            registerReplayUserActivity({
+                stopReplay: false,
+                applyCooldown: false,
+            });
         },
         hide() {
             cancelStartSequence();
             resetTaglineTransition();
+            clearReplayActivationTimeout();
+            setReplayActive(false, { pauseVideo: true });
+            replayState.hasPointerSample = false;
             rootEl.hidden = true;
         },
         resize() {
@@ -371,6 +408,12 @@ export function createWelcomeModalController({
             const direction = Math.sign(step || 1) || 1;
             const baseIndex = transition.active ? transition.targetIndex : selectedColorIndex;
             requestSwap(baseIndex + direction, direction, true);
+        },
+        setReplayClipSource(clip = null) {
+            applyReplayClipSource(clip);
+        },
+        clearReplayClipSource() {
+            applyReplayClipSource(null);
         },
         getPreferredStartMode() {
             return preferredStartMode;
@@ -418,10 +461,241 @@ export function createWelcomeModalController({
         },
     };
 
+    function applyReplayClipSource(clip = null) {
+        const nextUrl = typeof clip?.url === 'string' ? clip.url : '';
+        replayState.durationMs = Math.max(0, Math.round(Number(clip?.durationMs) || 0));
+        replayState.byteSize = Math.max(0, Math.round(Number(clip?.byteSize) || 0));
+        replayState.mimeType = typeof clip?.mimeType === 'string' ? clip.mimeType : '';
+
+        if (!replayVideoEl) {
+            replayState.sourceUrl = nextUrl;
+            setReplayShellState(false);
+            return;
+        }
+
+        if (nextUrl === replayState.sourceUrl) {
+            if (!rootEl.hidden && nextUrl) {
+                scheduleReplayActivation();
+            }
+            return;
+        }
+
+        clearReplayActivationTimeout();
+        setReplayActive(false, { pauseVideo: true, resetTime: true });
+        replayState.sourceUrl = nextUrl;
+
+        if (!nextUrl) {
+            replayVideoEl.removeAttribute('src');
+            replayVideoEl.load();
+            setReplayShellState(false);
+            return;
+        }
+
+        replayVideoEl.src = nextUrl;
+        replayVideoEl.preload = 'auto';
+        replayVideoEl.load();
+        if (!rootEl.hidden) {
+            registerReplayUserActivity({
+                stopReplay: false,
+                applyCooldown: false,
+            });
+        }
+    }
+
+    function scheduleReplayActivation() {
+        if (
+            !replayVideoEl ||
+            !replayState.sourceUrl ||
+            rootEl.hidden ||
+            launchSequenceState.active
+        ) {
+            setReplayShellState(false);
+            clearReplayActivationTimeout();
+            return;
+        }
+        clearReplayActivationTimeout();
+        const nowMs = performance.now();
+        const idleElapsedMs = Math.max(0, nowMs - replayState.lastUserActivityAtMs);
+        const idleDelayMs = Math.max(0, WELCOME_REPLAY_IDLE_TRIGGER_MS - idleElapsedMs);
+        const cooldownDelayMs = Math.max(0, replayState.cooldownUntilMs - nowMs);
+        const delayMs = Math.max(idleDelayMs, cooldownDelayMs);
+        replayState.pendingActivation = true;
+        replayState.activationTimeout = window.setTimeout(
+            () => {
+                replayState.pendingActivation = false;
+                replayState.activationTimeout = null;
+                if (!canActivateReplayNow()) {
+                    scheduleReplayActivation();
+                    return;
+                }
+                tryActivateReplayPlayback();
+            },
+            Math.max(0, Math.round(delayMs))
+        );
+    }
+
+    function clearReplayActivationTimeout() {
+        if (replayState.activationTimeout != null) {
+            window.clearTimeout(replayState.activationTimeout);
+        }
+        replayState.activationTimeout = null;
+        replayState.pendingActivation = false;
+    }
+
+    function canActivateReplayNow() {
+        if (
+            !replayVideoEl ||
+            !replayState.sourceUrl ||
+            rootEl.hidden ||
+            launchSequenceState.active
+        ) {
+            return false;
+        }
+        const nowMs = performance.now();
+        if (nowMs < replayState.cooldownUntilMs) {
+            return false;
+        }
+        return nowMs - replayState.lastUserActivityAtMs >= WELCOME_REPLAY_IDLE_TRIGGER_MS;
+    }
+
+    function tryActivateReplayPlayback() {
+        if (!canActivateReplayNow()) {
+            setReplayActive(false, { pauseVideo: true });
+            return;
+        }
+        setReplayActive(true, { pauseVideo: false });
+        try {
+            replayVideoEl.currentTime = 0;
+        } catch {
+            // Ignore seek failures for fresh clips.
+        }
+        Promise.resolve(replayVideoEl.play?.())
+            .then(() => {})
+            .catch(() => {
+                setReplayActive(false, { pauseVideo: true });
+                replayState.cooldownUntilMs = Math.max(
+                    replayState.cooldownUntilMs,
+                    performance.now() + WELCOME_REPLAY_RESTART_COOLDOWN_MS
+                );
+                scheduleReplayActivation();
+            });
+    }
+
+    function setReplayActive(nextActive, options = {}) {
+        const { pauseVideo = true, resetTime = false } = options;
+        const isActive = Boolean(nextActive && replayState.sourceUrl && replayVideoEl);
+        replayState.active = isActive;
+        setReplayShellState(isActive);
+        if (!replayVideoEl) {
+            return;
+        }
+        if (!isActive && pauseVideo) {
+            replayVideoEl.pause();
+        }
+        if (resetTime) {
+            try {
+                replayVideoEl.currentTime = 0;
+            } catch {
+                // Ignore replay seek failures for browsers that block manual seeks early.
+            }
+        }
+    }
+
+    function registerReplayUserActivity({ stopReplay = true, applyCooldown = true } = {}) {
+        if (rootEl.hidden) {
+            return;
+        }
+        const nowMs = performance.now();
+        replayState.lastUserActivityAtMs = nowMs;
+        if (applyCooldown) {
+            replayState.cooldownUntilMs = Math.max(
+                replayState.cooldownUntilMs,
+                nowMs + WELCOME_REPLAY_RESTART_COOLDOWN_MS
+            );
+        }
+        if (stopReplay && replayState.active) {
+            setReplayActive(false, { pauseVideo: true });
+        }
+        scheduleReplayActivation();
+    }
+
+    function handleReplayPointerDown(event) {
+        markReplayPointerSample(event);
+        registerReplayUserActivity();
+    }
+
+    function handleReplayPointerMove(event) {
+        if (!isReplayPointerMoveSignificant(event)) {
+            return;
+        }
+        registerReplayUserActivity();
+    }
+
+    function handleReplayWheel() {
+        registerReplayUserActivity();
+    }
+
+    function handleReplayTouchStart(event) {
+        const touch = event?.touches?.[0];
+        if (touch) {
+            markReplayPointerSample({
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+            });
+        }
+        registerReplayUserActivity();
+    }
+
+    function handleReplayKeydown() {
+        registerReplayUserActivity();
+    }
+
+    function isReplayPointerMoveSignificant(event) {
+        const pointerX = Number(event?.clientX);
+        const pointerY = Number(event?.clientY);
+        if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) {
+            return replayState.active;
+        }
+        if (!replayState.hasPointerSample) {
+            replayState.pointerX = pointerX;
+            replayState.pointerY = pointerY;
+            replayState.hasPointerSample = true;
+            return replayState.active;
+        }
+        const dx = pointerX - replayState.pointerX;
+        const dy = pointerY - replayState.pointerY;
+        replayState.pointerX = pointerX;
+        replayState.pointerY = pointerY;
+        const movementSq = dx * dx + dy * dy;
+        const thresholdSq =
+            WELCOME_REPLAY_POINTER_MOVE_THRESHOLD_PX * WELCOME_REPLAY_POINTER_MOVE_THRESHOLD_PX;
+        return movementSq >= thresholdSq;
+    }
+
+    function markReplayPointerSample(event) {
+        const pointerX = Number(event?.clientX);
+        const pointerY = Number(event?.clientY);
+        if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) {
+            return;
+        }
+        replayState.pointerX = pointerX;
+        replayState.pointerY = pointerY;
+        replayState.hasPointerSample = true;
+    }
+
+    function setReplayShellState(active) {
+        if (!previewShellEl) {
+            return;
+        }
+        previewShellEl.dataset.replayActive = active ? 'true' : 'false';
+    }
+
     async function beginStartSequence(mode, startContext = null) {
         if (launchSequenceState.active) {
             return;
         }
+        clearReplayActivationTimeout();
+        setReplayActive(false, { pauseVideo: true });
         const normalizedMode = mode === 'online' ? 'online' : 'bots';
         const hasLaunchUi = Boolean(
             launchOverlayEl &&
@@ -543,6 +817,12 @@ export function createWelcomeModalController({
             launchSequenceState.active = false;
             setStartButtonsDisabled(false);
             resetStartSequenceUi();
+            if (!rootEl.hidden) {
+                registerReplayUserActivity({
+                    stopReplay: false,
+                    applyCooldown: false,
+                });
+            }
             return;
         }
 

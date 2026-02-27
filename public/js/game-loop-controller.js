@@ -35,6 +35,7 @@ export function createGameLoopController(options = {}) {
         chargingProgressHudController,
         skidMarkController,
         welcomeModalUi,
+        replayRecorder = null,
         starsController,
         objectiveUi,
         botStatusUi,
@@ -364,7 +365,11 @@ export function createGameLoopController(options = {}) {
         const isEditModeActive = carEditModeController.isActive();
         const isWelcomeVisible = readWelcomeModalVisible();
         const worldMapDriveLockMode = readWorldMapDriveLockMode();
+        const worldMapOpen = readWorldMapOpen();
         const gamePaused = readGamePaused();
+        replayRecorder?.updateCaptureState?.({
+            enabled: !isWelcomeVisible && !gamePaused && !isEditModeActive && !worldMapOpen,
+        });
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;
@@ -421,7 +426,7 @@ export function createGameLoopController(options = {}) {
             audioFrameState.isBatteryDepleted = readBatteryDepleted();
             audioFrameState.isChargingActive = false;
             audioFrameState.chargingLevel = 0;
-            audioFrameState.worldMapVisible = readWorldMapOpen();
+            audioFrameState.worldMapVisible = worldMapOpen;
             audioFrameState.gameMode = readGameMode();
             audioController?.update?.(frameDelta, audioFrameState);
             scorePopupController?.update?.(camera, frameDelta);
@@ -435,7 +440,7 @@ export function createGameLoopController(options = {}) {
             reportFrameDiagnostics(frameStartMs, frameDelta, stageDurations, {
                 welcomeVisible: true,
                 gameMode: readGameMode(),
-                worldMapOpen: readWorldMapOpen(),
+                worldMapOpen,
                 paused: true,
                 editModeActive: false,
                 physicsSteps: 0,
@@ -742,7 +747,7 @@ export function createGameLoopController(options = {}) {
         audioFrameState.isBatteryDepleted = readBatteryDepleted();
         audioFrameState.isChargingActive = chargingHudActive;
         audioFrameState.chargingLevel = chargingHudLevel;
-        audioFrameState.worldMapVisible = readWorldMapOpen();
+        audioFrameState.worldMapVisible = worldMapOpen;
         audioFrameState.gameMode = readGameMode();
         measureStage('audio', () => {
             audioController?.update?.(frameDelta, audioFrameState);
@@ -751,7 +756,6 @@ export function createGameLoopController(options = {}) {
             scorePopupController?.update?.(camera, frameDelta);
         });
 
-        const worldMapOpen = readWorldMapOpen();
         const qualityAdaptiveAllowed =
             !gamePaused && !isEditModeActive && !readWelcomeModalVisible() && !worldMapOpen;
         maybeApplyPreRenderLoadShed({
