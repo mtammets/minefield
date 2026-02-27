@@ -1,10 +1,16 @@
 const DONATE_DESCRIPTION_TEXT = 'One-time support for Minefield Drift.';
-const DONATE_DISABLED_MESSAGE = 'Donations are currently unavailable.';
+const DONATE_CHECKOUT_ENDPOINT_PATH = '/api/donate/checkout-session';
 const DONATE_CURRENCY = 'usd';
 const DONATE_MIN_AMOUNT_CENTS = 100;
 const DONATE_MAX_AMOUNT_CENTS = 100_000;
 const DONATE_AMOUNT_STEP_CENTS = 100;
 const DONATE_PRESET_AMOUNTS_CENTS = Object.freeze([500, 1000, 2500, 5000]);
+const DONATE_CHECKOUT_REQUEST_TIMEOUT_MS = 15_000;
+const DONATE_CHECKOUT_REDIRECT_STATUS = 'Opening secure checkout...';
+const DONATE_CHECKOUT_FAILED_MESSAGE = 'Could not start secure checkout. Try again.';
+const DONATE_CHECKOUT_TIMEOUT_MESSAGE = 'Secure checkout timed out. Try again.';
+const DONATE_SUCCESS_STATUS = 'Donation completed. Thank you for supporting Minefield Drift.';
+const DONATE_CANCELED_STATUS = 'Donation checkout was canceled.';
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
 const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
@@ -41,6 +47,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     let selectedPresetAmountCents = DONATE_PRESET_AMOUNTS_CENTS[0] || null;
     let activeContextKey = '';
     let isWelcomeOnlineFlowOpen = false;
+    let isSubmittingDonation = false;
 
     return {
         initialize,
@@ -56,6 +63,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         }
         initialized = true;
         configurePanel();
+        applyReturnStatusFromLocation();
         setButtonsVisible(true);
         updateButtonExpandedState();
 
@@ -65,7 +73,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             });
         });
         submitBtnEl.addEventListener('click', () => {
-            submitDonation();
+            void submitDonation();
         });
         customAmountInputEl?.addEventListener('input', () => {
             selectedPresetAmountCents = null;
@@ -140,7 +148,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             }
         }
 
-        submitBtnEl.disabled = false;
+        setSubmitPending(false);
         renderPresetButtons();
         if (Number.isFinite(selectedPresetAmountCents)) {
             selectPresetAmount(selectedPresetAmountCents, { updateInput: true });
@@ -195,7 +203,11 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         });
     }
 
-    function submitDonation() {
+    async function submitDonation() {
+        if (isSubmittingDonation) {
+            return;
+        }
+
         const amountCents = resolveSelectedAmountCents();
         if (!Number.isFinite(amountCents)) {
             setStatus('Enter a valid donation amount.', 'error');
@@ -211,8 +223,47 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             return;
         }
 
-        setStatus(DONATE_DISABLED_MESSAGE, 'info');
-        onStatus(DONATE_DISABLED_MESSAGE, 3200);
+        setSubmitPending(true);
+        setStatus(DONATE_CHECKOUT_REDIRECT_STATUS, 'info');
+
+        const requestController = new AbortController();
+        const timeoutId = window.setTimeout(() => {
+            requestController.abort();
+        }, DONATE_CHECKOUT_REQUEST_TIMEOUT_MS);
+
+        try {
+            const response = await window.fetch(DONATE_CHECKOUT_ENDPOINT_PATH, {
+                method: 'POST',
+                cache: 'no-store',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    amountCents,
+                }),
+                signal: requestController.signal,
+            });
+            const payload = await response.json().catch(() => ({}));
+            const checkoutUrl =
+                typeof payload?.checkoutUrl === 'string' ? payload.checkoutUrl.trim() : '';
+
+            if (!response.ok || payload?.ok !== true || !checkoutUrl) {
+                const errorMessage = resolveStatusMessageFromServerError(payload?.error);
+                throw new Error(errorMessage);
+            }
+
+            window.location.assign(checkoutUrl);
+        } catch (error) {
+            const messageText =
+                error?.name === 'AbortError'
+                    ? DONATE_CHECKOUT_TIMEOUT_MESSAGE
+                    : resolveStatusMessageFromServerError(error?.message);
+            setStatus(messageText, 'error');
+            onStatus(messageText, 3200);
+            setSubmitPending(false);
+        } finally {
+            window.clearTimeout(timeoutId);
+        }
     }
 
     function resolveSelectedAmountCents() {
@@ -236,6 +287,40 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     function setStatus(messageText, tone = 'muted') {
         statusEl.textContent = messageText || '';
         statusEl.dataset.tone = tone;
+    }
+
+    function setSubmitPending(isPending) {
+        isSubmittingDonation = Boolean(isPending);
+        submitBtnEl.disabled = isSubmittingDonation;
+        submitBtnEl.setAttribute('aria-busy', isSubmittingDonation ? 'true' : 'false');
+    }
+
+    function applyReturnStatusFromLocation() {
+        let pageUrl;
+        try {
+            pageUrl = new URL(window.location.href);
+        } catch {
+            return;
+        }
+
+        const donateState = pageUrl.searchParams.get('donate');
+        if (donateState === 'success') {
+            setStatus(DONATE_SUCCESS_STATUS, 'info');
+            onStatus(DONATE_SUCCESS_STATUS, 4200);
+        } else if (donateState === 'cancel') {
+            setStatus(DONATE_CANCELED_STATUS, 'muted');
+            onStatus(DONATE_CANCELED_STATUS, 2800);
+        } else {
+            return;
+        }
+
+        pageUrl.searchParams.delete('donate');
+        const nextRelativeUrl = `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`;
+        try {
+            window.history.replaceState(null, '', nextRelativeUrl);
+        } catch {
+            // History API might be unavailable in constrained environments.
+        }
     }
 
     function setButtonsVisible(visible) {
@@ -336,6 +421,14 @@ function createCurrencyFormatter(currencyCode) {
             maximumFractionDigits: 2,
         });
     }
+}
+
+function resolveStatusMessageFromServerError(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return DONATE_CHECKOUT_FAILED_MESSAGE;
+    }
+    const normalized = rawValue.trim().replace(/\s+/g, ' ').slice(0, 180);
+    return normalized || DONATE_CHECKOUT_FAILED_MESSAGE;
 }
 
 function createNoopController() {

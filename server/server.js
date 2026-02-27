@@ -1,8 +1,11 @@
+require('dotenv').config();
+
 const express = require('express');
 const crypto = require('crypto');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const Stripe = require('stripe');
 const { Server } = require('socket.io');
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
@@ -57,6 +60,16 @@ const IP_RATE_MAX_EVENTS = 300;
 const IP_RATE_RULE_MULTIPLIER = 1.7;
 const IP_RATE_STORE_TTL_MS = 10 * 60 * 1000;
 const IP_RATE_STORE_PRUNE_INTERVAL_MS = 30_000;
+const DONATE_MIN_AMOUNT_CENTS = 100;
+const DONATE_MAX_AMOUNT_CENTS = 100_000;
+const DONATE_AMOUNT_STEP_CENTS = 100;
+const DONATE_CURRENCY = sanitizeCurrencyCode(process.env.STRIPE_DONATE_CURRENCY || 'usd', 'usd');
+const DONATE_PRODUCT_NAME = sanitizeCheckoutText(
+    process.env.STRIPE_DONATE_PRODUCT_NAME || 'Support Minefield Drift'
+);
+const DONATE_PUBLIC_BASE_URL = sanitizeHttpOrigin(process.env.STRIPE_DONATE_BASE_URL || '');
+const STRIPE_SECRET_KEY = sanitizeStripeSecretKey(process.env.STRIPE_SECRET_KEY || '');
+const stripeClient = createStripeClient(STRIPE_SECRET_KEY);
 
 const SOCKET_ALLOWED_ORIGINS = parseAllowedOriginList(
     process.env.SOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || ''
@@ -109,6 +122,7 @@ app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', HTTP_CONTENT_SECURITY_POLICY);
     next();
 });
+app.use(express.json({ limit: '16kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 app.get('/api/ping', (req, res) => {
@@ -133,6 +147,72 @@ app.get('/api/room-code/:roomCode/availability', (req, res) => {
         roomCode,
         available: !rooms.has(roomCode),
     });
+});
+
+app.post('/api/donate/checkout-session', async (req, res) => {
+    if (!stripeClient) {
+        res.status(503).json({
+            ok: false,
+            error: 'Donations are not configured on this server.',
+        });
+        return;
+    }
+
+    const amountCents = sanitizeDonationAmountCents(req.body?.amountCents);
+    if (!Number.isFinite(amountCents)) {
+        res.status(400).json({
+            ok: false,
+            error: `Amount must be between ${DONATE_MIN_AMOUNT_CENTS / 100} and ${DONATE_MAX_AMOUNT_CENTS / 100}.`,
+        });
+        return;
+    }
+
+    const checkoutBaseUrl = resolveDonateBaseUrl(req);
+    const successUrl = createDonateReturnUrl(checkoutBaseUrl, 'success');
+    const cancelUrl = createDonateReturnUrl(checkoutBaseUrl, 'cancel');
+    if (!successUrl || !cancelUrl) {
+        res.status(500).json({
+            ok: false,
+            error: 'Could not determine checkout return URL.',
+        });
+        return;
+    }
+
+    try {
+        const checkoutSession = await stripeClient.checkout.sessions.create({
+            mode: 'payment',
+            submit_type: 'donate',
+            payment_method_types: ['card'],
+            line_items: [
+                {
+                    quantity: 1,
+                    price_data: {
+                        currency: DONATE_CURRENCY,
+                        unit_amount: amountCents,
+                        product_data: {
+                            name: DONATE_PRODUCT_NAME,
+                        },
+                    },
+                },
+            ],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+        });
+        if (typeof checkoutSession?.url !== 'string' || !checkoutSession.url) {
+            throw new Error('Stripe did not return a checkout URL.');
+        }
+
+        res.status(201).json({
+            ok: true,
+            checkoutUrl: checkoutSession.url,
+        });
+    } catch (error) {
+        console.error('Stripe checkout session creation failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not start secure checkout. Try again.',
+        });
+    }
 });
 
 io.on('connection', (socket) => {
@@ -867,6 +947,129 @@ function parseAllowedOriginList(rawValue) {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);
+}
+
+function sanitizeDonationAmountCents(value) {
+    const numeric = Math.round(Number(value) || 0);
+    if (!Number.isFinite(numeric)) {
+        return null;
+    }
+    if (numeric < DONATE_MIN_AMOUNT_CENTS || numeric > DONATE_MAX_AMOUNT_CENTS) {
+        return null;
+    }
+    if (numeric % DONATE_AMOUNT_STEP_CENTS !== 0) {
+        return null;
+    }
+    return numeric;
+}
+
+function createStripeClient(secretKey) {
+    if (!secretKey) {
+        return null;
+    }
+    try {
+        return new Stripe(secretKey);
+    } catch (error) {
+        console.error('Stripe client initialization failed:', error);
+        return null;
+    }
+}
+
+function sanitizeStripeSecretKey(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    if (!normalized || !normalized.startsWith('sk_')) {
+        return '';
+    }
+    return normalized;
+}
+
+function sanitizeCurrencyCode(value, fallback = 'usd') {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    return /^[a-z]{3}$/.test(normalized) ? normalized : fallback;
+}
+
+function sanitizeCheckoutText(value, fallback = 'Support Minefield Drift') {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+    const normalized = value.trim().replace(/\s+/g, ' ').slice(0, 80);
+    return normalized || fallback;
+}
+
+function sanitizeHttpOrigin(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return '';
+    }
+    const normalized = rawValue.trim();
+    if (!normalized) {
+        return '';
+    }
+    try {
+        const parsed = new URL(normalized);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return '';
+        }
+        return parsed.origin;
+    } catch {
+        return '';
+    }
+}
+
+function resolveDonateBaseUrl(req) {
+    if (DONATE_PUBLIC_BASE_URL) {
+        return DONATE_PUBLIC_BASE_URL;
+    }
+
+    const host = sanitizeHttpHostHeader(req?.headers?.host);
+    if (!host) {
+        return '';
+    }
+    const protocol = resolveRequestProtocol(req);
+    return `${protocol}://${host}`;
+}
+
+function createDonateReturnUrl(baseUrl, state) {
+    if (!baseUrl) {
+        return '';
+    }
+    try {
+        const target = new URL('/', baseUrl);
+        target.searchParams.set('donate', state);
+        return target.toString();
+    } catch {
+        return '';
+    }
+}
+
+function resolveRequestProtocol(req) {
+    const forwardedProto = req?.headers?.['x-forwarded-proto'];
+    if (typeof forwardedProto === 'string') {
+        const normalized = forwardedProto.split(',')[0].trim().toLowerCase();
+        if (normalized === 'http' || normalized === 'https') {
+            return normalized;
+        }
+    }
+    const protocol = typeof req?.protocol === 'string' ? req.protocol.toLowerCase() : '';
+    return protocol === 'https' ? 'https' : 'http';
+}
+
+function sanitizeHttpHostHeader(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || normalized.includes('/') || normalized.includes('\\')) {
+        return '';
+    }
+    const isHostname = /^[a-z0-9.-]+(?::\d{1,5})?$/.test(normalized);
+    const isIpv6 = /^\[[a-f0-9:]+\](?::\d{1,5})?$/.test(normalized);
+    return isHostname || isIpv6 ? normalized : '';
 }
 
 function resolveSocketCorsOrigin(origin, callback) {

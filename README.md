@@ -11,6 +11,27 @@ npm start
 
 Open `http://localhost:3000`.
 
+## Donations (Stripe Checkout + Apple Pay)
+
+Set these environment variables before `npm start`:
+
+```bash
+STRIPE_SECRET_KEY=sk_test_...
+# Optional. Recommended in production behind a proxy/CDN.
+STRIPE_DONATE_BASE_URL=https://your-domain.example
+# Optional overrides:
+STRIPE_DONATE_CURRENCY=usd
+STRIPE_DONATE_PRODUCT_NAME="Support Minefield Drift"
+```
+
+The server loads `.env` automatically on startup.
+
+Notes:
+
+- The Donate button creates a Stripe Checkout session via `POST /api/donate/checkout-session`.
+- Apple Pay availability is controlled by Stripe and end-user device/browser support.
+- In production, configure your site domain in Stripe Dashboard under Apple Pay wallet settings.
+
 ## Online Multiplayer
 
 - Multiplayer runs over Socket.IO on the same Node server.
