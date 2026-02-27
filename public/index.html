@@ -37,6 +37,9 @@
                         <button id="welcomeStartOnlineBtn" type="button">
                             PLAY ONLINE <span aria-hidden="true">↗</span>
                         </button>
+                        <button id="welcomeDonateBtn" type="button" hidden>
+                            DONATE <span aria-hidden="true">❤</span>
+                        </button>
                     </div>
                     <div id="welcomeOnlineModeFlow" class="welcomeOnlineModeFlow" hidden>
                         <div class="welcomeOnlineModeTitle">ONLINE SESSION</div>
@@ -339,6 +342,83 @@
                     <button id="pauseExitBtn" class="pauseBtn exit" type="button">EXIT</button>
                     <button id="pauseResumeBtn" class="pauseBtn resume" type="button">
                         RESUME
+                    </button>
+                </div>
+                <div class="pauseSupportActions">
+                    <button id="pauseDonateBtn" class="pauseBtn donate" type="button" hidden>
+                        DONATE
+                    </button>
+                </div>
+            </div>
+        </div>
+        <div id="donateModal" aria-label="Donate" aria-live="polite" hidden>
+            <div class="donateCard" role="dialog" aria-modal="true" aria-labelledby="donateTitle">
+                <div class="donateHeader">
+                    <h2 id="donateTitle">Donate</h2>
+                    <button
+                        id="donateCloseBtn"
+                        class="donateIconBtn"
+                        type="button"
+                        aria-label="Close"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <p id="donateDescription" class="donateDescription">
+                    One-time support for Minefield Drift.
+                </p>
+                <div class="donateAmountPanel">
+                    <div id="donatePresetGrid" class="donatePresetGrid"></div>
+                    <label class="donateField">
+                        <span class="donateFieldLabel">Custom amount</span>
+                        <input
+                            id="donateCustomAmountInput"
+                            class="donateInput"
+                            type="number"
+                            min="1"
+                            step="1"
+                            inputmode="decimal"
+                            placeholder="10"
+                        />
+                    </label>
+                </div>
+                <details class="donateOptionalDetails">
+                    <summary>Add note (optional)</summary>
+                    <div class="donateOptionalFields">
+                        <label class="donateField">
+                            <span class="donateFieldLabel">Name</span>
+                            <input
+                                id="donateNameInput"
+                                class="donateInput"
+                                type="text"
+                                maxlength="32"
+                                autocomplete="nickname"
+                                placeholder="Driver"
+                            />
+                        </label>
+                        <label class="donateField">
+                            <span class="donateFieldLabel">Message</span>
+                            <textarea
+                                id="donateMessageInput"
+                                class="donateTextarea"
+                                maxlength="180"
+                                placeholder="Thanks for the game!"
+                            ></textarea>
+                        </label>
+                    </div>
+                </details>
+                <div
+                    id="donateStatus"
+                    class="donateStatus"
+                    data-tone="muted"
+                    aria-live="polite"
+                ></div>
+                <div class="donateActions">
+                    <button id="donateCancelBtn" class="donateBtn secondary" type="button">
+                        Cancel
+                    </button>
+                    <button id="donateSubmitBtn" class="donateBtn primary" type="button">
+                        Continue
                     </button>
                 </div>
             </div>

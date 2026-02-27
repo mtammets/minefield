@@ -1300,6 +1300,12 @@ body.race-intro-active #miniMapHud {
     gap: 10px;
 }
 
+.pauseSupportActions {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 1fr;
+}
+
 .pauseBtn {
     border: 1px solid rgba(183, 217, 255, 0.65);
     border-radius: 9px;
@@ -1335,6 +1341,12 @@ body.race-intro-active #miniMapHud {
     color: #eef8ff;
 }
 
+.pauseBtn.donate {
+    border-color: rgba(146, 213, 255, 0.72);
+    background: linear-gradient(180deg, rgba(33, 86, 128, 0.74), rgba(21, 54, 83, 0.74));
+    color: rgba(234, 247, 255, 0.99);
+}
+
 .pauseBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.08);
@@ -1343,6 +1355,314 @@ body.race-intro-active #miniMapHud {
 .pauseBtn:active {
     transform: translateY(0);
     filter: brightness(0.96);
+}
+
+#donateModal {
+    position: fixed;
+    inset: 0;
+    z-index: 13;
+    display: grid;
+    place-items: center;
+    padding: clamp(10px, 2vw, 20px);
+    background:
+        radial-gradient(circle at 100% 0%, rgba(116, 188, 247, 0.14), rgba(5, 9, 14, 0) 38%),
+        rgba(4, 8, 14, 0.72);
+    backdrop-filter: blur(7px) saturate(1.06);
+}
+
+#donateModal[hidden] {
+    display: none;
+}
+
+.donateCard {
+    width: min(620px, calc(100vw - 20px));
+    border: 1px solid rgba(153, 198, 235, 0.42);
+    border-radius: 20px;
+    padding: 16px;
+    background:
+        linear-gradient(163deg, rgba(12, 21, 34, 0.96), rgba(8, 13, 22, 0.96)),
+        radial-gradient(circle at 14% 0%, rgba(106, 181, 239, 0.14), transparent 42%);
+    box-shadow:
+        0 24px 68px rgba(0, 0, 0, 0.5),
+        inset 0 1px 0 rgba(221, 239, 255, 0.06);
+    color: rgba(244, 248, 255, 0.98);
+    font-family: 'Sora', sans-serif;
+    display: grid;
+    gap: 12px;
+    animation: donateCardReveal 220ms cubic-bezier(0.22, 0.82, 0.24, 1) both;
+}
+
+.donateHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+#donateTitle {
+    margin: 0;
+    font-size: clamp(36px, 8vw, 52px);
+    line-height: 0.95;
+    letter-spacing: -0.5px;
+    color: rgba(244, 250, 255, 0.99);
+    font-family: 'Sora', sans-serif;
+    font-weight: 800;
+}
+
+.donateIconBtn {
+    border: 1px solid rgba(166, 209, 243, 0.52);
+    border-radius: 12px;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(180deg, rgba(24, 53, 80, 0.8), rgba(15, 36, 56, 0.8));
+    color: rgba(233, 246, 255, 0.96);
+    font-family: 'Sora', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    transition:
+        transform 140ms ease,
+        filter 140ms ease,
+        border-color 140ms ease;
+}
+
+.donateIconBtn:hover {
+    transform: translateY(-1px) scale(1.02);
+    filter: brightness(1.08);
+    border-color: rgba(206, 228, 247, 0.82);
+}
+
+.donateIconBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+}
+
+.donateDescription {
+    margin: 0;
+    color: rgba(207, 225, 241, 0.92);
+    font-size: 15px;
+    line-height: 1.35;
+}
+
+.donateAmountPanel {
+    border: 1px solid rgba(141, 198, 229, 0.36);
+    border-radius: 14px;
+    padding: 10px;
+    background:
+        linear-gradient(170deg, rgba(12, 33, 48, 0.66), rgba(8, 22, 34, 0.7)),
+        radial-gradient(circle at 0% 0%, rgba(89, 169, 230, 0.12), transparent 42%);
+    display: grid;
+    gap: 10px;
+}
+
+.donatePresetGrid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.donatePresetBtn {
+    border: 1px solid rgba(151, 197, 231, 0.46);
+    border-radius: 11px;
+    min-height: 44px;
+    padding: 0 10px;
+    background: linear-gradient(180deg, rgba(24, 49, 76, 0.76), rgba(15, 31, 50, 0.76));
+    color: rgba(236, 246, 255, 0.98);
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease;
+}
+
+.donatePresetBtn[data-selected='true'] {
+    border-color: rgba(132, 236, 224, 0.86);
+    background: linear-gradient(180deg, rgba(19, 98, 97, 0.9), rgba(12, 62, 62, 0.92));
+    color: rgba(229, 255, 253, 0.99);
+}
+
+.donatePresetBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+}
+
+.donateField {
+    display: grid;
+    gap: 4px;
+}
+
+.donateFieldLabel {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    text-transform: none;
+    color: rgba(184, 212, 234, 0.9);
+}
+
+.donateInput,
+.donateTextarea {
+    border: 1px solid rgba(149, 189, 220, 0.52);
+    border-radius: 11px;
+    background:
+        linear-gradient(180deg, rgba(6, 17, 32, 0.8), rgba(6, 16, 30, 0.84)),
+        radial-gradient(circle at 50% 0%, rgba(93, 169, 227, 0.1), transparent 40%);
+    color: rgba(236, 246, 255, 0.99);
+    font-family: 'Sora', sans-serif;
+    font-size: 28px;
+    font-weight: 600;
+    padding: 11px 12px;
+    line-height: 1.1;
+}
+
+.donateInput:focus-visible,
+.donateTextarea:focus-visible {
+    outline: none;
+    border-color: rgba(182, 221, 249, 0.92);
+    box-shadow: 0 0 0 2px rgba(109, 183, 237, 0.22);
+}
+
+#donateCustomAmountInput {
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: -0.4px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+}
+
+.donateTextarea {
+    resize: vertical;
+    min-height: 92px;
+    max-height: 140px;
+    font-size: 16px;
+    line-height: 1.35;
+}
+
+.donateOptionalDetails {
+    border: 1px solid rgba(145, 189, 223, 0.34);
+    border-radius: 12px;
+    background: rgba(10, 23, 38, 0.52);
+    overflow: hidden;
+}
+
+.donateOptionalDetails > summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: rgba(184, 214, 236, 0.92);
+}
+
+.donateOptionalDetails > summary::-webkit-details-marker {
+    display: none;
+}
+
+.donateOptionalDetails > summary::after {
+    content: '+';
+    float: right;
+    color: rgba(176, 208, 232, 0.9);
+}
+
+.donateOptionalDetails[open] > summary::after {
+    content: '-';
+}
+
+.donateOptionalFields {
+    padding: 0 12px 12px;
+    display: grid;
+    gap: 8px;
+}
+
+.donateStatus {
+    min-height: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.15px;
+    color: rgba(186, 218, 243, 0.9);
+}
+
+.donateStatus:empty {
+    display: none;
+}
+
+.donateStatus[data-tone='muted'] {
+    color: rgba(176, 207, 232, 0.9);
+}
+
+.donateStatus[data-tone='info'] {
+    color: rgba(195, 228, 249, 0.98);
+}
+
+.donateStatus[data-tone='error'] {
+    color: rgba(255, 195, 195, 0.97);
+}
+
+.donateActions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.donateBtn {
+    border: 1px solid rgba(167, 205, 235, 0.58);
+    border-radius: 11px;
+    min-height: 46px;
+    padding: 0 12px;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease;
+}
+
+.donateBtn.secondary {
+    border-color: rgba(154, 196, 231, 0.58);
+    background: linear-gradient(180deg, rgba(27, 57, 89, 0.78), rgba(17, 40, 65, 0.8));
+    color: rgba(236, 246, 255, 0.98);
+}
+
+.donateBtn.primary {
+    border-color: rgba(122, 232, 216, 0.74);
+    background: linear-gradient(180deg, rgba(18, 131, 129, 0.9), rgba(12, 87, 91, 0.92));
+    color: rgba(230, 255, 253, 0.99);
+}
+
+.donateBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.08);
+}
+
+.donateBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+}
+
+.donateBtn:disabled {
+    opacity: 0.56;
+    cursor: wait;
+    transform: none;
+    filter: none;
+}
+
+@keyframes donateCardReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(10px) scale(0.99);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
 #multiplayerPanel {
@@ -2275,7 +2595,8 @@ body.race-intro-active #performancePanel {
 }
 
 #welcomeStartBtn,
-#welcomeStartOnlineBtn {
+#welcomeStartOnlineBtn,
+#welcomeDonateBtn {
     position: relative;
     border: 1px solid rgba(175, 207, 225, 0.54);
     border-radius: 14px;
@@ -2298,7 +2619,8 @@ body.race-intro-active #performancePanel {
 }
 
 #welcomeStartBtn::before,
-#welcomeStartOnlineBtn::before {
+#welcomeStartOnlineBtn::before,
+#welcomeDonateBtn::before {
     content: '';
     position: absolute;
     left: 1px;
@@ -2328,27 +2650,40 @@ body.race-intro-active #performancePanel {
         inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
+#welcomeDonateBtn {
+    color: rgba(235, 248, 255, 0.99);
+    border-color: rgba(141, 212, 255, 0.78);
+    background: linear-gradient(180deg, rgba(28, 107, 140, 0.9), rgba(16, 65, 86, 0.94));
+    box-shadow:
+        0 16px 30px rgba(24, 82, 114, 0.34),
+        inset 0 1px 0 rgba(224, 244, 255, 0.18);
+}
+
 #welcomeStartBtn span,
-#welcomeStartOnlineBtn span {
+#welcomeStartOnlineBtn span,
+#welcomeDonateBtn span {
     font-size: 18px;
     transform: translateY(-1px);
 }
 
 #welcomeStartBtn:hover,
-#welcomeStartOnlineBtn:hover {
+#welcomeStartOnlineBtn:hover,
+#welcomeDonateBtn:hover {
     transform: translateY(-2px);
     filter: brightness(1.08);
     border-color: rgba(224, 240, 250, 0.94);
 }
 
 #welcomeStartBtn:active,
-#welcomeStartOnlineBtn:active {
+#welcomeStartOnlineBtn:active,
+#welcomeDonateBtn:active {
     transform: translateY(0);
     filter: brightness(0.95);
 }
 
 #welcomeStartBtn:disabled,
-#welcomeStartOnlineBtn:disabled {
+#welcomeStartOnlineBtn:disabled,
+#welcomeDonateBtn:disabled {
     opacity: 0.5;
     cursor: wait;
     transform: none;
@@ -2916,14 +3251,16 @@ body.race-intro-active #performancePanel {
     }
 
     #welcomeStartBtn,
-    #welcomeStartOnlineBtn {
+    #welcomeStartOnlineBtn,
+    #welcomeDonateBtn {
         min-height: 54px;
         padding: 0 14px;
         font-size: 11px;
     }
 
     #welcomeStartBtn span,
-    #welcomeStartOnlineBtn span {
+    #welcomeStartOnlineBtn span,
+    #welcomeDonateBtn span {
         font-size: 16px;
     }
 
@@ -2975,6 +3312,48 @@ body.race-intro-active #performancePanel {
 
     .welcomeLaunchPercent {
         font-size: 10px;
+    }
+
+    .donateCard {
+        width: calc(100vw - 16px);
+        border-radius: 16px;
+        padding: 12px;
+        gap: 8px;
+    }
+
+    #donateTitle {
+        font-size: clamp(30px, 10vw, 42px);
+    }
+
+    .donateDescription {
+        font-size: 14px;
+    }
+
+    .donatePresetGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .donateActions {
+        grid-template-columns: 1fr;
+    }
+
+    .donateBtn,
+    .donatePresetBtn {
+        min-height: 44px;
+    }
+
+    .donateInput,
+    .donateTextarea {
+        font-size: 14px;
+        padding: 11px 12px;
+    }
+
+    #donateCustomAmountInput {
+        font-size: 28px;
+    }
+
+    .donateTextarea {
+        min-height: 88px;
     }
 }
 

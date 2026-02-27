@@ -20,6 +20,8 @@ const {
     recalculateRoomRoundStateFromPlayers,
     serializeRoomRoundState,
 } = require('./room-round-state');
+const { parseDonationConfig, serializePublicDonationConfig } = require('./donate-config');
+const { createDonationCheckoutSession } = require('./donate-service');
 
 const PORT = process.env.PORT || 3000;
 const ROOM_CODE_LENGTH = 6;
@@ -57,6 +59,13 @@ const IP_RATE_MAX_EVENTS = 300;
 const IP_RATE_RULE_MULTIPLIER = 1.7;
 const IP_RATE_STORE_TTL_MS = 10 * 60 * 1000;
 const IP_RATE_STORE_PRUNE_INTERVAL_MS = 30_000;
+const DONATE_CONFIG_RATE_WINDOW_MS = 30_000;
+const DONATE_CONFIG_RATE_MAX_EVENTS = 80;
+const DONATE_CHECKOUT_RATE_WINDOW_MS = 60_000;
+const DONATE_CHECKOUT_RATE_MAX_EVENTS = 16;
+const DONATE_HTTP_RATE_STORE_TTL_MS = 10 * 60 * 1000;
+const DONATE_HTTP_RATE_PRUNE_INTERVAL_MS = 30_000;
+const DONATE_CHECKOUT_BODY_LIMIT = '12kb';
 
 const SOCKET_ALLOWED_ORIGINS = parseAllowedOriginList(
     process.env.SOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || ''
@@ -99,7 +108,10 @@ const io = new Server(server, {
 
 const rooms = new Map();
 const ipRateLimitStore = new Map();
+const donateHttpRateLimitStore = new Map();
+const donationConfig = parseDonationConfig(process.env);
 let lastIpRateStorePruneAt = 0;
+let lastDonateRateStorePruneAt = 0;
 
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -134,6 +146,75 @@ app.get('/api/room-code/:roomCode/availability', (req, res) => {
         available: !rooms.has(roomCode),
     });
 });
+
+app.get('/api/donate/config', (req, res) => {
+    if (
+        !consumeHttpDonationQuota(req, {
+            action: 'config',
+            windowMs: DONATE_CONFIG_RATE_WINDOW_MS,
+            maxEvents: DONATE_CONFIG_RATE_MAX_EVENTS,
+        })
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many requests. Slow down and try again.',
+        });
+        return;
+    }
+
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(serializePublicDonationConfig(donationConfig));
+});
+
+app.post(
+    '/api/donate/checkout-session',
+    express.json({ limit: DONATE_CHECKOUT_BODY_LIMIT }),
+    async (req, res) => {
+        if (
+            !consumeHttpDonationQuota(req, {
+                action: 'checkout',
+                windowMs: DONATE_CHECKOUT_RATE_WINDOW_MS,
+                maxEvents: DONATE_CHECKOUT_RATE_MAX_EVENTS,
+            })
+        ) {
+            res.status(429).json({
+                ok: false,
+                error: 'Too many requests. Slow down and try again.',
+            });
+            return;
+        }
+
+        if (!donationConfig.enabled || donationConfig.provider === 'disabled') {
+            res.status(503).json({
+                ok: false,
+                error: 'Donations are currently unavailable.',
+            });
+            return;
+        }
+
+        const checkoutResult = await createDonationCheckoutSession({
+            donationConfig,
+            payload: req.body,
+            requestBaseUrl: resolveRequestBaseUrl(req),
+            clientIp: resolveHttpAddressKey(req),
+        });
+        if (!checkoutResult?.ok) {
+            res.status(Number(checkoutResult?.statusCode) || 502).json({
+                ok: false,
+                error: checkoutResult?.error || 'Could not start donation checkout.',
+            });
+            return;
+        }
+
+        res.setHeader('Cache-Control', 'no-store');
+        res.status(201).json({
+            ok: true,
+            provider: checkoutResult.provider,
+            redirectUrl: checkoutResult.redirectUrl,
+            sessionId: checkoutResult.sessionId || null,
+        });
+    }
+);
 
 io.on('connection', (socket) => {
     socket.data.profile = createDefaultProfile(socket.id);
@@ -820,10 +901,14 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
     const accessUrls = resolveServerAccessUrls(PORT);
+    const publicDonationConfig = serializePublicDonationConfig(donationConfig);
     console.log('Server is running on:');
     accessUrls.forEach((url) => {
         console.log(`- ${url}`);
     });
+    console.log(
+        `- Donation checkout: ${publicDonationConfig.enabled ? publicDonationConfig.provider : 'disabled'}`
+    );
 });
 
 function resolveServerAccessUrls(port) {
@@ -1018,6 +1103,104 @@ function pruneIpRateLimitStore(nowMs = Date.now()) {
             ipRateLimitStore.delete(key);
         }
     }
+}
+
+function consumeHttpDonationQuota(
+    req,
+    {
+        action = 'request',
+        windowMs = DONATE_CONFIG_RATE_WINDOW_MS,
+        maxEvents = DONATE_CONFIG_RATE_MAX_EVENTS,
+    } = {}
+) {
+    const now = Date.now();
+    pruneDonateRateLimitStore(now);
+    const addressKey = resolveHttpAddressKey(req);
+    if (!addressKey) {
+        return true;
+    }
+
+    return consumeRateLimit(
+        donateHttpRateLimitStore,
+        `http:${addressKey}:donate:${String(action || 'request')}`,
+        now,
+        windowMs,
+        maxEvents
+    );
+}
+
+function pruneDonateRateLimitStore(nowMs = Date.now()) {
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    if (now - lastDonateRateStorePruneAt < DONATE_HTTP_RATE_PRUNE_INTERVAL_MS) {
+        return;
+    }
+    lastDonateRateStorePruneAt = now;
+    for (const [key, bucket] of donateHttpRateLimitStore.entries()) {
+        const windowStartAt = Number(bucket?.windowStartAt);
+        if (
+            !Number.isFinite(windowStartAt) ||
+            now - windowStartAt > DONATE_HTTP_RATE_STORE_TTL_MS
+        ) {
+            donateHttpRateLimitStore.delete(key);
+        }
+    }
+}
+
+function resolveHttpAddressKey(req) {
+    const forwardedForHeader = req?.headers?.['x-forwarded-for'];
+    const forwardedFor =
+        typeof forwardedForHeader === 'string' ? forwardedForHeader.split(',')[0].trim() : '';
+    const rawAddress = String(forwardedFor || req?.socket?.remoteAddress || req?.ip || '').trim();
+    if (!rawAddress) {
+        return '';
+    }
+    return rawAddress
+        .replace(/^::ffff:/, '')
+        .replace(/[^\w\-.:]/g, '')
+        .slice(0, 96);
+}
+
+function resolveRequestBaseUrl(req) {
+    const forwardedProtoHeader = req?.headers?.['x-forwarded-proto'];
+    const forwardedProto =
+        typeof forwardedProtoHeader === 'string'
+            ? forwardedProtoHeader.split(',')[0].trim().toLowerCase()
+            : '';
+    const protocol =
+        forwardedProto === 'https' || forwardedProto === 'http'
+            ? forwardedProto
+            : req?.protocol === 'https'
+              ? 'https'
+              : 'http';
+
+    const forwardedHostHeader = req?.headers?.['x-forwarded-host'];
+    const hostCandidate =
+        typeof forwardedHostHeader === 'string' && forwardedHostHeader.trim()
+            ? forwardedHostHeader
+            : req?.headers?.host;
+    const host = sanitizeHostHeader(hostCandidate);
+    if (!host) {
+        return `http://localhost:${PORT}`;
+    }
+
+    return `${protocol}://${host}`;
+}
+
+function sanitizeHostHeader(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const candidate = value.split(',')[0].trim().toLowerCase();
+    if (!candidate) {
+        return '';
+    }
+    if (/^[a-z0-9.-]+(?::\d{1,5})?$/.test(candidate)) {
+        return candidate;
+    }
+    if (/^\[[0-9a-f:.]+\](?::\d{1,5})?$/i.test(candidate)) {
+        return candidate;
+    }
+    return '';
 }
 
 function validateStateTransition({

@@ -3,6 +3,7 @@ import { createWelcomeModalController } from './welcome-modal.js';
 import { createBotStatusController } from './bot-status-ui.js';
 import { createFinalScoreboardController } from './final-scoreboard-ui.js';
 import { createPauseMenuController } from './pause-menu-ui.js';
+import { createDonateUiController } from './donate-ui.js';
 
 export function createRuntimeUiControllers({
     toCssHex,
@@ -71,11 +72,22 @@ export function createRuntimeUiControllers({
         },
     });
 
+    const donateUi = createDonateUiController({
+        onStatus(messageText, timeoutMs = 2800) {
+            if (!messageText) {
+                return;
+            }
+            objectiveUi.showInfo(messageText, timeoutMs);
+        },
+    });
+    donateUi.initialize();
+
     return {
         objectiveUi,
         botStatusUi,
         finalScoreboardUi,
         pauseMenuUi,
         welcomeModalUi,
+        donateUi,
     };
 }
