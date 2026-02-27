@@ -251,6 +251,19 @@ const SOUND_DEFINITION_IDS = Object.freeze(Object.keys(SOUND_DEFINITIONS));
 const LOOP_SOUND_IDS = Object.freeze(
     SOUND_DEFINITION_IDS.filter((soundId) => Boolean(SOUND_DEFINITIONS[soundId]?.loop))
 );
+const CORE_GAMEPLAY_SOUND_IDS = Object.freeze([
+    'countdownBeep01',
+    'countdownGo01',
+    'engineIdleLoop01',
+    'engineLowLoop01',
+    'engineMidLoop01',
+    'engineHighLoop01',
+    'windSpeedLoop01',
+    'skidLoop01',
+    'handbrakeScrapeLoop01',
+    'suspensionRattleLoop01',
+    'chargingLoop01',
+]);
 
 const VARIANT_GROUPS = Object.freeze({
     uiClickSoft: ['uiClickSoft01', 'uiClickSoft02'],
@@ -453,27 +466,34 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
         const requireAllFiles = Boolean(options?.requireAllFiles);
+        const lazyPreloadRemaining = options?.lazyPreloadRemaining !== false;
+        const coreSoundIds = resolveSoundIdList(options?.coreSoundIds, CORE_GAMEPLAY_SOUND_IDS);
         preloadEnabled = true;
         const unsubscribeProgress = subscribePreloadProgress(onProgress);
         try {
             const unlockedNow = await unlockAudio({ waitForPreload: false });
-            startPreload();
-            if (preloadPromise) {
-                await preloadPromise;
-            }
             if (!unlockedNow) {
                 gameplayReady = false;
                 refreshUi();
                 notifyPreloadProgress();
                 return false;
             }
-            const preloadState = getPreloadState();
-            const preloadComplete = requireAllFiles
-                ? isPreloadStrictlyComplete(preloadState)
-                : preloadState.filesTotal > 0 &&
-                  preloadState.filesDone >= preloadState.filesTotal &&
-                  preloadState.filesFailed === 0;
-            gameplayReady = unlockedNow && preloadComplete;
+
+            if (requireAllFiles) {
+                startPreload();
+                if (preloadPromise) {
+                    await preloadPromise;
+                }
+                const preloadState = getPreloadState();
+                gameplayReady = unlockedNow && isPreloadStrictlyComplete(preloadState);
+            } else {
+                const corePreloadState = await preloadBuffersByIds(coreSoundIds);
+                gameplayReady = unlockedNow && isPreloadStrictlyComplete(corePreloadState);
+                if (lazyPreloadRemaining) {
+                    startPreload();
+                }
+            }
+
             if (gameplayReady) {
                 primeLoopInstances();
             }
@@ -537,21 +557,23 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function getPreloadState() {
-        const filesTotal = SOUND_DEFINITION_IDS.length;
-        const filesReady = buffers.size;
-        const filesFailed = failedBuffers.size;
-        const filesDone = Math.min(filesTotal, filesReady + filesFailed);
-        const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
-        const complete = filesDone >= filesTotal;
-        const completeNoFailures = complete && filesFailed === 0 && filesReady >= filesTotal;
+        const totalState = createSoundSetState(SOUND_DEFINITION_IDS);
+        const coreState = createSoundSetState(CORE_GAMEPLAY_SOUND_IDS);
         return {
-            filesTotal,
-            filesReady,
-            filesFailed,
-            filesDone,
-            progress,
-            complete,
-            completeNoFailures,
+            filesTotal: totalState.filesTotal,
+            filesReady: totalState.filesReady,
+            filesFailed: totalState.filesFailed,
+            filesDone: totalState.filesDone,
+            progress: totalState.progress,
+            complete: totalState.complete,
+            completeNoFailures: totalState.completeNoFailures,
+            coreFilesTotal: coreState.filesTotal,
+            coreFilesReady: coreState.filesReady,
+            coreFilesFailed: coreState.filesFailed,
+            coreFilesDone: coreState.filesDone,
+            coreProgress: coreState.progress,
+            coreComplete: coreState.complete,
+            coreCompleteNoFailures: coreState.completeNoFailures,
         };
     }
 
@@ -605,7 +627,55 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     async function preloadAllBuffers() {
-        const ids = SOUND_DEFINITION_IDS;
+        await preloadBuffersByIds(SOUND_DEFINITION_IDS);
+    }
+
+    function resolveSoundIdList(soundIds, fallback = SOUND_DEFINITION_IDS) {
+        const source = Array.isArray(soundIds) && soundIds.length > 0 ? soundIds : fallback;
+        const resolved = [];
+        const seen = new Set();
+        for (let i = 0; i < source.length; i += 1) {
+            const soundId = typeof source[i] === 'string' ? source[i] : '';
+            if (!soundId || seen.has(soundId) || !SOUND_DEFINITIONS[soundId]) {
+                continue;
+            }
+            seen.add(soundId);
+            resolved.push(soundId);
+        }
+        return resolved;
+    }
+
+    function createSoundSetState(soundIds = SOUND_DEFINITION_IDS) {
+        const ids = resolveSoundIdList(soundIds);
+        let filesReady = 0;
+        let filesFailed = 0;
+        for (let i = 0; i < ids.length; i += 1) {
+            const soundId = ids[i];
+            if (buffers.has(soundId)) {
+                filesReady += 1;
+            } else if (failedBuffers.has(soundId)) {
+                filesFailed += 1;
+            }
+        }
+
+        const filesTotal = ids.length;
+        const filesDone = Math.min(filesTotal, filesReady + filesFailed);
+        const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
+        const complete = filesDone >= filesTotal;
+        const completeNoFailures = complete && filesFailed === 0 && filesReady >= filesTotal;
+        return {
+            filesTotal,
+            filesReady,
+            filesFailed,
+            filesDone,
+            progress,
+            complete,
+            completeNoFailures,
+        };
+    }
+
+    async function preloadBuffersByIds(soundIds = SOUND_DEFINITION_IDS) {
+        const ids = resolveSoundIdList(soundIds);
         for (let i = 0; i < ids.length; i += 1) {
             await loadBuffer(ids[i]);
             notifyPreloadProgress();
@@ -616,6 +686,7 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         refreshUi();
         notifyPreloadProgress();
+        return createSoundSetState(ids);
     }
 
     async function loadBuffer(soundId) {
@@ -1153,6 +1224,7 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         const buffer = buffers.get(soundId);
         if (!buffer) {
+            void loadBuffer(soundId);
             return null;
         }
 
@@ -1218,6 +1290,7 @@ export function createAudioSystem({ camera = null } = {}) {
 
         const buffer = buffers.get(soundId);
         if (!buffer) {
+            void loadBuffer(soundId);
             return false;
         }
 

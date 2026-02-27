@@ -280,7 +280,8 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
         preparationTasks.push(
             (async () => {
                 const audioReady = await runtimeState.audioController.prepareForGameplay({
-                    requireAllFiles: true,
+                    requireAllFiles: false,
+                    lazyPreloadRemaining: true,
                     onProgress(preloadState) {
                         reportAudioProgress(preloadState);
                     },
@@ -289,16 +290,16 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
                 const filesTotal = Math.max(0, Math.round(Number(preloadState?.filesTotal) || 0));
                 const filesReady = Math.max(0, Math.round(Number(preloadState?.filesReady) || 0));
                 const filesFailed = Math.max(0, Math.round(Number(preloadState?.filesFailed) || 0));
-                const ready =
-                    filesTotal <= 0 ||
-                    (Boolean(audioReady) && filesReady >= filesTotal && filesFailed === 0);
+                const ready = Boolean(audioReady);
                 return {
                     task: 'audio',
                     ready,
                     message:
-                        filesTotal > 0 && filesFailed > 0
-                            ? `Gameplay audio failed to load (${filesFailed}/${filesTotal} missing).`
-                            : 'Gameplay audio could not be fully prepared.',
+                        !ready
+                            ? 'Core gameplay audio could not be prepared.'
+                            : filesTotal > 0 && filesFailed > 0
+                              ? `Some optional audio files failed to load (${filesFailed}/${filesTotal}).`
+                              : '',
                 };
             })()
         );
@@ -681,6 +682,7 @@ const renderer = initializeRenderer({ renderSettings });
 const gameplayReplayRecorder = createGameplayReplayRecorder({
     canvas: renderer.domElement,
     bufferDurationSec: 24,
+    minClipDurationMs: 1200,
     maxClipDurationMs: 24000,
 });
 window.addEventListener('beforeunload', () => {

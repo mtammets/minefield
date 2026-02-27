@@ -79,6 +79,9 @@ export function createGameplayReplayRecorder({
     let bufferedDurationMs = 0;
     let lastDataTimestampMs = Number(getNowMs()) || 0;
     let lastDataTimecodeMs = Number.NaN;
+    let rebasePending = false;
+    let rebaseInFlight = false;
+    let restartAfterRebase = false;
     let latestClipUrl = '';
     const bufferedChunks = [];
 
@@ -86,6 +89,22 @@ export function createGameplayReplayRecorder({
         if (disposed) {
             return;
         }
+        syncRecorderState();
+    });
+    recorder.addEventListener('stop', () => {
+        const shouldRestart = !disposed && restartAfterRebase;
+        startRequested = false;
+        rebaseInFlight = false;
+        restartAfterRebase = false;
+        rebasePending = false;
+        bufferedChunks.length = 0;
+        bufferedDurationMs = 0;
+        lastDataTimecodeMs = Number.NaN;
+        lastDataTimestampMs = Number(getNowMs()) || lastDataTimestampMs;
+        if (!shouldRestart) {
+            return;
+        }
+        ensureRecorderStarted();
         syncRecorderState();
     });
     recorder.addEventListener('dataavailable', (event) => {
@@ -135,6 +154,9 @@ export function createGameplayReplayRecorder({
             desiredCaptureEnabled = Boolean(nextState?.enabled);
             ensureRecorderStarted();
             syncRecorderState();
+            if (desiredCaptureEnabled) {
+                maybeRebaseRecorder();
+            }
         },
         captureLatestClip(options = {}) {
             if (disposed || bufferedChunks.length === 0) {
@@ -213,7 +235,7 @@ export function createGameplayReplayRecorder({
     }
 
     function syncRecorderState() {
-        if (!startRequested || disposed) {
+        if (!startRequested || disposed || rebaseInFlight) {
             return;
         }
         if (desiredCaptureEnabled) {
@@ -236,9 +258,15 @@ export function createGameplayReplayRecorder({
     }
 
     function trimBufferedChunks() {
+        let trimmed = false;
         while (bufferedDurationMs > normalizedBufferDurationMs && bufferedChunks.length > 1) {
             const dropped = bufferedChunks.shift();
             bufferedDurationMs = Math.max(0, bufferedDurationMs - (dropped?.durationMs || 0));
+            trimmed = true;
+        }
+        if (trimmed) {
+            // Older chunks were evicted; rebase recorder to refresh stream headers for the new window.
+            rebasePending = true;
         }
     }
 
@@ -257,6 +285,32 @@ export function createGameplayReplayRecorder({
             items: selected,
             durationMs,
         };
+    }
+
+    function maybeRebaseRecorder() {
+        if (
+            disposed ||
+            !rebasePending ||
+            rebaseInFlight ||
+            !startRequested ||
+            (recorder.state !== 'recording' && recorder.state !== 'paused')
+        ) {
+            return;
+        }
+        rebaseInFlight = true;
+        restartAfterRebase = desiredCaptureEnabled;
+        try {
+            recorder.requestData?.();
+        } catch {
+            // Continue and try to stop recorder even if requestData is unsupported.
+        }
+        try {
+            recorder.stop();
+        } catch {
+            rebaseInFlight = false;
+            restartAfterRebase = false;
+            rebasePending = false;
+        }
     }
 
     function revokeLatestClipUrl() {

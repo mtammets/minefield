@@ -237,10 +237,12 @@ export function createGameSessionController({
         carEditModeController.setActive(false);
         raceIntroController.stop();
         const replayClip = replayRecorder?.captureLatestClip?.({
-            minDurationMs: 2200,
+            minDurationMs: 1200,
             maxDurationMs: 24000,
         });
-        welcomeModalUi.setReplayClipSource?.(replayClip || null);
+        if (replayClip) {
+            welcomeModalUi.setReplayClipSource?.(replayClip);
+        }
         setIsWelcomeModalVisible(true);
         setIsGamePaused(true);
         clearDriveKeys();

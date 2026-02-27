@@ -274,6 +274,7 @@ export function createWelcomeModalController({
     rootEl.addEventListener('wheel', handleReplayWheel, { passive: true });
     rootEl.addEventListener('touchstart', handleReplayTouchStart, { passive: true });
     document.addEventListener('keydown', handleReplayKeydown);
+    replayVideoEl?.addEventListener('loadeddata', handleReplayVideoLoadedData);
 
     startBtnEl.addEventListener('click', () => {
         preferredStartMode = 'bots';
@@ -357,6 +358,14 @@ export function createWelcomeModalController({
             updateShowroomAtmosphere(0);
             applyPreviewPose();
             renderPreview();
+            const nowMs = performance.now();
+            replayState.lastUserActivityAtMs = nowMs;
+            if (replayState.sourceUrl) {
+                replayState.cooldownUntilMs = Math.min(replayState.cooldownUntilMs, nowMs);
+                replayState.lastUserActivityAtMs = nowMs - WELCOME_REPLAY_IDLE_TRIGGER_MS;
+                scheduleReplayActivation({ immediate: true });
+                return;
+            }
             registerReplayUserActivity({
                 stopReplay: false,
                 applyCooldown: false,
@@ -475,7 +484,7 @@ export function createWelcomeModalController({
 
         if (nextUrl === replayState.sourceUrl) {
             if (!rootEl.hidden && nextUrl) {
-                scheduleReplayActivation();
+                scheduleReplayActivation({ immediate: true });
             }
             return;
         }
@@ -495,14 +504,15 @@ export function createWelcomeModalController({
         replayVideoEl.preload = 'auto';
         replayVideoEl.load();
         if (!rootEl.hidden) {
-            registerReplayUserActivity({
-                stopReplay: false,
-                applyCooldown: false,
-            });
+            const nowMs = performance.now();
+            replayState.lastUserActivityAtMs = nowMs - WELCOME_REPLAY_IDLE_TRIGGER_MS;
+            replayState.cooldownUntilMs = Math.min(replayState.cooldownUntilMs, nowMs);
+            scheduleReplayActivation({ immediate: true });
         }
     }
 
-    function scheduleReplayActivation() {
+    function scheduleReplayActivation(options = {}) {
+        const immediate = Boolean(options?.immediate);
         if (
             !replayVideoEl ||
             !replayState.sourceUrl ||
@@ -516,7 +526,9 @@ export function createWelcomeModalController({
         clearReplayActivationTimeout();
         const nowMs = performance.now();
         const idleElapsedMs = Math.max(0, nowMs - replayState.lastUserActivityAtMs);
-        const idleDelayMs = Math.max(0, WELCOME_REPLAY_IDLE_TRIGGER_MS - idleElapsedMs);
+        const idleDelayMs = immediate
+            ? 0
+            : Math.max(0, WELCOME_REPLAY_IDLE_TRIGGER_MS - idleElapsedMs);
         const cooldownDelayMs = Math.max(0, replayState.cooldownUntilMs - nowMs);
         const delayMs = Math.max(idleDelayMs, cooldownDelayMs);
         replayState.pendingActivation = true;
@@ -524,11 +536,11 @@ export function createWelcomeModalController({
             () => {
                 replayState.pendingActivation = false;
                 replayState.activationTimeout = null;
-                if (!canActivateReplayNow()) {
-                    scheduleReplayActivation();
+                if (!canActivateReplayNow({ immediate })) {
+                    scheduleReplayActivation({ immediate });
                     return;
                 }
-                tryActivateReplayPlayback();
+                tryActivateReplayPlayback({ immediate });
             },
             Math.max(0, Math.round(delayMs))
         );
@@ -542,7 +554,8 @@ export function createWelcomeModalController({
         replayState.pendingActivation = false;
     }
 
-    function canActivateReplayNow() {
+    function canActivateReplayNow(options = {}) {
+        const immediate = Boolean(options?.immediate);
         if (
             !replayVideoEl ||
             !replayState.sourceUrl ||
@@ -555,11 +568,15 @@ export function createWelcomeModalController({
         if (nowMs < replayState.cooldownUntilMs) {
             return false;
         }
+        if (immediate) {
+            return true;
+        }
         return nowMs - replayState.lastUserActivityAtMs >= WELCOME_REPLAY_IDLE_TRIGGER_MS;
     }
 
-    function tryActivateReplayPlayback() {
-        if (!canActivateReplayNow()) {
+    function tryActivateReplayPlayback(options = {}) {
+        const immediate = Boolean(options?.immediate);
+        if (!canActivateReplayNow({ immediate })) {
             setReplayActive(false, { pauseVideo: true });
             return;
         }
@@ -577,7 +594,7 @@ export function createWelcomeModalController({
                     replayState.cooldownUntilMs,
                     performance.now() + WELCOME_REPLAY_RESTART_COOLDOWN_MS
                 );
-                scheduleReplayActivation();
+                scheduleReplayActivation({ immediate: true });
             });
     }
 
@@ -648,6 +665,13 @@ export function createWelcomeModalController({
 
     function handleReplayKeydown() {
         registerReplayUserActivity();
+    }
+
+    function handleReplayVideoLoadedData() {
+        if (rootEl.hidden || !replayState.sourceUrl || replayState.active) {
+            return;
+        }
+        scheduleReplayActivation({ immediate: true });
     }
 
     function isReplayPointerMoveSignificant(event) {
