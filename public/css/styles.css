@@ -1357,97 +1357,82 @@ body.race-intro-active #miniMapHud {
     filter: brightness(0.96);
 }
 
-#donateModal {
-    position: fixed;
-    inset: 0;
-    z-index: 13;
+.donateInlineHost {
     display: grid;
-    place-items: center;
-    padding: clamp(10px, 2vw, 20px);
-    background:
-        radial-gradient(circle at 100% 0%, rgba(116, 188, 247, 0.14), rgba(5, 9, 14, 0) 38%),
-        rgba(4, 8, 14, 0.72);
-    backdrop-filter: blur(7px) saturate(1.06);
+    gap: 10px;
 }
 
-#donateModal[hidden] {
+.donateInlineHost:empty {
     display: none;
 }
 
-.donateCard {
-    width: min(620px, calc(100vw - 20px));
+.donateInlinePanel {
+    width: 100%;
     border: 1px solid rgba(153, 198, 235, 0.42);
-    border-radius: 20px;
-    padding: 16px;
+    border-radius: 14px;
+    padding: 11px;
     background:
-        linear-gradient(163deg, rgba(12, 21, 34, 0.96), rgba(8, 13, 22, 0.96)),
-        radial-gradient(circle at 14% 0%, rgba(106, 181, 239, 0.14), transparent 42%);
+        linear-gradient(165deg, rgba(11, 25, 39, 0.92), rgba(8, 16, 27, 0.92)),
+        radial-gradient(circle at 12% 0%, rgba(106, 181, 239, 0.12), transparent 42%);
     box-shadow:
-        0 24px 68px rgba(0, 0, 0, 0.5),
+        0 12px 26px rgba(0, 0, 0, 0.28),
         inset 0 1px 0 rgba(221, 239, 255, 0.06);
     color: rgba(244, 248, 255, 0.98);
     font-family: 'Sora', sans-serif;
     display: grid;
-    gap: 12px;
-    animation: donateCardReveal 220ms cubic-bezier(0.22, 0.82, 0.24, 1) both;
+    gap: 10px;
+    animation: donateInlineReveal 180ms ease both;
 }
 
-.donateHeader {
+.donateInlinePanel[hidden] {
+    display: none;
+}
+
+#welcomeDonatePanelHost {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 7;
+    display: block;
+    pointer-events: none;
+}
+
+#welcomeDonatePanelHost .donateInlinePanel {
+    pointer-events: auto;
+    max-height: min(56vh, 520px);
+    overflow: auto;
+}
+
+.donateInlineHeader {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: 8px;
 }
 
 #donateTitle {
     margin: 0;
-    font-size: clamp(36px, 8vw, 52px);
-    line-height: 0.95;
-    letter-spacing: -0.5px;
-    color: rgba(244, 250, 255, 0.99);
+    font-size: 11px;
+    line-height: 1.1;
+    letter-spacing: 1.2px;
+    color: rgba(201, 228, 245, 0.98);
     font-family: 'Sora', sans-serif;
     font-weight: 800;
-}
-
-.donateIconBtn {
-    border: 1px solid rgba(166, 209, 243, 0.52);
-    border-radius: 12px;
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(180deg, rgba(24, 53, 80, 0.8), rgba(15, 36, 56, 0.8));
-    color: rgba(233, 246, 255, 0.96);
-    font-family: 'Sora', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    cursor: pointer;
-    transition:
-        transform 140ms ease,
-        filter 140ms ease,
-        border-color 140ms ease;
-}
-
-.donateIconBtn:hover {
-    transform: translateY(-1px) scale(1.02);
-    filter: brightness(1.08);
-    border-color: rgba(206, 228, 247, 0.82);
-}
-
-.donateIconBtn:active {
-    transform: translateY(0);
-    filter: brightness(0.96);
+    text-transform: uppercase;
 }
 
 .donateDescription {
     margin: 0;
     color: rgba(207, 225, 241, 0.92);
-    font-size: 15px;
+    font-size: 13px;
     line-height: 1.35;
 }
 
 .donateAmountPanel {
     border: 1px solid rgba(141, 198, 229, 0.36);
-    border-radius: 14px;
-    padding: 10px;
+    border-radius: 11px;
+    padding: 9px;
     background:
         linear-gradient(170deg, rgba(12, 33, 48, 0.66), rgba(8, 22, 34, 0.7)),
         radial-gradient(circle at 0% 0%, rgba(89, 169, 230, 0.12), transparent 42%);
@@ -1506,15 +1491,15 @@ body.race-intro-active #miniMapHud {
 .donateInput,
 .donateTextarea {
     border: 1px solid rgba(149, 189, 220, 0.52);
-    border-radius: 11px;
+    border-radius: 10px;
     background:
         linear-gradient(180deg, rgba(6, 17, 32, 0.8), rgba(6, 16, 30, 0.84)),
         radial-gradient(circle at 50% 0%, rgba(93, 169, 227, 0.1), transparent 40%);
     color: rgba(236, 246, 255, 0.99);
     font-family: 'Sora', sans-serif;
-    font-size: 28px;
+    font-size: 18px;
     font-weight: 600;
-    padding: 11px 12px;
+    padding: 9px 11px;
     line-height: 1.1;
 }
 
@@ -1526,18 +1511,18 @@ body.race-intro-active #miniMapHud {
 }
 
 #donateCustomAmountInput {
-    font-size: 34px;
+    font-size: 24px;
     font-weight: 800;
-    letter-spacing: -0.4px;
-    padding-top: 14px;
-    padding-bottom: 14px;
+    letter-spacing: -0.2px;
+    padding-top: 11px;
+    padding-bottom: 11px;
 }
 
 .donateTextarea {
     resize: vertical;
-    min-height: 92px;
-    max-height: 140px;
-    font-size: 16px;
+    min-height: 82px;
+    max-height: 132px;
+    font-size: 14px;
     line-height: 1.35;
 }
 
@@ -1611,13 +1596,13 @@ body.race-intro-active #miniMapHud {
 
 .donateBtn {
     border: 1px solid rgba(167, 205, 235, 0.58);
-    border-radius: 11px;
-    min-height: 46px;
+    border-radius: 10px;
+    min-height: 42px;
     padding: 0 12px;
     font-family: 'Sora', sans-serif;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 800;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.8px;
     text-transform: uppercase;
     cursor: pointer;
     transition:
@@ -1654,14 +1639,18 @@ body.race-intro-active #miniMapHud {
     filter: none;
 }
 
-@keyframes donateCardReveal {
+.pauseSupportActions .donateInlinePanel {
+    margin-top: 2px;
+}
+
+@keyframes donateInlineReveal {
     0% {
         opacity: 0;
-        transform: translateY(10px) scale(0.99);
+        transform: translateY(5px);
     }
     100% {
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
     }
 }
 
@@ -2589,6 +2578,7 @@ body.race-intro-active #performancePanel {
 }
 
 .welcomeStartActions {
+    position: relative;
     display: grid;
     grid-template-columns: 1fr;
     gap: 12px;
@@ -2693,6 +2683,11 @@ body.race-intro-active #performancePanel {
 
 #welcomeModal[data-launching='true'] .welcomeShell {
     pointer-events: none;
+}
+
+#welcomeModal[data-online-flow-open='true'] #welcomeDonateBtn,
+#welcomeModal[data-online-flow-open='true'] #welcomeDonatePanelHost {
+    display: none !important;
 }
 
 .welcomeLaunchOverlay {
@@ -3314,19 +3309,26 @@ body.race-intro-active #performancePanel {
         font-size: 10px;
     }
 
-    .donateCard {
-        width: calc(100vw - 16px);
-        border-radius: 16px;
-        padding: 12px;
+    .donateInlineHost {
         gap: 8px;
     }
 
+    .donateInlinePanel {
+        border-radius: 12px;
+        padding: 10px;
+    }
+
+    #welcomeDonatePanelHost .donateInlinePanel {
+        max-height: min(60vh, 480px);
+    }
+
     #donateTitle {
-        font-size: clamp(30px, 10vw, 42px);
+        font-size: 10px;
+        letter-spacing: 1.1px;
     }
 
     .donateDescription {
-        font-size: 14px;
+        font-size: 12px;
     }
 
     .donatePresetGrid {
@@ -3339,21 +3341,21 @@ body.race-intro-active #performancePanel {
 
     .donateBtn,
     .donatePresetBtn {
-        min-height: 44px;
+        min-height: 42px;
     }
 
     .donateInput,
     .donateTextarea {
-        font-size: 14px;
-        padding: 11px 12px;
+        font-size: 13px;
+        padding: 10px 11px;
     }
 
     #donateCustomAmountInput {
-        font-size: 28px;
+        font-size: 22px;
     }
 
     .donateTextarea {
-        min-height: 88px;
+        min-height: 80px;
     }
 }
 

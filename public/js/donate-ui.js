@@ -4,6 +4,9 @@ const DONATE_RESULT_QUERY_PARAM = 'donate';
 const DONATE_SESSION_ID_QUERY_PARAM = 'session_id';
 const DONATE_LAST_AMOUNT_STORAGE_KEY = 'silentdrift-donate-last-amount-cents';
 const DONATE_DESCRIPTION_FALLBACK = 'One-time support for Minefield Drift.';
+const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
+const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
+const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
 const DEFAULT_DONATE_EXPERIENCE_CONFIG = Object.freeze({
     enabled: true,
     provider: 'local',
@@ -21,8 +24,9 @@ const DEFAULT_DONATE_EXPERIENCE_CONFIG = Object.freeze({
 export function createDonateUiController({ onStatus = () => {} } = {}) {
     const welcomeDonateBtnEl = document.getElementById('welcomeDonateBtn');
     const pauseDonateBtnEl = document.getElementById('pauseDonateBtn');
-    const modalRootEl = document.getElementById('donateModal');
-    const closeBtnEl = document.getElementById('donateCloseBtn');
+    const welcomePanelHostEl = document.getElementById('welcomeDonatePanelHost');
+    const pausePanelHostEl = document.getElementById('pauseDonatePanelHost');
+    const panelRootEl = document.getElementById('donateInlinePanel');
     const cancelBtnEl = document.getElementById('donateCancelBtn');
     const submitBtnEl = document.getElementById('donateSubmitBtn');
     const descriptionEl = document.getElementById('donateDescription');
@@ -31,12 +35,23 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     const donorNameInputEl = document.getElementById('donateNameInput');
     const donorMessageInputEl = document.getElementById('donateMessageInput');
     const statusEl = document.getElementById('donateStatus');
+    const donateContexts = [
+        {
+            key: 'welcome',
+            buttonEl: welcomeDonateBtnEl,
+            hostEl: welcomePanelHostEl,
+        },
+        {
+            key: 'pause',
+            buttonEl: pauseDonateBtnEl,
+            hostEl: pausePanelHostEl,
+        },
+    ].filter((entry) => entry.buttonEl && entry.hostEl);
 
-    if (!modalRootEl || !submitBtnEl || !statusEl) {
+    if (!panelRootEl || !submitBtnEl || !statusEl || donateContexts.length === 0) {
         return createNoopController();
     }
 
-    const donateButtons = [welcomeDonateBtnEl, pauseDonateBtnEl].filter(Boolean);
     let initialized = false;
     let config = null;
     let selectedPresetAmountCents = null;
@@ -45,6 +60,8 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     let currentConfigAbortController = null;
     let currentSubmitAbortController = null;
     let isRefreshingConfig = false;
+    let activeContextKey = '';
+    let isWelcomeOnlineFlowOpen = false;
 
     return {
         initialize,
@@ -60,13 +77,13 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         }
         initialized = true;
         setButtonsVisible(true);
+        updateButtonExpandedState();
 
-        donateButtons.forEach((buttonEl) => {
-            buttonEl.addEventListener('click', () => {
-                open();
+        donateContexts.forEach((entry) => {
+            entry.buttonEl.addEventListener('click', () => {
+                toggle(entry.key);
             });
         });
-        closeBtnEl?.addEventListener('click', close);
         cancelBtnEl?.addEventListener('click', close);
         submitBtnEl.addEventListener('click', () => {
             void submitDonation();
@@ -75,17 +92,23 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             selectedPresetAmountCents = null;
             syncPresetSelectionUi();
         });
-        modalRootEl.addEventListener('pointerdown', (event) => {
-            if (event.target === modalRootEl) {
-                close();
-            }
-        });
         document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && !modalRootEl.hidden) {
+            if (event.key === 'Escape' && !panelRootEl.hidden) {
                 event.preventDefault();
                 event.stopImmediatePropagation();
                 close();
             }
+        });
+        document.addEventListener(WELCOME_ONLINE_OPEN_EVENT, () => {
+            isWelcomeOnlineFlowOpen = true;
+            if (activeContextKey === 'welcome' && !panelRootEl.hidden) {
+                close();
+            }
+            setButtonsVisible(true);
+        });
+        document.addEventListener(WELCOME_ONLINE_CLOSE_EVENT, () => {
+            isWelcomeOnlineFlowOpen = false;
+            setButtonsVisible(true);
         });
 
         consumeDonationReturnFromUrl();
@@ -119,14 +142,14 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             config = normalizedConfig || createFallbackExperienceConfig();
             setButtonsVisible(true);
             if (config?.enabled) {
-                configureModalForConfig(config);
+                configurePanelForConfig(config);
             }
         } catch (error) {
             if (error?.name !== 'AbortError') {
                 config = createFallbackExperienceConfig();
                 setButtonsVisible(true);
                 if (config?.enabled) {
-                    configureModalForConfig(config);
+                    configurePanelForConfig(config);
                 }
             }
         } finally {
@@ -137,16 +160,27 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         }
     }
 
-    function open() {
+    function open(contextKey = '') {
+        const activeContext = resolveContext(contextKey) || resolveDefaultContext();
+        if (!activeContext) {
+            return;
+        }
+        if (activeContext.key === 'welcome') {
+            document.dispatchEvent(new CustomEvent(WELCOME_DONATE_OPEN_EVENT));
+        }
+        if (panelRootEl.parentElement !== activeContext.hostEl) {
+            activeContext.hostEl.appendChild(panelRootEl);
+        }
+        activeContextKey = activeContext.key;
+        panelRootEl.hidden = false;
+        updateButtonExpandedState();
         if (!config || !config.enabled) {
             config = createFallbackExperienceConfig();
-            configureModalForConfig(config);
-            modalRootEl.hidden = false;
+            configurePanelForConfig(config);
             void refreshConfig();
             return;
         }
-        configureModalForConfig(config);
-        modalRootEl.hidden = false;
+        configurePanelForConfig(config);
         setStatus('', 'muted');
     }
 
@@ -156,14 +190,16 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             currentSubmitAbortController = null;
         }
         setSubmitting(false);
-        modalRootEl.hidden = true;
+        panelRootEl.hidden = true;
+        activeContextKey = '';
+        updateButtonExpandedState();
     }
 
     function isAvailable() {
         return Boolean(config?.enabled);
     }
 
-    function configureModalForConfig(nextConfig) {
+    function configurePanelForConfig(nextConfig) {
         const safeConfig = nextConfig || config;
         if (!safeConfig || !safeConfig.enabled) {
             return;
@@ -264,7 +300,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             if (!config || !config.enabled) {
                 config = createFallbackExperienceConfig();
             }
-            configureModalForConfig(config);
+            configurePanelForConfig(config);
         }
 
         const amountCents = resolveSelectedAmountCents(config);
@@ -363,17 +399,56 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     }
 
     function setButtonsVisible(visible) {
-        donateButtons.forEach((buttonEl) => {
-            buttonEl.hidden = !visible;
-            buttonEl.disabled = false;
+        donateContexts.forEach((entry) => {
+            const shouldHideForWelcomeOnline = entry.key === 'welcome' && isWelcomeOnlineFlowOpen;
+            entry.buttonEl.hidden = !visible || shouldHideForWelcomeOnline;
+            entry.buttonEl.disabled = false;
         });
     }
 
     function setSubmitting(submitting) {
         isSubmitting = Boolean(submitting);
         submitBtnEl.disabled = isSubmitting;
-        cancelBtnEl.disabled = isSubmitting;
-        closeBtnEl.disabled = isSubmitting;
+        if (cancelBtnEl) {
+            cancelBtnEl.disabled = isSubmitting;
+        }
+    }
+
+    function toggle(contextKey) {
+        if (!contextKey) {
+            return;
+        }
+        if (!panelRootEl.hidden && activeContextKey === contextKey) {
+            close();
+            return;
+        }
+        open(contextKey);
+    }
+
+    function resolveContext(contextKey) {
+        if (!contextKey) {
+            return null;
+        }
+        return donateContexts.find((entry) => entry.key === contextKey) || null;
+    }
+
+    function resolveDefaultContext() {
+        if (activeContextKey) {
+            const activeContext = resolveContext(activeContextKey);
+            if (activeContext) {
+                return activeContext;
+            }
+        }
+        const visibleContext = donateContexts.find((entry) => !entry.buttonEl.hidden);
+        return visibleContext || donateContexts[0] || null;
+    }
+
+    function updateButtonExpandedState() {
+        const isOpen = !panelRootEl.hidden;
+        donateContexts.forEach((entry) => {
+            const expanded = isOpen && activeContextKey === entry.key ? 'true' : 'false';
+            entry.buttonEl.setAttribute('aria-expanded', expanded);
+        });
     }
 
     async function startLocalCheckoutFallback(amountCents) {

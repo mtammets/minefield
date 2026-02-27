@@ -29,6 +29,9 @@ const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_REPLAY_IDLE_TRIGGER_MS = 5000;
 const WELCOME_REPLAY_RESTART_COOLDOWN_MS = 900;
 const WELCOME_REPLAY_POINTER_MOVE_THRESHOLD_PX = 10;
+const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
+const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
+const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
 const WELCOME_TAGLINE_VARIANTS = [
     'Master precision driving across high-stakes circuits. Tune your car, out-drift rivals, and climb the online leaderboard.',
     'Own every corner with elite handling, strategic mine plays, and relentless multiplayer competition.',
@@ -262,6 +265,7 @@ export function createWelcomeModalController({
 
     previewCamera.position.copy(previewCameraBasePosition);
     previewCamera.lookAt(previewLookAt);
+    rootEl.dataset.onlineFlowOpen = 'false';
     resetTransitionVisuals();
     setTaglineByIndex(0);
     applySelectedPreset(selectedColorIndex, false);
@@ -274,6 +278,12 @@ export function createWelcomeModalController({
     rootEl.addEventListener('wheel', handleReplayWheel, { passive: true });
     rootEl.addEventListener('touchstart', handleReplayTouchStart, { passive: true });
     document.addEventListener('keydown', handleReplayKeydown);
+    document.addEventListener(WELCOME_DONATE_OPEN_EVENT, () => {
+        if (rootEl.hidden || !hasOnlineStartFlow || onlineModeFlowEl.hidden) {
+            return;
+        }
+        closeOnlineModeFlow({ clearSelection: true });
+    });
     replayVideoEl?.addEventListener('loadeddata', handleReplayVideoLoadedData);
 
     startBtnEl.addEventListener('click', () => {
@@ -1085,8 +1095,10 @@ export function createWelcomeModalController({
         }
         syncOnlinePlayerNameFromStorage();
         onlineModeFlowEl.hidden = false;
+        rootEl.dataset.onlineFlowOpen = 'true';
         startOnlineBtnEl?.setAttribute('aria-expanded', 'true');
         setOnlineRoomAction('create');
+        document.dispatchEvent(new CustomEvent(WELCOME_ONLINE_OPEN_EVENT));
     }
 
     function closeOnlineModeFlow(options = {}) {
@@ -1098,6 +1110,7 @@ export function createWelcomeModalController({
         }
         const { clearSelection = false } = options;
         onlineModeFlowEl.hidden = true;
+        rootEl.dataset.onlineFlowOpen = 'false';
         startOnlineBtnEl?.setAttribute('aria-expanded', 'false');
         if (clearSelection) {
             clearCustomCreateCodeLookup();
@@ -1113,6 +1126,7 @@ export function createWelcomeModalController({
             setCustomCreateCodeStatus('idle', '');
             preferredStartMode = 'bots';
         }
+        document.dispatchEvent(new CustomEvent(WELCOME_ONLINE_CLOSE_EVENT));
     }
 
     function setOnlineRoomAction(nextAction, options = {}) {
