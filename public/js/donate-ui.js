@@ -27,13 +27,10 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     const welcomePanelHostEl = document.getElementById('welcomeDonatePanelHost');
     const pausePanelHostEl = document.getElementById('pauseDonatePanelHost');
     const panelRootEl = document.getElementById('donateInlinePanel');
-    const cancelBtnEl = document.getElementById('donateCancelBtn');
     const submitBtnEl = document.getElementById('donateSubmitBtn');
     const descriptionEl = document.getElementById('donateDescription');
     const presetGridEl = document.getElementById('donatePresetGrid');
     const customAmountInputEl = document.getElementById('donateCustomAmountInput');
-    const donorNameInputEl = document.getElementById('donateNameInput');
-    const donorMessageInputEl = document.getElementById('donateMessageInput');
     const statusEl = document.getElementById('donateStatus');
     const donateContexts = [
         {
@@ -84,7 +81,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
                 toggle(entry.key);
             });
         });
-        cancelBtnEl?.addEventListener('click', close);
         submitBtnEl.addEventListener('click', () => {
             void submitDonation();
         });
@@ -217,13 +213,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             customAmountInputEl.placeholder = String(Math.max(minMajor, 1));
         }
 
-        if (safeConfig.provider === 'link') {
-            submitBtnEl.textContent = 'OPEN DONATE PAGE';
-        } else if (safeConfig.provider === 'local') {
-            submitBtnEl.textContent = 'CONTINUE';
-        } else {
-            submitBtnEl.textContent = 'CONTINUE';
-        }
         submitBtnEl.disabled = false;
 
         renderPresetButtons(safeConfig);
@@ -330,9 +319,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             return;
         }
 
-        const donorAlias = sanitizeNameInput(donorNameInputEl?.value || '');
-        const donorMessage = sanitizeMessageInput(donorMessageInputEl?.value || '');
-
         setSubmitting(true);
         setStatus('Creating secure checkout session...', 'info');
         if (currentSubmitAbortController) {
@@ -349,8 +335,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
                 },
                 body: JSON.stringify({
                     amountCents,
-                    donorAlias,
-                    donorMessage,
                 }),
                 signal: controller.signal,
             });
@@ -409,9 +393,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     function setSubmitting(submitting) {
         isSubmitting = Boolean(submitting);
         submitBtnEl.disabled = isSubmitting;
-        if (cancelBtnEl) {
-            cancelBtnEl.disabled = isSubmitting;
-        }
     }
 
     function toggle(contextKey) {
@@ -600,25 +581,6 @@ function sanitizeText(value, maxLength = 120) {
         .replace(/[\r\n\t]+/g, ' ')
         .replace(/\s+/g, ' ')
         .slice(0, maxLength);
-}
-
-function sanitizeNameInput(value) {
-    return String(value || '')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/[^\p{L}\p{N} ._\-']/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 32);
-}
-
-function sanitizeMessageInput(value) {
-    return String(value || '')
-        .replace(/<[^>]*>/g, ' ')
-        .replace(/[\r\n\t]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .replace(/[\u0000-\u001F\u007F]/g, '')
-        .trim()
-        .slice(0, 180);
 }
 
 function createCurrencyFormatter(currencyCode) {
