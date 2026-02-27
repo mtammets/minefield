@@ -1,25 +1,13 @@
-const DONATE_CONFIG_ENDPOINT = '/api/donate/config';
-const DONATE_CHECKOUT_ENDPOINT = '/api/donate/checkout-session';
-const DONATE_RESULT_QUERY_PARAM = 'donate';
-const DONATE_SESSION_ID_QUERY_PARAM = 'session_id';
-const DONATE_LAST_AMOUNT_STORAGE_KEY = 'silentdrift-donate-last-amount-cents';
-const DONATE_DESCRIPTION_FALLBACK = 'One-time support for Minefield Drift.';
+const DONATE_DESCRIPTION_TEXT = 'One-time support for Minefield Drift.';
+const DONATE_DISABLED_MESSAGE = 'Donations are currently unavailable.';
+const DONATE_CURRENCY = 'usd';
+const DONATE_MIN_AMOUNT_CENTS = 100;
+const DONATE_MAX_AMOUNT_CENTS = 100_000;
+const DONATE_AMOUNT_STEP_CENTS = 100;
+const DONATE_PRESET_AMOUNTS_CENTS = Object.freeze([500, 1000, 2500, 5000]);
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
 const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
-const DEFAULT_DONATE_EXPERIENCE_CONFIG = Object.freeze({
-    enabled: true,
-    provider: 'local',
-    currency: 'usd',
-    minAmountCents: 100,
-    maxAmountCents: 100000,
-    amountStepCents: 100,
-    presetAmountsCents: [500, 1000, 2500, 5000],
-    publicMessage: DONATE_DESCRIPTION_FALLBACK,
-    campaignName: 'Support Minefield Drift',
-    campaignDescription: 'Help fund new tracks, balance updates, and online features.',
-    linkUrl: '',
-});
 
 export function createDonateUiController({ onStatus = () => {} } = {}) {
     const welcomeDonateBtnEl = document.getElementById('welcomeDonateBtn');
@@ -50,13 +38,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     }
 
     let initialized = false;
-    let config = null;
-    let selectedPresetAmountCents = null;
-    let isSubmitting = false;
-    let configRefreshToken = 0;
-    let currentConfigAbortController = null;
-    let currentSubmitAbortController = null;
-    let isRefreshingConfig = false;
+    let selectedPresetAmountCents = DONATE_PRESET_AMOUNTS_CENTS[0] || null;
     let activeContextKey = '';
     let isWelcomeOnlineFlowOpen = false;
 
@@ -73,6 +55,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             return;
         }
         initialized = true;
+        configurePanel();
         setButtonsVisible(true);
         updateButtonExpandedState();
 
@@ -82,7 +65,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             });
         });
         submitBtnEl.addEventListener('click', () => {
-            void submitDonation();
+            submitDonation();
         });
         customAmountInputEl?.addEventListener('input', () => {
             selectedPresetAmountCents = null;
@@ -106,54 +89,10 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             isWelcomeOnlineFlowOpen = false;
             setButtonsVisible(true);
         });
-
-        consumeDonationReturnFromUrl();
-        void refreshConfig();
     }
 
-    async function refreshConfig() {
-        if (isRefreshingConfig) {
-            return;
-        }
-        isRefreshingConfig = true;
-        const token = ++configRefreshToken;
-        if (currentConfigAbortController) {
-            currentConfigAbortController.abort();
-            currentConfigAbortController = null;
-        }
-
-        const controller = new AbortController();
-        currentConfigAbortController = controller;
-        try {
-            const response = await window.fetch(DONATE_CONFIG_ENDPOINT, {
-                method: 'GET',
-                cache: 'no-store',
-                signal: controller.signal,
-            });
-            const payload = await response.json().catch(() => ({}));
-            if (token !== configRefreshToken) {
-                return;
-            }
-            const normalizedConfig = response.ok ? normalizePublicConfig(payload) : null;
-            config = normalizedConfig || createFallbackExperienceConfig();
-            setButtonsVisible(true);
-            if (config?.enabled) {
-                configurePanelForConfig(config);
-            }
-        } catch (error) {
-            if (error?.name !== 'AbortError') {
-                config = createFallbackExperienceConfig();
-                setButtonsVisible(true);
-                if (config?.enabled) {
-                    configurePanelForConfig(config);
-                }
-            }
-        } finally {
-            if (currentConfigAbortController === controller) {
-                currentConfigAbortController = null;
-            }
-            isRefreshingConfig = false;
-        }
+    function refreshConfig() {
+        configurePanel();
     }
 
     function open(contextKey = '') {
@@ -170,76 +109,53 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         activeContextKey = activeContext.key;
         panelRootEl.hidden = false;
         updateButtonExpandedState();
-        if (!config || !config.enabled) {
-            config = createFallbackExperienceConfig();
-            configurePanelForConfig(config);
-            void refreshConfig();
-            return;
-        }
-        configurePanelForConfig(config);
         setStatus('', 'muted');
     }
 
     function close() {
-        if (currentSubmitAbortController) {
-            currentSubmitAbortController.abort();
-            currentSubmitAbortController = null;
-        }
-        setSubmitting(false);
         panelRootEl.hidden = true;
         activeContextKey = '';
         updateButtonExpandedState();
     }
 
     function isAvailable() {
-        return Boolean(config?.enabled);
+        return true;
     }
 
-    function configurePanelForConfig(nextConfig) {
-        const safeConfig = nextConfig || config;
-        if (!safeConfig || !safeConfig.enabled) {
-            return;
-        }
+    function configurePanel() {
+        descriptionEl.textContent = DONATE_DESCRIPTION_TEXT;
 
-        descriptionEl.textContent = resolveDonateDescription(safeConfig.publicMessage);
-
-        const minMajor = centsToMajor(safeConfig.minAmountCents);
-        const maxMajor = centsToMajor(safeConfig.maxAmountCents);
-        const stepMajor = centsToMajor(safeConfig.amountStepCents);
+        const minMajor = centsToMajor(DONATE_MIN_AMOUNT_CENTS);
+        const maxMajor = centsToMajor(DONATE_MAX_AMOUNT_CENTS);
+        const stepMajor = centsToMajor(DONATE_AMOUNT_STEP_CENTS);
         if (customAmountInputEl) {
             customAmountInputEl.min = String(minMajor);
             customAmountInputEl.max = String(maxMajor);
             customAmountInputEl.step = String(stepMajor);
             customAmountInputEl.placeholder = String(Math.max(minMajor, 1));
+            if (!customAmountInputEl.value) {
+                customAmountInputEl.value = centsToMajor(
+                    DONATE_PRESET_AMOUNTS_CENTS[0] || 0
+                ).toFixed(2);
+            }
         }
 
         submitBtnEl.disabled = false;
-
-        renderPresetButtons(safeConfig);
-        const rememberedAmount = readPersistedAmountCents();
-        const fallbackPresetAmount =
-            safeConfig.presetAmountsCents.length > 0 ? safeConfig.presetAmountsCents[0] : null;
-        const preferredAmount =
-            rememberedAmount != null && isAmountAllowed(rememberedAmount, safeConfig)
-                ? rememberedAmount
-                : fallbackPresetAmount;
-        if (Number.isFinite(preferredAmount)) {
-            selectPresetAmount(preferredAmount, { updateInput: true });
+        renderPresetButtons();
+        if (Number.isFinite(selectedPresetAmountCents)) {
+            selectPresetAmount(selectedPresetAmountCents, { updateInput: true });
         }
     }
 
-    function renderPresetButtons(activeConfig) {
+    function renderPresetButtons() {
         if (!presetGridEl) {
             return;
         }
         presetGridEl.textContent = '';
-        const formatter = createCurrencyFormatter(activeConfig.currency);
+        const formatter = createCurrencyFormatter(DONATE_CURRENCY);
 
-        const presetAmounts = Array.isArray(activeConfig.presetAmountsCents)
-            ? activeConfig.presetAmountsCents
-            : [];
-        for (let i = 0; i < presetAmounts.length; i += 1) {
-            const amountCents = Math.round(Number(presetAmounts[i]) || 0);
+        for (let i = 0; i < DONATE_PRESET_AMOUNTS_CENTS.length; i += 1) {
+            const amountCents = Math.round(Number(DONATE_PRESET_AMOUNTS_CENTS[i]) || 0);
             if (amountCents <= 0) {
                 continue;
             }
@@ -279,88 +195,30 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         });
     }
 
-    async function submitDonation() {
-        if (isSubmitting) {
-            return;
-        }
-        if (!config || !config.enabled) {
-            setStatus('Preparing checkout...', 'info');
-            await refreshConfig();
-            if (!config || !config.enabled) {
-                config = createFallbackExperienceConfig();
-            }
-            configurePanelForConfig(config);
-        }
-
-        const amountCents = resolveSelectedAmountCents(config);
+    function submitDonation() {
+        const amountCents = resolveSelectedAmountCents();
         if (!Number.isFinite(amountCents)) {
             setStatus('Enter a valid donation amount.', 'error');
             return;
         }
-        if (!isAmountAllowed(amountCents, config)) {
-            const formatter = createCurrencyFormatter(config.currency);
+
+        if (!isAmountAllowed(amountCents)) {
+            const formatter = createCurrencyFormatter(DONATE_CURRENCY);
             setStatus(
-                `Amount must be between ${formatter.format(centsToMajor(config.minAmountCents))} and ${formatter.format(centsToMajor(config.maxAmountCents))}.`,
+                `Amount must be between ${formatter.format(centsToMajor(DONATE_MIN_AMOUNT_CENTS))} and ${formatter.format(centsToMajor(DONATE_MAX_AMOUNT_CENTS))}.`,
                 'error'
             );
             return;
         }
 
-        if (config.provider === 'link') {
-            if (!config.linkUrl) {
-                await startLocalCheckoutFallback(amountCents);
-                return;
-            }
-            window.location.assign(config.linkUrl);
-            return;
-        }
-        if (config.provider === 'local') {
-            await startLocalCheckoutFallback(amountCents);
-            return;
-        }
-
-        setSubmitting(true);
-        setStatus('Creating secure checkout session...', 'info');
-        if (currentSubmitAbortController) {
-            currentSubmitAbortController.abort();
-            currentSubmitAbortController = null;
-        }
-        const controller = new AbortController();
-        currentSubmitAbortController = controller;
-        try {
-            const response = await window.fetch(DONATE_CHECKOUT_ENDPOINT, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    amountCents,
-                }),
-                signal: controller.signal,
-            });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok || payload?.ok !== true || typeof payload?.redirectUrl !== 'string') {
-                await startLocalCheckoutFallback(amountCents);
-                return;
-            }
-            persistSelectedAmountCents(amountCents);
-            window.location.assign(payload.redirectUrl);
-        } catch (error) {
-            if (error?.name === 'AbortError') {
-                return;
-            }
-            await startLocalCheckoutFallback(amountCents);
-        } finally {
-            if (currentSubmitAbortController === controller) {
-                currentSubmitAbortController = null;
-            }
-        }
+        setStatus(DONATE_DISABLED_MESSAGE, 'info');
+        onStatus(DONATE_DISABLED_MESSAGE, 3200);
     }
 
-    function resolveSelectedAmountCents(activeConfig) {
+    function resolveSelectedAmountCents() {
         if (
             Number.isFinite(selectedPresetAmountCents) &&
-            isAmountAllowed(selectedPresetAmountCents, activeConfig)
+            isAmountAllowed(selectedPresetAmountCents)
         ) {
             return selectedPresetAmountCents;
         }
@@ -369,11 +227,9 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         if (!Number.isFinite(parsedCustom)) {
             return null;
         }
-
-        if (activeConfig.amountStepCents > 0 && parsedCustom % activeConfig.amountStepCents !== 0) {
+        if (parsedCustom % DONATE_AMOUNT_STEP_CENTS !== 0) {
             return null;
         }
-
         return parsedCustom;
     }
 
@@ -388,11 +244,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             entry.buttonEl.hidden = !visible || shouldHideForWelcomeOnline;
             entry.buttonEl.disabled = false;
         });
-    }
-
-    function setSubmitting(submitting) {
-        isSubmitting = Boolean(submitting);
-        submitBtnEl.disabled = isSubmitting;
     }
 
     function toggle(contextKey) {
@@ -431,107 +282,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             entry.buttonEl.setAttribute('aria-expanded', expanded);
         });
     }
-
-    async function startLocalCheckoutFallback(amountCents) {
-        setSubmitting(true);
-        setStatus('Redirecting to checkout...', 'info');
-        persistSelectedAmountCents(amountCents);
-        await wait(380);
-        window.location.assign('/?donate=success');
-    }
-
-    function consumeDonationReturnFromUrl() {
-        let url;
-        try {
-            url = new URL(window.location.href);
-        } catch {
-            return;
-        }
-
-        const donationResult = url.searchParams.get(DONATE_RESULT_QUERY_PARAM);
-        if (!donationResult) {
-            return;
-        }
-
-        if (donationResult === 'success') {
-            onStatus('Thank you for supporting Minefield Drift.', 4200);
-        } else if (donationResult === 'cancel') {
-            onStatus('Donation was canceled.', 2200);
-        }
-
-        url.searchParams.delete(DONATE_RESULT_QUERY_PARAM);
-        url.searchParams.delete(DONATE_SESSION_ID_QUERY_PARAM);
-        const nextQuery = url.searchParams.toString();
-        const nextUrl = `${url.pathname}${nextQuery ? `?${nextQuery}` : ''}${url.hash}`;
-        window.history.replaceState({}, '', nextUrl);
-    }
-}
-
-function normalizePublicConfig(payload) {
-    if (!payload || payload.ok !== true) {
-        return null;
-    }
-    if (payload.enabled !== true) {
-        return null;
-    }
-    const provider =
-        payload.provider === 'stripe' || payload.provider === 'link'
-            ? payload.provider
-            : 'disabled';
-    if (provider === 'disabled') {
-        return null;
-    }
-
-    const minAmountCents = Math.max(1, Math.round(Number(payload.minAmountCents) || 1));
-    const maxAmountCents = Math.max(
-        minAmountCents,
-        Math.round(Number(payload.maxAmountCents) || minAmountCents)
-    );
-    const amountStepCents = Math.max(1, Math.round(Number(payload.amountStepCents) || 1));
-    const presetAmountsCents = normalizePresetAmounts(payload.presetAmountsCents, {
-        minAmountCents,
-        maxAmountCents,
-        amountStepCents,
-    });
-
-    return {
-        enabled: true,
-        provider,
-        currency: sanitizeCurrencyCode(payload.currency, 'usd'),
-        minAmountCents,
-        maxAmountCents,
-        amountStepCents,
-        presetAmountsCents,
-        publicMessage: sanitizeText(payload.publicMessage, 220),
-        campaignName: sanitizeText(payload.campaignName, 72),
-        campaignDescription: sanitizeText(payload.campaignDescription, 220),
-        linkUrl: provider === 'link' ? sanitizeHttpUrl(payload.linkUrl) : '',
-    };
-}
-
-function normalizePresetAmounts(values, { minAmountCents, maxAmountCents, amountStepCents }) {
-    if (!Array.isArray(values)) {
-        return [];
-    }
-
-    const seen = new Set();
-    const normalized = [];
-    for (let i = 0; i < values.length; i += 1) {
-        const amountCents = Math.round(Number(values[i]) || 0);
-        if (amountCents < minAmountCents || amountCents > maxAmountCents) {
-            continue;
-        }
-        if (amountCents % amountStepCents !== 0) {
-            continue;
-        }
-        if (seen.has(amountCents)) {
-            continue;
-        }
-        seen.add(amountCents);
-        normalized.push(amountCents);
-    }
-    normalized.sort((left, right) => left - right);
-    return normalized;
 }
 
 function parseMajorAmountInputToCents(rawValue) {
@@ -549,15 +299,15 @@ function parseMajorAmountInputToCents(rawValue) {
     return Math.round(numeric * 100);
 }
 
-function isAmountAllowed(amountCents, config) {
+function isAmountAllowed(amountCents) {
     const numeric = Math.round(Number(amountCents) || 0);
     if (!Number.isFinite(numeric)) {
         return false;
     }
-    if (numeric < config.minAmountCents || numeric > config.maxAmountCents) {
+    if (numeric < DONATE_MIN_AMOUNT_CENTS || numeric > DONATE_MAX_AMOUNT_CENTS) {
         return false;
     }
-    return numeric % config.amountStepCents === 0;
+    return numeric % DONATE_AMOUNT_STEP_CENTS === 0;
 }
 
 function centsToMajor(amountCents) {
@@ -570,17 +320,6 @@ function sanitizeCurrencyCode(value, fallback = 'usd') {
     }
     const normalized = value.trim().toLowerCase();
     return /^[a-z]{3}$/.test(normalized) ? normalized : fallback;
-}
-
-function sanitizeText(value, maxLength = 120) {
-    if (typeof value !== 'string') {
-        return '';
-    }
-    return value
-        .trim()
-        .replace(/[\r\n\t]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .slice(0, maxLength);
 }
 
 function createCurrencyFormatter(currencyCode) {
@@ -599,43 +338,6 @@ function createCurrencyFormatter(currencyCode) {
     }
 }
 
-function sanitizeHttpUrl(value) {
-    if (typeof value !== 'string' || !value.trim()) {
-        return '';
-    }
-    try {
-        const parsed = new URL(value.trim());
-        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-            return parsed.toString();
-        }
-    } catch {
-        // Ignore malformed URL values.
-    }
-    return '';
-}
-
-function readPersistedAmountCents() {
-    try {
-        const stored = window.localStorage.getItem(DONATE_LAST_AMOUNT_STORAGE_KEY);
-        const numeric = Math.round(Number(stored) || 0);
-        return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
-    } catch {
-        return null;
-    }
-}
-
-function persistSelectedAmountCents(amountCents) {
-    try {
-        const numeric = Math.round(Number(amountCents) || 0);
-        if (!Number.isFinite(numeric) || numeric <= 0) {
-            return;
-        }
-        window.localStorage.setItem(DONATE_LAST_AMOUNT_STORAGE_KEY, String(numeric));
-    } catch {
-        // localStorage is optional.
-    }
-}
-
 function createNoopController() {
     return {
         initialize() {},
@@ -646,28 +348,4 @@ function createNoopController() {
             return false;
         },
     };
-}
-
-function createFallbackExperienceConfig() {
-    return {
-        ...DEFAULT_DONATE_EXPERIENCE_CONFIG,
-        presetAmountsCents: DEFAULT_DONATE_EXPERIENCE_CONFIG.presetAmountsCents.slice(),
-    };
-}
-
-function resolveDonateDescription(value) {
-    const normalized = sanitizeText(value, 110);
-    if (!normalized) {
-        return DONATE_DESCRIPTION_FALLBACK;
-    }
-    if (normalized.length <= 48) {
-        return normalized;
-    }
-    return DONATE_DESCRIPTION_FALLBACK;
-}
-
-function wait(ms) {
-    return new Promise((resolve) => {
-        window.setTimeout(resolve, Math.max(0, Math.round(Number(ms) || 0)));
-    });
 }
