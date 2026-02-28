@@ -11,6 +11,8 @@ const DONATE_CHECKOUT_FAILED_MESSAGE = 'Could not start secure checkout. Try aga
 const DONATE_CHECKOUT_TIMEOUT_MESSAGE = 'Secure checkout timed out. Try again.';
 const DONATE_SUCCESS_STATUS = 'Donation completed. Thank you for supporting Minefield Drift.';
 const DONATE_CANCELED_STATUS = 'Donation checkout was canceled.';
+const DONATE_SUBMIT_DEFAULT_LABEL = 'Donate';
+const DONATE_SUBMIT_PENDING_LABEL = 'Opening checkout...';
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
 const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
@@ -26,6 +28,11 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     const presetGridEl = document.getElementById('donatePresetGrid');
     const customAmountInputEl = document.getElementById('donateCustomAmountInput');
     const statusEl = document.getElementById('donateStatus');
+    const submitBaseLabel =
+        String(submitBtnEl?.textContent || '')
+            .trim()
+            .replace(/\s+/g, ' ') || DONATE_SUBMIT_DEFAULT_LABEL;
+    const currencyFormatter = createCurrencyFormatter(DONATE_CURRENCY);
     const donateContexts = [
         {
             key: 'welcome',
@@ -78,6 +85,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         customAmountInputEl?.addEventListener('input', () => {
             selectedPresetAmountCents = null;
             syncPresetSelectionUi();
+            updateSubmitButtonLabel();
         });
         document.addEventListener('keydown', (event) => {
             if (event.key === 'Escape' && !panelRootEl.hidden) {
@@ -153,6 +161,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         if (Number.isFinite(selectedPresetAmountCents)) {
             selectPresetAmount(selectedPresetAmountCents, { updateInput: true });
         }
+        updateSubmitButtonLabel();
     }
 
     function renderPresetButtons() {
@@ -186,6 +195,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             customAmountInputEl.value = centsToMajor(selectedPresetAmountCents).toFixed(2);
         }
         syncPresetSelectionUi();
+        updateSubmitButtonLabel();
     }
 
     function syncPresetSelectionUi() {
@@ -293,6 +303,24 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         isSubmittingDonation = Boolean(isPending);
         submitBtnEl.disabled = isSubmittingDonation;
         submitBtnEl.setAttribute('aria-busy', isSubmittingDonation ? 'true' : 'false');
+        updateSubmitButtonLabel();
+    }
+
+    function updateSubmitButtonLabel() {
+        if (isSubmittingDonation) {
+            submitBtnEl.textContent = DONATE_SUBMIT_PENDING_LABEL;
+            submitBtnEl.setAttribute('aria-label', DONATE_SUBMIT_PENDING_LABEL);
+            return;
+        }
+        const amountCents = resolveSelectedAmountCents();
+        if (Number.isFinite(amountCents) && isAmountAllowed(amountCents)) {
+            const nextLabel = `Donate ${currencyFormatter.format(centsToMajor(amountCents))}`;
+            submitBtnEl.textContent = nextLabel;
+            submitBtnEl.setAttribute('aria-label', nextLabel);
+            return;
+        }
+        submitBtnEl.textContent = submitBaseLabel;
+        submitBtnEl.setAttribute('aria-label', submitBaseLabel);
     }
 
     function applyReturnStatusFromLocation() {
