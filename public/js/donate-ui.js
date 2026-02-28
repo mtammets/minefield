@@ -1,6 +1,6 @@
 const DONATE_DESCRIPTION_TEXT = 'One-time support for Minefield Drift.';
 const DONATE_CHECKOUT_ENDPOINT_PATH = '/api/donate/checkout-session';
-const DONATE_CURRENCY = 'usd';
+const DONATE_CURRENCY = 'eur';
 const DONATE_MIN_AMOUNT_CENTS = 100;
 const DONATE_MAX_AMOUNT_CENTS = 100_000;
 const DONATE_AMOUNT_STEP_CENTS = 100;
@@ -399,7 +399,7 @@ function centsToMajor(amountCents) {
     return Math.round(Number(amountCents) || 0) / 100;
 }
 
-function sanitizeCurrencyCode(value, fallback = 'usd') {
+function sanitizeCurrencyCode(value, fallback = 'eur') {
     if (typeof value !== 'string') {
         return fallback;
     }
@@ -411,7 +411,7 @@ function createCurrencyFormatter(currencyCode) {
     try {
         return new Intl.NumberFormat(undefined, {
             style: 'currency',
-            currency: sanitizeCurrencyCode(currencyCode, 'usd').toUpperCase(),
+            currency: sanitizeCurrencyCode(currencyCode, 'eur').toUpperCase(),
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
         });

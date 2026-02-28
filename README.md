@@ -20,7 +20,7 @@ STRIPE_SECRET_KEY=sk_test_...
 # Optional. Recommended in production behind a proxy/CDN.
 STRIPE_DONATE_BASE_URL=https://your-domain.example
 # Optional overrides:
-STRIPE_DONATE_CURRENCY=usd
+STRIPE_DONATE_CURRENCY=eur
 STRIPE_DONATE_PRODUCT_NAME="Support Minefield Drift"
 ```
 

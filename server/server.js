@@ -63,7 +63,7 @@ const IP_RATE_STORE_PRUNE_INTERVAL_MS = 30_000;
 const DONATE_MIN_AMOUNT_CENTS = 100;
 const DONATE_MAX_AMOUNT_CENTS = 100_000;
 const DONATE_AMOUNT_STEP_CENTS = 100;
-const DONATE_CURRENCY = sanitizeCurrencyCode(process.env.STRIPE_DONATE_CURRENCY || 'usd', 'usd');
+const DONATE_CURRENCY = sanitizeCurrencyCode(process.env.STRIPE_DONATE_CURRENCY || 'eur', 'eur');
 const DONATE_PRODUCT_NAME = sanitizeCheckoutText(
     process.env.STRIPE_DONATE_PRODUCT_NAME || 'Support Minefield Drift'
 );
@@ -182,6 +182,7 @@ app.post('/api/donate/checkout-session', async (req, res) => {
         const checkoutSession = await stripeClient.checkout.sessions.create({
             mode: 'payment',
             submit_type: 'donate',
+            locale: 'en',
             payment_method_types: ['card'],
             line_items: [
                 {
@@ -986,7 +987,7 @@ function sanitizeStripeSecretKey(value) {
     return normalized;
 }
 
-function sanitizeCurrencyCode(value, fallback = 'usd') {
+function sanitizeCurrencyCode(value, fallback = 'eur') {
     if (typeof value !== 'string') {
         return fallback;
     }

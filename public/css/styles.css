@@ -1569,25 +1569,6 @@ body.race-intro-active #miniMapHud {
     appearance: none;
 }
 
-.donateApplePayWordmark {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.donateApplePayIcon {
-    width: 17px;
-    height: 17px;
-    display: block;
-}
-
-.donateApplePayText {
-    font-size: 20px;
-    font-weight: 500;
-    letter-spacing: -0.2px;
-    line-height: 1;
-}
-
 .donateBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.08);
