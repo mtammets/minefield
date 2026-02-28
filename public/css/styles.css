@@ -1545,8 +1545,87 @@ body.race-intro-active #miniMapHud {
 .donateActions {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 0;
+    gap: 6px;
 }
+
+.donateSecurityNote {
+    text-align: center;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    color: rgba(168, 203, 227, 0.84);
+}
+
+.donatePaymentBadges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+
+.donatePaymentBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 22px;
+    padding: 0 9px;
+    border: 1px solid rgba(154, 195, 225, 0.34);
+    border-radius: 999px;
+    background: rgba(9, 25, 42, 0.72);
+    color: rgba(219, 236, 251, 0.95);
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.18px;
+    line-height: 1;
+}
+
+.donatePaymentBadgeApplePay {
+    border-color: rgba(255, 255, 255, 0.35);
+    background: #080808;
+    color: rgba(246, 246, 246, 0.98);
+}
+
+.donateAppleIcon {
+    width: 9px;
+    height: 12px;
+    fill: currentColor;
+}
+
+.donatePaymentBadgeVisa {
+    color: rgba(206, 225, 255, 0.96);
+    border-color: rgba(122, 168, 230, 0.56);
+    background: rgba(8, 35, 72, 0.72);
+    letter-spacing: 0.46px;
+}
+
+.donateMastercardMark {
+    position: relative;
+    width: 14px;
+    height: 10px;
+    display: inline-block;
+}
+
+.donateMastercardCircle {
+    position: absolute;
+    top: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.donateMastercardCircleLeft {
+    left: 0;
+    background: rgba(236, 73, 71, 0.92);
+}
+
+.donateMastercardCircleRight {
+    right: 0;
+    background: rgba(245, 157, 54, 0.9);
+}
+
 
 .donateBtn {
     border: 1px solid rgba(170, 208, 236, 0.48);
@@ -3346,6 +3425,12 @@ body.race-intro-active #performancePanel {
 
     .donateActions {
         grid-template-columns: 1fr;
+    }
+
+    .donatePaymentBadge {
+        min-height: 20px;
+        padding: 0 8px;
+        font-size: 9px;
     }
 
     .donateBtn,
