@@ -1508,6 +1508,14 @@ body.race-intro-active #miniMapHud {
     letter-spacing: -0.1px;
     padding-top: 11px;
     padding-bottom: 11px;
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
+#donateCustomAmountInput::-webkit-outer-spin-button,
+#donateCustomAmountInput::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
 }
 
 .donateStatus {
@@ -2858,6 +2866,48 @@ body.race-intro-active #performancePanel {
     gap: 8px;
 }
 
+.welcomeMetaFooter {
+    margin-top: auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(152, 196, 226, 0.26);
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.18px;
+    color: rgba(170, 204, 228, 0.86);
+}
+
+.welcomeMetaBullet {
+    opacity: 0.6;
+}
+
+.welcomeMetaLink {
+    color: rgba(188, 220, 244, 0.88);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(188, 220, 244, 0.22);
+    transition:
+        color 120ms ease,
+        border-color 120ms ease,
+        filter 120ms ease;
+}
+
+.welcomeMetaLink:hover {
+    color: rgba(228, 243, 255, 0.98);
+    border-color: rgba(228, 243, 255, 0.68);
+    filter: brightness(1.04);
+}
+
+.welcomeMetaLink:focus-visible {
+    outline: none;
+    border-color: rgba(228, 243, 255, 0.78);
+    box-shadow: 0 0 0 2px rgba(154, 210, 246, 0.22);
+    border-radius: 4px;
+}
+
 .welcomeOnlineModeContinueBtn {
     position: relative;
     overflow: hidden;
@@ -3209,6 +3259,18 @@ body.race-intro-active #performancePanel {
     .welcomeOnlineModeChoiceRow,
     .welcomeOnlineModeActions {
         grid-template-columns: 1fr;
+    }
+
+    .welcomeMetaFooter {
+        gap: 6px;
+        padding-top: 8px;
+        font-size: 10px;
+        letter-spacing: 0.12px;
+        justify-content: center;
+    }
+
+    .welcomeMetaBullet {
+        display: none;
     }
 
     .welcomeShowroomBay {
