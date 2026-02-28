@@ -86,6 +86,17 @@ const HTTP_CONTENT_SECURITY_POLICY = [
     "base-uri 'self'",
     "object-src 'none'",
 ].join('; ');
+const HTTP_PERMISSIONS_POLICY = [
+    'accelerometer=()',
+    'camera=()',
+    'geolocation=()',
+    'gyroscope=()',
+    'magnetometer=()',
+    'microphone=()',
+    'payment=()',
+    'usb=()',
+].join(', ');
+const HTTP_STRICT_TRANSPORT_SECURITY = 'max-age=31536000; includeSubDomains';
 
 const EVENT_RATE_LIMITS = {
     'mp:createRoom': { windowMs: 10_000, max: 8 },
@@ -119,6 +130,8 @@ app.use((req, res, next) => {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader('Permissions-Policy', HTTP_PERMISSIONS_POLICY);
+    res.setHeader('Strict-Transport-Security', HTTP_STRICT_TRANSPORT_SECURITY);
     res.setHeader('Content-Security-Policy', HTTP_CONTENT_SECURITY_POLICY);
     next();
 });
