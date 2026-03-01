@@ -29,6 +29,9 @@ const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_REPLAY_IDLE_TRIGGER_MS = 5000;
 const WELCOME_REPLAY_RESTART_COOLDOWN_MS = 900;
 const WELCOME_REPLAY_POINTER_MOVE_THRESHOLD_PX = 10;
+const WELCOME_PREVIEW_LOADING_MIN_VISIBLE_MS = 700;
+const WELCOME_PREVIEW_LOADING_FADE_MS = 420;
+const WELCOME_PREVIEW_LOADING_SOFT_CAP = 0.94;
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
 const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
@@ -79,6 +82,11 @@ export function createWelcomeModalController({
     const launchPercentEl = document.getElementById('welcomeLaunchPercent');
     const previewShellEl = document.getElementById('welcomePreviewShell');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
+    const previewLoadingEl = document.getElementById('welcomePreviewLoading');
+    const previewLoadingStatusEl = document.getElementById('welcomePreviewLoadingStatus');
+    const previewLoadingProgressEl = document.getElementById('welcomePreviewLoadingProgress');
+    const previewLoadingFillEl = document.getElementById('welcomePreviewLoadingFill');
+    const previewLoadingPercentEl = document.getElementById('welcomePreviewLoadingPercent');
     const replayVideoEl = document.getElementById('welcomeReplayVideo');
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
@@ -179,6 +187,18 @@ export function createWelcomeModalController({
         token: 0,
         progress: 0,
     };
+    const previewLoadingState = {
+        active: Boolean(previewLoadingEl && previewLoadingFillEl),
+        ready: false,
+        hidden: false,
+        readyRafHandle: null,
+        rafHandle: null,
+        hideTimeoutHandle: null,
+        startedAtMs: 0,
+        lastFrameAtMs: 0,
+        progress: 0,
+        targetProgress: 0,
+    };
     const hasOnlineStartFlow = Boolean(
         startActionsEl &&
         onlineModeFlowEl &&
@@ -272,6 +292,8 @@ export function createWelcomeModalController({
     resetStartSequenceUi();
     bindVehicleButtons();
     setReplayShellState(false);
+    initializePreviewLoadingUi();
+    startPreviewLoadingAnimation();
     replayState.lastUserActivityAtMs = performance.now();
     rootEl.addEventListener('pointerdown', handleReplayPointerDown, { passive: true });
     rootEl.addEventListener('pointermove', handleReplayPointerMove, { passive: true });
@@ -368,6 +390,7 @@ export function createWelcomeModalController({
             updateShowroomAtmosphere(0);
             applyPreviewPose();
             renderPreview();
+            schedulePreviewLoadingReady();
             const nowMs = performance.now();
             replayState.lastUserActivityAtMs = nowMs;
             if (replayState.sourceUrl) {
@@ -393,6 +416,7 @@ export function createWelcomeModalController({
             syncPreviewSize();
             if (!rootEl.hidden) {
                 renderPreview();
+                schedulePreviewLoadingReady();
             }
         },
         update(dt) {
@@ -409,6 +433,7 @@ export function createWelcomeModalController({
             updateTaglineRotation(frameDt);
             applyPreviewPose();
             renderPreview();
+            schedulePreviewLoadingReady();
         },
         isVisible() {
             return !rootEl.hidden;
@@ -722,6 +747,195 @@ export function createWelcomeModalController({
             return;
         }
         previewShellEl.dataset.replayActive = active ? 'true' : 'false';
+    }
+
+    function initializePreviewLoadingUi() {
+        if (previewShellEl) {
+            previewShellEl.dataset.previewLoading = previewLoadingState.active ? 'true' : 'false';
+        }
+        if (!previewLoadingState.active) {
+            return;
+        }
+        previewLoadingState.hidden = false;
+        previewLoadingState.ready = false;
+        previewLoadingEl.hidden = false;
+        previewLoadingEl.classList.remove('is-hiding');
+        previewLoadingEl.setAttribute('aria-hidden', 'false');
+        setPreviewLoadingProgress(0);
+    }
+
+    function startPreviewLoadingAnimation() {
+        if (!previewLoadingState.active || previewLoadingState.hidden) {
+            return;
+        }
+        if (previewLoadingState.rafHandle != null) {
+            return;
+        }
+        const nowMs = performance.now();
+        previewLoadingState.startedAtMs = nowMs;
+        previewLoadingState.lastFrameAtMs = nowMs;
+        previewLoadingState.progress = 0;
+        previewLoadingState.targetProgress = 0;
+        previewLoadingState.rafHandle = window.requestAnimationFrame(updatePreviewLoadingFrame);
+    }
+
+    function schedulePreviewLoadingReady() {
+        if (
+            !previewLoadingState.active ||
+            previewLoadingState.hidden ||
+            previewLoadingState.ready
+        ) {
+            return;
+        }
+        if (previewLoadingState.readyRafHandle != null) {
+            return;
+        }
+        previewLoadingState.readyRafHandle = window.requestAnimationFrame(() => {
+            previewLoadingState.readyRafHandle = null;
+            markPreviewLoadingReady();
+        });
+    }
+
+    function markPreviewLoadingReady() {
+        if (
+            !previewLoadingState.active ||
+            previewLoadingState.hidden ||
+            previewLoadingState.ready
+        ) {
+            return;
+        }
+        previewLoadingState.ready = true;
+        previewLoadingState.targetProgress = 1;
+        if (previewLoadingState.rafHandle == null) {
+            previewLoadingState.lastFrameAtMs = performance.now();
+            previewLoadingState.rafHandle = window.requestAnimationFrame(updatePreviewLoadingFrame);
+        }
+    }
+
+    function updatePreviewLoadingFrame(nowMs = performance.now()) {
+        previewLoadingState.rafHandle = null;
+        if (!previewLoadingState.active || previewLoadingState.hidden) {
+            return;
+        }
+
+        const elapsedMs = Math.max(0, nowMs - previewLoadingState.startedAtMs);
+        const dtSec = Math.max(
+            1 / 240,
+            Math.min(0.22, Math.max(0, nowMs - previewLoadingState.lastFrameAtMs) / 1000)
+        );
+        previewLoadingState.lastFrameAtMs = nowMs;
+
+        if (previewLoadingState.ready) {
+            previewLoadingState.targetProgress = 1;
+        } else {
+            const softProgress = resolvePreviewLoadingSoftProgress(elapsedMs);
+            previewLoadingState.targetProgress = Math.min(
+                WELCOME_PREVIEW_LOADING_SOFT_CAP,
+                Math.max(previewLoadingState.targetProgress, softProgress)
+            );
+        }
+
+        const catchupRate = previewLoadingState.ready ? 11 : 4.2;
+        const smoothing = 1 - Math.exp(-catchupRate * dtSec);
+        previewLoadingState.progress = clampNumber(
+            previewLoadingState.progress +
+                (previewLoadingState.targetProgress - previewLoadingState.progress) * smoothing,
+            0,
+            1
+        );
+        setPreviewLoadingProgress(previewLoadingState.progress);
+
+        const minVisibleReached = elapsedMs >= WELCOME_PREVIEW_LOADING_MIN_VISIBLE_MS;
+        if (
+            previewLoadingState.ready &&
+            minVisibleReached &&
+            previewLoadingState.progress >= 0.995
+        ) {
+            hidePreviewLoadingUi();
+            return;
+        }
+
+        previewLoadingState.rafHandle = window.requestAnimationFrame(updatePreviewLoadingFrame);
+    }
+
+    function resolvePreviewLoadingSoftProgress(elapsedMs) {
+        const t = Math.max(0, elapsedMs);
+        if (t <= 460) {
+            return 0.1 + easeOutCubic(t / 460) * 0.34;
+        }
+        if (t <= 1320) {
+            return 0.44 + easeOutCubic((t - 460) / 860) * 0.28;
+        }
+        if (t <= 2450) {
+            return 0.72 + easeOutCubic((t - 1320) / 1130) * 0.16;
+        }
+        const tail = 1 - Math.exp(-(t - 2450) / 2800);
+        return 0.88 + tail * 0.06;
+    }
+
+    function hidePreviewLoadingUi() {
+        if (!previewLoadingState.active || previewLoadingState.hidden) {
+            return;
+        }
+        previewLoadingState.hidden = true;
+        previewLoadingState.progress = 1;
+        previewLoadingState.targetProgress = 1;
+        if (previewLoadingState.rafHandle != null) {
+            window.cancelAnimationFrame(previewLoadingState.rafHandle);
+        }
+        previewLoadingState.rafHandle = null;
+        if (previewLoadingState.readyRafHandle != null) {
+            window.cancelAnimationFrame(previewLoadingState.readyRafHandle);
+        }
+        previewLoadingState.readyRafHandle = null;
+        if (previewLoadingState.hideTimeoutHandle != null) {
+            window.clearTimeout(previewLoadingState.hideTimeoutHandle);
+        }
+        if (previewShellEl) {
+            previewShellEl.dataset.previewLoading = 'false';
+        }
+        previewLoadingEl.classList.add('is-hiding');
+        previewLoadingEl.setAttribute('aria-hidden', 'true');
+        previewLoadingState.hideTimeoutHandle = window.setTimeout(() => {
+            previewLoadingState.hideTimeoutHandle = null;
+            previewLoadingEl.hidden = true;
+        }, WELCOME_PREVIEW_LOADING_FADE_MS);
+    }
+
+    function setPreviewLoadingProgress(nextProgress) {
+        if (!previewLoadingState.active) {
+            return;
+        }
+        const progress = clampNumber(nextProgress, 0, 1);
+        const percent = Math.round(progress * 100);
+        if (previewLoadingFillEl) {
+            previewLoadingFillEl.style.width = `${percent}%`;
+        }
+        if (previewLoadingPercentEl) {
+            previewLoadingPercentEl.textContent = `${percent}%`;
+        }
+        if (previewLoadingProgressEl) {
+            previewLoadingProgressEl.setAttribute('aria-valuenow', String(percent));
+        }
+        if (previewLoadingStatusEl) {
+            previewLoadingStatusEl.textContent = resolvePreviewLoadingStatus(progress);
+        }
+    }
+
+    function resolvePreviewLoadingStatus(progress) {
+        if (previewLoadingState.ready || progress >= 0.98) {
+            return 'Showroom synchronized.';
+        }
+        if (progress >= 0.82) {
+            return 'Calibrating camera and reflections...';
+        }
+        if (progress >= 0.58) {
+            return 'Linking drivetrain and lighting stacks...';
+        }
+        if (progress >= 0.34) {
+            return 'Assembling body shell and wheel rig...';
+        }
+        return 'Synchronizing vehicle systems...';
     }
 
     async function beginStartSequence(mode, startContext = null) {

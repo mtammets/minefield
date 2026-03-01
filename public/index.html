@@ -37,7 +37,12 @@
                         <button id="welcomeStartOnlineBtn" type="button">
                             PLAY ONLINE <span aria-hidden="true">↗</span>
                         </button>
-                        <button id="welcomeDonateBtn" type="button" aria-label="Open donation panel" hidden>
+                        <button
+                            id="welcomeDonateBtn"
+                            type="button"
+                            aria-label="Open donation panel"
+                            hidden
+                        >
                             SUPPORT THE GAME <span aria-hidden="true">❤</span>
                         </button>
                         <div id="welcomeDonatePanelHost" class="donateInlineHost"></div>
@@ -117,6 +122,35 @@
                     </div>
                 </section>
                 <section id="welcomePreviewShell" class="welcomeShowroomBay">
+                    <div
+                        id="welcomePreviewLoading"
+                        class="welcomePreviewLoading"
+                        role="status"
+                        aria-live="polite"
+                        aria-label="Preparing showroom preview"
+                    >
+                        <div class="welcomePreviewLoadingKicker">SHOWROOM BOOT</div>
+                        <div id="welcomePreviewLoadingStatus" class="welcomePreviewLoadingStatus">
+                            Synchronizing vehicle systems...
+                        </div>
+                        <div
+                            id="welcomePreviewLoadingProgress"
+                            class="welcomePreviewLoadingProgress"
+                            role="progressbar"
+                            aria-label="Vehicle preview loading progress"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow="0"
+                        >
+                            <div
+                                id="welcomePreviewLoadingFill"
+                                class="welcomePreviewLoadingFill"
+                            ></div>
+                        </div>
+                        <div id="welcomePreviewLoadingPercent" class="welcomePreviewLoadingPercent">
+                            0%
+                        </div>
+                    </div>
                     <button
                         id="welcomeVehiclePrevBtn"
                         class="welcomeVehicleNav welcomeVehicleNavPrev"
@@ -390,7 +424,11 @@
                 </button>
                 <div class="donateSecurityNote">Secure Stripe checkout • one-time payment</div>
                 <div class="donatePaymentBadges" aria-label="Supported card brands">
-                    <span class="donatePaymentBadge donatePaymentBadgeVisa" role="img" aria-label="Visa">
+                    <span
+                        class="donatePaymentBadge donatePaymentBadgeVisa"
+                        role="img"
+                        aria-label="Visa"
+                    >
                         VISA
                     </span>
                     <span
@@ -399,12 +437,8 @@
                         aria-label="Mastercard"
                     >
                         <span class="donateMastercardMark" aria-hidden="true">
-                            <span
-                                class="donateMastercardCircle donateMastercardCircleLeft"
-                            ></span>
-                            <span
-                                class="donateMastercardCircle donateMastercardCircleRight"
-                            ></span>
+                            <span class="donateMastercardCircle donateMastercardCircleLeft"></span>
+                            <span class="donateMastercardCircle donateMastercardCircleRight"></span>
                         </span>
                     </span>
                     <span
@@ -421,7 +455,11 @@
                     >
                         <span class="donateDiscoverMark" aria-hidden="true">DISC</span>
                     </span>
-                    <span class="donatePaymentBadge donatePaymentBadgeJcb" role="img" aria-label="JCB">
+                    <span
+                        class="donatePaymentBadge donatePaymentBadgeJcb"
+                        role="img"
+                        aria-label="JCB"
+                    >
                         <span class="donateJcbMark" aria-hidden="true">
                             <span class="donateJcbPill donateJcbPillBlue">J</span>
                             <span class="donateJcbPill donateJcbPillRed">C</span>
