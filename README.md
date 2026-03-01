@@ -32,6 +32,22 @@ Notes:
 - Apple Pay availability is controlled by Stripe and end-user device/browser support.
 - In production, configure your site domain in Stripe Dashboard under Apple Pay wallet settings.
 
+## Google Analytics 4 (Optional, Consent-Gated)
+
+Set this environment variable to enable GA4:
+
+```bash
+GA_MEASUREMENT_ID=G-XXXXXXXXXX
+```
+
+How it works:
+
+- Frontend fetches `GET /api/public-config` to read the GA measurement ID.
+- A cookie consent banner is shown before loading Google Analytics.
+- GA script is loaded only after user accepts analytics cookies.
+- Consent choice is stored in `localStorage` (`minefield-cookie-consent-v1`).
+- If `GA_MEASUREMENT_ID` is not set, analytics and consent UI stay disabled.
+
 ## Online Multiplayer
 
 - Multiplayer runs over Socket.IO on the same Node server.
@@ -111,6 +127,7 @@ npm run check
 - `public/index.html`: application shell and HUD containers
 - `public/css/styles.css`: all UI and overlay styles
 - `public/js/main.js`: entrypoint
+- `public/js/analytics-consent.js`: GA4 consent flow and runtime tracking API
 - `public/js/game-runtime.js`: runtime composition/wiring
 - `public/js/game-loop-controller.js`: render/update loop
 - `public/js/game-session-flow.js`: game lifecycle/session flow

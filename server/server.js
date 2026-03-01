@@ -70,18 +70,21 @@ const DONATE_PRODUCT_NAME = sanitizeCheckoutText(
 const DONATE_PUBLIC_BASE_URL = sanitizeHttpOrigin(process.env.STRIPE_DONATE_BASE_URL || '');
 const STRIPE_SECRET_KEY = sanitizeStripeSecretKey(process.env.STRIPE_SECRET_KEY || '');
 const stripeClient = createStripeClient(STRIPE_SECRET_KEY);
+const GA_MEASUREMENT_ID = sanitizeGaMeasurementId(
+    process.env.GA_MEASUREMENT_ID || process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID || ''
+);
 
 const SOCKET_ALLOWED_ORIGINS = parseAllowedOriginList(
     process.env.SOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || ''
 );
 const HTTP_CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
-    "script-src 'self' https://cdn.jsdelivr.net",
+    "script-src 'self' https://cdn.jsdelivr.net https://www.googletagmanager.com",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    "img-src 'self' data: blob: https://www.google-analytics.com https://stats.g.doubleclick.net",
     "media-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' ws: wss:",
+    "connect-src 'self' ws: wss: https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "object-src 'none'",
@@ -142,6 +145,16 @@ app.get('/api/ping', (req, res) => {
     res.json({
         message: 'Server is running!',
         rooms: rooms.size,
+    });
+});
+
+app.get('/api/public-config', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+        ok: true,
+        analytics: {
+            gaMeasurementId: GA_MEASUREMENT_ID || null,
+        },
     });
 });
 
@@ -998,6 +1011,14 @@ function sanitizeStripeSecretKey(value) {
         return '';
     }
     return normalized;
+}
+
+function sanitizeGaMeasurementId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toUpperCase();
+    return /^G-[A-Z0-9]{6,20}$/.test(normalized) ? normalized : '';
 }
 
 function sanitizeCurrencyCode(value, fallback = 'eur') {
