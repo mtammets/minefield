@@ -449,12 +449,8 @@ export function createInputController(options = {}) {
         if (document.fullscreenElement) {
             clearFullscreenCursorHideTimeout();
             resetFullscreenCursorPointerSample();
-            if (isGameplayCursorLockActive()) {
-                hideFullscreenCursor();
-            } else {
-                showFullscreenCursor();
-                scheduleFullscreenCursorHide();
-            }
+            showFullscreenCursor();
+            scheduleFullscreenCursorHide();
             void lockEscapeKeyInFullscreen();
             return;
         }
@@ -472,16 +468,6 @@ export function createInputController(options = {}) {
 
     function handleFullscreenCursorPointerMove(event) {
         if (!document.fullscreenElement) {
-            return;
-        }
-        if (isGameplayCursorLockActive()) {
-            clearFullscreenCursorHideTimeout();
-            hideFullscreenCursor();
-            return;
-        }
-        if (shouldKeepCursorVisible()) {
-            showFullscreenCursor();
-            clearFullscreenCursorHideTimeout();
             return;
         }
 
@@ -514,11 +500,6 @@ export function createInputController(options = {}) {
         if (!document.fullscreenElement) {
             return;
         }
-        if (isGameplayCursorLockActive()) {
-            clearFullscreenCursorHideTimeout();
-            hideFullscreenCursor();
-            return;
-        }
         if (event?.type === 'keydown') {
             return;
         }
@@ -531,24 +512,9 @@ export function createInputController(options = {}) {
         if (!document.fullscreenElement) {
             return;
         }
-        if (isGameplayCursorLockActive()) {
-            hideFullscreenCursor();
-            return;
-        }
-        if (shouldKeepCursorVisible()) {
-            return;
-        }
         fullscreenCursorHideTimeout = window.setTimeout(() => {
             fullscreenCursorHideTimeout = null;
             if (!document.fullscreenElement) {
-                return;
-            }
-            if (isGameplayCursorLockActive()) {
-                hideFullscreenCursor();
-                return;
-            }
-            if (shouldKeepCursorVisible()) {
-                showFullscreenCursor();
                 return;
             }
             hideFullscreenCursor();
@@ -574,32 +540,6 @@ export function createInputController(options = {}) {
 
     function hideFullscreenCursor() {
         document.documentElement.classList.add('fullscreen-idle-cursor-hidden');
-    }
-
-    function isGameplayCursorLockActive() {
-        if (getIsGamePaused() || finalScoreboardUi.isVisible()) {
-            return false;
-        }
-        const inputContext = getInputContext();
-        return (
-            inputContext === INPUT_CONTEXTS.gameplay ||
-            inputContext === INPUT_CONTEXTS.raceIntroLocked
-        );
-    }
-
-    function shouldKeepCursorVisible() {
-        if (getIsGamePaused()) {
-            return true;
-        }
-        const activeEl = document.activeElement;
-        if (!activeEl) {
-            return false;
-        }
-        const tagName = String(activeEl.tagName || '').toLowerCase();
-        if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
-            return true;
-        }
-        return Boolean(activeEl.isContentEditable);
     }
 
     async function lockEscapeKeyInFullscreen() {
