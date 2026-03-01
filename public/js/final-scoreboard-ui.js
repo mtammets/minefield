@@ -15,6 +15,8 @@ export function createFinalScoreboardController({ onRestart, onExit, onDownloadL
     const downloadLogBtnEl = document.getElementById('leaderboardDownloadLogBtn');
     const exitBtnEl = document.getElementById('leaderboardExitBtn');
     const numberFormatter = new Intl.NumberFormat('en-US');
+    const downloadLogHostAllowed = isDownloadLogHostAllowed();
+    const canDownloadLog = downloadLogHostAllowed && typeof onDownloadLog === 'function';
     let detailsVisible = false;
     let detailsAvailable = false;
     let lastRoundSnapshot = null;
@@ -32,6 +34,9 @@ export function createFinalScoreboardController({ onRestart, onExit, onDownloadL
         onRestart?.();
     });
     downloadLogBtnEl?.addEventListener('click', () => {
+        if (!canDownloadLog) {
+            return;
+        }
         onDownloadLog?.(lastRoundSnapshot);
     });
     exitBtnEl?.addEventListener('click', () => {
@@ -43,6 +48,7 @@ export function createFinalScoreboardController({ onRestart, onExit, onDownloadL
     });
 
     syncDetailsVisibility();
+    syncDownloadLogButtonState();
 
     return {
         show({
@@ -171,10 +177,7 @@ export function createFinalScoreboardController({ onRestart, onExit, onDownloadL
                         entry?.stats && typeof entry.stats === 'object' ? { ...entry.stats } : null,
                 })),
             };
-            if (downloadLogBtnEl) {
-                downloadLogBtnEl.hidden = typeof onDownloadLog !== 'function';
-                downloadLogBtnEl.disabled = typeof onDownloadLog !== 'function';
-            }
+            syncDownloadLogButtonState();
             rootEl.hidden = false;
         },
         hide() {
@@ -204,10 +207,7 @@ export function createFinalScoreboardController({ onRestart, onExit, onDownloadL
             detailsVisible = false;
             detailsAvailable = false;
             lastRoundSnapshot = null;
-            if (downloadLogBtnEl) {
-                downloadLogBtnEl.hidden = typeof onDownloadLog !== 'function';
-                downloadLogBtnEl.disabled = typeof onDownloadLog !== 'function';
-            }
+            syncDownloadLogButtonState();
             syncDetailsVisibility();
         },
         isVisible() {
@@ -226,6 +226,21 @@ export function createFinalScoreboardController({ onRestart, onExit, onDownloadL
             detailsPanelEl.hidden = !showToggle || !detailsVisible;
         }
     }
+
+    function syncDownloadLogButtonState() {
+        if (!downloadLogBtnEl) {
+            return;
+        }
+        downloadLogBtnEl.hidden = !canDownloadLog;
+        downloadLogBtnEl.disabled = !canDownloadLog;
+    }
+}
+
+function isDownloadLogHostAllowed() {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+    return String(window.location?.hostname || '').toLowerCase() === 'localhost';
 }
 
 function resolveEntryName(entry) {

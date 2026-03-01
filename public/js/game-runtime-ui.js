@@ -1,4 +1,3 @@
-import { createObjectiveUiController } from './objective-ui.js';
 import { createWelcomeModalController } from './welcome-modal.js';
 import { createBotStatusController } from './bot-status-ui.js';
 import { createFinalScoreboardController } from './final-scoreboard-ui.js';
@@ -18,12 +17,7 @@ export function createRuntimeUiControllers({
     onPrepareStart,
     onDownloadPerformanceLog = null,
 }) {
-    const objectiveUi = createObjectiveUiController({
-        toCssHex,
-        colorNameFromHex,
-        statusDefaultText,
-        isCarDestroyed: getIsCarDestroyed,
-    });
+    const objectiveUi = createNoopObjectiveUi();
 
     const botStatusUi = createBotStatusController({
         toCssHex,
@@ -89,5 +83,17 @@ export function createRuntimeUiControllers({
         pauseMenuUi,
         welcomeModalUi,
         donateUi,
+    };
+}
+
+function createNoopObjectiveUi() {
+    return {
+        setTargetColor() {},
+        flashCorrect() {},
+        showFailure() {},
+        showCrash() {},
+        showInfo() {},
+        showResult() {},
+        resetStatus() {},
     };
 }

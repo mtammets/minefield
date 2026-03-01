@@ -33,6 +33,10 @@ const STAGE_LABELS = Object.freeze({
 });
 
 export function createPerformanceDiagnosticsController(options = {}) {
+    if (!isDiagnosticsHostAllowed()) {
+        return createNoopController();
+    }
+
     const stutterThresholdMs = clampNumber(
         options?.stutterThresholdMs,
         14,
@@ -1406,6 +1410,13 @@ function toIsoTimestamp(epochMs = 0) {
     } catch {
         return '';
     }
+}
+
+function isDiagnosticsHostAllowed() {
+    if (typeof window === 'undefined') {
+        return false;
+    }
+    return String(window.location?.hostname || '').toLowerCase() === 'localhost';
 }
 
 function ensurePanelElement() {

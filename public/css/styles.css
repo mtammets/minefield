@@ -265,59 +265,10 @@ canvas#gameCanvas {
     }
 }
 
-#objectivePanel {
-    position: fixed;
-    left: 18px;
-    top: 18px;
-    width: 240px;
-}
-
-#objectiveTitle {
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 1.1px;
-    margin-bottom: 7px;
-    text-transform: uppercase;
-    color: rgba(207, 233, 255, 0.94);
-}
-
-#objectiveRow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 13px;
-}
-
-#objectiveLabel {
-    color: rgba(194, 225, 252, 0.94);
-}
-
-#targetColorSwatch {
-    width: 17px;
-    height: 17px;
-    border-radius: 50%;
-    border: 1px solid rgba(234, 245, 255, 0.82);
-    box-shadow: 0 0 12px rgba(180, 228, 255, 0.34);
-    background: #6b84a5;
-    flex: 0 0 auto;
-}
-
-#targetColorName {
-    font-weight: 700;
-    color: #ffffff;
-}
-
-#objectiveStatus {
-    margin-top: 7px;
-    font-size: 12px;
-    line-height: 1.35;
-    color: var(--hud-text-dim);
-}
-
 #botPanel {
     position: fixed;
     left: 18px;
-    top: 132px;
+    top: 18px;
     width: 260px;
 }
 
@@ -418,15 +369,6 @@ canvas#gameCanvas {
     color: rgba(174, 208, 236, 0.88);
     line-height: 1.35;
     letter-spacing: 0.24px;
-}
-
-#botTitle {
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 1.1px;
-    margin-bottom: 8px;
-    text-transform: uppercase;
-    color: rgba(207, 233, 255, 0.94);
 }
 
 #botList {
@@ -675,7 +617,6 @@ canvas#gameCanvas {
     line-height: 1.4;
 }
 
-body.world-map-open #objectivePanel,
 body.world-map-open #botPanel,
 body.world-map-open #multiplayerPanel,
 body.world-map-open #miniMapHud,
@@ -822,7 +763,6 @@ body.race-intro-active #miniMapHud {
     line-height: 1;
 }
 
-#objectivePanel,
 #botPanel {
     z-index: 4;
     padding: 11px 12px 10px;
@@ -837,7 +777,6 @@ body.race-intro-active #miniMapHud {
         inset 0 0 0 1px rgba(218, 240, 255, 0.05);
 }
 
-#objectivePanel::before,
 #botPanel::before {
     content: '';
     position: absolute;
@@ -2020,14 +1959,12 @@ body.race-intro-active #miniMapHud {
     color: rgba(173, 204, 233, 0.9);
 }
 
-body.edit-mode-active #objectivePanel,
 body.edit-mode-active #botPanel,
 body.edit-mode-active #performancePanel {
     opacity: 0;
     pointer-events: none;
 }
 
-body.race-intro-active #objectivePanel,
 body.race-intro-active #botPanel,
 body.race-intro-active #performancePanel {
     opacity: 0;
@@ -2328,16 +2265,9 @@ body.race-intro-active #performancePanel {
 }
 
 @media (max-width: 860px) {
-    #objectivePanel {
-        left: 10px;
-        top: 10px;
-        transform: scale(0.88);
-        transform-origin: top left;
-    }
-
     #botPanel {
         left: 10px;
-        top: 112px;
+        top: 10px;
         transform: scale(0.88);
         transform-origin: top left;
     }
