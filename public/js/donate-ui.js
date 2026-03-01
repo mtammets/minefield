@@ -1,15 +1,27 @@
 const DONATE_DESCRIPTION_TEXT = 'One-time support for Minefield Drift.';
 const DONATE_CHECKOUT_ENDPOINT_PATH = '/api/donate/checkout-session';
+const DONATE_SESSION_STATUS_ENDPOINT_PATH = '/api/donate/session-status';
 const DONATE_CURRENCY = 'eur';
 const DONATE_MIN_AMOUNT_CENTS = 100;
 const DONATE_MAX_AMOUNT_CENTS = 100_000;
 const DONATE_AMOUNT_STEP_CENTS = 100;
 const DONATE_PRESET_AMOUNTS_CENTS = Object.freeze([500, 1000, 2500, 5000]);
 const DONATE_CHECKOUT_REQUEST_TIMEOUT_MS = 15_000;
+const DONATE_STATUS_REQUEST_TIMEOUT_MS = 12_000;
+const DONATE_STATUS_POLL_ATTEMPTS = 4;
+const DONATE_STATUS_POLL_INTERVAL_MS = 2200;
 const DONATE_CHECKOUT_REDIRECT_STATUS = 'Opening checkout...';
 const DONATE_CHECKOUT_FAILED_MESSAGE = 'Could not start secure checkout. Try again.';
 const DONATE_CHECKOUT_TIMEOUT_MESSAGE = 'Secure checkout timed out. Try again.';
+const DONATE_VERIFYING_STATUS = 'Verifying donation status...';
+const DONATE_PENDING_STATUS = 'Payment is processing. We will confirm it shortly.';
+const DONATE_VERIFICATION_FAILED_STATUS =
+    'Could not verify donation status right now. Please try again shortly.';
+const DONATE_VERIFICATION_TIMEOUT_STATUS =
+    'Donation verification timed out. Please try again shortly.';
 const DONATE_SUCCESS_STATUS = 'Donation completed. Thank you for supporting Minefield Drift.';
+const DONATE_FAILED_STATUS = 'Donation payment was not completed.';
+const DONATE_EXPIRED_STATUS = 'Donation checkout session expired. Please try again.';
 const DONATE_CANCELED_STATUS = 'Donation checkout was canceled.';
 const DONATE_SUBMIT_DEFAULT_LABEL = 'Donate';
 const DONATE_SUBMIT_PENDING_LABEL = 'Opening checkout...';
@@ -70,7 +82,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         }
         initialized = true;
         configurePanel();
-        applyReturnStatusFromLocation();
+        void applyReturnStatusFromLocation();
         setButtonsVisible(true);
         updateButtonExpandedState();
 
@@ -111,7 +123,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         configurePanel();
     }
 
-    function open(contextKey = '') {
+    function open(contextKey = '', options = {}) {
         const activeContext = resolveContext(contextKey) || resolveDefaultContext();
         if (!activeContext) {
             return;
@@ -125,7 +137,9 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         activeContextKey = activeContext.key;
         panelRootEl.hidden = false;
         updateButtonExpandedState();
-        setStatus('', 'muted');
+        if (!options?.preserveStatus) {
+            setStatus('', 'muted');
+        }
     }
 
     function close() {
@@ -323,31 +337,122 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         submitBtnEl.setAttribute('aria-label', submitBaseLabel);
     }
 
-    function applyReturnStatusFromLocation() {
+    async function applyReturnStatusFromLocation() {
         let pageUrl;
         try {
             pageUrl = new URL(window.location.href);
         } catch {
             return;
         }
+        const removeReturnParamsFromLocation = () => {
+            pageUrl.searchParams.delete('donate');
+            pageUrl.searchParams.delete('session_id');
+            const nextRelativeUrl = `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`;
+            try {
+                window.history.replaceState(null, '', nextRelativeUrl);
+            } catch {
+                // History API might be unavailable in constrained environments.
+            }
+        };
 
-        const donateState = pageUrl.searchParams.get('donate');
-        if (donateState === 'success') {
-            setStatus(DONATE_SUCCESS_STATUS, 'info');
-            onStatus(DONATE_SUCCESS_STATUS, 4200);
-        } else if (donateState === 'cancel') {
+        const donateState = sanitizeDonationReturnState(pageUrl.searchParams.get('donate'));
+        if (!donateState) {
+            return;
+        }
+        const checkoutSessionId = sanitizeStripeCheckoutSessionId(
+            pageUrl.searchParams.get('session_id')
+        );
+
+        open(resolveDefaultContext()?.key || '', { preserveStatus: true });
+
+        if (donateState === 'cancel') {
             setStatus(DONATE_CANCELED_STATUS, 'muted');
             onStatus(DONATE_CANCELED_STATUS, 2800);
-        } else {
+            removeReturnParamsFromLocation();
             return;
         }
 
-        pageUrl.searchParams.delete('donate');
-        const nextRelativeUrl = `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`;
+        if (!checkoutSessionId) {
+            setStatus(DONATE_VERIFICATION_FAILED_STATUS, 'error');
+            onStatus(DONATE_VERIFICATION_FAILED_STATUS, 3200);
+            removeReturnParamsFromLocation();
+            return;
+        }
+
+        setStatus(DONATE_VERIFYING_STATUS, 'info');
         try {
-            window.history.replaceState(null, '', nextRelativeUrl);
-        } catch {
-            // History API might be unavailable in constrained environments.
+            const sessionStatusPayload =
+                await verifyDonationSessionStatusWithRetry(checkoutSessionId);
+            const finalMessage = resolveReturnStatusMessageFromSessionStatus(
+                sessionStatusPayload?.status
+            );
+            setStatus(finalMessage.messageText, finalMessage.tone);
+            onStatus(finalMessage.messageText, finalMessage.timeoutMs);
+            if (sessionStatusPayload?.final) {
+                removeReturnParamsFromLocation();
+            }
+        } catch (error) {
+            const messageText =
+                error?.name === 'AbortError'
+                    ? DONATE_VERIFICATION_TIMEOUT_STATUS
+                    : resolveVerificationMessageFromServerError(error?.message);
+            setStatus(messageText, 'error');
+            onStatus(messageText, 3200);
+        }
+    }
+
+    async function verifyDonationSessionStatusWithRetry(checkoutSessionId) {
+        let latestPayload = null;
+        for (let attempt = 0; attempt < DONATE_STATUS_POLL_ATTEMPTS; attempt += 1) {
+            latestPayload = await requestDonationSessionStatus(checkoutSessionId);
+            const normalizedStatus = normalizeDonationSessionStatus(latestPayload?.status);
+            const final =
+                latestPayload?.final === true || isDonationSessionStatusFinal(normalizedStatus);
+            latestPayload = {
+                ...latestPayload,
+                status: normalizedStatus,
+                final,
+            };
+            if (final || !isDonationSessionStatusRetryable(normalizedStatus)) {
+                return latestPayload;
+            }
+            if (attempt < DONATE_STATUS_POLL_ATTEMPTS - 1) {
+                await waitForMs(DONATE_STATUS_POLL_INTERVAL_MS);
+            }
+        }
+        return latestPayload || { status: 'unknown', final: false };
+    }
+
+    async function requestDonationSessionStatus(checkoutSessionId) {
+        const requestController = new AbortController();
+        const timeoutId = window.setTimeout(() => {
+            requestController.abort();
+        }, DONATE_STATUS_REQUEST_TIMEOUT_MS);
+
+        try {
+            const requestUrl = `${DONATE_SESSION_STATUS_ENDPOINT_PATH}?session_id=${encodeURIComponent(
+                checkoutSessionId
+            )}`;
+            const response = await window.fetch(requestUrl, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: {
+                    Accept: 'application/json',
+                },
+                signal: requestController.signal,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok || payload?.ok !== true) {
+                const errorMessage = resolveVerificationMessageFromServerError(payload?.error);
+                throw new Error(errorMessage);
+            }
+            return {
+                status: normalizeDonationSessionStatus(payload?.status),
+                paid: payload?.paid === true,
+                final: payload?.final === true,
+            };
+        } finally {
+            window.clearTimeout(timeoutId);
         }
     }
 
@@ -457,6 +562,113 @@ function resolveStatusMessageFromServerError(rawValue) {
     }
     const normalized = rawValue.trim().replace(/\s+/g, ' ').slice(0, 180);
     return normalized || DONATE_CHECKOUT_FAILED_MESSAGE;
+}
+
+function resolveVerificationMessageFromServerError(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return DONATE_VERIFICATION_FAILED_STATUS;
+    }
+    const normalized = rawValue.trim().replace(/\s+/g, ' ').slice(0, 180);
+    return normalized || DONATE_VERIFICATION_FAILED_STATUS;
+}
+
+function sanitizeDonationReturnState(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return '';
+    }
+    const normalized = rawValue.trim().toLowerCase();
+    if (normalized === 'success' || normalized === 'cancel') {
+        return normalized;
+    }
+    return '';
+}
+
+function sanitizeStripeCheckoutSessionId(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return '';
+    }
+    const normalized = rawValue.trim();
+    if (!/^cs_[A-Za-z0-9_]{8,255}$/.test(normalized)) {
+        return '';
+    }
+    return normalized;
+}
+
+function normalizeDonationSessionStatus(rawValue) {
+    if (typeof rawValue !== 'string') {
+        return 'unknown';
+    }
+    const normalized = rawValue.trim().toLowerCase();
+    if (
+        normalized === 'paid' ||
+        normalized === 'processing' ||
+        normalized === 'open' ||
+        normalized === 'canceled' ||
+        normalized === 'expired' ||
+        normalized === 'failed'
+    ) {
+        return normalized;
+    }
+    return 'unknown';
+}
+
+function isDonationSessionStatusFinal(status) {
+    const normalized = normalizeDonationSessionStatus(status);
+    return (
+        normalized === 'paid' ||
+        normalized === 'failed' ||
+        normalized === 'expired' ||
+        normalized === 'canceled'
+    );
+}
+
+function isDonationSessionStatusRetryable(status) {
+    const normalized = normalizeDonationSessionStatus(status);
+    return normalized === 'processing' || normalized === 'open';
+}
+
+function waitForMs(durationMs) {
+    const delayMs = Math.max(0, Math.round(Number(durationMs) || 0));
+    return new Promise((resolve) => {
+        window.setTimeout(resolve, delayMs);
+    });
+}
+
+function resolveReturnStatusMessageFromSessionStatus(status) {
+    const normalized = normalizeDonationSessionStatus(status);
+    if (normalized === 'paid') {
+        return {
+            messageText: DONATE_SUCCESS_STATUS,
+            tone: 'info',
+            timeoutMs: 4200,
+        };
+    }
+    if (normalized === 'processing' || normalized === 'open') {
+        return {
+            messageText: DONATE_PENDING_STATUS,
+            tone: 'info',
+            timeoutMs: 3600,
+        };
+    }
+    if (normalized === 'expired') {
+        return {
+            messageText: DONATE_EXPIRED_STATUS,
+            tone: 'muted',
+            timeoutMs: 3200,
+        };
+    }
+    if (normalized === 'failed' || normalized === 'canceled') {
+        return {
+            messageText: DONATE_FAILED_STATUS,
+            tone: 'error',
+            timeoutMs: 3200,
+        };
+    }
+    return {
+        messageText: DONATE_VERIFICATION_FAILED_STATUS,
+        tone: 'error',
+        timeoutMs: 3200,
+    };
 }
 
 function createNoopController() {

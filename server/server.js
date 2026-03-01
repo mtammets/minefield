@@ -11,6 +11,12 @@ const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
 const { resolveAuthoritativeMineDetonation } = require('./mine-guard');
 const {
+    DONATION_SESSION_STATUSES,
+    createDonationSessionStore,
+    isDonationSessionStatusFinal,
+    normalizeStripeCheckoutSessionId,
+} = require('./donate-session-store');
+const {
     validatePickupCollection,
     markPickupCollected,
     pruneCollectedPickupHistory,
@@ -69,7 +75,9 @@ const DONATE_PRODUCT_NAME = sanitizeCheckoutText(
 );
 const DONATE_PUBLIC_BASE_URL = sanitizeHttpOrigin(process.env.STRIPE_DONATE_BASE_URL || '');
 const STRIPE_SECRET_KEY = sanitizeStripeSecretKey(process.env.STRIPE_SECRET_KEY || '');
+const STRIPE_WEBHOOK_SECRET = sanitizeStripeWebhookSecret(process.env.STRIPE_WEBHOOK_SECRET || '');
 const stripeClient = createStripeClient(STRIPE_SECRET_KEY);
+const donateSessionStore = createDonationSessionStore();
 const GA_MEASUREMENT_ID = sanitizeGaMeasurementId(
     process.env.GA_MEASUREMENT_ID || process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID || ''
 );
@@ -138,6 +146,9 @@ app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', HTTP_CONTENT_SECURITY_POLICY);
     next();
 });
+app.post('/api/donate/stripe-webhook', express.raw({ type: 'application/json' }), (req, res) => {
+    handleStripeDonateWebhook(req, res);
+});
 app.use(express.json({ limit: '16kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
 
@@ -176,6 +187,7 @@ app.get('/api/room-code/:roomCode/availability', (req, res) => {
 });
 
 app.post('/api/donate/checkout-session', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
     if (!stripeClient) {
         res.status(503).json({
             ok: false,
@@ -194,7 +206,9 @@ app.post('/api/donate/checkout-session', async (req, res) => {
     }
 
     const checkoutBaseUrl = resolveDonateBaseUrl(req);
-    const successUrl = createDonateReturnUrl(checkoutBaseUrl, 'success');
+    const successUrl = createDonateReturnUrl(checkoutBaseUrl, 'success', {
+        includeSessionId: true,
+    });
     const cancelUrl = createDonateReturnUrl(checkoutBaseUrl, 'cancel');
     if (!successUrl || !cancelUrl) {
         res.status(500).json({
@@ -224,13 +238,21 @@ app.post('/api/donate/checkout-session', async (req, res) => {
             ],
             success_url: successUrl,
             cancel_url: cancelUrl,
+            metadata: {
+                integration: 'minefield-drift',
+            },
         });
         if (typeof checkoutSession?.url !== 'string' || !checkoutSession.url) {
             throw new Error('Stripe did not return a checkout URL.');
         }
 
+        donateSessionStore.upsertFromStripeSession(checkoutSession, {
+            source: 'checkout-create',
+        });
+
         res.status(201).json({
             ok: true,
+            sessionId: checkoutSession.id,
             checkoutUrl: checkoutSession.url,
         });
     } catch (error) {
@@ -238,6 +260,61 @@ app.post('/api/donate/checkout-session', async (req, res) => {
         res.status(502).json({
             ok: false,
             error: 'Could not start secure checkout. Try again.',
+        });
+    }
+});
+
+app.get('/api/donate/session-status', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!stripeClient) {
+        res.status(503).json({
+            ok: false,
+            error: 'Donations are not configured on this server.',
+        });
+        return;
+    }
+
+    const checkoutSessionId = normalizeStripeCheckoutSessionId(
+        typeof req.query?.session_id === 'string' ? req.query.session_id : req.query?.sessionId
+    );
+    if (!checkoutSessionId) {
+        res.status(400).json({
+            ok: false,
+            error: 'A valid Stripe Checkout session ID is required.',
+        });
+        return;
+    }
+
+    const cachedSessionState = donateSessionStore.getSessionState(checkoutSessionId);
+    if (cachedSessionState && isDonationSessionStatusFinal(cachedSessionState.status)) {
+        res.json(buildDonateSessionStatusResponse(cachedSessionState, { fromCache: true }));
+        return;
+    }
+
+    try {
+        const checkoutSession = await stripeClient.checkout.sessions.retrieve(checkoutSessionId);
+        const syncedSessionState = donateSessionStore.upsertFromStripeSession(checkoutSession, {
+            source: 'api-verify',
+        });
+        if (!syncedSessionState) {
+            throw new Error('Could not normalize Stripe checkout session.');
+        }
+        res.json(buildDonateSessionStatusResponse(syncedSessionState, { fromCache: false }));
+    } catch (error) {
+        const fallbackSessionState = donateSessionStore.getSessionState(checkoutSessionId);
+        if (fallbackSessionState) {
+            res.json(
+                buildDonateSessionStatusResponse(fallbackSessionState, {
+                    fromCache: true,
+                    stale: true,
+                })
+            );
+            return;
+        }
+        console.error('Stripe checkout session verification failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not verify donation status. Try again shortly.',
         });
     }
 });
@@ -931,6 +1008,11 @@ server.listen(PORT, () => {
     accessUrls.forEach((url) => {
         console.log(`- ${url}`);
     });
+    if (stripeClient && !STRIPE_WEBHOOK_SECRET) {
+        console.warn(
+            'Stripe webhook secret is not configured; donation verification falls back to polling.'
+        );
+    }
 });
 
 function resolveServerAccessUrls(port) {
@@ -1002,6 +1084,17 @@ function createStripeClient(secretKey) {
     }
 }
 
+function sanitizeStripeWebhookSecret(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    if (!normalized || !normalized.startsWith('whsec_')) {
+        return '';
+    }
+    return normalized;
+}
+
 function sanitizeStripeSecretKey(value) {
     if (typeof value !== 'string') {
         return '';
@@ -1069,17 +1162,114 @@ function resolveDonateBaseUrl(req) {
     return `${protocol}://${host}`;
 }
 
-function createDonateReturnUrl(baseUrl, state) {
+function createDonateReturnUrl(baseUrl, state, options = {}) {
     if (!baseUrl) {
         return '';
     }
     try {
         const target = new URL('/', baseUrl);
         target.searchParams.set('donate', state);
+        const includeSessionId = Boolean(options?.includeSessionId) && state === 'success';
+        if (includeSessionId) {
+            target.searchParams.set('session_id', '{CHECKOUT_SESSION_ID}');
+        }
         return target.toString();
     } catch {
         return '';
     }
+}
+
+function handleStripeDonateWebhook(req, res) {
+    if (!stripeClient || !STRIPE_WEBHOOK_SECRET) {
+        res.status(503).send('Donations are not configured on this server.');
+        return;
+    }
+    const signatureHeader = req?.headers?.['stripe-signature'];
+    if (typeof signatureHeader !== 'string' || !signatureHeader.trim()) {
+        res.status(400).send('Missing Stripe signature header.');
+        return;
+    }
+    if (!Buffer.isBuffer(req.body)) {
+        res.status(400).send('Expected raw request body.');
+        return;
+    }
+
+    let stripeEvent;
+    try {
+        stripeEvent = stripeClient.webhooks.constructEvent(
+            req.body,
+            signatureHeader,
+            STRIPE_WEBHOOK_SECRET
+        );
+    } catch (error) {
+        console.error('Stripe webhook signature validation failed:', error?.message || error);
+        res.status(400).send('Invalid Stripe webhook signature.');
+        return;
+    }
+
+    if (donateSessionStore.hasProcessedEvent(stripeEvent.id)) {
+        res.status(200).send('ok');
+        return;
+    }
+
+    try {
+        processStripeDonateWebhookEvent(stripeEvent);
+        donateSessionStore.markEventProcessed(stripeEvent.id);
+        res.status(200).send('ok');
+    } catch (error) {
+        console.error('Stripe webhook processing failed:', error);
+        res.status(500).send('Stripe webhook processing failed.');
+    }
+}
+
+function processStripeDonateWebhookEvent(stripeEvent) {
+    const eventType = typeof stripeEvent?.type === 'string' ? stripeEvent.type : '';
+    if (!eventType || !eventType.startsWith('checkout.session.')) {
+        return;
+    }
+    const checkoutSession = stripeEvent?.data?.object;
+    if (!checkoutSession || typeof checkoutSession !== 'object') {
+        return;
+    }
+    const statusOverride = resolveDonationStatusFromStripeEventType(eventType);
+    donateSessionStore.upsertFromStripeSession(checkoutSession, {
+        statusOverride,
+        source: `webhook:${eventType}`,
+    });
+}
+
+function resolveDonationStatusFromStripeEventType(eventType) {
+    const normalized = typeof eventType === 'string' ? eventType.trim().toLowerCase() : '';
+    switch (normalized) {
+        case 'checkout.session.async_payment_succeeded':
+            return DONATION_SESSION_STATUSES.paid;
+        case 'checkout.session.async_payment_failed':
+            return DONATION_SESSION_STATUSES.failed;
+        case 'checkout.session.expired':
+            return DONATION_SESSION_STATUSES.expired;
+        default:
+            return '';
+    }
+}
+
+function buildDonateSessionStatusResponse(sessionState, options = {}) {
+    return {
+        ok: true,
+        sessionId: sessionState.sessionId,
+        status: sessionState.status,
+        paid: sessionState.status === DONATION_SESSION_STATUSES.paid,
+        final: isDonationSessionStatusFinal(sessionState.status),
+        amountCents:
+            Number.isInteger(sessionState.amountCents) && sessionState.amountCents >= 0
+                ? sessionState.amountCents
+                : null,
+        currency: sanitizeCurrencyCode(sessionState.currency, DONATE_CURRENCY),
+        fromCache: Boolean(options?.fromCache),
+        stale: Boolean(options?.stale),
+        updatedAtMs: Number.isFinite(sessionState.updatedAtMs)
+            ? Math.max(0, Math.round(sessionState.updatedAtMs))
+            : Date.now(),
+    };
 }
 
 function resolveRequestProtocol(req) {

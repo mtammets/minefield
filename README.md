@@ -17,6 +17,8 @@ Set these environment variables before `npm start`:
 
 ```bash
 STRIPE_SECRET_KEY=sk_test_...
+# Strongly recommended for production:
+STRIPE_WEBHOOK_SECRET=whsec_...
 # Optional. Recommended in production behind a proxy/CDN.
 STRIPE_DONATE_BASE_URL=https://your-domain.example
 # Optional overrides:
@@ -29,8 +31,17 @@ The server loads `.env` automatically on startup.
 Notes:
 
 - The Donate button creates a Stripe Checkout session via `POST /api/donate/checkout-session`.
+- Stripe returns to `/?donate=success&session_id={CHECKOUT_SESSION_ID}` after checkout.
+- The game verifies donation success server-side via `GET /api/donate/session-status`.
+- Stripe webhook endpoint: `POST /api/donate/stripe-webhook`.
 - Apple Pay availability is controlled by Stripe and end-user device/browser support.
 - In production, configure your site domain in Stripe Dashboard under Apple Pay wallet settings.
+
+Local webhook testing with Stripe CLI:
+
+```bash
+stripe listen --forward-to localhost:3000/api/donate/stripe-webhook
+```
 
 ## Google Analytics 4 (Optional, Consent-Gated)
 
