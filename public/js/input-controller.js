@@ -54,9 +54,16 @@ export function createInputController(options = {}) {
     const roofMenuPointerNdc = new THREE.Vector2();
     let lastEscapeKeyDownAtMs = -10_000;
     const editModeShortcutHostAllowed = isEditModeShortcutHostAllowed();
+    const fullscreenCursorIdleHideMs = 1500;
+    const fullscreenCursorMoveThresholdSq = 1;
+    let fullscreenCursorHideTimeout = null;
+    let lastFullscreenPointerX = null;
+    let lastFullscreenPointerY = null;
 
     const onKeyDown = (event) => handleKey(event, true);
     const onKeyUp = (event) => handleKey(event, false);
+    const onFullscreenPointerMove = (event) => handleFullscreenCursorPointerMove(event);
+    const onFullscreenCursorActivity = (event) => handleFullscreenCursorActivity(event);
 
     return {
         initialize,
@@ -68,16 +75,27 @@ export function createInputController(options = {}) {
         document.addEventListener('keydown', onKeyDown);
         document.addEventListener('keyup', onKeyUp);
         document.addEventListener('fullscreenchange', onFullscreenChange);
+        document.addEventListener('pointermove', onFullscreenPointerMove, { passive: true });
+        document.addEventListener('pointerdown', onFullscreenCursorActivity, { passive: true });
+        document.addEventListener('wheel', onFullscreenCursorActivity, { passive: true });
+        document.addEventListener('keydown', onFullscreenCursorActivity);
         window.addEventListener('resize', onWindowResize);
         renderer.domElement.addEventListener('pointerdown', handleGameCanvasPointerDown);
+        onFullscreenChange();
     }
 
     function dispose() {
         document.removeEventListener('keydown', onKeyDown);
         document.removeEventListener('keyup', onKeyUp);
         document.removeEventListener('fullscreenchange', onFullscreenChange);
+        document.removeEventListener('pointermove', onFullscreenPointerMove);
+        document.removeEventListener('pointerdown', onFullscreenCursorActivity);
+        document.removeEventListener('wheel', onFullscreenCursorActivity);
+        document.removeEventListener('keydown', onFullscreenCursorActivity);
         window.removeEventListener('resize', onWindowResize);
         renderer.domElement.removeEventListener('pointerdown', handleGameCanvasPointerDown);
+        clearFullscreenCursorHideTimeout();
+        showFullscreenCursor();
     }
 
     function handleKey(event, isKeyDown) {
@@ -423,16 +441,113 @@ export function createInputController(options = {}) {
     function onFullscreenChange() {
         onWindowResize();
         if (document.fullscreenElement) {
+            showFullscreenCursor();
+            resetFullscreenCursorPointerSample();
+            scheduleFullscreenCursorHide();
             void lockEscapeKeyInFullscreen();
             return;
         }
 
+        clearFullscreenCursorHideTimeout();
+        resetFullscreenCursorPointerSample();
+        showFullscreenCursor();
         unlockKeyboardLock();
         const escapedRecently =
             performance.now() - lastEscapeKeyDownAtMs <= escFullscreenFallbackWindowMs;
         if (escapedRecently && !getIsGamePaused() && !finalScoreboardUi.isVisible()) {
             onSetPauseState(true);
         }
+    }
+
+    function handleFullscreenCursorPointerMove(event) {
+        if (!document.fullscreenElement) {
+            return;
+        }
+        if (shouldKeepCursorVisible()) {
+            showFullscreenCursor();
+            clearFullscreenCursorHideTimeout();
+            return;
+        }
+
+        const pointerX = Number(event?.clientX);
+        const pointerY = Number(event?.clientY);
+        if (!Number.isFinite(pointerX) || !Number.isFinite(pointerY)) {
+            handleFullscreenCursorActivity();
+            return;
+        }
+
+        if (!Number.isFinite(lastFullscreenPointerX) || !Number.isFinite(lastFullscreenPointerY)) {
+            lastFullscreenPointerX = pointerX;
+            lastFullscreenPointerY = pointerY;
+            handleFullscreenCursorActivity();
+            return;
+        }
+
+        const dx = pointerX - lastFullscreenPointerX;
+        const dy = pointerY - lastFullscreenPointerY;
+        if (dx * dx + dy * dy < fullscreenCursorMoveThresholdSq) {
+            return;
+        }
+
+        lastFullscreenPointerX = pointerX;
+        lastFullscreenPointerY = pointerY;
+        handleFullscreenCursorActivity();
+    }
+
+    function handleFullscreenCursorActivity() {
+        if (!document.fullscreenElement) {
+            return;
+        }
+        showFullscreenCursor();
+        scheduleFullscreenCursorHide();
+    }
+
+    function scheduleFullscreenCursorHide() {
+        clearFullscreenCursorHideTimeout();
+        if (!document.fullscreenElement || shouldKeepCursorVisible()) {
+            return;
+        }
+        fullscreenCursorHideTimeout = window.setTimeout(() => {
+            fullscreenCursorHideTimeout = null;
+            if (!document.fullscreenElement || shouldKeepCursorVisible()) {
+                showFullscreenCursor();
+                return;
+            }
+            hideFullscreenCursor();
+        }, fullscreenCursorIdleHideMs);
+    }
+
+    function clearFullscreenCursorHideTimeout() {
+        if (fullscreenCursorHideTimeout == null) {
+            return;
+        }
+        window.clearTimeout(fullscreenCursorHideTimeout);
+        fullscreenCursorHideTimeout = null;
+    }
+
+    function resetFullscreenCursorPointerSample() {
+        lastFullscreenPointerX = null;
+        lastFullscreenPointerY = null;
+    }
+
+    function showFullscreenCursor() {
+        document.documentElement.classList.remove('fullscreen-idle-cursor-hidden');
+    }
+
+    function hideFullscreenCursor() {
+        document.documentElement.classList.add('fullscreen-idle-cursor-hidden');
+    }
+
+    function shouldKeepCursorVisible() {
+        const activeEl = document.activeElement;
+        if (!activeEl) {
+            return false;
+        }
+        const tagName = String(activeEl.tagName || '').toLowerCase();
+        if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+            return true;
+        }
+        return Boolean(activeEl.isContentEditable);
     }
 
     async function lockEscapeKeyInFullscreen() {

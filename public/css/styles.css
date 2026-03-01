@@ -31,6 +31,11 @@ body {
     color: white;
 }
 
+html.fullscreen-idle-cursor-hidden,
+html.fullscreen-idle-cursor-hidden * {
+    cursor: none !important;
+}
+
 body::before {
     content: '';
     position: fixed;
