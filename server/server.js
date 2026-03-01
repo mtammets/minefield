@@ -1166,14 +1166,19 @@ function createDonateReturnUrl(baseUrl, state, options = {}) {
     if (!baseUrl) {
         return '';
     }
+    const normalizedState = typeof state === 'string' ? state.trim().toLowerCase() : '';
+    if (normalizedState !== 'success' && normalizedState !== 'cancel') {
+        return '';
+    }
     try {
-        const target = new URL('/', baseUrl);
-        target.searchParams.set('donate', state);
-        const includeSessionId = Boolean(options?.includeSessionId) && state === 'success';
+        const origin = new URL(baseUrl).origin;
+        const includeSessionId = Boolean(options?.includeSessionId) && normalizedState === 'success';
+        const queryParts = [`donate=${encodeURIComponent(normalizedState)}`];
         if (includeSessionId) {
-            target.searchParams.set('session_id', '{CHECKOUT_SESSION_ID}');
+            // Stripe requires the literal placeholder token for runtime replacement.
+            queryParts.push('session_id={CHECKOUT_SESSION_ID}');
         }
-        return target.toString();
+        return `${origin}/?${queryParts.join('&')}`;
     } catch {
         return '';
     }
