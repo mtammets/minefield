@@ -53,6 +53,7 @@ export function createInputController(options = {}) {
     const roofMenuRaycaster = new THREE.Raycaster();
     const roofMenuPointerNdc = new THREE.Vector2();
     let lastEscapeKeyDownAtMs = -10_000;
+    const editModeShortcutHostAllowed = isEditModeShortcutHostAllowed();
 
     const onKeyDown = (event) => handleKey(event, true);
     const onKeyUp = (event) => handleKey(event, false);
@@ -111,6 +112,7 @@ export function createInputController(options = {}) {
         }
 
         const canEnterEditMode =
+            editModeShortcutHostAllowed &&
             !getIsWelcomeModalVisible() &&
             !getIsGamePaused() &&
             !raceIntroController.isActive() &&
@@ -363,6 +365,13 @@ export function createInputController(options = {}) {
         }
         const speedKph = Math.round(tune.topSpeedKph || 0);
         onShowObjectiveInfo(`Top speed: ${speedKph} km/h.`);
+    }
+
+    function isEditModeShortcutHostAllowed() {
+        if (typeof window === 'undefined') {
+            return false;
+        }
+        return String(window.location?.hostname || '').toLowerCase() === 'localhost';
     }
 
     function onWindowResize() {
