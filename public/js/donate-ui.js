@@ -10,6 +10,7 @@ const DONATE_CHECKOUT_REQUEST_TIMEOUT_MS = 15_000;
 const DONATE_STATUS_REQUEST_TIMEOUT_MS = 12_000;
 const DONATE_STATUS_POLL_ATTEMPTS = 4;
 const DONATE_STATUS_POLL_INTERVAL_MS = 2200;
+const DONATE_GLOBAL_NOTICE_HIDE_ANIMATION_MS = 180;
 const DONATE_CHECKOUT_REDIRECT_STATUS = 'Opening checkout...';
 const DONATE_CHECKOUT_FAILED_MESSAGE = 'Could not start secure checkout. Try again.';
 const DONATE_CHECKOUT_TIMEOUT_MESSAGE = 'Secure checkout timed out. Try again.';
@@ -19,7 +20,10 @@ const DONATE_VERIFICATION_FAILED_STATUS =
     'Could not verify donation status right now. Please try again shortly.';
 const DONATE_VERIFICATION_TIMEOUT_STATUS =
     'Donation verification timed out. Please try again shortly.';
-const DONATE_SUCCESS_STATUS = 'Donation completed. Thank you for supporting Minefield Drift.';
+const DONATE_SUCCESS_STATUS = 'Donation confirmed. Thank you for backing Minefield Drift.';
+const DONATE_SUCCESS_TITLE = 'Thank You, Driver';
+const DONATE_SUCCESS_SUBTITLE =
+    'Your support helps keep the servers running and funds new tracks, polish, and multiplayer upgrades.';
 const DONATE_FAILED_STATUS = 'Donation payment was not completed.';
 const DONATE_EXPIRED_STATUS = 'Donation checkout session expired. Please try again.';
 const DONATE_CANCELED_STATUS = 'Donation checkout was canceled.';
@@ -40,6 +44,8 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     const presetGridEl = document.getElementById('donatePresetGrid');
     const customAmountInputEl = document.getElementById('donateCustomAmountInput');
     const statusEl = document.getElementById('donateStatus');
+    const globalNoticeUi = createDonateGlobalNoticeController();
+    const gratitudeUi = createDonateGratitudeModalController();
     const submitBaseLabel =
         String(submitBtnEl?.textContent || '')
             .trim()
@@ -85,6 +91,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         void applyReturnStatusFromLocation();
         setButtonsVisible(true);
         updateButtonExpandedState();
+        initializeLocalhostPreviewHotkey();
 
         donateContexts.forEach((entry) => {
             entry.buttonEl.addEventListener('click', () => {
@@ -116,6 +123,38 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
         document.addEventListener(WELCOME_ONLINE_CLOSE_EVENT, () => {
             isWelcomeOnlineFlowOpen = false;
             setButtonsVisible(true);
+        });
+    }
+
+    function initializeLocalhostPreviewHotkey() {
+        if (!isLocalDevelopmentHost(window.location.hostname)) {
+            return;
+        }
+        document.addEventListener('keydown', (event) => {
+            if (
+                event.defaultPrevented ||
+                event.repeat ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.altKey
+            ) {
+                return;
+            }
+            if (isFormFieldEventTarget(event.target)) {
+                return;
+            }
+            const keyValue = String(event.key || '').toLowerCase();
+            if (keyValue !== 'ä') {
+                return;
+            }
+            event.preventDefault();
+            gratitudeUi.show({
+                titleText: DONATE_SUCCESS_TITLE,
+                messageText: '',
+                subtitleText: DONATE_SUCCESS_SUBTITLE,
+                amountText: '€5.00',
+                previewMode: true,
+            });
         });
     }
 
@@ -283,6 +322,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
                     ? DONATE_CHECKOUT_TIMEOUT_MESSAGE
                     : resolveStatusMessageFromServerError(error?.message);
             setStatus(messageText, 'error');
+            globalNoticeUi.show(messageText, 'error', 3200);
             onStatus(messageText, 3200);
             setSubmitPending(false);
         } finally {
@@ -367,6 +407,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
 
         if (donateState === 'cancel') {
             setStatus(DONATE_CANCELED_STATUS, 'muted');
+            globalNoticeUi.show(DONATE_CANCELED_STATUS, 'muted', 2800);
             onStatus(DONATE_CANCELED_STATUS, 2800);
             removeReturnParamsFromLocation();
             return;
@@ -374,6 +415,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
 
         if (!checkoutSessionId) {
             setStatus(DONATE_VERIFICATION_FAILED_STATUS, 'error');
+            globalNoticeUi.show(DONATE_VERIFICATION_FAILED_STATUS, 'error', 3200);
             onStatus(DONATE_VERIFICATION_FAILED_STATUS, 3200);
             removeReturnParamsFromLocation();
             return;
@@ -387,6 +429,15 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
                 sessionStatusPayload?.status
             );
             setStatus(finalMessage.messageText, finalMessage.tone);
+            if (normalizeDonationSessionStatus(sessionStatusPayload?.status) === 'paid') {
+                gratitudeUi.show(resolveGratitudeContentFromSessionStatus(sessionStatusPayload));
+            } else {
+                globalNoticeUi.show(
+                    finalMessage.messageText,
+                    finalMessage.tone,
+                    finalMessage.timeoutMs
+                );
+            }
             onStatus(finalMessage.messageText, finalMessage.timeoutMs);
             if (sessionStatusPayload?.final) {
                 removeReturnParamsFromLocation();
@@ -397,6 +448,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
                     ? DONATE_VERIFICATION_TIMEOUT_STATUS
                     : resolveVerificationMessageFromServerError(error?.message);
             setStatus(messageText, 'error');
+            globalNoticeUi.show(messageText, 'error', 3200);
             onStatus(messageText, 3200);
         }
     }
@@ -450,6 +502,8 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
                 status: normalizeDonationSessionStatus(payload?.status),
                 paid: payload?.paid === true,
                 final: payload?.final === true,
+                amountCents: sanitizeAmountCents(payload?.amountCents),
+                currency: sanitizeCurrencyCode(payload?.currency, DONATE_CURRENCY),
             };
         } finally {
             window.clearTimeout(timeoutId);
@@ -669,6 +723,276 @@ function resolveReturnStatusMessageFromSessionStatus(status) {
         tone: 'error',
         timeoutMs: 3200,
     };
+}
+
+function createDonateGlobalNoticeController() {
+    const rootEl = ensureDonateGlobalNoticeRoot();
+    const noticeEl = ensureDonateGlobalNoticeElement(rootEl);
+    let hideDelayTimer = 0;
+    let autoHideTimer = 0;
+
+    return {
+        show,
+        hide,
+    };
+
+    function show(messageText, tone = 'info', timeoutMs = 3200) {
+        const normalizedMessage = sanitizeGlobalNoticeMessage(messageText);
+        if (!normalizedMessage) {
+            return;
+        }
+        clearHideTimers();
+        noticeEl.textContent = normalizedMessage;
+        noticeEl.dataset.tone = sanitizeGlobalNoticeTone(tone);
+        rootEl.hidden = false;
+        rootEl.setAttribute('aria-hidden', 'false');
+        rootEl.classList.add('is-visible');
+
+        const durationMs = sanitizeGlobalNoticeDuration(timeoutMs);
+        if (durationMs <= 0) {
+            return;
+        }
+        autoHideTimer = window.setTimeout(() => {
+            hide();
+        }, durationMs);
+    }
+
+    function hide() {
+        clearHideTimers();
+        rootEl.classList.remove('is-visible');
+        hideDelayTimer = window.setTimeout(() => {
+            rootEl.hidden = true;
+            rootEl.setAttribute('aria-hidden', 'true');
+        }, DONATE_GLOBAL_NOTICE_HIDE_ANIMATION_MS);
+    }
+
+    function clearHideTimers() {
+        if (autoHideTimer > 0) {
+            window.clearTimeout(autoHideTimer);
+            autoHideTimer = 0;
+        }
+        if (hideDelayTimer > 0) {
+            window.clearTimeout(hideDelayTimer);
+            hideDelayTimer = 0;
+        }
+    }
+}
+
+function ensureDonateGlobalNoticeRoot() {
+    const existingRootEl = document.getElementById('donateGlobalNoticeLayer');
+    if (existingRootEl) {
+        return existingRootEl;
+    }
+    const rootEl = document.createElement('div');
+    rootEl.id = 'donateGlobalNoticeLayer';
+    rootEl.className = 'donateGlobalNoticeLayer';
+    rootEl.setAttribute('aria-hidden', 'true');
+    rootEl.hidden = true;
+    document.body.append(rootEl);
+    return rootEl;
+}
+
+function ensureDonateGlobalNoticeElement(rootEl) {
+    const existingNoticeEl = rootEl.querySelector('.donateGlobalNotice');
+    if (existingNoticeEl) {
+        return existingNoticeEl;
+    }
+    const noticeEl = document.createElement('div');
+    noticeEl.className = 'donateGlobalNotice';
+    noticeEl.setAttribute('role', 'status');
+    noticeEl.setAttribute('aria-live', 'polite');
+    noticeEl.dataset.tone = 'info';
+    rootEl.append(noticeEl);
+    return noticeEl;
+}
+
+function sanitizeGlobalNoticeMessage(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().replace(/\s+/g, ' ').slice(0, 220);
+    return normalized;
+}
+
+function sanitizeGlobalNoticeTone(value) {
+    if (typeof value !== 'string') {
+        return 'info';
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'error' || normalized === 'muted' || normalized === 'info') {
+        return normalized;
+    }
+    return 'info';
+}
+
+function sanitizeGlobalNoticeDuration(value) {
+    const numeric = Math.round(Number(value));
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return 0;
+    }
+    return Math.min(12_000, Math.max(800, numeric));
+}
+
+function resolveGratitudeContentFromSessionStatus(sessionStatusPayload) {
+    const amountText = formatDonationAmountForDisplay({
+        amountCents: sessionStatusPayload?.amountCents,
+        currencyCode: sessionStatusPayload?.currency,
+    });
+    return {
+        titleText: DONATE_SUCCESS_TITLE,
+        subtitleText: DONATE_SUCCESS_SUBTITLE,
+        messageText: '',
+        amountText,
+        previewMode: false,
+    };
+}
+
+function formatDonationAmountForDisplay({ amountCents, currencyCode } = {}) {
+    const numericAmountCents = sanitizeAmountCents(amountCents);
+    if (!Number.isInteger(numericAmountCents) || numericAmountCents <= 0) {
+        return '';
+    }
+    const formatter = createCurrencyFormatter(sanitizeCurrencyCode(currencyCode, DONATE_CURRENCY));
+    return formatter.format(centsToMajor(numericAmountCents));
+}
+
+function sanitizeAmountCents(value) {
+    const numeric = Math.round(Number(value));
+    if (!Number.isFinite(numeric) || numeric < 0) {
+        return null;
+    }
+    return numeric;
+}
+
+function createDonateGratitudeModalController() {
+    const overlayEl = ensureDonateGratitudeOverlayElement();
+    const titleEl = overlayEl.querySelector('.donateGratitudeTitle');
+    const subtitleEl = overlayEl.querySelector('.donateGratitudeSubtitle');
+    const amountEl = overlayEl.querySelector('.donateGratitudeAmount');
+    const messageEl = overlayEl.querySelector('.donateGratitudeMessage');
+    const closeBtnEl = overlayEl.querySelector('.donateGratitudeCloseBtn');
+    const continueBtnEl = overlayEl.querySelector('.donateGratitudeContinueBtn');
+    const cardEl = overlayEl.querySelector('.donateGratitudeCard');
+
+    const hide = () => {
+        overlayEl.classList.remove('is-visible');
+        window.setTimeout(() => {
+            if (!overlayEl.classList.contains('is-visible')) {
+                overlayEl.hidden = true;
+                overlayEl.setAttribute('aria-hidden', 'true');
+            }
+        }, 200);
+    };
+
+    closeBtnEl?.addEventListener('click', hide);
+    continueBtnEl?.addEventListener('click', hide);
+    overlayEl.addEventListener('click', (event) => {
+        if (event.target === overlayEl) {
+            hide();
+        }
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !overlayEl.hidden) {
+            event.preventDefault();
+            hide();
+        }
+    });
+
+    return {
+        show(payload = {}) {
+            const titleText = sanitizeGratitudeText(payload.titleText, DONATE_SUCCESS_TITLE, 90);
+            const subtitleText = sanitizeGratitudeText(
+                payload.subtitleText,
+                DONATE_SUCCESS_SUBTITLE,
+                170
+            );
+            const messageText = sanitizeOptionalGratitudeText(payload.messageText, 220);
+            const amountText = sanitizeGratitudeText(payload.amountText, '', 40);
+            const previewMode = Boolean(payload.previewMode);
+
+            titleEl.textContent = titleText;
+            subtitleEl.textContent = subtitleText;
+            messageEl.textContent = messageText;
+            messageEl.hidden = !messageText;
+            amountEl.textContent = amountText || '';
+            amountEl.hidden = !amountText;
+            cardEl.dataset.preview = previewMode ? 'true' : 'false';
+
+            overlayEl.hidden = false;
+            overlayEl.setAttribute('aria-hidden', 'false');
+            requestAnimationFrame(() => {
+                overlayEl.classList.add('is-visible');
+            });
+        },
+        hide,
+    };
+}
+
+function ensureDonateGratitudeOverlayElement() {
+    const existingEl = document.getElementById('donateGratitudeOverlay');
+    if (existingEl) {
+        return existingEl;
+    }
+
+    const overlayEl = document.createElement('section');
+    overlayEl.id = 'donateGratitudeOverlay';
+    overlayEl.className = 'donateGratitudeOverlay';
+    overlayEl.setAttribute('aria-hidden', 'true');
+    overlayEl.hidden = true;
+    overlayEl.innerHTML = `
+        <div class="donateGratitudeCard" role="dialog" aria-modal="true" aria-labelledby="donateGratitudeTitle">
+            <button class="donateGratitudeCloseBtn" type="button" aria-label="Close thank-you message">×</button>
+            <div class="donateGratitudeKicker">Support Received</div>
+            <h2 id="donateGratitudeTitle" class="donateGratitudeTitle">Thank You, Driver</h2>
+            <p class="donateGratitudeSubtitle"></p>
+            <div class="donateGratitudeAmount" hidden></div>
+            <p class="donateGratitudeMessage"></p>
+            <div class="donateGratitudeActions">
+                <button class="donateGratitudeContinueBtn" type="button">Keep Drifting</button>
+            </div>
+            <div class="donateGratitudeGlow donateGratitudeGlowA" aria-hidden="true"></div>
+            <div class="donateGratitudeGlow donateGratitudeGlowB" aria-hidden="true"></div>
+        </div>
+    `;
+    document.body.append(overlayEl);
+    return overlayEl;
+}
+
+function sanitizeGratitudeText(value, fallback = '', maxLength = 180) {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+    const normalized = value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+    return normalized || fallback;
+}
+
+function sanitizeOptionalGratitudeText(value, maxLength = 180) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+}
+
+function isLocalDevelopmentHost(hostnameValue) {
+    const normalizedHostname = String(hostnameValue || '')
+        .trim()
+        .toLowerCase();
+    return (
+        normalizedHostname === 'localhost' ||
+        normalizedHostname === '127.0.0.1' ||
+        normalizedHostname === '::1'
+    );
+}
+
+function isFormFieldEventTarget(target) {
+    if (!(target instanceof HTMLElement)) {
+        return false;
+    }
+    const tagName = target.tagName.toLowerCase();
+    if (tagName === 'input' || tagName === 'textarea' || tagName === 'select') {
+        return true;
+    }
+    return target.isContentEditable;
 }
 
 function createNoopController() {

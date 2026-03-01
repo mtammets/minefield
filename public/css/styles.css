@@ -1476,6 +1476,264 @@ body.race-intro-active #miniMapHud {
     color: rgba(255, 195, 195, 0.97);
 }
 
+.donateGlobalNoticeLayer {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    padding: 0 12px;
+    z-index: 26;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-8px);
+    transition:
+        opacity 180ms ease,
+        transform 180ms ease;
+}
+
+.donateGlobalNoticeLayer.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.donateGlobalNoticeLayer[hidden] {
+    display: none;
+}
+
+.donateGlobalNotice {
+    max-width: min(620px, calc(100vw - 24px));
+    border: 1px solid rgba(167, 207, 238, 0.6);
+    border-radius: 12px;
+    padding: 10px 14px;
+    background: linear-gradient(165deg, rgba(10, 24, 42, 0.95), rgba(6, 15, 28, 0.95));
+    box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.4),
+        inset 0 0 0 1px rgba(212, 236, 255, 0.08);
+    color: rgba(222, 241, 255, 0.98);
+    font-family: 'Sora', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.1px;
+    line-height: 1.4;
+    text-align: center;
+    backdrop-filter: blur(4px);
+}
+
+.donateGlobalNotice[data-tone='info'] {
+    border-color: rgba(167, 207, 238, 0.6);
+    color: rgba(222, 241, 255, 0.98);
+}
+
+.donateGlobalNotice[data-tone='muted'] {
+    border-color: rgba(150, 175, 201, 0.54);
+    color: rgba(204, 222, 238, 0.97);
+}
+
+.donateGlobalNotice[data-tone='error'] {
+    border-color: rgba(243, 159, 159, 0.62);
+    color: rgba(255, 219, 219, 0.99);
+    background: linear-gradient(165deg, rgba(45, 15, 19, 0.95), rgba(23, 8, 12, 0.95));
+}
+
+.donateGratitudeOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 34;
+    display: grid;
+    place-items: center;
+    padding: clamp(14px, 4vw, 28px);
+    background:
+        radial-gradient(circle at 28% 18%, rgba(90, 186, 255, 0.2), rgba(90, 186, 255, 0) 40%),
+        radial-gradient(circle at 78% 84%, rgba(255, 170, 82, 0.18), rgba(255, 170, 82, 0) 46%),
+        rgba(3, 8, 16, 0.62);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 210ms ease;
+}
+
+.donateGratitudeOverlay.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.donateGratitudeOverlay[hidden] {
+    display: none;
+}
+
+.donateGratitudeCard {
+    position: relative;
+    width: min(620px, calc(100vw - 32px));
+    border: 1px solid rgba(187, 223, 250, 0.62);
+    border-radius: 18px;
+    padding: clamp(18px, 3.2vw, 30px);
+    background: linear-gradient(166deg, rgba(8, 24, 42, 0.97), rgba(4, 13, 24, 0.97));
+    box-shadow:
+        0 22px 54px rgba(0, 0, 0, 0.5),
+        inset 0 0 0 1px rgba(224, 243, 255, 0.08);
+    color: rgba(236, 247, 255, 0.99);
+    overflow: hidden;
+    transform: translateY(8px) scale(0.98);
+    transition: transform 220ms ease;
+}
+
+.donateGratitudeOverlay.is-visible .donateGratitudeCard {
+    transform: translateY(0) scale(1);
+}
+
+.donateGratitudeCard[data-preview='true'] {
+    outline: 1px dashed rgba(255, 206, 138, 0.78);
+    outline-offset: -8px;
+}
+
+.donateGratitudeKicker {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: rgba(255, 211, 152, 0.96);
+}
+
+.donateGratitudeTitle {
+    margin: 9px 0 6px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(28px, 4.6vw, 42px);
+    font-weight: 900;
+    letter-spacing: 0.4px;
+    line-height: 1.03;
+    color: rgba(242, 251, 255, 0.99);
+    text-shadow: 0 0 20px rgba(110, 193, 255, 0.3);
+}
+
+.donateGratitudeSubtitle {
+    margin: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: clamp(13px, 2vw, 16px);
+    font-weight: 600;
+    line-height: 1.45;
+    color: rgba(208, 230, 248, 0.96);
+}
+
+.donateGratitudeAmount {
+    margin-top: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 11px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 208, 136, 0.72);
+    background: linear-gradient(180deg, rgba(58, 40, 12, 0.82), rgba(31, 22, 7, 0.84));
+    color: rgba(255, 233, 190, 0.99);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+}
+
+.donateGratitudeMessage {
+    margin: 16px 0 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.55;
+    color: rgba(220, 238, 252, 0.96);
+}
+
+.donateGratitudeActions {
+    margin-top: 18px;
+    display: flex;
+    justify-content: flex-start;
+}
+
+.donateGratitudeContinueBtn {
+    border: 1px solid rgba(168, 225, 180, 0.7);
+    border-radius: 11px;
+    min-height: 42px;
+    padding: 0 14px;
+    background: linear-gradient(180deg, rgba(75, 196, 126, 0.96), rgba(34, 124, 83, 0.96));
+    color: rgba(5, 25, 14, 0.98);
+    font-family: 'Sora', sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease;
+}
+
+.donateGratitudeContinueBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+}
+
+.donateGratitudeContinueBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.95);
+}
+
+.donateGratitudeContinueBtn:focus-visible {
+    outline: none;
+    border-color: rgba(212, 246, 220, 0.94);
+    box-shadow: 0 0 0 2px rgba(132, 219, 155, 0.28);
+}
+
+.donateGratitudeCloseBtn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 34px;
+    height: 34px;
+    border: 1px solid rgba(171, 210, 241, 0.5);
+    border-radius: 9px;
+    background: rgba(10, 28, 46, 0.88);
+    color: rgba(224, 241, 254, 0.96);
+    font-family: 'Sora', sans-serif;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease;
+}
+
+.donateGratitudeCloseBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.07);
+}
+
+.donateGratitudeCloseBtn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(141, 194, 231, 0.24);
+}
+
+.donateGratitudeGlow {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 999px;
+    filter: blur(22px);
+}
+
+.donateGratitudeGlowA {
+    width: 180px;
+    height: 180px;
+    top: -56px;
+    left: -28px;
+    background: rgba(90, 182, 255, 0.24);
+}
+
+.donateGratitudeGlowB {
+    width: 190px;
+    height: 190px;
+    right: -56px;
+    bottom: -74px;
+    background: rgba(255, 178, 92, 0.24);
+}
+
 .donateActions {
     display: grid;
     grid-template-columns: 1fr;
@@ -3652,6 +3910,36 @@ body.race-intro-active #performancePanel {
 
     #donateCustomAmountInput {
         font-size: 22px;
+    }
+
+    .donateGratitudeOverlay {
+        padding: 10px;
+    }
+
+    .donateGratitudeCard {
+        width: calc(100vw - 20px);
+        border-radius: 14px;
+        padding: 14px;
+    }
+
+    .donateGratitudeTitle {
+        font-size: clamp(24px, 9.5vw, 34px);
+    }
+
+    .donateGratitudeSubtitle {
+        font-size: 13px;
+    }
+
+    .donateGratitudeMessage {
+        font-size: 13px;
+    }
+
+    .donateGratitudeActions {
+        justify-content: stretch;
+    }
+
+    .donateGratitudeContinueBtn {
+        width: 100%;
     }
 }
 
