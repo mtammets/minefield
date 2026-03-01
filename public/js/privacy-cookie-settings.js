@@ -1,3 +1,5 @@
+import { clearAnalyticsCookies } from './analytics-cookie-cleanup.js';
+
 const CONSENT_STORAGE_KEY = 'minefield-cookie-consent-v1';
 const CONSENT_STORAGE_VERSION = 1;
 const CONSENT_STATUS_GRANTED = 'granted';
@@ -15,10 +17,15 @@ if (acceptOptionalCookiesBtn && onlyNecessaryCookiesBtn && consentStatusEl) {
 
     onlyNecessaryCookiesBtn.addEventListener('click', () => {
         writeStoredConsentStatus(CONSENT_STATUS_DENIED);
+        clearAnalyticsCookies();
         renderConsentStatus(CONSENT_STATUS_DENIED);
     });
 
-    renderConsentStatus(readStoredConsentStatus());
+    const initialStatus = readStoredConsentStatus();
+    if (initialStatus === CONSENT_STATUS_DENIED) {
+        clearAnalyticsCookies();
+    }
+    renderConsentStatus(initialStatus);
 }
 
 function readStoredConsentStatus() {

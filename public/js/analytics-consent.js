@@ -1,3 +1,5 @@
+import { clearAnalyticsCookies } from './analytics-cookie-cleanup.js';
+
 const PUBLIC_CONFIG_ENDPOINT_PATH = '/api/public-config';
 const GA_SCRIPT_SRC_BASE = 'https://www.googletagmanager.com/gtag/js';
 const GA_SCRIPT_ELEMENT_ID = 'minefield-ga4-script';
@@ -178,6 +180,7 @@ async function enableAnalyticsTracking() {
 }
 
 function disableAnalyticsTracking() {
+    clearAnalyticsCookies();
     bootstrapGtagApi();
     if (typeof window.gtag !== 'function') {
         return;
@@ -188,6 +191,7 @@ function disableAnalyticsTracking() {
         ad_user_data: 'denied',
         ad_personalization: 'denied',
     });
+    clearAnalyticsCookies();
 }
 
 function ensureGoogleTagScriptLoaded() {
