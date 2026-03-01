@@ -3924,44 +3924,6 @@ body.edit-mode-active .audioControlPanel {
     border-color: rgba(234, 247, 255, 0.72);
 }
 
-.cookieConsentSettingsBtn {
-    position: fixed;
-    left: max(12px, env(safe-area-inset-left));
-    bottom: max(12px, env(safe-area-inset-bottom));
-    z-index: 119;
-    border: 1px solid rgba(149, 201, 234, 0.58);
-    border-radius: 999px;
-    min-height: 36px;
-    padding: 0 12px;
-    background: linear-gradient(170deg, rgba(12, 29, 47, 0.9), rgba(9, 20, 33, 0.92));
-    color: rgba(210, 235, 253, 0.97);
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    letter-spacing: 0.9px;
-    font-weight: 800;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition:
-        transform 120ms ease,
-        filter 120ms ease,
-        opacity 120ms ease;
-}
-
-.cookieConsentSettingsBtn:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.08);
-}
-
-.cookieConsentSettingsBtn:active {
-    transform: translateY(0);
-    filter: brightness(0.94);
-}
-
-body.cookie-consent-open .cookieConsentSettingsBtn {
-    opacity: 0;
-    pointer-events: none;
-}
-
 @media (max-width: 720px) {
     .cookieConsentCard {
         border-radius: 12px;

@@ -30,18 +30,15 @@ async function initializeAnalyticsConsent() {
     if (consentStatus === CONSENT_STATUS_GRANTED) {
         await applyConsentStatus(CONSENT_STATUS_GRANTED, { persist: false });
         hideConsentBanner();
-        showSettingsButton();
         return;
     }
 
     if (consentStatus === CONSENT_STATUS_DENIED) {
         await applyConsentStatus(CONSENT_STATUS_DENIED, { persist: false });
         hideConsentBanner();
-        showSettingsButton();
         return;
     }
 
-    showSettingsButton();
     showConsentBanner();
 }
 
@@ -53,31 +50,23 @@ function createConsentUi() {
     bannerEl.setAttribute('aria-hidden', 'true');
     bannerEl.innerHTML = `
         <div class="cookieConsentCard" role="dialog" aria-labelledby="cookieConsentTitle" aria-live="polite">
-            <h2 id="cookieConsentTitle" class="cookieConsentTitle">Analytics Cookies</h2>
+            <h2 id="cookieConsentTitle" class="cookieConsentTitle">Cookie Preferences</h2>
             <p class="cookieConsentText">
-                Minefield Drift uses Google Analytics to measure traffic and improve gameplay UX.
-                Analytics is optional and is enabled only if you allow it.
+                We use cookies to provide core functionality and improve service quality.
+                Optional cookies are used only with your consent.
             </p>
             <div class="cookieConsentActions">
                 <button id="cookieConsentAcceptBtn" class="cookieConsentBtn accept" type="button">
-                    Accept analytics
+                    Accept optional cookies
                 </button>
                 <button id="cookieConsentDeclineBtn" class="cookieConsentBtn decline" type="button">
-                    Decline
+                    Only necessary cookies
                 </button>
                 <a class="cookieConsentLink" href="/privacy.html">Privacy policy</a>
             </div>
         </div>
     `;
-
-    const settingsButtonEl = document.createElement('button');
-    settingsButtonEl.id = 'cookieConsentSettingsBtn';
-    settingsButtonEl.className = 'cookieConsentSettingsBtn';
-    settingsButtonEl.type = 'button';
-    settingsButtonEl.hidden = true;
-    settingsButtonEl.textContent = 'Cookie settings';
-
-    document.body.append(settingsButtonEl, bannerEl);
+    document.body.append(bannerEl);
 
     const acceptButtonEl = bannerEl.querySelector('#cookieConsentAcceptBtn');
     const declineButtonEl = bannerEl.querySelector('#cookieConsentDeclineBtn');
@@ -87,7 +76,6 @@ function createConsentUi() {
         await applyConsentStatus(CONSENT_STATUS_GRANTED, { persist: true });
         setBannerBusyState(false);
         hideConsentBanner();
-        showSettingsButton();
     });
 
     declineButtonEl?.addEventListener('click', async () => {
@@ -95,16 +83,10 @@ function createConsentUi() {
         await applyConsentStatus(CONSENT_STATUS_DENIED, { persist: true });
         setBannerBusyState(false);
         hideConsentBanner();
-        showSettingsButton();
-    });
-
-    settingsButtonEl.addEventListener('click', () => {
-        showConsentBanner();
     });
 
     return {
         bannerEl,
-        settingsButtonEl,
         acceptButtonEl,
         declineButtonEl,
     };
@@ -298,13 +280,8 @@ function hideConsentBanner() {
     document.body.classList.remove('cookie-consent-open');
 }
 
-function showSettingsButton() {
-    consentUi.settingsButtonEl.hidden = false;
-}
-
 function hideConsentUi() {
     hideConsentBanner();
-    consentUi.settingsButtonEl.hidden = true;
 }
 
 function setBannerBusyState(isBusy) {

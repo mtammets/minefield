@@ -105,10 +105,27 @@
                         them.
                     </li>
                     <li>
-                        You can change your analytics cookie choice at any time using the Cookie
-                        Settings button shown in the game UI.
+                        You can change your analytics cookie choice at any time using the controls
+                        below.
                     </li>
                 </ul>
+                <div class="legalConsentControls" aria-label="Cookie settings controls">
+                    <button
+                        id="privacyAcceptOptionalCookiesBtn"
+                        class="legalConsentBtn"
+                        type="button"
+                    >
+                        Accept optional cookies
+                    </button>
+                    <button
+                        id="privacyOnlyNecessaryCookiesBtn"
+                        class="legalConsentBtn secondary"
+                        type="button"
+                    >
+                        Only necessary cookies
+                    </button>
+                </div>
+                <p id="privacyCookieConsentStatus" class="legalConsentStatus" aria-live="polite"></p>
             </section>
 
             <section class="legalSection" aria-label="Your rights">
@@ -130,5 +147,6 @@
 
             <div class="legalFooter">© 2026 Minefield Drift</div>
         </main>
+        <script type="module" src="/js/privacy-cookie-settings.js"></script>
     </body>
 </html>

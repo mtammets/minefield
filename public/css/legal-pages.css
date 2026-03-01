@@ -141,6 +141,55 @@ body {
     text-decoration-color: rgba(228, 244, 255, 0.82);
 }
 
+.legalConsentControls {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.legalConsentBtn {
+    border: 1px solid rgba(156, 210, 244, 0.52);
+    border-radius: 9px;
+    min-height: 36px;
+    padding: 0 12px;
+    background: linear-gradient(170deg, rgba(21, 61, 89, 0.84), rgba(10, 28, 43, 0.9));
+    color: rgba(228, 244, 255, 0.97);
+    font-family: 'Sora', 'Segoe UI', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.35px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease;
+}
+
+.legalConsentBtn.secondary {
+    background: linear-gradient(170deg, rgba(17, 39, 61, 0.82), rgba(8, 20, 32, 0.9));
+    color: rgba(210, 234, 250, 0.96);
+}
+
+.legalConsentBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    border-color: rgba(191, 230, 252, 0.72);
+}
+
+.legalConsentBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+}
+
+.legalConsentStatus {
+    margin: 8px 0 0 0;
+    font-size: 13px;
+    line-height: 1.4;
+    color: rgba(186, 218, 240, 0.9);
+}
+
 .legalFooter {
     margin-top: 16px;
     padding-top: 12px;
