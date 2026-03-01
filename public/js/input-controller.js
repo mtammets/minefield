@@ -164,7 +164,13 @@ export function createInputController(options = {}) {
                 lastEscapeKeyDownAtMs = performance.now();
             }
             if (isKeyDown && !finalScoreboardUi.isVisible()) {
-                onSetPauseState(!getIsGamePaused());
+                const nextPausedState = !getIsGamePaused();
+                onSetPauseState(nextPausedState);
+                if (document.fullscreenElement) {
+                    clearFullscreenCursorHideTimeout();
+                    resetFullscreenCursorPointerSample();
+                    hideFullscreenCursor();
+                }
                 void lockEscapeKeyInFullscreen();
             }
             return;
@@ -441,9 +447,14 @@ export function createInputController(options = {}) {
     function onFullscreenChange() {
         onWindowResize();
         if (document.fullscreenElement) {
-            showFullscreenCursor();
+            clearFullscreenCursorHideTimeout();
             resetFullscreenCursorPointerSample();
-            scheduleFullscreenCursorHide();
+            if (isGameplayCursorLockActive()) {
+                hideFullscreenCursor();
+            } else {
+                showFullscreenCursor();
+                scheduleFullscreenCursorHide();
+            }
             void lockEscapeKeyInFullscreen();
             return;
         }
@@ -461,6 +472,11 @@ export function createInputController(options = {}) {
 
     function handleFullscreenCursorPointerMove(event) {
         if (!document.fullscreenElement) {
+            return;
+        }
+        if (isGameplayCursorLockActive()) {
+            clearFullscreenCursorHideTimeout();
+            hideFullscreenCursor();
             return;
         }
         if (shouldKeepCursorVisible()) {
@@ -494,8 +510,16 @@ export function createInputController(options = {}) {
         handleFullscreenCursorActivity();
     }
 
-    function handleFullscreenCursorActivity() {
+    function handleFullscreenCursorActivity(event) {
         if (!document.fullscreenElement) {
+            return;
+        }
+        if (isGameplayCursorLockActive()) {
+            clearFullscreenCursorHideTimeout();
+            hideFullscreenCursor();
+            return;
+        }
+        if (event?.type === 'keydown') {
             return;
         }
         showFullscreenCursor();
@@ -504,12 +528,26 @@ export function createInputController(options = {}) {
 
     function scheduleFullscreenCursorHide() {
         clearFullscreenCursorHideTimeout();
-        if (!document.fullscreenElement || shouldKeepCursorVisible()) {
+        if (!document.fullscreenElement) {
+            return;
+        }
+        if (isGameplayCursorLockActive()) {
+            hideFullscreenCursor();
+            return;
+        }
+        if (shouldKeepCursorVisible()) {
             return;
         }
         fullscreenCursorHideTimeout = window.setTimeout(() => {
             fullscreenCursorHideTimeout = null;
-            if (!document.fullscreenElement || shouldKeepCursorVisible()) {
+            if (!document.fullscreenElement) {
+                return;
+            }
+            if (isGameplayCursorLockActive()) {
+                hideFullscreenCursor();
+                return;
+            }
+            if (shouldKeepCursorVisible()) {
                 showFullscreenCursor();
                 return;
             }
@@ -538,7 +576,21 @@ export function createInputController(options = {}) {
         document.documentElement.classList.add('fullscreen-idle-cursor-hidden');
     }
 
+    function isGameplayCursorLockActive() {
+        if (getIsGamePaused() || finalScoreboardUi.isVisible()) {
+            return false;
+        }
+        const inputContext = getInputContext();
+        return (
+            inputContext === INPUT_CONTEXTS.gameplay ||
+            inputContext === INPUT_CONTEXTS.raceIntroLocked
+        );
+    }
+
     function shouldKeepCursorVisible() {
+        if (getIsGamePaused()) {
+            return true;
+        }
         const activeEl = document.activeElement;
         if (!activeEl) {
             return false;
