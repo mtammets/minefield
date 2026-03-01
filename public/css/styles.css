@@ -31,16 +31,6 @@ body {
     color: white;
 }
 
-html:fullscreen,
-html:fullscreen * {
-    cursor: none !important;
-}
-
-html:-webkit-full-screen,
-html:-webkit-full-screen * {
-    cursor: none !important;
-}
-
 body::before {
     content: '';
     position: fixed;
