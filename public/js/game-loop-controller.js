@@ -35,7 +35,6 @@ export function createGameLoopController(options = {}) {
         chargingProgressHudController,
         skidMarkController,
         welcomeModalUi,
-        replayRecorder = null,
         starsController,
         objectiveUi,
         botStatusUi,
@@ -367,9 +366,6 @@ export function createGameLoopController(options = {}) {
         const worldMapDriveLockMode = readWorldMapDriveLockMode();
         const worldMapOpen = readWorldMapOpen();
         const gamePaused = readGamePaused();
-        replayRecorder?.updateCaptureState?.({
-            enabled: !isWelcomeVisible && !gamePaused && !isEditModeActive && !worldMapOpen,
-        });
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;

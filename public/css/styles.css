@@ -3522,10 +3522,6 @@ body.race-intro-active #performancePanel {
     pointer-events: none !important;
 }
 
-.welcomeShowroomBay[data-preview-loading='true'] .welcomeReplayVideo {
-    opacity: 0 !important;
-}
-
 .welcomePreviewLabel {
     position: absolute;
     z-index: 4;
@@ -3553,36 +3549,6 @@ body.race-intro-active #performancePanel {
     transition:
         opacity 220ms ease,
         filter 220ms ease;
-}
-
-.welcomeReplayVideo {
-    position: absolute;
-    inset: 0;
-    z-index: 4;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    opacity: 0;
-    pointer-events: none;
-    background: rgba(2, 4, 7, 0.92);
-    transition: opacity 280ms ease;
-}
-
-.welcomeShowroomBay[data-replay-active='true'] .welcomeReplayVideo {
-    opacity: 1;
-}
-
-.welcomeShowroomBay[data-replay-active='true'] #welcomeCarCanvas {
-    opacity: 0.22;
-    filter: saturate(0.66) brightness(0.72);
-}
-
-.welcomeShowroomBay[data-replay-active='true'] .welcomePreviewSweep {
-    opacity: 0.16;
-}
-
-.welcomeShowroomBay[data-replay-active='true'] .welcomeBayRings {
-    opacity: 0.42;
 }
 
 .welcomeBayRings {

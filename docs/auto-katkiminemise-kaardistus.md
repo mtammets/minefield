@@ -132,13 +132,12 @@ Peamised crash-kontrollid jooksevad aktiivses gameplay harus:
 
 - mitte pausis
 - mitte edit mode
-- mitte replay playback
 - auto pole juba hävinud
 - round pole lõppenud
 
 Viide: `public/js/game-loop-controller.js`.
 
-Seega näiteks pausis/welcome/replay ajal uusi hard-crashe ei käivitata.
+Seega näiteks pausis või welcome vaates uusi hard-crashe ei käivitata.
 
 ## 5) Runtime-is muudetavad lävendid
 

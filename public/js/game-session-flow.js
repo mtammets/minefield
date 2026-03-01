@@ -88,7 +88,6 @@ export function createGameSessionController({
     onPlayerRespawned = () => {},
     onPlayerExplosion = () => {},
     audioController = null,
-    replayRecorder = null,
 } = {}) {
     const getBotSystem =
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
@@ -236,13 +235,6 @@ export function createGameSessionController({
         clearPendingRoundPresentation();
         carEditModeController.setActive(false);
         raceIntroController.stop();
-        const replayClip = replayRecorder?.captureLatestClip?.({
-            minDurationMs: 1200,
-            maxDurationMs: 24000,
-        });
-        if (replayClip) {
-            welcomeModalUi.setReplayClipSource?.(replayClip);
-        }
         setIsWelcomeModalVisible(true);
         setIsGamePaused(true);
         clearDriveKeys();

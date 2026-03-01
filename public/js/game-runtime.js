@@ -105,7 +105,6 @@ import { createGameLoopController } from './game-loop-controller.js';
 import { createGameRuntimeState } from './game-runtime-state.js';
 import { initializeScene, initializeRenderer } from './game-bootstrap.js';
 import { createRuntimeUiControllers } from './game-runtime-ui.js';
-import { createGameplayReplayRecorder } from './gameplay-replay-recorder.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
 import { createMapUiController } from './map-ui.js';
@@ -294,12 +293,11 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
                 return {
                     task: 'audio',
                     ready,
-                    message:
-                        !ready
-                            ? 'Core gameplay audio could not be prepared.'
-                            : filesTotal > 0 && filesFailed > 0
-                              ? `Some optional audio files failed to load (${filesFailed}/${filesTotal}).`
-                              : '',
+                    message: !ready
+                        ? 'Core gameplay audio could not be prepared.'
+                        : filesTotal > 0 && filesFailed > 0
+                          ? `Some optional audio files failed to load (${filesFailed}/${filesTotal}).`
+                          : '',
                 };
             })()
         );
@@ -679,15 +677,6 @@ const scene = initializeScene({
     worldBoundary,
 });
 const renderer = initializeRenderer({ renderSettings });
-const gameplayReplayRecorder = createGameplayReplayRecorder({
-    canvas: renderer.domElement,
-    bufferDurationSec: 24,
-    minClipDurationMs: 1200,
-    maxClipDurationMs: 24000,
-});
-window.addEventListener('beforeunload', () => {
-    gameplayReplayRecorder.dispose();
-});
 runtimeState.audioController = createAudioSystem({ camera });
 runtimeState.audioController.initialize({
     preloadOnInitialize: false,
@@ -2070,7 +2059,6 @@ runtimeState.gameSessionController = createGameSessionController({
         runtimeState.scorePopupController?.clear?.();
     },
     audioController: runtimeState.audioController,
-    replayRecorder: gameplayReplayRecorder,
 });
 
 function syncRuntimeInputContext() {
@@ -2429,7 +2417,6 @@ runtimeState.gameLoopController = createGameLoopController({
     chargingProgressHudController,
     skidMarkController,
     welcomeModalUi,
-    replayRecorder: gameplayReplayRecorder,
     starsController,
     objectiveUi,
     botStatusUi,

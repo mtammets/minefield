@@ -98,9 +98,8 @@ Seda voogu ei töödelda aktiivse gameplay haru väliselt:
 
 1. pausis
 2. edit mode’is
-3. replay playback ajal
-4. kui auto on juba hävinud
-5. kui round on lõpetatud
+3. kui auto on juba hävinud
+4. kui round on lõpetatud
 
 Viited:
 
@@ -125,8 +124,7 @@ Kere ja osad taastatakse baseline’i:
 
 1. respawnil (`PLAYER_RESPAWN_DELAY_MS = 850ms` pärast hävingut)
 2. uue mängu käivitamisel
-3. replay resetil
-4. runtime initil
+3. runtime initil
 
 Viited:
 
