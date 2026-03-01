@@ -2478,6 +2478,11 @@ body.race-intro-active #performancePanel {
 }
 
 @media (max-width: 720px) {
+    #botPanel,
+    #miniMapHud {
+        display: none;
+    }
+
     #editModePanel {
         left: 10px;
         right: 10px;
