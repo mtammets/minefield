@@ -1,4 +1,10 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import {
+    ACTION_IDS,
+    DEFAULT_KEY_BINDINGS,
+    actionMatchesEvent,
+    normalizeKeyboardKey,
+} from './input-bindings.js';
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.3, 600);
 camera.position.set(0, 3, 8);
@@ -19,19 +25,50 @@ const roofCamLocalPosition = new THREE.Vector3(0.24, 1.92, 1.42);
 const roofScreenLookLocal = new THREE.Vector3(0, 0.72, 0.14);
 const roofCamWorldPosition = new THREE.Vector3();
 const roofLookWorldPosition = new THREE.Vector3();
+const cameraViewActionOrder = [
+    ACTION_IDS.cameraView1,
+    ACTION_IDS.cameraView2,
+    ACTION_IDS.cameraView3,
+    ACTION_IDS.cameraView4,
+    ACTION_IDS.cameraView5,
+    ACTION_IDS.cameraView6,
+    ACTION_IDS.cameraView7,
+];
 
 document.addEventListener('keydown', (event) => {
     if (!cameraKeyboardControlsEnabled) {
         return;
     }
 
-    if (event.key >= '1' && event.key <= '7') {
-        cameraViewMode = parseInt(event.key, 10);
-        cinematicMode = false;
+    const normalizedKey = normalizeKeyboardKey(event?.key || '');
+    if (
+        actionMatchesEvent(
+            ACTION_IDS.cameraCinematicToggle,
+            event,
+            DEFAULT_KEY_BINDINGS,
+            normalizedKey
+        )
+    ) {
+        event.preventDefault();
+        cinematicMode = !cinematicMode;
+        return;
     }
 
-    if (event.key.toLowerCase() === 'c') {
-        cinematicMode = !cinematicMode;
+    for (let index = 0; index < cameraViewActionOrder.length; index += 1) {
+        if (
+            !actionMatchesEvent(
+                cameraViewActionOrder[index],
+                event,
+                DEFAULT_KEY_BINDINGS,
+                normalizedKey
+            )
+        ) {
+            continue;
+        }
+        event.preventDefault();
+        cameraViewMode = index + 1;
+        cinematicMode = false;
+        return;
     }
 });
 

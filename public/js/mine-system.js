@@ -176,7 +176,7 @@ export function createMineSystemController(options = {}) {
             return {
                 ok: false,
                 message: includePlayerMessages
-                    ? 'Landmines can only be used in an active online room.'
+                    ? 'Landmines are unavailable right now.'
                     : 'Mine deployment is currently disabled.',
             };
         }

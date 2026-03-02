@@ -115,13 +115,13 @@ import {
     createGraphicsQualityController,
     GRAPHICS_QUALITY_MODES,
 } from './graphics-quality-controller.js';
-import { createPerformanceDiagnosticsController } from './performance-diagnostics-ui.js';
 import {
     INPUT_CONTEXTS,
     WORLD_MAP_DRIVE_LOCK_MODES,
     resolveGameplayInputContext,
     resolveWorldMapDriveLockMode,
 } from './input-context.js';
+import { DEFAULT_KEY_BINDINGS } from './input-bindings.js';
 
 const clock = new THREE.Clock();
 const physicsStep = 1 / 120;
@@ -160,7 +160,7 @@ const runtimeState = createGameRuntimeState({
 let runtimeGraphicsWarmupReady = false;
 runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
-const performanceDiagnosticsController = createPerformanceDiagnosticsController();
+const performanceDiagnosticsController = createNoopPerformanceDiagnosticsController();
 
 setPlayerCarBodyColor(runtimeState.selectedCarColorHex);
 setPlayerTopSpeedLimitKph(
@@ -170,7 +170,7 @@ setPlayerTopSpeedLimitKph(
     })
 );
 
-const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi } =
+const { objectiveUi, controlsHelpUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi } =
     createRuntimeUiControllers({
         toCssHex,
         colorNameFromHex,
@@ -181,6 +181,7 @@ const { objectiveUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi
         getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
         getGameSessionController: () => runtimeState.gameSessionController,
         getInputController: () => runtimeState.inputController,
+        getIsInOnlineRoom: () => Boolean(runtimeState.multiplayerController?.isInRoom?.()),
         onPrepareStart: prepareRuntimeForSessionStart,
         onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
     });
@@ -1902,6 +1903,7 @@ runtimeState.gameSessionController = createGameSessionController({
     resolvePlayerCarColorHex,
     persistPlayerCarColorHex,
     objectiveUi,
+    controlsHelpUi,
     botStatusUi,
     finalScoreboardUi,
     pauseMenuUi,
@@ -2172,6 +2174,38 @@ function cycleGraphicsQualityMode(step = 1, options = {}) {
     return finalizeGraphicsQualitySnapshot(snapshot, options);
 }
 
+function createNoopPerformanceDiagnosticsController() {
+    return {
+        update() {},
+        clear() {},
+        setVisible() {},
+        getSnapshot() {
+            return null;
+        },
+        recordEvent() {
+            return null;
+        },
+        downloadLog(payload = null, options = null) {
+            const fallbackFilename = createDiagnosticsLogFilename();
+            const filename = sanitizeDiagnosticsFilename(options?.filename, fallbackFilename);
+            const result = downloadDiagnosticsJson(payload || {}, filename);
+            if (result.ok) {
+                return {
+                    ok: true,
+                    filename,
+                    bytes: result.bytes,
+                    spikes: 0,
+                };
+            }
+            return {
+                ok: false,
+                filename,
+                error: result.error || 'Download failed.',
+            };
+        },
+    };
+}
+
 function downloadPerformanceDiagnosticsLog(roundSnapshot = null) {
     const diagnosticsPayload = {
         trigger: 'round_complete',
@@ -2201,6 +2235,60 @@ function downloadPerformanceDiagnosticsLog(roundSnapshot = null) {
         filename: result?.filename || fallbackFilename,
         error: result?.error || 'Download failed.',
     };
+}
+
+function sanitizeDiagnosticsFilename(filename, fallbackFilename) {
+    const fallback =
+        typeof fallbackFilename === 'string' && fallbackFilename.trim()
+            ? fallbackFilename.trim()
+            : 'auto-diagnostics.json';
+    const raw = typeof filename === 'string' ? filename.trim() : '';
+    const withExtension = raw
+        ? raw.toLowerCase().endsWith('.json')
+            ? raw
+            : `${raw}.json`
+        : fallback;
+    const cleaned = withExtension
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    return cleaned || fallback;
+}
+
+function downloadDiagnosticsJson(payload, filename) {
+    try {
+        const serialized = JSON.stringify(payload, null, 2);
+        const blob = new Blob([serialized], {
+            type: 'application/json;charset=utf-8',
+        });
+        const url = URL.createObjectURL(blob);
+        try {
+            const anchor = document.createElement('a');
+            anchor.href = url;
+            anchor.download = filename;
+            anchor.rel = 'noopener';
+            anchor.style.display = 'none';
+            document.body.append(anchor);
+            anchor.click();
+            anchor.remove();
+        } finally {
+            setTimeout(() => {
+                URL.revokeObjectURL(url);
+            }, 0);
+        }
+        return {
+            ok: true,
+            bytes: blob.size,
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            error:
+                typeof error?.message === 'string' && error.message.trim()
+                    ? error.message.trim()
+                    : 'Unable to create diagnostics file.',
+        };
+    }
 }
 
 function createRuntimeDiagnosticsSnapshot() {
@@ -2362,6 +2450,9 @@ runtimeState.inputController = createInputController({
     onShowObjectiveInfo(messageText, timeoutMs = 2000) {
         objectiveUi.showInfo(messageText, timeoutMs);
     },
+    onRegisterControlAction(actionId = '') {
+        objectiveUi.registerControlAction?.(actionId);
+    },
     onStartNewGame() {
         runtimeState.gameSessionController?.startNewGame();
     },
@@ -2396,6 +2487,7 @@ runtimeState.inputController = createInputController({
             getPlayerTopSpeedLimitBounds,
         });
     },
+    keyBindings: DEFAULT_KEY_BINDINGS,
     getMaxPixelRatio() {
         return graphicsQualityController.getMaxPixelRatioCap();
     },

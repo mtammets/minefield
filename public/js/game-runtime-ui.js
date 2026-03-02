@@ -3,6 +3,7 @@ import { createBotStatusController } from './bot-status-ui.js';
 import { createFinalScoreboardController } from './final-scoreboard-ui.js';
 import { createPauseMenuController } from './pause-menu-ui.js';
 import { createDonateUiController } from './donate-ui.js';
+import { createControlsHelpController } from './controls-ui.js';
 
 export function createRuntimeUiControllers({
     toCssHex,
@@ -14,10 +15,14 @@ export function createRuntimeUiControllers({
     getSelectedCarColorHex,
     getGameSessionController,
     getInputController,
+    getIsInOnlineRoom = () => false,
     onPrepareStart,
     onDownloadPerformanceLog = null,
 }) {
     const objectiveUi = createNoopObjectiveUi();
+    const controlsHelpUi = createControlsHelpController({
+        getIsInOnlineRoom,
+    });
 
     const botStatusUi = createBotStatusController({
         toCssHex,
@@ -78,6 +83,7 @@ export function createRuntimeUiControllers({
 
     return {
         objectiveUi,
+        controlsHelpUi,
         botStatusUi,
         finalScoreboardUi,
         pauseMenuUi,
@@ -95,5 +101,7 @@ function createNoopObjectiveUi() {
         showInfo() {},
         showResult() {},
         resetStatus() {},
+        setGameplayVisible() {},
+        registerControlAction() {},
     };
 }

@@ -70,9 +70,26 @@ How it works:
 3. Share the 6-character room code with other players.
 
 - Remote players appear in the world in real time.
-- In an online room, press `G` to drop a landmine behind your car.
-- In an online room, press `T` to throw a landmine forward.
+- In an active race (bots or online), press `G` to drop a landmine behind your car.
+- In an active race (bots or online), press `T` to throw a landmine forward.
 - Any other player driving over an armed mine explodes into debris.
+
+## Controls
+
+- Drive: `W/A/S/D` or arrow keys.
+- Handbrake / drift: `Space`.
+- Pause / resume: `Esc`.
+- Restart round: `Q` (or `Enter` on final scoreboard).
+- Fullscreen toggle: `F`.
+- Tactical map toggle: `M`.
+- Roof interface:
+    - `Tab`: next roof tab
+    - `Shift+Tab`: previous roof tab
+    - `1-4`: direct roof tabs
+- Camera:
+    - `Alt+1` ... `Alt+7`: camera views
+    - `Alt+C`: cinematic camera toggle
+- Graphics quality cycle: `Y`.
 
 ## Map & Navigation
 
@@ -84,8 +101,8 @@ How it works:
   autobrake.
 - Full map controls:
     - Left click: set waypoint
-    - Left drag: pan
-    - Mouse wheel: zoom
+    - Left drag: locked in overview mode
+    - Mouse wheel: locked in overview mode
     - Right click: clear waypoint
     - `ESC`: close map
 - The map supports layer filters (roads, buildings, pickups, vehicles, mines, charging zones).

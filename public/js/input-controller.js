@@ -1,5 +1,11 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { INPUT_CONTEXTS } from './input-context.js';
+import {
+    ACTION_IDS,
+    DEFAULT_KEY_BINDINGS,
+    actionMatchesEvent,
+    normalizeKeyboardKey,
+} from './input-bindings.js';
 
 export function createInputController(options = {}) {
     const {
@@ -20,6 +26,7 @@ export function createInputController(options = {}) {
         onRestartGameWithCountdown = () => {},
         onClearDriveKeys = () => {},
         onShowObjectiveInfo = () => {},
+        onRegisterControlAction = () => {},
         onStartNewGame = () => {},
         onShowWelcomeModal = () => {},
         onDeployMine = () => null,
@@ -37,6 +44,7 @@ export function createInputController(options = {}) {
         adjustPlayerTopSpeedLimit,
         getPlayerTopSpeedLimit,
         persistPlayerTopSpeedKph,
+        keyBindings = DEFAULT_KEY_BINDINGS,
         getMaxPixelRatio = () => renderSettings.maxPixelRatio,
         onCycleGraphicsQualityMode = () => null,
         escFullscreenFallbackWindowMs = 460,
@@ -99,8 +107,14 @@ export function createInputController(options = {}) {
     }
 
     function handleKey(event, isKeyDown) {
-        const rawKey = event.key.toLowerCase();
-        const key = rawKey === ' ' || rawKey === 'spacebar' ? 'space' : rawKey;
+        const key = normalizeKeyboardKey(event?.key || '');
+        const matchesAction = (actionId) => actionMatchesEvent(actionId, event, keyBindings, key);
+        const reportAction = (actionId) => {
+            if (!isKeyDown || event.repeat) {
+                return;
+            }
+            onRegisterControlAction(actionId);
+        };
 
         // While welcome modal is visible, disable gameplay/editor shortcuts so text inputs work naturally.
         if (getIsWelcomeModalVisible()) {
@@ -110,21 +124,21 @@ export function createInputController(options = {}) {
         if (
             isKeyDown &&
             event.repeat &&
-            (key === 'f' ||
-                key === 'e' ||
-                key === 'q' ||
-                key === 'enter' ||
-                key === 'escape' ||
-                key === 'tab' ||
-                key === 'm' ||
-                key === '1' ||
-                key === '2' ||
-                key === '3' ||
-                key === '4' ||
-                key === 'g' ||
-                key === 't' ||
-                key === 'c' ||
-                key === 'y')
+            (matchesAction(ACTION_IDS.fullscreenToggle) ||
+                matchesAction(ACTION_IDS.editModeToggle) ||
+                matchesAction(ACTION_IDS.restartRound) ||
+                matchesAction(ACTION_IDS.restartFromScoreboard) ||
+                matchesAction(ACTION_IDS.pauseToggle) ||
+                matchesAction(ACTION_IDS.roofMenuNext) ||
+                matchesAction(ACTION_IDS.roofMenuPrevious) ||
+                matchesAction(ACTION_IDS.mapToggle) ||
+                matchesAction(ACTION_IDS.roofModeDashboard) ||
+                matchesAction(ACTION_IDS.roofModeBattery) ||
+                matchesAction(ACTION_IDS.roofModeNavigation) ||
+                matchesAction(ACTION_IDS.roofModeChassis) ||
+                matchesAction(ACTION_IDS.mineDrop) ||
+                matchesAction(ACTION_IDS.mineThrow) ||
+                matchesAction(ACTION_IDS.graphicsCycle))
         ) {
             return;
         }
@@ -148,7 +162,7 @@ export function createInputController(options = {}) {
         const worldMapVisible =
             inputContext === INPUT_CONTEXTS.fullMap || Boolean(isWorldMapVisible());
 
-        if (key === 'escape') {
+        if (matchesAction(ACTION_IDS.pauseToggle)) {
             event.preventDefault();
             if (isRaceIntroActive) {
                 return;
@@ -176,132 +190,177 @@ export function createInputController(options = {}) {
             return;
         }
 
-        const allowMapToggleWhilePaused = inputContext === INPUT_CONTEXTS.fullMap && key === 'm';
+        const allowMapToggleWhilePaused =
+            inputContext === INPUT_CONTEXTS.fullMap && matchesAction(ACTION_IDS.mapToggle);
         if (getIsGamePaused() && !allowMapToggleWhilePaused) {
             return;
         }
-        if (inputContext === INPUT_CONTEXTS.fullMap && key !== 'm' && key !== 'escape') {
+        if (
+            inputContext === INPUT_CONTEXTS.fullMap &&
+            !matchesAction(ACTION_IDS.mapToggle) &&
+            !matchesAction(ACTION_IDS.pauseToggle)
+        ) {
             return;
         }
 
-        if (key === 'space') {
+        if (matchesAction(ACTION_IDS.handbrake)) {
             event.preventDefault();
         }
 
-        const isDriveKey =
-            key === 'arrowup' ||
-            key === 'arrowdown' ||
-            key === 'arrowleft' ||
-            key === 'arrowright' ||
-            key === 'w' ||
-            key === 'a' ||
-            key === 's' ||
-            key === 'd' ||
-            key === 'space';
         const setDriveInput = (driveKey) => {
             keys[driveKey] = isKeyDown;
         };
 
-        const actions = {
-            arrowup: () => setDriveInput('forward'),
-            arrowdown: () => setDriveInput('backward'),
-            arrowleft: () => setDriveInput('left'),
-            arrowright: () => setDriveInput('right'),
-            w: () => setDriveInput('forward'),
-            s: () => setDriveInput('backward'),
-            a: () => setDriveInput('left'),
-            d: () => setDriveInput('right'),
-            space: () => setDriveInput('handbrake'),
-            f: () => isKeyDown && toggleFullscreen(),
-            q: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                onRestartGameWithCountdown();
-            },
-            g: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                const result = onDeployMine('drop');
-                if (result?.message) {
-                    onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
-                }
-            },
-            t: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                const result = onDeployMine('throw');
-                if (result?.message) {
-                    onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
-                }
-            },
-            enter: () => {
-                if (!isKeyDown || !finalScoreboardUi.isVisible() || isRaceIntroDriveLocked) {
-                    return;
-                }
-                onRestartGameWithCountdown();
-            },
-            tab: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                event.preventDefault();
-                const step = event.shiftKey ? -1 : 1;
-                const modeKey = cyclePlayerRoofMenu(step);
-                showRoofMenuStatus(modeKey);
-            },
-            m: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                event.preventDefault();
-                const result = toggleWorldMap();
-                if (result?.open) {
-                    onClearDriveKeys();
-                }
-                if (result?.message) {
-                    onShowObjectiveInfo(result.message, 1300);
-                }
-            },
-            1: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                const modeKey = setPlayerRoofMenuMode('dashboard');
-                showRoofMenuStatus(modeKey);
-            },
-            2: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                const modeKey = setPlayerRoofMenuMode('battery');
-                showRoofMenuStatus(modeKey);
-            },
-            3: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                const modeKey = setPlayerRoofMenuMode('navigation');
-                showRoofMenuStatus(modeKey);
-            },
-            4: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                const modeKey = setPlayerRoofMenuMode('chassis');
-                showRoofMenuStatus(modeKey);
-            },
-            y: () => {
-                if (!isKeyDown || isRaceIntroDriveLocked) {
-                    return;
-                }
-                onCycleGraphicsQualityMode(1);
-            },
-        };
-        if (actions[key]) {
-            actions[key]();
+        if (matchesAction(ACTION_IDS.driveForward)) {
+            setDriveInput('forward');
+            reportAction(ACTION_IDS.driveForward);
+            return;
+        }
+        if (matchesAction(ACTION_IDS.driveBackward)) {
+            setDriveInput('backward');
+            reportAction(ACTION_IDS.driveBackward);
+            return;
+        }
+        if (matchesAction(ACTION_IDS.driveLeft)) {
+            setDriveInput('left');
+            reportAction(ACTION_IDS.driveLeft);
+            return;
+        }
+        if (matchesAction(ACTION_IDS.driveRight)) {
+            setDriveInput('right');
+            reportAction(ACTION_IDS.driveRight);
+            return;
+        }
+        if (matchesAction(ACTION_IDS.handbrake)) {
+            setDriveInput('handbrake');
+            reportAction(ACTION_IDS.handbrake);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.fullscreenToggle)) {
+            if (isKeyDown) {
+                toggleFullscreen();
+                reportAction(ACTION_IDS.fullscreenToggle);
+            }
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.restartRound)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            onRestartGameWithCountdown();
+            reportAction(ACTION_IDS.restartRound);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.mineDrop)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const result = onDeployMine('drop');
+            if (result?.message) {
+                onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
+            }
+            reportAction(ACTION_IDS.mineDrop);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.mineThrow)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const result = onDeployMine('throw');
+            if (result?.message) {
+                onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
+            }
+            reportAction(ACTION_IDS.mineThrow);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.restartFromScoreboard)) {
+            if (!isKeyDown || !finalScoreboardUi.isVisible() || isRaceIntroDriveLocked) {
+                return;
+            }
+            onRestartGameWithCountdown();
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.roofMenuPrevious) || matchesAction(ACTION_IDS.roofMenuNext)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            event.preventDefault();
+            const step = matchesAction(ACTION_IDS.roofMenuPrevious) ? -1 : 1;
+            const modeKey = cyclePlayerRoofMenu(step);
+            showRoofMenuStatus(modeKey);
+            reportAction(step < 0 ? ACTION_IDS.roofMenuPrevious : ACTION_IDS.roofMenuNext);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.mapToggle)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            event.preventDefault();
+            const result = toggleWorldMap();
+            if (result?.open) {
+                onClearDriveKeys();
+            }
+            if (result?.message) {
+                onShowObjectiveInfo(result.message, 1300);
+            }
+            reportAction(ACTION_IDS.mapToggle);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.roofModeDashboard)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('dashboard');
+            showRoofMenuStatus(modeKey);
+            reportAction(ACTION_IDS.roofModeDashboard);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.roofModeBattery)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('battery');
+            showRoofMenuStatus(modeKey);
+            reportAction(ACTION_IDS.roofModeBattery);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.roofModeNavigation)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('navigation');
+            showRoofMenuStatus(modeKey);
+            reportAction(ACTION_IDS.roofModeNavigation);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.roofModeChassis)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const modeKey = setPlayerRoofMenuMode('chassis');
+            showRoofMenuStatus(modeKey);
+            reportAction(ACTION_IDS.roofModeChassis);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.graphicsCycle)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            onCycleGraphicsQualityMode(1);
+            reportAction(ACTION_IDS.graphicsCycle);
+            return;
         }
     }
 

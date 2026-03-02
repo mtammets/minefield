@@ -260,110 +260,247 @@ canvas#gameCanvas {
     }
 }
 
+.controlsPanelCard {
+    border: 1px solid rgba(154, 205, 243, 0.45);
+    border-radius: 12px;
+    padding: 10px;
+    background: linear-gradient(165deg, rgba(10, 22, 36, 0.86), rgba(7, 15, 24, 0.86));
+    box-shadow: inset 0 0 0 1px rgba(220, 241, 255, 0.04);
+}
+
+.controlsPanelHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.controlsPanelTitle {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(208, 234, 251, 0.96);
+}
+
+.controlsPanelKicker {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: rgba(166, 206, 233, 0.9);
+}
+
+.controlsPanelBody {
+    margin-top: 9px;
+    display: grid;
+    gap: 8px;
+}
+
+.controlsPanelGroup {
+    display: grid;
+    gap: 6px;
+}
+
+.controlsPanelGroupTitle {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(166, 206, 233, 0.92);
+}
+
+.controlsPanelRows {
+    display: grid;
+    gap: 5px;
+}
+
+.controlsPanelRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 9px;
+    border: 1px solid rgba(140, 192, 233, 0.3);
+    background: rgba(11, 25, 40, 0.58);
+}
+
+.controlsPanelRow[data-available='false'] {
+    opacity: 0.62;
+}
+
+.controlsPanelMeta {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+}
+
+.controlsPanelAction {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: rgba(225, 242, 255, 0.97);
+}
+
+.controlsPanelHint {
+    font-size: 10px;
+    line-height: 1.25;
+    color: rgba(170, 207, 232, 0.88);
+}
+
+.controlsPanelKeys {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.controlsPanelKey {
+    border: 1px solid rgba(167, 211, 241, 0.62);
+    border-radius: 7px;
+    min-width: 26px;
+    height: 24px;
+    padding: 0 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(231, 246, 255, 0.98);
+    background: linear-gradient(180deg, rgba(21, 46, 72, 0.84), rgba(14, 31, 49, 0.84));
+    letter-spacing: 0.45px;
+    white-space: nowrap;
+}
+
+.controlsPanelAvailability {
+    grid-column: 1 / -1;
+    justify-self: start;
+    margin-top: -2px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: rgba(255, 192, 139, 0.95);
+}
+
+#welcomeControlsPanel {
+    margin-top: 2px;
+    display: grid;
+    gap: 8px;
+    position: relative;
+    z-index: 6;
+}
+
+.welcomeControlsToggleBtn {
+    border: 1px solid rgba(151, 199, 232, 0.46);
+    border-radius: 10px;
+    min-height: 40px;
+    padding: 0 11px;
+    background: linear-gradient(170deg, rgba(14, 31, 48, 0.74), rgba(8, 18, 31, 0.74));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: rgba(220, 241, 255, 0.97);
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.95px;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease;
+}
+
+.welcomeControlsToggleBtn:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    border-color: rgba(189, 222, 245, 0.74);
+}
+
+.welcomeControlsToggleBtn:active {
+    transform: translateY(0);
+    filter: brightness(0.96);
+}
+
+.welcomeControlsToggleBtn:focus-visible {
+    outline: 2px solid rgba(186, 221, 246, 0.84);
+    outline-offset: 2px;
+}
+
+.welcomeControlsToggleTitle {
+    white-space: nowrap;
+}
+
+.welcomeControlsToggleHint {
+    color: rgba(167, 206, 232, 0.94);
+    font-size: 9px;
+    letter-spacing: 0.85px;
+}
+
+#welcomeControlsPanel[data-open='true'] .welcomeControlsToggleBtn {
+    border-color: rgba(175, 220, 248, 0.7);
+    background: linear-gradient(170deg, rgba(17, 38, 60, 0.8), rgba(10, 23, 38, 0.8));
+}
+
+.welcomeControlsDisclosurePanel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 8px);
+    z-index: 7;
+}
+
+.welcomeControlsDisclosurePanel[hidden] {
+    display: none;
+}
+
+#welcomeControlsPanel .controlsPanelBody {
+    max-height: min(30vh, 250px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
+#pauseControlsPanel {
+    margin-bottom: 12px;
+}
+
+#pauseControlsPanel .controlsPanelBody {
+    max-height: min(36vh, 320px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
+@media (max-width: 900px) {
+    .controlsPanelAction {
+        font-size: 10px;
+    }
+
+    .controlsPanelKey {
+        min-width: 24px;
+        height: 22px;
+        font-size: 9px;
+        padding: 0 6px;
+    }
+}
+
+@media (max-width: 720px) {
+    #pauseControlsPanel .controlsPanelBody,
+    #welcomeControlsPanel .controlsPanelBody {
+        max-height: min(28vh, 220px);
+    }
+}
+
 #botPanel {
     position: fixed;
     left: 18px;
     top: 18px;
     width: 260px;
-}
-
-#performancePanel {
-    position: fixed;
-    right: 18px;
-    top: 18px;
-    width: min(332px, calc(100vw - 34px));
-    z-index: 6;
-    pointer-events: none;
-    padding: 11px 12px 10px;
-    border: 1px solid rgba(123, 194, 255, 0.52);
-    border-radius: var(--hud-radius);
-    background: linear-gradient(170deg, rgba(8, 19, 34, 0.92), rgba(5, 13, 24, 0.9));
-    color: var(--hud-text);
-    box-shadow:
-        var(--hud-shadow),
-        inset 0 0 0 1px rgba(214, 237, 255, 0.05);
-    transition:
-        opacity 180ms ease,
-        transform 180ms ease,
-        border-color 180ms ease,
-        box-shadow 180ms ease;
-}
-
-#performancePanel::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    border: 1px solid rgba(174, 218, 255, 0.23);
-}
-
-#performancePanel[data-tone='warn'] {
-    border-color: rgba(255, 186, 108, 0.82);
-    box-shadow:
-        0 14px 30px rgba(32, 15, 1, 0.4),
-        inset 0 0 0 1px rgba(255, 233, 178, 0.14);
-}
-
-#performancePanel[data-tone='severe'] {
-    border-color: rgba(255, 126, 126, 0.86);
-    box-shadow:
-        0 14px 30px rgba(45, 4, 4, 0.46),
-        inset 0 0 0 1px rgba(255, 194, 194, 0.18);
-}
-
-#performancePanel[hidden] {
-    display: none;
-}
-
-.perfPanelTitle {
-    font-size: 10px;
-    letter-spacing: 1.08px;
-    font-weight: 800;
-    margin-bottom: 8px;
-    color: rgba(211, 234, 255, 0.95);
-}
-
-.perfPanelRow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 11px;
-    line-height: 1.35;
-    color: rgba(187, 216, 242, 0.9);
-}
-
-.perfPanelRow + .perfPanelRow {
-    margin-top: 4px;
-}
-
-.perfPanelRow strong {
-    color: rgba(238, 247, 255, 0.98);
-    font-size: 11px;
-    letter-spacing: 0.2px;
-}
-
-.perfPanelCause {
-    margin-top: 7px;
-    font-size: 11px;
-    font-weight: 700;
-    color: rgba(236, 246, 255, 0.98);
-}
-
-.perfPanelDetail {
-    margin-top: 3px;
-    font-size: 11px;
-    color: rgba(198, 225, 247, 0.94);
-    line-height: 1.35;
-}
-
-.perfPanelBreakdown {
-    margin-top: 6px;
-    font-size: 10px;
-    color: rgba(174, 208, 236, 0.88);
-    line-height: 1.35;
-    letter-spacing: 0.24px;
 }
 
 #botList {
@@ -614,8 +751,7 @@ canvas#gameCanvas {
 
 body.world-map-open #botPanel,
 body.world-map-open #multiplayerPanel,
-body.world-map-open #miniMapHud,
-body.world-map-open #performancePanel {
+body.world-map-open #miniMapHud {
     opacity: 0;
     pointer-events: none;
 }
@@ -1182,7 +1318,7 @@ body.race-intro-active #miniMapHud {
 }
 
 .pauseCard {
-    width: min(360px, calc(100vw - 28px));
+    width: min(560px, calc(100vw - 28px));
     border: 1px solid rgba(157, 198, 255, 0.56);
     border-radius: 14px;
     padding: 16px;
@@ -2212,14 +2348,12 @@ body.race-intro-active #miniMapHud {
     color: rgba(173, 204, 233, 0.9);
 }
 
-body.edit-mode-active #botPanel,
-body.edit-mode-active #performancePanel {
+body.edit-mode-active #botPanel {
     opacity: 0;
     pointer-events: none;
 }
 
-body.race-intro-active #botPanel,
-body.race-intro-active #performancePanel {
+body.race-intro-active #botPanel {
     opacity: 0;
     transform: translateY(-12px);
     pointer-events: none;
@@ -2514,12 +2648,6 @@ body.race-intro-active #performancePanel {
     #multiplayerPlayerList {
         max-height: 106px;
     }
-
-    #performancePanel {
-        right: 10px;
-        top: 10px;
-        width: min(320px, calc(100vw - 20px));
-    }
 }
 
 @media (max-width: 860px) {
@@ -2528,13 +2656,6 @@ body.race-intro-active #performancePanel {
         top: 10px;
         transform: scale(0.88);
         transform-origin: top left;
-    }
-
-    #performancePanel {
-        right: 10px;
-        top: 10px;
-        transform: scale(0.9);
-        transform-origin: top right;
     }
 
     .leaderboardCard {
@@ -2576,27 +2697,6 @@ body.race-intro-active #performancePanel {
 }
 
 @media (max-width: 620px) {
-    #performancePanel {
-        width: min(286px, calc(100vw - 20px));
-        padding: 9px 10px 8px;
-    }
-
-    .perfPanelTitle {
-        font-size: 9px;
-        margin-bottom: 6px;
-    }
-
-    .perfPanelRow,
-    .perfPanelRow strong,
-    .perfPanelCause,
-    .perfPanelDetail {
-        font-size: 10px;
-    }
-
-    .perfPanelBreakdown {
-        font-size: 9px;
-    }
-
     .leaderboardCard {
         border-radius: 15px;
         padding: 12px;

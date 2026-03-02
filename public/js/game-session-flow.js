@@ -33,6 +33,7 @@ export function createGameSessionController({
     resolvePlayerCarColorHex,
     persistPlayerCarColorHex,
     objectiveUi,
+    controlsHelpUi = null,
     botStatusUi,
     finalScoreboardUi,
     pauseMenuUi,
@@ -227,6 +228,8 @@ export function createGameSessionController({
         setIsWelcomeModalVisible(false);
         carEditModeController.setActive(false);
         welcomeModalUi.hide();
+        objectiveUi.setGameplayVisible?.(true);
+        controlsHelpUi?.setGameplayVisible?.(true);
         audioController?.onWelcomeVisibilityChanged?.(false);
         restartGameWithCountdown();
     }
@@ -238,6 +241,8 @@ export function createGameSessionController({
         setIsWelcomeModalVisible(true);
         setIsGamePaused(true);
         clearDriveKeys();
+        objectiveUi.setGameplayVisible?.(false);
+        controlsHelpUi?.setGameplayVisible?.(false);
         pauseMenuUi.hide();
         setCameraKeyboardControlsEnabled(true);
         welcomeModalUi.show();
@@ -737,6 +742,7 @@ export function createGameSessionController({
         carEditModeController.setActive(false);
         setCameraKeyboardControlsEnabled(true);
         setPauseState(false);
+        controlsHelpUi?.refreshContext?.();
         clearPendingRoundPresentation();
 
         clearPendingRespawn();
