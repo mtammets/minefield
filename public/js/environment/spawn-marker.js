@@ -11,7 +11,7 @@ export function createSpawnMarkerLayer() {
 
     const baseY = getGroundHeightAt(playerSpawnPoint.x, playerSpawnPoint.z);
     const marker = new THREE.Group();
-    marker.position.set(playerSpawnPoint.x, baseY + 0.14, playerSpawnPoint.z);
+    marker.position.set(playerSpawnPoint.x, baseY + 0.06, playerSpawnPoint.z);
     marker.rotation.y = playerSpawnPoint.rotationY + Math.PI;
 
     const padTexture = getSpawnPadTexture();
@@ -19,6 +19,9 @@ export function createSpawnMarkerLayer() {
     const padMaterial = new THREE.MeshBasicMaterial({
         color: 0xffffff,
         map: padTexture,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
     });
     const gateMaterial = new THREE.MeshLambertMaterial({
         color: 0xb8cde6,
@@ -134,63 +137,6 @@ function createSpawnPadTexture() {
     ctx.moveTo(canvas.width * 0.82, 34);
     ctx.lineTo(canvas.width * 0.82, canvas.height - 34);
     ctx.stroke();
-
-    ctx.strokeStyle = 'rgba(192, 231, 255, 0.58)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(canvas.width * 0.5, 44);
-    ctx.lineTo(canvas.width * 0.5, canvas.height - 44);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(234, 245, 255, 0.9)';
-    for (let i = 0; i < 9; i += 1) {
-        ctx.fillRect(canvas.width * 0.5 - 18, 120 + i * 114, 36, 64);
-    }
-
-    const startBarY = canvas.height * 0.23;
-    const cellW = 34;
-    const cellH = 34;
-    for (let row = 0; row < 2; row += 1) {
-        for (let col = 0; col < 16; col += 1) {
-            ctx.fillStyle =
-                (row + col) % 2 === 0 ? 'rgba(233, 246, 255, 0.9)' : 'rgba(92, 133, 171, 0.86)';
-            ctx.fillRect(
-                canvas.width * 0.5 - cellW * 8 + col * cellW,
-                startBarY + row * cellH,
-                cellW,
-                cellH
-            );
-        }
-    }
-
-    ctx.fillStyle = 'rgba(160, 214, 255, 0.66)';
-    for (let i = 0; i < 8; i += 1) {
-        const y = canvas.height * 0.36 + i * 88;
-        const halfWidth = 104 - i * 8;
-        ctx.beginPath();
-        ctx.moveTo(canvas.width * 0.5 - halfWidth, y);
-        ctx.lineTo(canvas.width * 0.5, y + 30);
-        ctx.lineTo(canvas.width * 0.5 + halfWidth, y);
-        ctx.lineTo(canvas.width * 0.5 + halfWidth - 20, y - 12);
-        ctx.lineTo(canvas.width * 0.5, y + 16);
-        ctx.lineTo(canvas.width * 0.5 - halfWidth + 20, y - 12);
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    const ringCenterY = canvas.height * 0.9;
-    const ringStroke = [
-        'rgba(255, 118, 126, 0.76)',
-        'rgba(255, 198, 102, 0.74)',
-        'rgba(140, 230, 255, 0.74)',
-    ];
-    for (let i = 0; i < 3; i += 1) {
-        ctx.strokeStyle = ringStroke[i];
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.arc(canvas.width * 0.5 + (i - 1) * 72, ringCenterY, 34, 0, Math.PI * 2);
-        ctx.stroke();
-    }
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
