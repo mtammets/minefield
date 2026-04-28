@@ -9,6 +9,14 @@ const Stripe = require('stripe');
 const { Server } = require('socket.io');
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
+const {
+    isSocketCorsOriginAllowed,
+    isSocketOriginAllowed,
+    parseAllowedOriginList,
+    resolveSocketRequestHost,
+    sanitizeHttpHostHeader,
+    sanitizeHttpOrigin,
+} = require('./socket-origin');
 const { resolveAuthoritativeMineDetonation } = require('./mine-guard');
 const {
     DONATION_SESSION_STATUSES,
@@ -130,6 +138,7 @@ const io = new Server(server, {
         origin: resolveSocketCorsOrigin,
         methods: ['GET', 'POST'],
     },
+    allowRequest: resolveSocketAllowRequest,
 });
 
 const rooms = new Map();
@@ -1048,16 +1057,6 @@ function isIpv4Family(family) {
     return family === 'IPv4' || family === 4;
 }
 
-function parseAllowedOriginList(rawValue) {
-    if (typeof rawValue !== 'string') {
-        return [];
-    }
-    return rawValue
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean);
-}
-
 function sanitizeDonationAmountCents(value) {
     const numeric = Math.round(Number(value) || 0);
     if (!Number.isFinite(numeric)) {
@@ -1130,25 +1129,6 @@ function sanitizeCheckoutText(value, fallback = 'Support Minefield Drift') {
     return normalized || fallback;
 }
 
-function sanitizeHttpOrigin(rawValue) {
-    if (typeof rawValue !== 'string') {
-        return '';
-    }
-    const normalized = rawValue.trim();
-    if (!normalized) {
-        return '';
-    }
-    try {
-        const parsed = new URL(normalized);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            return '';
-        }
-        return parsed.origin;
-    } catch {
-        return '';
-    }
-}
-
 function resolveDonateBaseUrl(req) {
     if (DONATE_PUBLIC_BASE_URL) {
         return DONATE_PUBLIC_BASE_URL;
@@ -1172,7 +1152,8 @@ function createDonateReturnUrl(baseUrl, state, options = {}) {
     }
     try {
         const origin = new URL(baseUrl).origin;
-        const includeSessionId = Boolean(options?.includeSessionId) && normalizedState === 'success';
+        const includeSessionId =
+            Boolean(options?.includeSessionId) && normalizedState === 'success';
         const queryParts = [`donate=${encodeURIComponent(normalizedState)}`];
         if (includeSessionId) {
             // Stripe requires the literal placeholder token for runtime replacement.
@@ -1289,21 +1270,10 @@ function resolveRequestProtocol(req) {
     return protocol === 'https' ? 'https' : 'http';
 }
 
-function sanitizeHttpHostHeader(value) {
-    if (typeof value !== 'string') {
-        return '';
-    }
-    const normalized = value.trim().toLowerCase();
-    if (!normalized || normalized.includes('/') || normalized.includes('\\')) {
-        return '';
-    }
-    const isHostname = /^[a-z0-9.-]+(?::\d{1,5})?$/.test(normalized);
-    const isIpv6 = /^\[[a-f0-9:]+\](?::\d{1,5})?$/.test(normalized);
-    return isHostname || isIpv6 ? normalized : '';
-}
-
 function resolveSocketCorsOrigin(origin, callback) {
-    const allowed = isSocketOriginAllowed(origin);
+    const allowed = isSocketCorsOriginAllowed(origin, {
+        allowedOrigins: SOCKET_ALLOWED_ORIGINS,
+    });
     if (allowed) {
         callback(null, true);
         return;
@@ -1311,53 +1281,13 @@ function resolveSocketCorsOrigin(origin, callback) {
     callback(new Error('Origin is not allowed by CORS'));
 }
 
-function isSocketOriginAllowed(origin) {
-    if (!origin) {
-        return true;
-    }
-    if (SOCKET_ALLOWED_ORIGINS.length > 0) {
-        return SOCKET_ALLOWED_ORIGINS.includes(origin);
-    }
-
-    try {
-        const parsed = new URL(origin);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            return false;
-        }
-        const hostname = (parsed.hostname || '').toLowerCase();
-        if (!hostname) {
-            return false;
-        }
-        if (
-            hostname === 'localhost' ||
-            hostname === '127.0.0.1' ||
-            hostname === '::1' ||
-            hostname.endsWith('.local')
-        ) {
-            return true;
-        }
-        return isPrivateIpv4Address(hostname);
-    } catch {
-        return false;
-    }
-}
-
-function isPrivateIpv4Address(hostname) {
-    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)) {
-        return false;
-    }
-    const parts = hostname.split('.').map((part) => Number(part));
-    if (parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
-        return false;
-    }
-    const [a, b] = parts;
-    if (a === 10 || a === 127) {
-        return true;
-    }
-    if (a === 192 && b === 168) {
-        return true;
-    }
-    return a === 172 && b >= 16 && b <= 31;
+function resolveSocketAllowRequest(req, callback) {
+    const allowed = isSocketOriginAllowed(req?.headers?.origin, {
+        allowedOrigins: SOCKET_ALLOWED_ORIGINS,
+        publicBaseUrl: DONATE_PUBLIC_BASE_URL,
+        requestHost: resolveSocketRequestHost(req),
+    });
+    callback(null, allowed);
 }
 
 function safeAck(ack, payload) {

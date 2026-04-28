@@ -21,6 +21,8 @@ STRIPE_SECRET_KEY=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 # Optional. Recommended in production behind a proxy/CDN.
 STRIPE_DONATE_BASE_URL=https://your-domain.example
+# Optional. Comma-separated explicit allowlist for Socket.IO origins.
+SOCKET_ALLOWED_ORIGINS=https://your-domain.example,https://www.your-domain.example
 # Optional overrides:
 STRIPE_DONATE_CURRENCY=eur
 STRIPE_DONATE_PRODUCT_NAME="Support Minefield Drift"
@@ -36,6 +38,8 @@ Notes:
 - Stripe webhook endpoint: `POST /api/donate/stripe-webhook`.
 - Apple Pay availability is controlled by Stripe and end-user device/browser support.
 - In production, configure your site domain in Stripe Dashboard under Apple Pay wallet settings.
+- Socket.IO accepts same-host websocket requests by default; use `SOCKET_ALLOWED_ORIGINS` if your
+  proxy/CDN setup needs an explicit origin allowlist.
 
 Local webhook testing with Stripe CLI:
 
