@@ -49,10 +49,14 @@ const CRASH_DEBRIS_ALWAYS_VISIBLE_DISTANCE_SQ =
 const CRASH_DEBRIS_MAX_VISIBLE = 8;
 const CRASH_DEBRIS_MAX_VISIBLE_UNDER_LOAD = 6;
 const CRASH_DEBRIS_MAX_VISIBLE_SEVERE_LOAD = 4;
-const CRASH_DEBRIS_LIFETIME_SEC = 20;
-const CRASH_DEBRIS_LIFETIME_JITTER_SEC = 6;
-const CRASH_DEBRIS_LIFETIME_WHEEL_BONUS_SEC = 6;
-const CRASH_DEBRIS_LIFETIME_SUSPENSION_BONUS_SEC = 3;
+const CRASH_DEBRIS_LIFETIME_DEFAULT_SEC = 4.8;
+const CRASH_DEBRIS_LIFETIME_JITTER_SEC = 1.35;
+const CRASH_DEBRIS_LIFETIME_WHEEL_FALLBACK_BONUS_SEC = 0.9;
+const CRASH_DEBRIS_LIFETIME_SUSPENSION_FALLBACK_BONUS_SEC = 0.45;
+const CRASH_DEBRIS_LIFETIME_UNDER_LOAD_SCALE = 0.8;
+const CRASH_DEBRIS_LIFETIME_SEVERE_LOAD_SCALE = 0.62;
+const CRASH_DEBRIS_LIFETIME_MIN_SEC = 2.6;
+const CRASH_DEBRIS_LIFETIME_MAX_SEC = 8.2;
 
 export function createCrashDebrisController({
     scene,
@@ -1359,7 +1363,7 @@ export function createCrashDebrisController({
             mesh: debrisMesh,
             velocity,
             angularVelocity,
-            life: resolveCrashDebrisPieceLifetime(part.type),
+            life: resolveCrashDebrisPieceLifetime(part),
             groundOffset: debrisGroundOffset,
             groundClearance: getDebrisGroundClearanceForPartType(part.type),
             drag:
@@ -1376,14 +1380,40 @@ export function createCrashDebrisController({
         });
     }
 
-    function resolveCrashDebrisPieceLifetime(partType = '') {
-        let lifetime = CRASH_DEBRIS_LIFETIME_SEC + Math.random() * CRASH_DEBRIS_LIFETIME_JITTER_SEC;
-        if (partType === 'wheel') {
-            lifetime += CRASH_DEBRIS_LIFETIME_WHEEL_BONUS_SEC;
-        } else if (partType === 'suspension_link') {
-            lifetime += CRASH_DEBRIS_LIFETIME_SUSPENSION_BONUS_SEC;
+    function resolveCrashDebrisPieceLifetime(part = null) {
+        const partType = typeof part?.type === 'string' ? part.type : '';
+        const partBaseLife = Number(part?.baseLife);
+        let lifetime =
+            Number.isFinite(partBaseLife) && partBaseLife > 0
+                ? partBaseLife
+                : CRASH_DEBRIS_LIFETIME_DEFAULT_SEC;
+
+        if (!Number.isFinite(partBaseLife) || partBaseLife <= 0) {
+            if (partType === 'wheel') {
+                lifetime += CRASH_DEBRIS_LIFETIME_WHEEL_FALLBACK_BONUS_SEC;
+            } else if (partType === 'suspension_link') {
+                lifetime += CRASH_DEBRIS_LIFETIME_SUSPENSION_FALLBACK_BONUS_SEC;
+            }
         }
-        return lifetime;
+
+        lifetime += Math.random() * CRASH_DEBRIS_LIFETIME_JITTER_SEC;
+
+        const activeDebrisCount = debrisPieces.length;
+        const pendingDebrisCount = Math.max(
+            0,
+            pendingDebrisSpawns.length - pendingDebrisSpawnReadIndex
+        );
+        if (activeDebrisCount >= 18 || pendingDebrisCount >= 8) {
+            lifetime *= CRASH_DEBRIS_LIFETIME_SEVERE_LOAD_SCALE;
+        } else if (activeDebrisCount >= 10 || pendingDebrisCount >= 4) {
+            lifetime *= CRASH_DEBRIS_LIFETIME_UNDER_LOAD_SCALE;
+        }
+
+        return THREE.MathUtils.clamp(
+            lifetime,
+            CRASH_DEBRIS_LIFETIME_MIN_SEC,
+            CRASH_DEBRIS_LIFETIME_MAX_SEC
+        );
     }
 
     function acquireDebrisMesh(partId, _source) {

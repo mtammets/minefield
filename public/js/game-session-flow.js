@@ -291,6 +291,7 @@ export function createGameSessionController({
             return;
         }
 
+        crashDebrisController.clearDebris();
         setIsCarDestroyed(false);
         car.visible = true;
         car.position.copy(playerSpawnState.position);
