@@ -12,6 +12,7 @@ import { staticObstacles } from './obstacles.js';
 import { createGroundTexture } from './textures.js';
 import { getGroundHeightAt, createGround, updateGroundMotionRuntime } from './terrain.js';
 import { updateBillboardRuntime } from './billboards.js';
+import { updateMonumentRuntime } from './monument.js';
 import { createCityScenery } from './city-scenery.js';
 import { createWorldBoundary } from './boundary.js';
 
@@ -64,7 +65,7 @@ function ensureWorldBuilt() {
     };
 }
 
-function updateGroundMotion(playerPosition, playerSpeed = 0) {
+function updateGroundMotion(playerPosition, playerSpeed = 0, monumentRhythmState = null) {
     if (!environmentBuilt) {
         return;
     }
@@ -75,6 +76,7 @@ function updateGroundMotion(playerPosition, playerSpeed = 0) {
         playerPosition,
     });
     updateBillboardRuntime(runtimeCityScenery);
+    updateMonumentRuntime(runtimeCityScenery, monumentRhythmState);
 }
 
 export {

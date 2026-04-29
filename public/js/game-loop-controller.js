@@ -465,7 +465,8 @@ export function createGameLoopController(options = {}) {
                 vehicleState.batteryDepleted = readBatteryDepleted();
                 updateCarVisuals(vehicleState, frameDelta);
                 const introFinished = raceIntroController.update(frameDelta);
-                updateGroundMotion(car.position, 0);
+                const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
+                updateGroundMotion(car.position, 0, monumentRhythmState);
                 starsController.update(frameDelta);
                 if (introFinished) {
                     resetCameraTrackingState();
@@ -612,7 +613,8 @@ export function createGameLoopController(options = {}) {
 
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
                 updateCamera(car, cameraSpeed, frameDelta);
-                updateGroundMotion(car.position, cameraSpeed);
+                const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
+                updateGroundMotion(car.position, cameraSpeed, monumentRhythmState);
                 starsController.update(frameDelta);
                 if (!readPickupRoundFinished()) {
                     const botTrafficSystem = getBotTrafficSystem();
@@ -684,7 +686,8 @@ export function createGameLoopController(options = {}) {
                 carEditModeController.update(frameDelta);
             }
             starsController.update(frameDelta);
-            updateGroundMotion(car.position, 0);
+            const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
+            updateGroundMotion(car.position, 0, monumentRhythmState);
         } else {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
         }

@@ -14,10 +14,14 @@ export function createCityScenery() {
     group.name = 'cityScenery';
     group.userData.lampLights = [];
     group.userData.billboardScreens = [];
+    group.userData.monumentEffects = [];
 
     clearStaticObstacles();
 
-    const monumentLayer = createMonumentLayer(group.userData.billboardScreens);
+    const monumentLayer = createMonumentLayer(
+        group.userData.billboardScreens,
+        group.userData.monumentEffects
+    );
 
     group.add(createRoadLayer());
     group.add(createParkingLotLayer());

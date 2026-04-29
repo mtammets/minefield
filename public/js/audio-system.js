@@ -376,6 +376,18 @@ export function createAudioSystem({ camera = null } = {}) {
     let disposed = false;
     let monumentMusicInstance = null;
     let monumentImpulseBuffer = null;
+    const monumentRhythmState = {
+        active: 0,
+        bass: 0,
+        mid: 0,
+        treble: 0,
+        energy: 0,
+        beat: 0,
+        pulse: 0,
+        smoothedBass: 0,
+        smoothedEnergy: 0,
+        lastSampleTimeMs: -Number.POSITIVE_INFINITY,
+    };
 
     const runtime = {
         paused: false,
@@ -398,6 +410,7 @@ export function createAudioSystem({ camera = null } = {}) {
         isUnlocked() {
             return unlocked;
         },
+        getMonumentRhythmState,
         onVehicleCollisionContacts,
         onObstacleCrash,
         onPickupCollected,
@@ -1481,6 +1494,11 @@ export function createAudioSystem({ camera = null } = {}) {
         toneFilter.frequency.setValueAtTime(MONUMENT_AUDIO_CONFIG.farCutoffHz, context.currentTime);
         toneFilter.Q.setValueAtTime(0.3, context.currentTime);
 
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.72;
+        const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+
         const panner = context.createPanner();
         panner.panningModel = 'equalpower';
         panner.distanceModel = 'inverse';
@@ -1526,7 +1544,8 @@ export function createAudioSystem({ camera = null } = {}) {
         wetGain.gain.setValueAtTime(0, context.currentTime);
 
         source.connect(sourceGain);
-        sourceGain.connect(toneFilter);
+        sourceGain.connect(analyser);
+        analyser.connect(toneFilter);
         toneFilter.connect(panner);
         panner.connect(dryGain);
         dryGain.connect(busNode);
@@ -1546,6 +1565,8 @@ export function createAudioSystem({ camera = null } = {}) {
         monumentMusicInstance = {
             source,
             sourceGain,
+            analyser,
+            frequencyData,
             toneFilter,
             panner,
             dryGain,
@@ -1568,6 +1589,7 @@ export function createAudioSystem({ camera = null } = {}) {
         safeStopSource(monumentMusicInstance.source);
         safeDisconnect(monumentMusicInstance.source);
         safeDisconnect(monumentMusicInstance.sourceGain);
+        safeDisconnect(monumentMusicInstance.analyser);
         safeDisconnect(monumentMusicInstance.toneFilter);
         safeDisconnect(monumentMusicInstance.panner);
         safeDisconnect(monumentMusicInstance.dryGain);
@@ -1579,6 +1601,85 @@ export function createAudioSystem({ camera = null } = {}) {
         safeDisconnect(monumentMusicInstance.wetFilter);
         safeDisconnect(monumentMusicInstance.wetGain);
         monumentMusicInstance = null;
+    }
+
+    function getMonumentRhythmState() {
+        if (!isRealtimeAudioReady()) {
+            return decayMonumentRhythmState(0.84);
+        }
+
+        const instance = monumentMusicInstance || ensureMonumentMusicInstance();
+        if (!instance?.analyser || !instance.frequencyData) {
+            return decayMonumentRhythmState(0.86);
+        }
+
+        const nowMs = performance.now();
+        if (nowMs - monumentRhythmState.lastSampleTimeMs < 14) {
+            return createMonumentRhythmSnapshot();
+        }
+        monumentRhythmState.lastSampleTimeMs = nowMs;
+
+        instance.analyser.getByteFrequencyData(instance.frequencyData);
+
+        const bass = averageAnalyserRange(instance.frequencyData, 1, 6);
+        const mid = averageAnalyserRange(instance.frequencyData, 6, 20);
+        const treble = averageAnalyserRange(instance.frequencyData, 20, 56);
+        const energy = clampNumber(bass * 0.54 + mid * 0.31 + treble * 0.15, 0, 1, 0);
+        const bassDelta = Math.max(0, bass - monumentRhythmState.smoothedBass);
+        const energyDelta = Math.max(0, energy - monumentRhythmState.smoothedEnergy);
+
+        monumentRhythmState.smoothedBass = lerpNumber(monumentRhythmState.smoothedBass, bass, 0.16);
+        monumentRhythmState.smoothedEnergy = lerpNumber(
+            monumentRhythmState.smoothedEnergy,
+            energy,
+            0.12
+        );
+        monumentRhythmState.active = 1;
+        monumentRhythmState.bass = bass;
+        monumentRhythmState.mid = mid;
+        monumentRhythmState.treble = treble;
+        monumentRhythmState.energy = energy;
+
+        const beatTarget = clampNumber(
+            energy * 0.56 + bassDelta * 2.8 + energyDelta * 1.4 + Math.max(0, bass - mid) * 0.62,
+            0,
+            1,
+            0
+        );
+        monumentRhythmState.pulse = Math.max(beatTarget, monumentRhythmState.pulse * 0.84);
+        monumentRhythmState.beat = clampNumber(
+            monumentRhythmState.pulse * 0.72 + beatTarget * 0.28,
+            0,
+            1,
+            0
+        );
+
+        return createMonumentRhythmSnapshot();
+    }
+
+    function createMonumentRhythmSnapshot() {
+        return {
+            active: monumentRhythmState.active,
+            bass: monumentRhythmState.bass,
+            mid: monumentRhythmState.mid,
+            treble: monumentRhythmState.treble,
+            energy: monumentRhythmState.energy,
+            beat: monumentRhythmState.beat,
+            pulse: monumentRhythmState.pulse,
+        };
+    }
+
+    function decayMonumentRhythmState(decay = 0.86) {
+        monumentRhythmState.active = 0;
+        monumentRhythmState.bass *= decay;
+        monumentRhythmState.mid *= decay;
+        monumentRhythmState.treble *= decay;
+        monumentRhythmState.energy *= decay;
+        monumentRhythmState.beat *= decay;
+        monumentRhythmState.pulse *= decay;
+        monumentRhythmState.smoothedBass *= decay;
+        monumentRhythmState.smoothedEnergy *= decay;
+        return createMonumentRhythmSnapshot();
     }
 
     function playVariant(variantGroupKey, options = {}) {
@@ -1900,6 +2001,17 @@ function createNoopAudioSystem() {
         isUnlocked() {
             return false;
         },
+        getMonumentRhythmState() {
+            return {
+                active: 0,
+                bass: 0,
+                mid: 0,
+                treble: 0,
+                energy: 0,
+                beat: 0,
+                pulse: 0,
+            };
+        },
         onVehicleCollisionContacts() {},
         onObstacleCrash() {},
         onPickupCollected() {},
@@ -1948,6 +2060,20 @@ function randomRange(min, max) {
     const low = Math.min(a, b);
     const high = Math.max(a, b);
     return low + Math.random() * (high - low);
+}
+
+function averageAnalyserRange(data, startBin, endBinExclusive) {
+    if (!data || data.length === 0) {
+        return 0;
+    }
+
+    const start = Math.max(0, Math.min(data.length - 1, Math.floor(startBin)));
+    const end = Math.max(start + 1, Math.min(data.length, Math.floor(endBinExclusive)));
+    let total = 0;
+    for (let i = start; i < end; i += 1) {
+        total += (Number(data[i]) || 0) / 255;
+    }
+    return total / Math.max(1, end - start);
 }
 
 function lerpNumber(start, end, alpha) {
