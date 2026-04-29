@@ -1,4 +1,7 @@
+import { centralParkingLot } from './environment/layout.js';
+
 const AUDIO_PREFS_STORAGE_KEY = 'silentdrift-audio-prefs-v1';
+const MONUMENT_MUSIC_SOUND_ID = 'monumentHookusPookusInstrumentalLoop01';
 
 const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
@@ -246,10 +249,19 @@ const SOUND_DEFINITIONS = Object.freeze({
         gain: 0.32,
         loop: true,
     },
+    monumentHookusPookusInstrumentalLoop01: {
+        src: '/audio/ambience/monument_hookus_pookus_instrumental_loop_01.mp3',
+        bus: 'ambience',
+        gain: 0.76,
+        loop: true,
+    },
 });
 const SOUND_DEFINITION_IDS = Object.freeze(Object.keys(SOUND_DEFINITIONS));
 const LOOP_SOUND_IDS = Object.freeze(
-    SOUND_DEFINITION_IDS.filter((soundId) => Boolean(SOUND_DEFINITIONS[soundId]?.loop))
+    SOUND_DEFINITION_IDS.filter(
+        (soundId) =>
+            Boolean(SOUND_DEFINITIONS[soundId]?.loop) && soundId !== MONUMENT_MUSIC_SOUND_ID
+    )
 );
 const CORE_GAMEPLAY_SOUND_IDS = Object.freeze([
     'countdownBeep01',
@@ -310,6 +322,34 @@ const AUDIO_FETCH_CACHE_MODES = Object.freeze(['default', 'reload']);
 const WELCOME_MENU_AMBIENCE_GAIN = 0;
 const WELCOME_MENU_CROWD_GAIN = 0;
 const AUDIO_PRELOAD_BATCH_SIZE = 2;
+const MONUMENT_AUDIO_CONFIG = Object.freeze({
+    x: centralParkingLot.centerX,
+    y: 7.12,
+    z: centralParkingLot.centerZ,
+    refDistance: 18,
+    maxDistance: 220,
+    rolloffFactor: 1.34,
+    fullPresenceDistance: 22,
+    audibleDistance: 168,
+    nearCutoffHz: 17200,
+    farCutoffHz: 1450,
+    nearWetLowpassHz: 5200,
+    farWetLowpassHz: 1850,
+    nearSourceGain: 1,
+    farSourceGain: 0.18,
+    nearDryGain: 0.94,
+    farDryGain: 0.11,
+    nearWetGain: 0.18,
+    farWetGain: 0.42,
+    nearDelaySec: 0.14,
+    farDelaySec: 0.31,
+    nearFeedback: 0.24,
+    farFeedback: 0.46,
+    delaySendNear: 0.1,
+    delaySendFar: 0.32,
+    reverbSendNear: 0.14,
+    reverbSendFar: 0.42,
+});
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -334,6 +374,8 @@ export function createAudioSystem({ camera = null } = {}) {
     let preloadPromise = null;
     let gameplayReady = false;
     let disposed = false;
+    let monumentMusicInstance = null;
+    let monumentImpulseBuffer = null;
 
     const runtime = {
         paused: false,
@@ -423,6 +465,7 @@ export function createAudioSystem({ camera = null } = {}) {
             safeDisconnect(instance.gain);
         }
         loopInstances.clear();
+        disposeMonumentMusicInstance();
 
         if (context) {
             void context.close().catch(() => {});
@@ -978,6 +1021,12 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         updateAudioListenerFromCamera(context, camera);
+        updateMonumentMusic({
+            isPaused,
+            welcomeVisible,
+            editModeActive,
+            pickupRoundFinished,
+        });
     }
 
     function onVehicleCollisionContacts(contacts = []) {
@@ -1267,6 +1316,269 @@ export function createAudioSystem({ camera = null } = {}) {
             primed += 1;
         }
         return primed;
+    }
+
+    function updateMonumentMusic(frameState = {}) {
+        const shouldBeAudible =
+            !Boolean(frameState.isPaused) &&
+            !Boolean(frameState.welcomeVisible) &&
+            !Boolean(frameState.editModeActive) &&
+            !Boolean(frameState.pickupRoundFinished);
+
+        if (!shouldBeAudible && !monumentMusicInstance) {
+            return;
+        }
+
+        const instance = monumentMusicInstance || ensureMonumentMusicInstance();
+        if (!instance || !context || !camera?.position) {
+            return;
+        }
+
+        const now = context.currentTime;
+        const dx = (Number(camera.position.x) || 0) - MONUMENT_AUDIO_CONFIG.x;
+        const dy = (Number(camera.position.y) || 0) - MONUMENT_AUDIO_CONFIG.y;
+        const dz = (Number(camera.position.z) || 0) - MONUMENT_AUDIO_CONFIG.z;
+        const distance = Math.hypot(dx, dz, dy * 0.65);
+        const nearMix =
+            1 -
+            clampNumber(
+                (distance - MONUMENT_AUDIO_CONFIG.fullPresenceDistance) /
+                    Math.max(
+                        1,
+                        MONUMENT_AUDIO_CONFIG.audibleDistance -
+                            MONUMENT_AUDIO_CONFIG.fullPresenceDistance
+                    ),
+                0,
+                1,
+                0
+            );
+        const wideAreaMix = 1 - clampNumber(distance / MONUMENT_AUDIO_CONFIG.maxDistance, 0, 1, 0);
+        const activeMix = shouldBeAudible ? 1 : 0;
+        const definitionGain = SOUND_DEFINITIONS[MONUMENT_MUSIC_SOUND_ID]?.gain || 1;
+
+        instance.sourceGain.gain.setTargetAtTime(
+            activeMix *
+                definitionGain *
+                lerpNumber(
+                    MONUMENT_AUDIO_CONFIG.farSourceGain,
+                    MONUMENT_AUDIO_CONFIG.nearSourceGain,
+                    nearMix
+                ) *
+                (0.42 + wideAreaMix * 0.58),
+            now,
+            0.3
+        );
+        instance.dryGain.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    MONUMENT_AUDIO_CONFIG.farDryGain,
+                    MONUMENT_AUDIO_CONFIG.nearDryGain,
+                    nearMix
+                ),
+            now,
+            0.24
+        );
+        instance.wetGain.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    MONUMENT_AUDIO_CONFIG.farWetGain,
+                    MONUMENT_AUDIO_CONFIG.nearWetGain,
+                    nearMix
+                ),
+            now,
+            0.28
+        );
+        instance.delaySend.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    MONUMENT_AUDIO_CONFIG.delaySendFar,
+                    MONUMENT_AUDIO_CONFIG.delaySendNear,
+                    nearMix
+                ) *
+                (0.64 + wideAreaMix * 0.36),
+            now,
+            0.26
+        );
+        instance.reverbSend.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    MONUMENT_AUDIO_CONFIG.reverbSendFar,
+                    MONUMENT_AUDIO_CONFIG.reverbSendNear,
+                    nearMix
+                ) *
+                (0.72 + wideAreaMix * 0.28),
+            now,
+            0.3
+        );
+        instance.toneFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                MONUMENT_AUDIO_CONFIG.farCutoffHz,
+                MONUMENT_AUDIO_CONFIG.nearCutoffHz,
+                nearMix
+            ),
+            now,
+            0.24
+        );
+        instance.toneFilter.Q.setTargetAtTime(lerpNumber(0.24, 0.7, nearMix), now, 0.28);
+        instance.wetFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                MONUMENT_AUDIO_CONFIG.farWetLowpassHz,
+                MONUMENT_AUDIO_CONFIG.nearWetLowpassHz,
+                nearMix
+            ),
+            now,
+            0.3
+        );
+        instance.delay.delayTime.setTargetAtTime(
+            lerpNumber(
+                MONUMENT_AUDIO_CONFIG.farDelaySec,
+                MONUMENT_AUDIO_CONFIG.nearDelaySec,
+                nearMix
+            ),
+            now,
+            0.22
+        );
+        instance.delayFeedback.gain.setTargetAtTime(
+            lerpNumber(
+                MONUMENT_AUDIO_CONFIG.farFeedback,
+                MONUMENT_AUDIO_CONFIG.nearFeedback,
+                nearMix
+            ),
+            now,
+            0.28
+        );
+    }
+
+    function ensureMonumentMusicInstance() {
+        if (!isRealtimeAudioReady() || !context || !mixer) {
+            return null;
+        }
+        if (monumentMusicInstance) {
+            return monumentMusicInstance;
+        }
+
+        const definition = SOUND_DEFINITIONS[MONUMENT_MUSIC_SOUND_ID];
+        const buffer = buffers.get(MONUMENT_MUSIC_SOUND_ID);
+        if (!definition || !buffer) {
+            void loadBuffer(MONUMENT_MUSIC_SOUND_ID);
+            return null;
+        }
+
+        const busNode = mixer.buses[definition.bus];
+        if (!busNode) {
+            return null;
+        }
+
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+
+        const sourceGain = context.createGain();
+        sourceGain.gain.setValueAtTime(0, context.currentTime);
+
+        const toneFilter = context.createBiquadFilter();
+        toneFilter.type = 'lowpass';
+        toneFilter.frequency.setValueAtTime(MONUMENT_AUDIO_CONFIG.farCutoffHz, context.currentTime);
+        toneFilter.Q.setValueAtTime(0.3, context.currentTime);
+
+        const panner = context.createPanner();
+        panner.panningModel = 'equalpower';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = MONUMENT_AUDIO_CONFIG.refDistance;
+        panner.maxDistance = MONUMENT_AUDIO_CONFIG.maxDistance;
+        panner.rolloffFactor = MONUMENT_AUDIO_CONFIG.rolloffFactor;
+        panner.coneInnerAngle = 360;
+        panner.coneOuterAngle = 360;
+        panner.coneOuterGain = 1;
+        setPannerPosition(
+            panner,
+            MONUMENT_AUDIO_CONFIG.x,
+            MONUMENT_AUDIO_CONFIG.y,
+            MONUMENT_AUDIO_CONFIG.z,
+            context.currentTime
+        );
+
+        const dryGain = context.createGain();
+        dryGain.gain.setValueAtTime(0, context.currentTime);
+
+        const delaySend = context.createGain();
+        delaySend.gain.setValueAtTime(0, context.currentTime);
+        const delay = context.createDelay(1);
+        delay.delayTime.setValueAtTime(MONUMENT_AUDIO_CONFIG.farDelaySec, context.currentTime);
+        const delayFeedback = context.createGain();
+        delayFeedback.gain.setValueAtTime(MONUMENT_AUDIO_CONFIG.farFeedback, context.currentTime);
+
+        const reverbSend = context.createGain();
+        reverbSend.gain.setValueAtTime(0, context.currentTime);
+        const convolver = context.createConvolver();
+        monumentImpulseBuffer =
+            monumentImpulseBuffer || createUrbanPlazaImpulseBuffer(context, 2.8, 2.6);
+        convolver.buffer = monumentImpulseBuffer;
+
+        const wetFilter = context.createBiquadFilter();
+        wetFilter.type = 'lowpass';
+        wetFilter.frequency.setValueAtTime(
+            MONUMENT_AUDIO_CONFIG.farWetLowpassHz,
+            context.currentTime
+        );
+
+        const wetGain = context.createGain();
+        wetGain.gain.setValueAtTime(0, context.currentTime);
+
+        source.connect(sourceGain);
+        sourceGain.connect(toneFilter);
+        toneFilter.connect(panner);
+        panner.connect(dryGain);
+        dryGain.connect(busNode);
+        panner.connect(delaySend);
+        delaySend.connect(delay);
+        delay.connect(delayFeedback);
+        delayFeedback.connect(delay);
+        delay.connect(wetFilter);
+        panner.connect(reverbSend);
+        reverbSend.connect(convolver);
+        convolver.connect(wetFilter);
+        wetFilter.connect(wetGain);
+        wetGain.connect(busNode);
+
+        source.start();
+
+        monumentMusicInstance = {
+            source,
+            sourceGain,
+            toneFilter,
+            panner,
+            dryGain,
+            delaySend,
+            delay,
+            delayFeedback,
+            reverbSend,
+            convolver,
+            wetFilter,
+            wetGain,
+        };
+
+        return monumentMusicInstance;
+    }
+
+    function disposeMonumentMusicInstance() {
+        if (!monumentMusicInstance) {
+            return;
+        }
+        safeStopSource(monumentMusicInstance.source);
+        safeDisconnect(monumentMusicInstance.source);
+        safeDisconnect(monumentMusicInstance.sourceGain);
+        safeDisconnect(monumentMusicInstance.toneFilter);
+        safeDisconnect(monumentMusicInstance.panner);
+        safeDisconnect(monumentMusicInstance.dryGain);
+        safeDisconnect(monumentMusicInstance.delaySend);
+        safeDisconnect(monumentMusicInstance.delay);
+        safeDisconnect(monumentMusicInstance.delayFeedback);
+        safeDisconnect(monumentMusicInstance.reverbSend);
+        safeDisconnect(monumentMusicInstance.convolver);
+        safeDisconnect(monumentMusicInstance.wetFilter);
+        safeDisconnect(monumentMusicInstance.wetGain);
+        monumentMusicInstance = null;
     }
 
     function playVariant(variantGroupKey, options = {}) {
@@ -1638,6 +1950,46 @@ function randomRange(min, max) {
     return low + Math.random() * (high - low);
 }
 
+function lerpNumber(start, end, alpha) {
+    const safeAlpha = clampNumber(alpha, 0, 1, 0);
+    return start + (end - start) * safeAlpha;
+}
+
+function createUrbanPlazaImpulseBuffer(audioContext, durationSec = 2.6, decay = 2.4) {
+    const safeDuration = clampNumber(durationSec, 0.4, 5, 2.6);
+    const safeDecay = clampNumber(decay, 0.5, 6, 2.4);
+    const sampleRate = Math.max(22050, Math.round(audioContext?.sampleRate || 44100));
+    const sampleCount = Math.max(1, Math.floor(sampleRate * safeDuration));
+    const impulse = audioContext.createBuffer(2, sampleCount, sampleRate);
+    const tapTimes = [0.034, 0.061, 0.094, 0.148, 0.212, 0.286, 0.412, 0.608, 0.91, 1.36];
+
+    for (let channelIndex = 0; channelIndex < impulse.numberOfChannels; channelIndex += 1) {
+        const channelData = impulse.getChannelData(channelIndex);
+        for (let i = 0; i < sampleCount; i += 1) {
+            const decayT = 1 - i / sampleCount;
+            channelData[i] = (Math.random() * 2 - 1) * Math.pow(decayT, safeDecay) * 0.16;
+        }
+
+        for (let tapIndex = 0; tapIndex < tapTimes.length; tapIndex += 1) {
+            const tapSample = Math.floor(tapTimes[tapIndex] * sampleRate);
+            if (tapSample >= sampleCount) {
+                break;
+            }
+            const tapStrength =
+                (1 - tapIndex / tapTimes.length) * (channelIndex === 0 ? 0.34 : 0.28);
+            channelData[tapSample] += tapStrength;
+            if (tapSample + 1 < sampleCount) {
+                channelData[tapSample + 1] += tapStrength * 0.52;
+            }
+            if (tapSample + 2 < sampleCount) {
+                channelData[tapSample + 2] += tapStrength * 0.24;
+            }
+        }
+    }
+
+    return impulse;
+}
+
 function setAudioParamValue(param, value, when) {
     if (!param) {
         return;
@@ -1648,6 +2000,21 @@ function setAudioParamValue(param, value, when) {
     }
     if ('value' in param) {
         param.value = value;
+    }
+}
+
+function setPannerPosition(panner, x, y, z, when) {
+    if (!panner) {
+        return;
+    }
+    if (panner.positionX && panner.positionY && panner.positionZ) {
+        setAudioParamValue(panner.positionX, x, when);
+        setAudioParamValue(panner.positionY, y, when);
+        setAudioParamValue(panner.positionZ, z, when);
+        return;
+    }
+    if (typeof panner.setPosition === 'function') {
+        panner.setPosition(x, y, z);
     }
 }
 

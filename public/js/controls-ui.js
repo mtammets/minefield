@@ -73,7 +73,7 @@ const CONTROL_LAYOUTS = Object.freeze({
         {
             title: 'Camera',
             rows: Object.freeze([
-                { label: 'View Presets', keyLabels: ['Alt+1…7'] },
+                { label: 'View Presets', keyLabels: ['Cmd+1…7', 'Alt+1…7'] },
                 { label: 'Cinematic Camera', actionId: ACTION_IDS.cameraCinematicToggle },
             ]),
         },

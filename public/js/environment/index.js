@@ -11,6 +11,7 @@ import { worldBounds, cityMapLayout, chargingZones, playerSpawnPoint } from './l
 import { staticObstacles } from './obstacles.js';
 import { createGroundTexture } from './textures.js';
 import { getGroundHeightAt, createGround, updateGroundMotionRuntime } from './terrain.js';
+import { updateBillboardRuntime } from './billboards.js';
 import { createCityScenery } from './city-scenery.js';
 import { createWorldBoundary } from './boundary.js';
 
@@ -73,6 +74,7 @@ function updateGroundMotion(playerPosition, playerSpeed = 0) {
         playerSpeed,
         playerPosition,
     });
+    updateBillboardRuntime(runtimeCityScenery);
 }
 
 export {

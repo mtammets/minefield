@@ -20,37 +20,7 @@ export function createBuildingLayer() {
         vertexColors: true,
     });
 
-    const placements = [];
-    for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
-        for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
-            if (Math.abs(gridX) % 2 === 0 || Math.abs(gridZ) % 2 === 0) {
-                continue;
-            }
-            if (!isInsideBuildingDistrict(gridX, gridZ)) {
-                continue;
-            }
-
-            const width = 12 + randomFromGrid(gridX, gridZ, 11) * 11;
-            const depth = 12 + randomFromGrid(gridX, gridZ, 12) * 11;
-            const height = 14 + randomFromGrid(gridX, gridZ, 13) * 58;
-            const tint = randomFromGrid(gridX, gridZ, 16);
-            const centerX = gridX * CITY_GRID_SPACING;
-            const centerZ = gridZ * CITY_GRID_SPACING;
-
-            if (doesRectOverlapCentralParkingLot(centerX, centerZ, width, depth, 2)) {
-                continue;
-            }
-
-            placements.push({
-                x: centerX,
-                z: centerZ,
-                width,
-                depth,
-                height,
-                tint,
-            });
-        }
-    }
+    const placements = getBuildingPlacements();
 
     if (placements.length === 0) {
         return layer;
@@ -81,6 +51,43 @@ export function createBuildingLayer() {
 
     layer.add(buildings);
     return layer;
+}
+
+export function getBuildingPlacements() {
+    const placements = [];
+    for (let gridX = -CITY_GRID_RANGE; gridX <= CITY_GRID_RANGE; gridX += 1) {
+        for (let gridZ = -CITY_GRID_RANGE; gridZ <= CITY_GRID_RANGE; gridZ += 1) {
+            if (Math.abs(gridX) % 2 === 0 || Math.abs(gridZ) % 2 === 0) {
+                continue;
+            }
+            if (!isInsideBuildingDistrict(gridX, gridZ)) {
+                continue;
+            }
+
+            const width = 12 + randomFromGrid(gridX, gridZ, 11) * 11;
+            const depth = 12 + randomFromGrid(gridX, gridZ, 12) * 11;
+            const height = 14 + randomFromGrid(gridX, gridZ, 13) * 58;
+            const tint = randomFromGrid(gridX, gridZ, 16);
+            const centerX = gridX * CITY_GRID_SPACING;
+            const centerZ = gridZ * CITY_GRID_SPACING;
+
+            if (doesRectOverlapCentralParkingLot(centerX, centerZ, width, depth, 2)) {
+                continue;
+            }
+
+            placements.push({
+                gridX,
+                gridZ,
+                x: centerX,
+                z: centerZ,
+                width,
+                depth,
+                height,
+                tint,
+            });
+        }
+    }
+    return placements;
 }
 
 export function createHorizonBackdropLayer() {

@@ -6,16 +6,18 @@ import { createMonumentLayer } from './monument.js';
 import { createSpawnMarkerLayer } from './spawn-marker.js';
 import { createParkLayer } from './parks.js';
 import { createBuildingLayer } from './buildings.js';
+import { createBillboardLayer } from './billboards.js';
 import { createStreetLampLayer } from './street-lamps.js';
 
 export function createCityScenery() {
     const group = new THREE.Group();
     group.name = 'cityScenery';
     group.userData.lampLights = [];
+    group.userData.billboardScreens = [];
 
     clearStaticObstacles();
 
-    const monumentLayer = createMonumentLayer();
+    const monumentLayer = createMonumentLayer(group.userData.billboardScreens);
 
     group.add(createRoadLayer());
     group.add(createParkingLotLayer());
@@ -23,6 +25,7 @@ export function createCityScenery() {
     group.add(createSpawnMarkerLayer());
     group.add(createParkLayer());
     group.add(createBuildingLayer());
+    group.add(createBillboardLayer(group.userData.billboardScreens));
     group.add(createStreetLampLayer(group.userData.lampLights));
 
     return group;
