@@ -673,11 +673,6 @@ export function createWelcomeModalController({
         } catch {
             // Ignore pre-start hook failures so launch can continue.
         }
-        await waitForNextFrame();
-        if (launchSequenceState.token !== token) {
-            return;
-        }
-
         let preparationDone = false;
         let preparationFailed = false;
         let preparationFailureMessage = '';
@@ -719,6 +714,11 @@ export function createWelcomeModalController({
             .finally(() => {
                 preparationDone = true;
             });
+
+        await waitForNextFrame();
+        if (launchSequenceState.token !== token) {
+            return;
+        }
 
         const startTime = performance.now();
         while (launchSequenceState.token === token) {
@@ -899,6 +899,16 @@ export function createWelcomeModalController({
             return mode === 'online'
                 ? 'Building city world and online track state...'
                 : 'Building city world and race track...';
+        }
+        if (preparationStage === 'media' && audioFilesFailed > 0) {
+            return `Billboard media missing (${audioFilesFailed}/${audioFilesTotal}).`;
+        }
+        if (
+            preparationStage === 'media' &&
+            audioFilesTotal > 0 &&
+            audioFilesDone < audioFilesTotal
+        ) {
+            return `Loading billboard media (${audioFilesDone}/${audioFilesTotal})...`;
         }
         if (preparationStage === 'audio' && audioFilesFailed > 0) {
             return `Gameplay audio missing (${audioFilesFailed}/${audioFilesTotal}).`;

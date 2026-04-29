@@ -4,7 +4,7 @@ import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
 import { createVideoDisplayPanel } from './billboards.js';
 
-const MONUMENT_SCREEN_VIDEO_URLS = [
+export const MONUMENT_SCREEN_VIDEO_URLS = [
     '/assets/billboards/monument-dj-led.mp4',
     '/assets/billboards/DJ2.mp4',
 ];

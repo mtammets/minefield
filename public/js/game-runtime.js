@@ -115,6 +115,8 @@ import {
     createGraphicsQualityController,
     GRAPHICS_QUALITY_MODES,
 } from './graphics-quality-controller.js';
+import { preloadBillboardMedia } from './environment/billboards.js';
+import { MONUMENT_SCREEN_VIDEO_URLS } from './environment/monument.js';
 import {
     INPUT_CONTEXTS,
     WORLD_MAP_DRIVE_LOCK_MODES,
@@ -230,6 +232,35 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
             complete: completeNoFailures,
         });
     };
+    const reportMediaProgress = (preloadState = null) => {
+        const snapshot = preloadState && typeof preloadState === 'object' ? preloadState : null;
+        if (!snapshot) {
+            return;
+        }
+
+        const filesTotal = Math.max(0, Math.round(Number(snapshot.filesTotal) || 0));
+        const filesReady = Math.max(0, Math.round(Number(snapshot.filesReady) || 0));
+        const filesFailed = Math.max(0, Math.round(Number(snapshot.filesFailed) || 0));
+        const fallbackDone = filesReady + filesFailed;
+        const filesDone = Math.min(
+            filesTotal,
+            Math.max(0, Math.round(Number(snapshot.filesDone) || fallbackDone))
+        );
+        const progress = filesTotal > 0 ? filesDone / filesTotal : 1;
+        const completeNoFailures =
+            Boolean(snapshot.completeNoFailures) ||
+            (filesTotal > 0 && filesReady >= filesTotal && filesFailed === 0);
+
+        reportProgress({
+            stage: 'media',
+            progress: Math.min(1, Math.max(0, progress)),
+            filesTotal,
+            filesReady,
+            filesFailed,
+            filesDone,
+            complete: completeNoFailures,
+        });
+    };
 
     const normalizedMode = mode === 'online' ? 'online' : 'bots';
     const canPrepareOnlineRoomFlow = Boolean(startContext && typeof startContext === 'object');
@@ -239,6 +270,14 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
         progress: 0,
     });
     reportAudioProgress();
+    reportMediaProgress({
+        filesTotal: 0,
+        filesReady: 0,
+        filesFailed: 0,
+        filesDone: 0,
+        progress: 0,
+        completeNoFailures: false,
+    });
     const preparationTasks = [waitForAnimationFrames(2)];
 
     preparationTasks.push(
@@ -259,6 +298,27 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
                 task: 'world',
                 ready: true,
                 message: '',
+            };
+        })()
+    );
+
+    preparationTasks.push(
+        (async () => {
+            reportProgress({
+                stage: 'media',
+                progress: 0,
+            });
+            const preloadState = await preloadBillboardMedia({
+                extraVideoUrls: MONUMENT_SCREEN_VIDEO_URLS,
+                onProgress(preloadSnapshot) {
+                    reportMediaProgress(preloadSnapshot);
+                },
+            });
+            const ready = preloadState.filesTotal <= 0 || Boolean(preloadState.completeNoFailures);
+            return {
+                task: 'media',
+                ready,
+                message: ready ? '' : 'Billboard media could not be prepared.',
             };
         })()
     );
@@ -2426,6 +2486,7 @@ runtimeState.inputController = createInputController({
     renderer,
     camera,
     car,
+    sceneClickRoot: cityScenery,
     keys,
     renderSettings,
     welcomeModalUi,

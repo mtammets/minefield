@@ -7,6 +7,7 @@ import { addObstacleCircle } from './obstacles.js';
 const billboardImageCache = new Map();
 const billboardTextureCache = new Map();
 const billboardVideoSurfaceCache = new Map();
+const billboardVideoPreloadCache = new Map();
 
 const BILLBOARD_ASSETS = {
     poster: {
@@ -74,6 +75,11 @@ const TALL_PLAYLIST = ['portrait', 'summer', 'poster'];
 const TOTEM_PLAYLIST = ['monumentWizardPortrait', 'monumentTitle', 'monumentRedPortrait'];
 const SPAWN_VIEW_TARGET = { x: 0, z: -76 };
 const LANDSCAPE_SCREEN_TOP_CROP_FOCUS_Y = 0.34;
+const BILLBOARD_VIDEO_SOURCE_URLS = Object.freeze([
+    '/assets/billboards/lisett-kulmats-wall-led.mp4',
+    '/assets/billboards/model.mp4',
+    '/assets/billboards/model2.mp4',
+]);
 
 let glowTexture = null;
 
@@ -281,6 +287,82 @@ export function updateBillboardRuntime(cityScenery) {
             material.opacity = material.userData.baseOpacity * (0.9 + pulse * 0.16);
         });
     });
+}
+
+export async function preloadBillboardMedia(options = {}) {
+    const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
+    const extraVideoUrls = Array.isArray(options?.extraVideoUrls) ? options.extraVideoUrls : [];
+    const imageUrls = dedupeMediaUrls(
+        Object.values(BILLBOARD_ASSETS)
+            .map((asset) => asset?.url)
+            .filter((url) => typeof url === 'string' && url.length > 0)
+    );
+    const videoUrls = dedupeMediaUrls([...BILLBOARD_VIDEO_SOURCE_URLS, ...extraVideoUrls]);
+    const assetsTotal = imageUrls.length + videoUrls.length;
+    let assetsReady = 0;
+    let assetsFailed = 0;
+
+    const report = () => {
+        if (!onProgress) {
+            return;
+        }
+        const assetsDone = Math.min(assetsTotal, assetsReady + assetsFailed);
+        const progress = assetsTotal > 0 ? assetsDone / assetsTotal : 1;
+        onProgress({
+            assetsTotal,
+            assetsReady,
+            assetsFailed,
+            assetsDone,
+            filesTotal: assetsTotal,
+            filesReady: assetsReady,
+            filesFailed: assetsFailed,
+            filesDone: assetsDone,
+            progress,
+            complete: assetsDone >= assetsTotal,
+            completeNoFailures: assetsDone >= assetsTotal && assetsFailed === 0,
+        });
+    };
+
+    report();
+
+    for (let i = 0; i < imageUrls.length; i += 1) {
+        try {
+            await loadBillboardImage(imageUrls[i]);
+            assetsReady += 1;
+        } catch {
+            assetsFailed += 1;
+        }
+        report();
+        if ((i + 1) % 2 === 0) {
+            await waitForMediaPreloadFrame();
+        }
+    }
+
+    for (let i = 0; i < videoUrls.length; i += 1) {
+        const loaded = await preloadBillboardVideoUrl(videoUrls[i]);
+        if (loaded) {
+            assetsReady += 1;
+        } else {
+            assetsFailed += 1;
+        }
+        report();
+        await waitForMediaPreloadFrame();
+    }
+
+    const assetsDone = Math.min(assetsTotal, assetsReady + assetsFailed);
+    return {
+        assetsTotal,
+        assetsReady,
+        assetsFailed,
+        assetsDone,
+        filesTotal: assetsTotal,
+        filesReady: assetsReady,
+        filesFailed: assetsFailed,
+        filesDone: assetsDone,
+        progress: assetsTotal > 0 ? assetsDone / assetsTotal : 1,
+        complete: assetsDone >= assetsTotal,
+        completeNoFailures: assetsDone >= assetsTotal && assetsFailed === 0,
+    };
 }
 
 function addWallMountedBillboard(layer, screenEntries, placement, options) {
@@ -1026,6 +1108,26 @@ function resolveVideoUrlList(videoUrls, videoUrl) {
     return [];
 }
 
+function dedupeMediaUrls(urls = []) {
+    const result = [];
+    const seen = new Set();
+    for (let i = 0; i < urls.length; i += 1) {
+        const value = typeof urls[i] === 'string' ? urls[i].trim() : '';
+        if (!value || seen.has(value)) {
+            continue;
+        }
+        seen.add(value);
+        result.push(value);
+    }
+    return result;
+}
+
+function waitForMediaPreloadFrame() {
+    return new Promise((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+    });
+}
+
 function createDisplayPanel({
     width,
     height,
@@ -1366,6 +1468,70 @@ function loadBillboardImage(url) {
         image.src = url;
     });
     billboardImageCache.set(url, promise);
+    return promise;
+}
+
+function preloadBillboardVideoUrl(url) {
+    const normalizedUrl = typeof url === 'string' ? url.trim() : '';
+    if (!normalizedUrl) {
+        return Promise.resolve(false);
+    }
+
+    const cached = billboardVideoPreloadCache.get(normalizedUrl);
+    if (cached) {
+        return cached;
+    }
+
+    const promise = new Promise((resolve) => {
+        const video = document.createElement('video');
+        let settled = false;
+        let timeoutId = null;
+
+        const cleanup = () => {
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            video.removeEventListener('loadeddata', handleReady);
+            video.removeEventListener('canplay', handleReady);
+            video.removeEventListener('error', handleFailure);
+        };
+
+        const settle = (loaded) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            cleanup();
+            resolve(Boolean(loaded));
+        };
+
+        const handleReady = () => {
+            settle(true);
+        };
+        const handleFailure = () => {
+            settle(false);
+        };
+
+        video.preload = 'auto';
+        video.muted = true;
+        video.defaultMuted = true;
+        video.playsInline = true;
+        video.crossOrigin = 'anonymous';
+        video.setAttribute('muted', '');
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
+        video.addEventListener('loadeddata', handleReady, { once: true });
+        video.addEventListener('canplay', handleReady, { once: true });
+        video.addEventListener('error', handleFailure, { once: true });
+        timeoutId = window.setTimeout(() => {
+            settle(video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
+        }, 15000);
+        video.src = normalizedUrl;
+        video.load();
+    });
+
+    billboardVideoPreloadCache.set(normalizedUrl, promise);
     return promise;
 }
 
