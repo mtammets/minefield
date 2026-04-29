@@ -12,6 +12,7 @@ export function createInputController(options = {}) {
         renderer,
         camera,
         car,
+        sceneClickRoot = null,
         keys,
         renderSettings,
         welcomeModalUi,
@@ -60,6 +61,7 @@ export function createInputController(options = {}) {
 
     const roofMenuRaycaster = new THREE.Raycaster();
     const roofMenuPointerNdc = new THREE.Vector2();
+    const sceneClickRaycaster = new THREE.Raycaster();
     let lastEscapeKeyDownAtMs = -10_000;
     const editModeShortcutHostAllowed = isEditModeShortcutHostAllowed();
     const fullscreenCursorIdleHideMs = 1500;
@@ -428,6 +430,50 @@ export function createInputController(options = {}) {
                 event.preventDefault();
             }
             return;
+        }
+
+        const clickUrl = resolveSceneClickUrl(roofMenuPointerNdc);
+        if (clickUrl) {
+            openSceneClickUrl(clickUrl);
+            event.preventDefault();
+        }
+    }
+
+    function resolveSceneClickUrl(pointerNdc) {
+        if (!sceneClickRoot) {
+            return '';
+        }
+        sceneClickRaycaster.setFromCamera(pointerNdc, camera);
+        const intersections = sceneClickRaycaster.intersectObject(sceneClickRoot, true);
+        for (let i = 0; i < intersections.length; i += 1) {
+            const clickUrl = resolveClickUrlFromObject(intersections[i]?.object);
+            if (clickUrl) {
+                return clickUrl;
+            }
+        }
+        return '';
+    }
+
+    function resolveClickUrlFromObject(object) {
+        let node = object;
+        while (node) {
+            const clickUrl =
+                typeof node.userData?.clickUrl === 'string' ? node.userData.clickUrl : '';
+            if (clickUrl) {
+                return clickUrl;
+            }
+            node = node.parent || null;
+        }
+        return '';
+    }
+
+    function openSceneClickUrl(clickUrl) {
+        if (typeof window === 'undefined' || !clickUrl) {
+            return;
+        }
+        const openedWindow = window.open(clickUrl, '_blank', 'noopener,noreferrer');
+        if (openedWindow) {
+            openedWindow.opener = null;
         }
     }
 

@@ -9,7 +9,7 @@ import {
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.3, 600);
 camera.position.set(0, 3, 8);
 
-let cameraViewMode = 0;
+let cameraViewMode = 6;
 let cinematicMode = false;
 let cinematicAngle = 0;
 const CINEMATIC_ORBIT_SPEED = 0.42;
@@ -33,6 +33,7 @@ const cameraViewActionOrder = [
     ACTION_IDS.cameraView5,
     ACTION_IDS.cameraView6,
     ACTION_IDS.cameraView7,
+    ACTION_IDS.cameraView8,
 ];
 
 document.addEventListener('keydown', (event) => {
@@ -207,6 +208,7 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
             targetFov = 36;
             break;
         }
+        case 8:
         default:
             targetPosition.set(
                 car.position.x + Math.sin(smoothedHeading) * 6,
