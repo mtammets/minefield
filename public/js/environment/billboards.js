@@ -143,7 +143,7 @@ export function createBillboardLayer(screenEntries = []) {
         ],
         videoCropFocusX: 0.5,
         videoCropFocusY: 0.34,
-        videoTargetFps: 24,
+        videoTargetFps: 18,
         accentAssetKey: 'monumentRedPortrait',
     });
     addWallMountedLightbox(layer, buildingPlacements.get('-1:3'), {
@@ -1404,12 +1404,6 @@ function drawLedVideoCreative(ctx, canvas, video, asset) {
     const cornerRadius = Math.min(18, width * 0.018);
 
     drawBillboardFallback(ctx, canvas, asset);
-
-    ctx.save();
-    ctx.globalAlpha = 0.24;
-    ctx.filter = 'blur(24px) saturate(1.08)';
-    drawVideoCoverFrame(ctx, video, 0, 0, width, height, asset);
-    ctx.restore();
 
     ctx.save();
     ctx.beginPath();

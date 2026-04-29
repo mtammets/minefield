@@ -148,7 +148,7 @@ export function createMonumentLayer(screenEntries = [], effectEntries = []) {
             videoUrls: MONUMENT_SCREEN_VIDEO_URLS,
             videoCropFocusX: 0.5,
             videoCropFocusY: 0.5,
-            videoTargetFps: 30,
+            videoTargetFps: 20,
             accentAssetKey: 'monumentDj',
             styleConfig: ledStyleConfig,
         });
