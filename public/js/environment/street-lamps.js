@@ -4,6 +4,8 @@ import { isInsideCentralParkingLot } from './layout.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
 
+const STREET_LAMP_EXCLUSION_KEYS = new Set(['-60:-16', '-28:-16', '-16:36', '-16:68']);
+
 export function createStreetLampLayer(_lampLights) {
     const layer = new THREE.Group();
     const poleMaterial = new THREE.MeshStandardMaterial({
@@ -35,6 +37,9 @@ export function createStreetLampLayer(_lampLights) {
             if (isInsideCentralParkingLot(positionX, positionZ, 2.2)) {
                 continue;
             }
+            if (shouldSkipStreetLampPlacement(positionX, positionZ)) {
+                continue;
+            }
             const baseY = getGroundHeightAt(positionX, positionZ);
 
             const pole = new THREE.Mesh(poleGeometry, poleMaterial);
@@ -51,4 +56,8 @@ export function createStreetLampLayer(_lampLights) {
     }
 
     return layer;
+}
+
+function shouldSkipStreetLampPlacement(x, z) {
+    return STREET_LAMP_EXCLUSION_KEYS.has(`${Math.round(x)}:${Math.round(z)}`);
 }
