@@ -50,12 +50,30 @@ const BILLBOARD_ASSETS = {
         focusX: 0.56,
         focusY: 0.4,
     },
+    monumentDj: {
+        url: '/assets/billboards/monument-dj-poster.jpg',
+        glowColor: 0xff59d0,
+        accentColor: 0x74ddff,
+        focusX: 0.5,
+        focusY: 0.5,
+    },
+    lorienVelmore: {
+        glowColor: 0xfff1d1,
+        accentColor: 0xc9ac84,
+        drawTexture: drawLorienVelmoreLightboxTexture,
+    },
+    animaator: {
+        glowColor: 0x00d8ff,
+        accentColor: 0x5cefff,
+        drawTexture: drawAnimaatorNeonTexture,
+    },
 };
 
 const WIDE_PLAYLIST = ['poster', 'summer', 'portrait'];
 const TALL_PLAYLIST = ['portrait', 'summer', 'poster'];
 const TOTEM_PLAYLIST = ['monumentWizardPortrait', 'monumentTitle', 'monumentRedPortrait'];
 const SPAWN_VIEW_TARGET = { x: 0, z: -76 };
+const LANDSCAPE_SCREEN_TOP_CROP_FOCUS_Y = 0.34;
 
 let glowTexture = null;
 
@@ -82,27 +100,29 @@ export function createBillboardLayer(screenEntries = []) {
         ])
     );
 
-    addWallMountedBillboard(layer, screenEntries, buildingPlacements.get('1:-3'), {
-        face: 'south',
+    addWallMountedBillboard(layer, screenEntries, buildingPlacements.get('-1:-3'), {
+        face: 'north',
         playlistKeys: WIDE_PLAYLIST,
         width: 13.6,
         height: 7.65,
-        verticalRatio: 0.63,
-        surfaceOffset: 0.22,
-        mountArmLength: 0.56,
-        displayYawOffset: 0.22,
+        verticalRatio: 0.52,
+        surfaceOffset: 0.24,
+        mountArmLength: 0,
+        displayYawOffset: 0,
+        flushToWall: true,
         cycleIntervalMs: 5200,
         phaseOffsetMs: 900,
     });
-    addWallMountedBillboard(layer, screenEntries, buildingPlacements.get('-1:-3'), {
+    addWallMountedBillboard(layer, screenEntries, buildingPlacements.get('1:3'), {
         face: 'south',
         playlistKeys: TALL_PLAYLIST,
-        width: 5.8,
+        width: 5.4,
         height: 8.9,
-        verticalRatio: 0.6,
-        surfaceOffset: 0.24,
-        mountArmLength: 0.62,
-        displayYawOffset: -0.24,
+        verticalRatio: 0.3,
+        surfaceOffset: 0.26,
+        mountArmLength: 0,
+        displayYawOffset: 0,
+        flushToWall: true,
         cycleIntervalMs: 4600,
         phaseOffsetMs: 2300,
     });
@@ -112,13 +132,58 @@ export function createBillboardLayer(screenEntries = []) {
         height: 20.8,
         verticalRatio: 0.34,
         surfaceOffset: 0.26,
-        mountArmLength: 0.78,
-        displayYawOffset: -0.18,
-        videoUrl: '/assets/billboards/lisett-kulmats-wall-led.mp4',
+        mountArmLength: 0,
+        displayYawOffset: 0,
+        flushToWall: true,
+        lateralOffset: 3.2,
+        videoUrls: [
+            '/assets/billboards/lisett-kulmats-wall-led.mp4',
+            '/assets/billboards/model.mp4',
+            '/assets/billboards/model2.mp4',
+        ],
         videoCropFocusX: 0.5,
         videoCropFocusY: 0.34,
         videoTargetFps: 24,
         accentAssetKey: 'monumentRedPortrait',
+    });
+    addWallMountedLightbox(layer, buildingPlacements.get('-1:3'), {
+        face: 'south',
+        assetKey: 'lorienVelmore',
+        clickUrl: 'https://lorienvelmore.com/',
+        width: 10.8,
+        height: 2.45,
+        verticalRatio: 0.28,
+        surfaceOffset: 0.2,
+        mountArmLength: 0,
+        displayYawOffset: 0,
+        flushToWall: true,
+        styleConfig: {
+            depth: 0.18,
+            framePadding: 0.14,
+            shellColor: 0xe7decf,
+            shellRoughness: 0.52,
+            shellMetalness: 0.18,
+            shellEmissiveIntensity: 0.08,
+            trimTopScale: 0.985,
+            trimBottomScale: 0.985,
+            trimTopThickness: 0.04,
+            trimBottomThickness: 0.04,
+            trimTopOffset: 0.028,
+            trimBottomOffset: 0.028,
+            frontGlowScale: 1.04,
+            backGlowScale: 1.01,
+            frontGlowOpacity: 0.16,
+            backGlowOpacity: 0.04,
+        },
+    });
+    addWallNeonSign(layer, buildingPlacements.get('-3:-1'), {
+        face: 'east',
+        assetKey: 'animaator',
+        width: 10.8,
+        height: 2.35,
+        verticalRatio: 0.3,
+        surfaceOffset: 0.1,
+        lateralOffset: 2.4,
     });
     streetKioskPlacements.forEach((placement, index) => {
         addStreetKiosk(layer, screenEntries, {
@@ -241,12 +306,14 @@ function addWallMountedBillboard(layer, screenEntries, placement, options) {
         height,
         mountArmLength: options.mountArmLength,
         displayYawOffset: options.displayYawOffset,
+        flushToWall: options.flushToWall,
         playlistKeys: options.playlistKeys,
         screenEntries,
         cycleIntervalMs: options.cycleIntervalMs,
         phaseOffsetMs: options.phaseOffsetMs,
     });
-    billboard.position.set(mount.x, centerY, mount.z);
+    const anchor = resolveWallBillboardAnchor(mount, options.face, width, options.lateralOffset);
+    billboard.position.set(anchor.x, centerY, anchor.z);
     billboard.rotation.y = mount.rotationY;
     layer.add(billboard);
 }
@@ -274,16 +341,95 @@ function addWallMountedVideoBillboard(layer, screenEntries, placement, options) 
         height,
         mountArmLength: options.mountArmLength,
         displayYawOffset: options.displayYawOffset,
+        flushToWall: options.flushToWall,
         videoUrl: options.videoUrl,
+        videoUrls: options.videoUrls,
         videoCropFocusX: options.videoCropFocusX,
         videoCropFocusY: options.videoCropFocusY,
         videoTargetFps: options.videoTargetFps,
         accentAssetKey: options.accentAssetKey,
         screenEntries,
     });
-    billboard.position.set(mount.x, centerY, mount.z);
+    const anchor = resolveWallBillboardAnchor(mount, options.face, width, options.lateralOffset);
+    billboard.position.set(anchor.x, centerY, anchor.z);
     billboard.rotation.y = mount.rotationY;
     layer.add(billboard);
+}
+
+function addWallMountedLightbox(layer, placement, options) {
+    if (!placement) {
+        return;
+    }
+
+    const mount = resolveBuildingFaceMount(placement, options.face, options.surfaceOffset);
+    if (!mount) {
+        return;
+    }
+
+    const assetKey = BILLBOARD_ASSETS[options.assetKey] ? options.assetKey : 'lorienVelmore';
+    const width = Math.min(options.width, mount.faceSpan - 1.2);
+    const height = options.height;
+    const centerY = resolveWallBillboardCenterY({
+        buildingHeight: placement.height,
+        height,
+        verticalRatio: options.verticalRatio,
+    });
+    const texture = getBillboardTextureInternal(assetKey, width / height);
+    const panel = createDisplayPanel({
+        width,
+        height,
+        playlistKeys: [assetKey],
+        doubleSided: !options.flushToWall,
+        screenEntries: null,
+        registerRuntimeEntry: false,
+        initialTexture: texture,
+        initialAssetKey: assetKey,
+        styleConfig: options.styleConfig || {},
+    });
+    const lightbox = createWallMountedDisplayAssembly({
+        width,
+        height,
+        mountArmLength: options.mountArmLength,
+        displayYawOffset: options.displayYawOffset,
+        flushToWall: options.flushToWall,
+        panel,
+    });
+    const anchor = resolveWallBillboardAnchor(mount, options.face, width, options.lateralOffset);
+    lightbox.position.set(anchor.x, centerY, anchor.z);
+    lightbox.rotation.y = mount.rotationY;
+    if (typeof options.clickUrl === 'string' && options.clickUrl) {
+        lightbox.userData.clickUrl = options.clickUrl;
+    }
+    layer.add(lightbox);
+}
+
+function addWallNeonSign(layer, placement, options) {
+    if (!placement) {
+        return;
+    }
+
+    const mount = resolveBuildingFaceMount(placement, options.face, options.surfaceOffset);
+    if (!mount) {
+        return;
+    }
+
+    const assetKey = BILLBOARD_ASSETS[options.assetKey] ? options.assetKey : 'animaator';
+    const width = Math.min(options.width, mount.faceSpan - 1);
+    const height = options.height;
+    const centerY = resolveWallBillboardCenterY({
+        buildingHeight: placement.height,
+        height,
+        verticalRatio: options.verticalRatio,
+    });
+    const sign = createWallNeonSignMesh({
+        width,
+        height,
+        assetKey,
+    });
+    const anchor = resolveWallBillboardAnchor(mount, options.face, width, options.lateralOffset);
+    sign.position.set(anchor.x, centerY, anchor.z);
+    sign.rotation.y = mount.rotationY;
+    layer.add(sign);
 }
 
 function addPoleMountedBillboard(layer, screenEntries, options) {
@@ -329,6 +475,7 @@ function createWallMountedBillboardMesh({
     height,
     mountArmLength = 0.52,
     displayYawOffset = 0,
+    flushToWall = false,
     playlistKeys,
     screenEntries,
     cycleIntervalMs,
@@ -338,7 +485,7 @@ function createWallMountedBillboardMesh({
         width,
         height,
         playlistKeys,
-        doubleSided: true,
+        doubleSided: !flushToWall,
         screenEntries,
         cycleIntervalMs,
         phaseOffsetMs,
@@ -348,6 +495,7 @@ function createWallMountedBillboardMesh({
         height,
         mountArmLength,
         displayYawOffset,
+        flushToWall,
         panel,
     });
 }
@@ -357,7 +505,9 @@ function createWallMountedVideoBillboardMesh({
     height,
     mountArmLength = 0.52,
     displayYawOffset = 0,
+    flushToWall = false,
     videoUrl,
+    videoUrls,
     videoCropFocusX = 0.5,
     videoCropFocusY = 0.5,
     videoTargetFps = 24,
@@ -367,9 +517,10 @@ function createWallMountedVideoBillboardMesh({
     const panel = createVideoDisplayPanel({
         width,
         height,
-        doubleSided: true,
+        doubleSided: !flushToWall,
         screenEntries,
         videoUrl,
+        videoUrls,
         videoCropFocusX,
         videoCropFocusY,
         videoTargetFps,
@@ -380,6 +531,7 @@ function createWallMountedVideoBillboardMesh({
         height,
         mountArmLength,
         displayYawOffset,
+        flushToWall,
         panel,
     });
 }
@@ -389,28 +541,32 @@ function createWallMountedDisplayAssembly({
     height,
     mountArmLength = 0.52,
     displayYawOffset = 0,
+    flushToWall = false,
     panel,
 }) {
     const group = new THREE.Group();
-    const braceMaterial = createMountMaterial();
-    const braceLength = mountArmLength + panel.depth * 0.42;
-    const braceGeometry = new THREE.BoxGeometry(0.22, 0.22, braceLength);
+    const safeMountArmLength = flushToWall ? 0 : Math.max(0, mountArmLength);
+    if (!flushToWall) {
+        const braceMaterial = createMountMaterial();
+        const braceLength = safeMountArmLength + panel.depth * 0.42;
+        const braceGeometry = new THREE.BoxGeometry(0.22, 0.22, braceLength);
 
-    [-width * 0.3, width * 0.3].forEach((braceX) => {
-        const brace = new THREE.Mesh(braceGeometry, braceMaterial);
-        brace.position.set(braceX, 0, braceLength * 0.5);
-        group.add(brace);
-    });
+        [-width * 0.3, width * 0.3].forEach((braceX) => {
+            const brace = new THREE.Mesh(braceGeometry, braceMaterial);
+            brace.position.set(braceX, 0, braceLength * 0.5);
+            group.add(brace);
+        });
 
-    const rail = new THREE.Mesh(
-        new THREE.BoxGeometry(Math.max(2.2, width * 0.68), 0.14, 0.14),
-        braceMaterial
-    );
-    rail.position.set(0, -height * 0.18, 0.12);
-    group.add(rail);
+        const rail = new THREE.Mesh(
+            new THREE.BoxGeometry(Math.max(2.2, width * 0.68), 0.14, 0.14),
+            braceMaterial
+        );
+        rail.position.set(0, -height * 0.18, 0.12);
+        group.add(rail);
+    }
 
-    panel.group.position.z = mountArmLength + panel.depth * 0.5;
-    panel.group.rotation.y = displayYawOffset;
+    panel.group.position.z = safeMountArmLength + panel.depth * 0.5;
+    panel.group.rotation.y = flushToWall ? 0 : displayYawOffset;
     group.add(panel.group);
     return group;
 }
@@ -543,16 +699,63 @@ function createStreetKioskMesh({
     return group;
 }
 
+function createWallNeonSignMesh({ width, height, assetKey = 'animaator' }) {
+    const group = new THREE.Group();
+    const texture = getBillboardTextureInternal(assetKey, width / height);
+    const braceMaterial = new THREE.MeshStandardMaterial({
+        color: 0x17314a,
+        roughness: 0.42,
+        metalness: 0.62,
+        emissive: 0x081725,
+        emissiveIntensity: 0.2,
+    });
+
+    const textMaterial = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        alphaTest: 0.004,
+        depthWrite: false,
+        toneMapped: false,
+    });
+
+    [-width * 0.34, width * 0.34].forEach((strutX) => {
+        const strut = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, height * 0.72, 0.08),
+            braceMaterial
+        );
+        strut.position.set(strutX, 0, -0.012);
+        group.add(strut);
+    });
+
+    const topBrace = new THREE.Mesh(new THREE.BoxGeometry(width * 0.82, 0.08, 0.06), braceMaterial);
+    topBrace.position.set(0, height * 0.24, -0.02);
+    group.add(topBrace);
+
+    const bottomBrace = new THREE.Mesh(
+        new THREE.BoxGeometry(width * 0.76, 0.06, 0.06),
+        braceMaterial
+    );
+    bottomBrace.position.set(0, -height * 0.24, -0.02);
+    group.add(bottomBrace);
+
+    const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), textMaterial);
+    textPlane.position.z = 0.038;
+    group.add(textPlane);
+
+    return group;
+}
+
 export function createLedDisplayPanel(options) {
     return createDisplayPanel(options);
 }
 
-function createVideoDisplayPanel({
+export function createVideoDisplayPanel({
     width,
     height,
     doubleSided = true,
     screenEntries,
     videoUrl,
+    videoUrls,
     videoCropFocusX = 0.5,
     videoCropFocusY = 0.5,
     videoTargetFps = 24,
@@ -560,8 +763,9 @@ function createVideoDisplayPanel({
     styleConfig = {},
 }) {
     const safeAccentAssetKey = BILLBOARD_ASSETS[accentAssetKey] ? accentAssetKey : 'portrait';
+    const resolvedVideoUrls = resolveVideoUrlList(videoUrls, videoUrl);
     const videoSurface = getBillboardVideoSurface({
-        videoUrl,
+        videoUrls: resolvedVideoUrls,
         targetAspect: width / height,
         focusX: videoCropFocusX,
         focusY: videoCropFocusY,
@@ -632,14 +836,16 @@ export function resolveBillboardCanvasSize(targetAspect) {
 
 function getBillboardVideoSurface({
     videoUrl,
+    videoUrls,
     targetAspect,
     focusX = 0.5,
     focusY = 0.5,
     targetFps = 24,
     accentAssetKey = 'portrait',
 }) {
+    const resolvedVideoUrls = resolveVideoUrlList(videoUrls, videoUrl);
     const cacheKey = [
-        videoUrl,
+        resolvedVideoUrls.join('|'),
         targetAspect.toFixed(3),
         focusX.toFixed(3),
         focusY.toFixed(3),
@@ -665,9 +871,7 @@ function getBillboardVideoSurface({
     texture.anisotropy = 4;
 
     const video = document.createElement('video');
-    video.src = videoUrl;
     video.preload = 'auto';
-    video.loop = true;
     video.muted = true;
     video.defaultMuted = true;
     video.playsInline = true;
@@ -682,6 +886,8 @@ function getBillboardVideoSurface({
         update,
     };
 
+    let currentVideoIndex = 0;
+    let currentVideoUrl = null;
     let lastDrawTime = -Infinity;
     let lastVideoTime = -1;
     let lastPlayAttemptTime = -Infinity;
@@ -718,7 +924,49 @@ function getBillboardVideoSurface({
         return true;
     }
 
+    function loadVideoAtIndex(index, shouldAutoplay = true) {
+        if (resolvedVideoUrls.length === 0) {
+            return;
+        }
+
+        currentVideoIndex =
+            ((index % resolvedVideoUrls.length) + resolvedVideoUrls.length) %
+            resolvedVideoUrls.length;
+        const nextVideoUrl = resolvedVideoUrls[currentVideoIndex];
+        const shouldLoop = resolvedVideoUrls.length === 1;
+        if (currentVideoUrl === nextVideoUrl && video.loop === shouldLoop) {
+            if (shouldAutoplay) {
+                tryPlay();
+            }
+            return;
+        }
+
+        currentVideoUrl = nextVideoUrl;
+        lastDrawTime = -Infinity;
+        lastVideoTime = -1;
+        video.pause();
+        video.loop = shouldLoop;
+        video.removeAttribute('src');
+        video.src = nextVideoUrl;
+        video.load();
+        if (shouldAutoplay) {
+            tryPlay();
+        }
+    }
+
+    function advancePlaylist() {
+        if (resolvedVideoUrls.length <= 1) {
+            return;
+        }
+        loadVideoAtIndex(currentVideoIndex + 1);
+    }
+
     function update(now) {
+        if (resolvedVideoUrls.length > 1 && video.ended) {
+            advancePlaylist();
+            return;
+        }
+
         if (
             video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
             (video.paused || video.ended)
@@ -752,11 +1000,30 @@ function getBillboardVideoSurface({
     video.addEventListener('canplay', () => {
         tryPlay();
     });
-    video.load();
-    tryPlay();
+    video.addEventListener('ended', () => {
+        advancePlaylist();
+    });
+    loadVideoAtIndex(0);
 
     billboardVideoSurfaceCache.set(cacheKey, surface);
     return surface;
+}
+
+function resolveVideoUrlList(videoUrls, videoUrl) {
+    if (Array.isArray(videoUrls)) {
+        const filteredUrls = videoUrls.filter(
+            (entry) => typeof entry === 'string' && entry.length > 0
+        );
+        if (filteredUrls.length > 0) {
+            return filteredUrls;
+        }
+    }
+
+    if (typeof videoUrl === 'string' && videoUrl.length > 0) {
+        return [videoUrl];
+    }
+
+    return [];
 }
 
 function createDisplayPanel({
@@ -972,14 +1239,14 @@ function resolveBuildingFaceMount(placement, face, surfaceOffset = 0.18) {
             return {
                 x: placement.x + halfWidth + surfaceOffset,
                 z: placement.z,
-                rotationY: -Math.PI / 2,
+                rotationY: Math.PI / 2,
                 faceSpan: placement.depth,
             };
         case 'west':
             return {
                 x: placement.x - halfWidth - surfaceOffset,
                 z: placement.z,
-                rotationY: Math.PI / 2,
+                rotationY: -Math.PI / 2,
                 faceSpan: placement.depth,
             };
         default:
@@ -991,6 +1258,29 @@ function resolveWallBillboardCenterY({ buildingHeight, height, verticalRatio = 0
     const minCenter = height * 0.5 + 3;
     const maxCenter = buildingHeight - height * 0.5 - 2.6;
     return THREE.MathUtils.clamp(buildingHeight * verticalRatio, minCenter, maxCenter);
+}
+
+function resolveWallBillboardAnchor(mount, face, width, lateralOffset = 0) {
+    const safeOffset = Number(lateralOffset) || 0;
+    const maxOffset = Math.max(0, mount.faceSpan * 0.5 - width * 0.5 - 0.2);
+    const clampedOffset = THREE.MathUtils.clamp(safeOffset, -maxOffset, maxOffset);
+
+    switch (face) {
+        case 'north':
+        case 'south':
+            return {
+                x: mount.x + clampedOffset,
+                z: mount.z,
+            };
+        case 'east':
+        case 'west':
+            return {
+                x: mount.x,
+                z: mount.z + clampedOffset,
+            };
+        default:
+            return { x: mount.x, z: mount.z };
+    }
 }
 
 function resolvePoleOffsets(poleCount, poleSpacing) {
@@ -1046,6 +1336,12 @@ function getBillboardTextureInternal(assetKey, targetAspect) {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 4;
     billboardTextureCache.set(cacheKey, texture);
+
+    if (typeof asset.drawTexture === 'function') {
+        asset.drawTexture(ctx, canvas, asset);
+        texture.needsUpdate = true;
+        return texture;
+    }
 
     loadBillboardImage(asset.url)
         .then((image) => {
@@ -1133,6 +1429,114 @@ function drawLedVideoCreative(ctx, canvas, video, asset) {
     drawVignette(ctx, width, height);
 }
 
+function drawLorienVelmoreLightboxTexture(ctx, canvas, asset) {
+    const { width, height } = canvas;
+    ctx.clearRect(0, 0, width, height);
+
+    const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
+    bgGradient.addColorStop(0, '#fffef8');
+    bgGradient.addColorStop(0.48, '#f8f2e6');
+    bgGradient.addColorStop(1, '#ece1cf');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+
+    const halo = ctx.createRadialGradient(
+        width * 0.5,
+        height * 0.48,
+        width * 0.06,
+        width * 0.5,
+        height * 0.48,
+        width * 0.72
+    );
+    halo.addColorStop(0, 'rgba(255,255,255,0.9)');
+    halo.addColorStop(0.42, 'rgba(255,249,238,0.54)');
+    halo.addColorStop(1, 'rgba(255,249,238,0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = 'rgba(193, 164, 123, 0.72)';
+    ctx.lineWidth = Math.max(2, height * 0.032);
+    ctx.strokeRect(
+        ctx.lineWidth * 0.5,
+        ctx.lineWidth * 0.5,
+        width - ctx.lineWidth,
+        height - ctx.lineWidth
+    );
+
+    const innerShadow = ctx.createLinearGradient(0, 0, width, 0);
+    innerShadow.addColorStop(0, 'rgba(120, 93, 57, 0.08)');
+    innerShadow.addColorStop(0.12, 'rgba(255,255,255,0)');
+    innerShadow.addColorStop(0.88, 'rgba(255,255,255,0)');
+    innerShadow.addColorStop(1, 'rgba(120, 93, 57, 0.08)');
+    ctx.fillStyle = innerShadow;
+    ctx.fillRect(0, 0, width, height);
+
+    const text = 'LORIEN VELMORE';
+    let fontSize = height * 0.54;
+    let tracking = fontSize * 0.058;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+
+    while (fontSize > height * 0.34) {
+        ctx.font = `600 ${fontSize}px "Didot", "Bodoni MT", "Times New Roman", serif`;
+        tracking = fontSize * 0.058;
+        if (measureTrackedText(ctx, text, tracking) <= width * 0.88) {
+            break;
+        }
+        fontSize -= 4;
+    }
+
+    ctx.fillStyle = '#060606';
+    ctx.shadowColor = 'rgba(255,255,255,0.18)';
+    ctx.shadowBlur = Math.max(6, height * 0.09);
+    drawTrackedText(ctx, text, width * 0.5, height * 0.5, tracking);
+    ctx.shadowBlur = 0;
+
+    const sheen = ctx.createLinearGradient(0, 0, 0, height);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.34)');
+    sheen.addColorStop(0.18, 'rgba(255,255,255,0.08)');
+    sheen.addColorStop(0.4, 'rgba(255,255,255,0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(0, 0, width, height);
+
+    const accentGradient = ctx.createLinearGradient(0, 0, width, 0);
+    accentGradient.addColorStop(0, hexToRgba(asset.glowColor, 0.2));
+    accentGradient.addColorStop(0.5, 'rgba(255,255,255,0)');
+    accentGradient.addColorStop(1, hexToRgba(asset.accentColor, 0.18));
+    ctx.fillStyle = accentGradient;
+    ctx.fillRect(0, 0, width, height);
+}
+
+function drawAnimaatorNeonTexture(ctx, canvas, asset) {
+    const { width, height } = canvas;
+    ctx.clearRect(0, 0, width, height);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    const text = 'ANIMAATOR';
+    let fontSize = height * 0.74;
+    while (fontSize > height * 0.36) {
+        ctx.font = `900 ${fontSize}px "Arial Black", "Helvetica Neue", sans-serif`;
+        if (ctx.measureText(text).width <= width * 0.9) {
+            break;
+        }
+        fontSize -= 4;
+    }
+
+    const centerX = width * 0.5;
+    const centerY = height * 0.52;
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(3, 18, 30, 0.92)';
+    ctx.lineWidth = Math.max(4, fontSize * 0.11);
+    ctx.strokeText(text, centerX, centerY);
+    ctx.fillStyle = '#00d8ff';
+    ctx.fillText(text, centerX, centerY);
+    ctx.restore();
+}
+
 function drawBillboardFallback(ctx, canvas, asset) {
     const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
     gradient.addColorStop(0, '#05080d');
@@ -1181,6 +1585,31 @@ function drawVignette(ctx, width, height) {
     ctx.fillRect(0, 0, width, height);
 }
 
+function measureTrackedText(ctx, text, tracking = 0) {
+    const glyphs = Array.from(text);
+    let totalWidth = 0;
+    glyphs.forEach((glyph, index) => {
+        totalWidth += ctx.measureText(glyph).width;
+        if (index < glyphs.length - 1) {
+            totalWidth += glyph === ' ' ? tracking * 1.2 : tracking;
+        }
+    });
+    return totalWidth;
+}
+
+function drawTrackedText(ctx, text, centerX, centerY, tracking = 0) {
+    const glyphs = Array.from(text);
+    const totalWidth = measureTrackedText(ctx, text, tracking);
+    let x = centerX - totalWidth * 0.5;
+    glyphs.forEach((glyph, index) => {
+        ctx.fillText(glyph, x, centerY);
+        x += ctx.measureText(glyph).width;
+        if (index < glyphs.length - 1) {
+            x += glyph === ' ' ? tracking * 1.2 : tracking;
+        }
+    });
+}
+
 function drawImageContain(ctx, image, x, y, width, height) {
     const imageAspect = image.width / image.height;
     const rectAspect = width / height;
@@ -1202,7 +1631,6 @@ function drawImageCover(ctx, image, x, y, width, height, options = {}) {
     const imageAspect = image.width / image.height;
     const rectAspect = width / height;
     const focusX = THREE.MathUtils.clamp(options.focusX ?? 0.5, 0, 1);
-    const focusY = THREE.MathUtils.clamp(options.focusY ?? 0.5, 0, 1);
 
     let drawWidth = width;
     let drawHeight = height;
@@ -1214,6 +1642,7 @@ function drawImageCover(ctx, image, x, y, width, height, options = {}) {
 
     const overflowX = Math.max(0, drawWidth - width);
     const overflowY = Math.max(0, drawHeight - height);
+    const focusY = resolveCoverFocusY(options.focusY, rectAspect, overflowY);
     const drawX = x - overflowX * focusX;
     const drawY = y - overflowY * focusY;
     ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
@@ -1223,7 +1652,6 @@ function drawVideoCoverFrame(ctx, video, x, y, width, height, options = {}) {
     const videoAspect = video.videoWidth / video.videoHeight;
     const rectAspect = width / height;
     const focusX = THREE.MathUtils.clamp(options.focusX ?? 0.5, 0, 1);
-    const focusY = THREE.MathUtils.clamp(options.focusY ?? 0.5, 0, 1);
 
     let drawWidth = width;
     let drawHeight = height;
@@ -1235,9 +1663,22 @@ function drawVideoCoverFrame(ctx, video, x, y, width, height, options = {}) {
 
     const overflowX = Math.max(0, drawWidth - width);
     const overflowY = Math.max(0, drawHeight - height);
+    const focusY = resolveCoverFocusY(options.focusY, rectAspect, overflowY);
     const drawX = x - overflowX * focusX;
     const drawY = y - overflowY * focusY;
     ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
+}
+
+function resolveCoverFocusY(explicitFocusY, rectAspect, overflowY) {
+    if (explicitFocusY != null) {
+        return THREE.MathUtils.clamp(explicitFocusY, 0, 1);
+    }
+
+    if (rectAspect > 1 && overflowY > 0) {
+        return LANDSCAPE_SCREEN_TOP_CROP_FOCUS_Y;
+    }
+
+    return 0.5;
 }
 
 function fillRoundedRect(ctx, x, y, width, height, radius) {
