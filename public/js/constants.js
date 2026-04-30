@@ -88,6 +88,7 @@ export const MINE_MAX_PER_OWNER = 10;
 export const MINE_THROW_SPEED = 24;
 export const MINE_THROW_VERTICAL_SPEED = 6.8;
 export const MINE_THROW_GRAVITY = 18;
+export const MINE_THROW_AUTO_DETONATE_DELAY_MS = 1000;
 
 export const WELCOME_CAR_SPIN_SPEED = 0.62;
 export const WELCOME_PREVIEW_STATE_SPEED = 17;

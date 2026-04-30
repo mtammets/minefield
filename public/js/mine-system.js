@@ -8,6 +8,7 @@ import {
     MINE_THROW_SPEED,
     MINE_THROW_VERTICAL_SPEED,
     MINE_THROW_GRAVITY,
+    MINE_THROW_AUTO_DETONATE_DELAY_MS,
 } from './constants.js';
 import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
@@ -430,12 +431,32 @@ export function createMineSystemController(options = {}) {
                     mine.mesh.position.y = groundY;
                     mine.velocity.set(0, 0, 0);
                     mine.landed = true;
+                    mine.landedAt = now;
                 }
             } else {
                 const groundY =
                     getGroundHeightAt(mine.mesh.position.x, mine.mesh.position.z) +
                     MINE_SURFACE_OFFSET;
                 mine.mesh.position.y = groundY;
+            }
+
+            const localOwnThrownMine =
+                Boolean(localPlayerId) && mine.ownerId && mine.ownerId === localPlayerId;
+            if (
+                mine.thrown &&
+                mine.landed &&
+                localOwnThrownMine &&
+                now >= mine.landedAt + MINE_THROW_AUTO_DETONATE_DELAY_MS
+            ) {
+                detonateMine(mineId, {
+                    emitNetworkEvent: true,
+                    triggerPlayerId: localPlayerId,
+                    targetPlayerId: '',
+                    localHit: false,
+                    detonationType: 'timed_throw',
+                    landedAt: mine.landedAt,
+                });
+                continue;
             }
 
             const armed = now >= mine.armedAt && mine.landed;
@@ -678,6 +699,17 @@ export function createMineSystemController(options = {}) {
                 z: detonationPosition.z,
                 triggerPlayerId: sanitizePlayerId(context.triggerPlayerId),
                 targetPlayerId: sanitizePlayerId(context.targetPlayerId),
+                detonationType:
+                    context.detonationType === 'timed_throw' ? 'timed_throw' : undefined,
+                landedAt:
+                    context.detonationType === 'timed_throw'
+                        ? clampFinite(
+                              context.landedAt,
+                              0,
+                              Number.MAX_SAFE_INTEGER,
+                              now
+                          )
+                        : undefined,
             });
         }
 
@@ -734,6 +766,9 @@ export function createMineSystemController(options = {}) {
         existingMine.thrown = snapshot.thrown;
         existingMine.velocity.set(snapshot.velocityX, snapshot.velocityY, snapshot.velocityZ);
         existingMine.landed = existingMine.landed || !snapshot.thrown;
+        existingMine.landedAt =
+            existingMine.landedAt ??
+            (existingMine.landed ? existingMine.createdAt : Number.POSITIVE_INFINITY);
         if (preferIncomingPosition || !existingMine.landed) {
             existingMine.mesh.position.set(snapshot.x, snapshot.y, snapshot.z);
         }
@@ -755,6 +790,7 @@ export function createMineSystemController(options = {}) {
             expiresAt: snapshot.expiresAt,
             thrown: snapshot.thrown,
             landed: !snapshot.thrown,
+            landedAt: snapshot.thrown ? Number.POSITIVE_INFINITY : snapshot.createdAt,
             velocity: new THREE.Vector3(snapshot.velocityX, snapshot.velocityY, snapshot.velocityZ),
             mesh: meshBundle.group,
             meshBundle,

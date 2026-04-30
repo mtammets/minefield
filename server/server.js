@@ -1803,8 +1803,20 @@ function sanitizeMineDetonation(payload, now = Date.now()) {
         z: clampFinite(payload.z, -5000, 5000, 0),
         triggerPlayerId: sanitizeSocketLikeId(payload.triggerPlayerId),
         targetPlayerId: sanitizeSocketLikeId(payload.targetPlayerId),
+        detonationType: sanitizeMineDetonationType(payload.detonationType),
+        landedAt: Math.round(
+            clampFinite(payload.landedAt, 0, Number.MAX_SAFE_INTEGER, 0)
+        ),
         serverTime: now,
     };
+}
+
+function sanitizeMineDetonationType(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'timed_throw' ? normalized : '';
 }
 
 function sanitizeMineId(value) {

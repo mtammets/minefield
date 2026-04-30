@@ -263,6 +263,89 @@ test('resolveAuthoritativeMineDetonation accepts segment intersection against re
     assert.equal(accepted.detonation.targetPlayerId, 'victim');
 });
 
+test('resolveAuthoritativeMineDetonation accepts timed thrown-mine auto detonation for owner', () => {
+    const room = {
+        players: new Map([
+            ['owner', { lastState: { x: 24, z: 18 } }],
+            ['victim', { lastState: { x: -5, z: -4 } }],
+        ]),
+    };
+    const mine = {
+        id: 'mine-throw-1',
+        ownerId: 'owner',
+        ownerName: 'Owner',
+        x: 0,
+        y: 1.2,
+        z: 0,
+        velocityX: 12,
+        velocityY: 6.8,
+        velocityZ: 0,
+        triggerRadius: 1.5,
+        thrown: true,
+        createdAt: 1000,
+        armedAt: 1650,
+        expiresAt: 9000,
+    };
+
+    const accepted = resolveAuthoritativeMineDetonation({
+        room,
+        mine,
+        reportingPlayerId: 'owner',
+        detonation: {
+            detonationType: 'timed_throw',
+            landedAt: 1850,
+            x: 9.8,
+            y: 0.06,
+            z: 0,
+        },
+        nowMs: 2855,
+    });
+    assert.equal(accepted.ok, true);
+    assert.equal(accepted.detonation.ownerId, 'owner');
+    assert.equal(accepted.detonation.targetPlayerId, '');
+    assert.equal(accepted.detonation.x, 9.8);
+});
+
+test('resolveAuthoritativeMineDetonation rejects timed thrown-mine auto detonation before delay completes', () => {
+    const room = {
+        players: new Map([
+            ['owner', { lastState: { x: 24, z: 18 } }],
+        ]),
+    };
+    const mine = {
+        id: 'mine-throw-2',
+        ownerId: 'owner',
+        ownerName: 'Owner',
+        x: 0,
+        y: 1.2,
+        z: 0,
+        velocityX: 12,
+        velocityY: 6.8,
+        velocityZ: 0,
+        triggerRadius: 1.5,
+        thrown: true,
+        createdAt: 1000,
+        armedAt: 1650,
+        expiresAt: 9000,
+    };
+
+    const tooEarly = resolveAuthoritativeMineDetonation({
+        room,
+        mine,
+        reportingPlayerId: 'owner',
+        detonation: {
+            detonationType: 'timed_throw',
+            landedAt: 1850,
+            x: 9.8,
+            y: 0.06,
+            z: 0,
+        },
+        nowMs: 2750,
+    });
+    assert.equal(tooEarly.ok, false);
+    assert.equal(tooEarly.reason, 'timed-throw-too-early');
+});
+
 test('parsePickupId validates fixed and grid pickup IDs', () => {
     const validFixed = parsePickupId('pickup:fixed:3', 10);
     assert.equal(validFixed.ok, true);

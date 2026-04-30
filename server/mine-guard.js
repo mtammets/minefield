@@ -9,6 +9,10 @@ function clampFinite(value, min, max, fallback = 0) {
 const TARGET_COLLISION_RADIUS_DEFAULT = 1.34;
 const DETONATION_VALIDATION_TOLERANCE = 0.3;
 const SEGMENT_STATE_MAX_AGE_MS = 480;
+const TIMED_THROW_DETONATION_TYPE = 'timed_throw';
+const TIMED_THROW_AUTO_DETONATE_DELAY_MS = 1000;
+const TIMED_THROW_MIN_FLIGHT_MS = 700;
+const TIMED_THROW_POSITION_TOLERANCE = 1.25;
 
 function resolveAuthoritativeMineDetonation({
     room,
@@ -24,6 +28,16 @@ function resolveAuthoritativeMineDetonation({
     const now = Number.isFinite(nowMs) ? nowMs : Date.now();
     if (mine.expiresAt <= now) {
         return { ok: false, reason: 'mine-expired' };
+    }
+
+    if (detonation?.detonationType === TIMED_THROW_DETONATION_TYPE) {
+        return resolveTimedThrowDetonation({
+            room,
+            mine,
+            reportingPlayerId,
+            detonation,
+            now,
+        });
     }
 
     const triggerPlayerId = sanitizeRoomPlayerId(
@@ -103,6 +117,71 @@ function resolveAuthoritativeMineDetonation({
             z: mine.z,
             triggerPlayerId,
             targetPlayerId,
+        },
+    };
+}
+
+function resolveTimedThrowDetonation({
+    room,
+    mine,
+    reportingPlayerId,
+    detonation,
+    now,
+}) {
+    if (!mine?.thrown) {
+        return { ok: false, reason: 'timed-throw-not-thrown' };
+    }
+    if (reportingPlayerId !== mine.ownerId) {
+        return { ok: false, reason: 'timed-throw-owner-mismatch' };
+    }
+
+    const landedAt = clampFinite(
+        detonation?.landedAt,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        Number.NaN
+    );
+    if (!Number.isFinite(landedAt)) {
+        return { ok: false, reason: 'timed-throw-missing-landed-at' };
+    }
+
+    if (landedAt < mine.createdAt + TIMED_THROW_MIN_FLIGHT_MS) {
+        return { ok: false, reason: 'timed-throw-landed-too-soon' };
+    }
+    if (now < landedAt + TIMED_THROW_AUTO_DETONATE_DELAY_MS) {
+        return { ok: false, reason: 'timed-throw-too-early' };
+    }
+
+    const detonationX = clampFinite(detonation?.x, -5000, 5000, Number.NaN);
+    const detonationY = clampFinite(detonation?.y, -500, 2500, mine.y);
+    const detonationZ = clampFinite(detonation?.z, -5000, 5000, Number.NaN);
+    if (!Number.isFinite(detonationX) || !Number.isFinite(detonationZ)) {
+        return { ok: false, reason: 'timed-throw-missing-position' };
+    }
+
+    const flightDurationSec = Math.max(0, (landedAt - mine.createdAt) / 1000);
+    const horizontalSpeed = Math.hypot(
+        clampFinite(mine.velocityX, -140, 140, 0),
+        clampFinite(mine.velocityZ, -140, 140, 0)
+    );
+    const maxTravelDistance =
+        horizontalSpeed * flightDurationSec + mine.triggerRadius + TIMED_THROW_POSITION_TOLERANCE;
+    const travelDistance = Math.hypot(detonationX - mine.x, detonationZ - mine.z);
+    if (travelDistance > maxTravelDistance) {
+        return { ok: false, reason: 'timed-throw-position-too-far' };
+    }
+
+    return {
+        ok: true,
+        detonation: {
+            mineId: mine.id,
+            ownerId: mine.ownerId,
+            ownerName: mine.ownerName,
+            x: detonationX,
+            y: detonationY,
+            z: detonationZ,
+            triggerPlayerId: mine.ownerId,
+            targetPlayerId: '',
         },
     };
 }

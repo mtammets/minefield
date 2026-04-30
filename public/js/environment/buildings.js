@@ -51,6 +51,14 @@ const LORIEN_VELMORE_GALLERY_ARTWORK_URLS = [
     '/assets/Lorienvelmore/5.png',
     '/assets/Lorienvelmore/6.png',
 ];
+const LORIEN_VELMORE_GALLERY_ARTWORK_ASPECT_RATIOS = Object.freeze({
+    '/assets/Lorienvelmore/1.png': 864 / 1130,
+    '/assets/Lorienvelmore/2.png': 732 / 960,
+    '/assets/Lorienvelmore/3.png': 778 / 1016,
+    '/assets/Lorienvelmore/4.png': 978 / 1270,
+    '/assets/Lorienvelmore/5.png': 790 / 1028,
+    '/assets/Lorienvelmore/6.png': 752 / 978,
+});
 const LORIEN_VELMORE_GALLERY_VIDEO_URL = '/assets/Lorienvelmore/lorien_video.mp4';
 const LORIEN_VELMORE_GALLERY_VIDEO_PLAYBACK_DELAY_MS = 2000;
 const lorienGalleryArtworkTextureLoader = new THREE.TextureLoader();
@@ -3119,11 +3127,7 @@ function addLorienVelmoreGalleryDisplays(
         opacity: 0.11,
         toneMapped: false,
     });
-    const artworkAspectRatio = 0.755;
     const wallArtworkHeight = 2.12;
-    const wallArtworkWidth = wallArtworkHeight * artworkAspectRatio;
-    const wallArtworkGlowHeight = wallArtworkHeight + 0.18;
-    const wallArtworkGlowWidth = wallArtworkWidth + 0.18;
 
     const wallDisplayX = layout.hallHalfWidth - 0.12;
     const wallDisplayOffsets = [-3.15, 0, 3.15].map((offset) =>
@@ -3150,6 +3154,10 @@ function addLorienVelmoreGalleryDisplays(
     });
 
     displayPositions.forEach((display) => {
+        const artworkDimensions = getLorienGalleryArtworkDisplayDimensions(
+            display.artworkUrl,
+            wallArtworkHeight
+        );
         const artworkGroup = new THREE.Group();
         artworkGroup.position.set(display.x, 1.94, display.z);
         artworkGroup.rotation.y = display.facing;
@@ -3159,14 +3167,17 @@ function addLorienVelmoreGalleryDisplays(
             toneMapped: false,
         });
         const artFront = new THREE.Mesh(
-            new THREE.PlaneGeometry(wallArtworkWidth, wallArtworkHeight),
+            new THREE.PlaneGeometry(artworkDimensions.width, artworkDimensions.height),
             artMaterial
         );
         artFront.position.z = 0.026;
         artworkGroup.add(artFront);
 
         const glow = new THREE.Mesh(
-            new THREE.PlaneGeometry(wallArtworkGlowWidth, wallArtworkGlowHeight),
+            new THREE.PlaneGeometry(
+                artworkDimensions.width + 0.18,
+                artworkDimensions.height + 0.18
+            ),
             artGlowMaterial
         );
         glow.position.z = 0.02;
@@ -3451,6 +3462,16 @@ function createGalleryHallFloorMesh(building, material) {
 
 function sampleLorienGalleryFloorHeightLocal(building, localX, localZ) {
     return resolveLorienVelmoreGalleryFloorHeightLocal(building, localX, localZ);
+}
+
+function getLorienGalleryArtworkDisplayDimensions(artworkUrl, targetHeight = 2.12) {
+    const safeHeight = Math.max(0.2, Number(targetHeight) || 2.12);
+    const aspectRatio =
+        LORIEN_VELMORE_GALLERY_ARTWORK_ASPECT_RATIOS[artworkUrl] || 864 / 1130;
+    return {
+        width: safeHeight * aspectRatio,
+        height: safeHeight,
+    };
 }
 
 function updateLorienVelmoreGalleryVideoDisplays(videoDisplays, playerPosition) {
