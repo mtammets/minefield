@@ -167,17 +167,20 @@ const OBSTACLE_BROADPHASE_CELL_SIZE = 12;
 const OBSTACLE_BROADPHASE_EXTRA_RADIUS = 6;
 const VEHICLE_COLLISION_MASS = 1.35;
 const VEHICLE_COLLISION_PENETRATION_SHARE = 0.94;
-// Roads/intersections are rendered slightly above the base terrain (around y=0.028),
-// so add extra ride height to prevent visual tire clipping into road meshes.
-const VEHICLE_RIDE_HEIGHT = 0.088;
-// Wheel centers are around +/-1.28 in local X, so terrain sampling must match that width.
-const TERRAIN_TRACK_HALF_WIDTH = 1.26;
+// Keep the tire contact only slightly above rendered roads/surfaces.
+const VEHICLE_RIDE_HEIGHT = 0.034;
+const TERRAIN_WHEEL_RADIUS = 0.5;
+const TERRAIN_WHEEL_CENTER_HEIGHT = TERRAIN_WHEEL_RADIUS;
+// Terrain support should use the visual wheel footprint, not the shorter handling wheelbase.
+const TERRAIN_FRONT_CONTACT_DISTANCE = 1.8;
+const TERRAIN_REAR_CONTACT_DISTANCE = 1.8;
+const TERRAIN_TRACK_HALF_WIDTH = 1.28;
 // Small visual safety gap to avoid tire-ground clipping from camera angle/terrain interpolation.
-const TERRAIN_WHEEL_CLEARANCE = 0.014;
-const TERRAIN_TILT_RESPONSE = 8.6;
-const TERRAIN_SUPPORT_HEIGHT_RESPONSE = 9.2;
-const TERRAIN_MAX_PITCH = THREE.MathUtils.degToRad(12);
-const TERRAIN_MAX_ROLL = THREE.MathUtils.degToRad(14);
+const TERRAIN_WHEEL_CLEARANCE = 0.006;
+const TERRAIN_TILT_RESPONSE = 14.5;
+const TERRAIN_SUPPORT_HEIGHT_RESPONSE = 15.5;
+const TERRAIN_MAX_PITCH = THREE.MathUtils.degToRad(28);
+const TERRAIN_MAX_ROLL = THREE.MathUtils.degToRad(18);
 const TERRAIN_SUSPENSION_STIFFNESS = 122;
 const TERRAIN_SUSPENSION_COMPRESSION_DAMPING = 18;
 const TERRAIN_SUSPENSION_REBOUND_DAMPING = 14;
@@ -209,6 +212,8 @@ const vehicleState = {
     verticalSpeed: 0,
     terrainCompression: 0,
     terrainGrounded: 1,
+    terrainPitch: 0,
+    terrainRoll: 0,
     topSpeedLimitKph: TOP_SPEED_LIMIT_TUNING.maxKph,
     topSpeedLimitPercent: 100,
     autoGearIndex: 0,
@@ -224,6 +229,8 @@ const collisionNormal = new THREE.Vector2();
 const physicsPosition = new THREE.Vector3();
 const previousPhysicsPosition = new THREE.Vector3();
 const interpolatedPosition = new THREE.Vector3();
+const terrainContactEuler = new THREE.Euler(0, 0, 0, 'XYZ');
+const terrainContactPoint = new THREE.Vector3();
 
 let physicsRotationY = 0;
 let previousPhysicsRotationY = 0;
@@ -432,6 +439,8 @@ export function initializePlayerPhysics(player) {
     vehicleState.verticalSpeed = 0;
     vehicleState.terrainCompression = 0;
     vehicleState.terrainGrounded = 1;
+    vehicleState.terrainPitch = 0;
+    vehicleState.terrainRoll = 0;
     vehicleState.topSpeedLimitKph = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph);
     vehicleState.topSpeedLimitPercent = getTopSpeedLimitPercent(vehicleState.topSpeedLimitKph);
     vehicleState.autoGearIndex = 0;
@@ -709,6 +718,8 @@ export function updatePlayerPhysics(
         vehicleState.verticalSpeed = moveToward(vehicleState.verticalSpeed, 0, 8 * dt);
         vehicleState.terrainCompression = moveToward(vehicleState.terrainCompression, 0, 6 * dt);
         vehicleState.terrainGrounded = 0;
+        vehicleState.terrainPitch = physicsPitch;
+        vehicleState.terrainRoll = physicsRoll;
     }
 
     player.position.copy(physicsPosition);
@@ -1822,37 +1833,37 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     const rightX = Math.cos(physicsRotationY);
     const rightZ = -Math.sin(physicsRotationY);
 
-    const frontOffset = TUNING.frontAxleDistance;
-    const rearOffset = TUNING.rearAxleDistance;
+    const frontOffset = TERRAIN_FRONT_CONTACT_DISTANCE;
+    const rearOffset = TERRAIN_REAR_CONTACT_DISTANCE;
     const trackOffset = TERRAIN_TRACK_HALF_WIDTH;
 
     const fallbackGroundHeight = previousY - VEHICLE_RIDE_HEIGHT;
 
     const frontLeftHeight = finiteNumberOr(
         sampleGroundHeight(
-            physicsPosition.x + forwardX * frontOffset + rightX * trackOffset,
-            physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset
-        ),
-        fallbackGroundHeight
-    );
-    const frontRightHeight = finiteNumberOr(
-        sampleGroundHeight(
             physicsPosition.x + forwardX * frontOffset - rightX * trackOffset,
             physicsPosition.z + forwardZ * frontOffset - rightZ * trackOffset
         ),
         fallbackGroundHeight
     );
+    const frontRightHeight = finiteNumberOr(
+        sampleGroundHeight(
+            physicsPosition.x + forwardX * frontOffset + rightX * trackOffset,
+            physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset
+        ),
+        fallbackGroundHeight
+    );
     const rearLeftHeight = finiteNumberOr(
         sampleGroundHeight(
-            physicsPosition.x - forwardX * rearOffset + rightX * trackOffset,
-            physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset
+            physicsPosition.x - forwardX * rearOffset - rightX * trackOffset,
+            physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset
         ),
         fallbackGroundHeight
     );
     const rearRightHeight = finiteNumberOr(
         sampleGroundHeight(
-            physicsPosition.x - forwardX * rearOffset - rightX * trackOffset,
-            physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset
+            physicsPosition.x - forwardX * rearOffset + rightX * trackOffset,
+            physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset
         ),
         fallbackGroundHeight
     );
@@ -1862,7 +1873,7 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     const leftAverage = (frontLeftHeight + rearLeftHeight) * 0.5;
     const rightAverage = (frontRightHeight + rearRightHeight) * 0.5;
 
-    const wheelBase = Math.max(0.01, TUNING.frontAxleDistance + TUNING.rearAxleDistance);
+    const wheelBase = Math.max(0.01, frontOffset + rearOffset);
     const trackWidth = Math.max(0.01, TERRAIN_TRACK_HALF_WIDTH * 2);
 
     const targetPitch = THREE.MathUtils.clamp(
@@ -1876,44 +1887,39 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
         TERRAIN_MAX_ROLL
     );
 
-    const tiltBlend = 1 - Math.exp(-TERRAIN_TILT_RESPONSE * dt);
-    physicsPitch = THREE.MathUtils.lerp(physicsPitch, targetPitch, tiltBlend);
-    physicsRoll = THREE.MathUtils.lerp(physicsRoll, targetRoll, tiltBlend);
+    physicsPitch = targetPitch;
+    physicsRoll = targetRoll;
+    terrainContactEuler.set(physicsPitch, 0, physicsRoll, 'XYZ');
 
     const centerHeight = finiteNumberOr(
         sampleGroundHeight(physicsPosition.x, physicsPosition.z),
         (frontAverage + rearAverage) * 0.5
     );
     const averageHeight = (frontAverage + rearAverage) * 0.5;
-    const maxWheelHeight = Math.max(
-        frontLeftHeight,
-        frontRightHeight,
-        rearLeftHeight,
-        rearRightHeight
-    );
     const supportedGroundHeight = Math.max(centerHeight, averageHeight);
     if (!terrainSupportFilterInitialized) {
         smoothedSupportedGroundHeight = supportedGroundHeight;
         smoothedCenterGroundHeight = centerHeight;
         terrainSupportFilterInitialized = true;
     }
-    const supportBlend = 1 - Math.exp(-TERRAIN_SUPPORT_HEIGHT_RESPONSE * dt);
-    smoothedSupportedGroundHeight = THREE.MathUtils.lerp(
-        smoothedSupportedGroundHeight,
-        supportedGroundHeight,
-        supportBlend
+    smoothedSupportedGroundHeight = supportedGroundHeight;
+    smoothedCenterGroundHeight = centerHeight;
+    const wheelContactFloor =
+        Math.max(
+            getTerrainWheelSupportHeight(-trackOffset, -frontOffset, frontLeftHeight),
+            getTerrainWheelSupportHeight(trackOffset, -frontOffset, frontRightHeight),
+            getTerrainWheelSupportHeight(-trackOffset, rearOffset, rearLeftHeight),
+            getTerrainWheelSupportHeight(trackOffset, rearOffset, rearRightHeight)
+        ) + TERRAIN_WHEEL_CLEARANCE;
+    const targetRideHeight = Math.max(
+        smoothedSupportedGroundHeight + VEHICLE_RIDE_HEIGHT,
+        wheelContactFloor
     );
-    smoothedCenterGroundHeight = THREE.MathUtils.lerp(
-        smoothedCenterGroundHeight,
-        centerHeight,
-        supportBlend
-    );
-    const targetRideHeight = smoothedSupportedGroundHeight + VEHICLE_RIDE_HEIGHT;
     const minRideOffset = Math.max(
-        0.01 + TERRAIN_WHEEL_CLEARANCE,
+        TERRAIN_WHEEL_CLEARANCE,
         VEHICLE_RIDE_HEIGHT - TERRAIN_MAX_COMPRESSION + TERRAIN_WHEEL_CLEARANCE
     );
-    const compressionFloor = maxWheelHeight + minRideOffset;
+    const compressionFloor = wheelContactFloor;
 
     const springDamping =
         physicsVerticalVelocity < 0
@@ -1939,10 +1945,10 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
         physicsPosition.y = compressionFloor;
     }
 
-    const centerHardFloor =
-        Math.max(centerHeight, smoothedCenterGroundHeight) +
-        minRideOffset +
-        TERRAIN_HARD_FLOOR_MARGIN;
+    const centerHardFloor = Math.max(
+        wheelContactFloor,
+        Math.max(centerHeight, smoothedCenterGroundHeight) + TERRAIN_HARD_FLOOR_MARGIN
+    );
     if (physicsPosition.y < centerHardFloor) {
         physicsPosition.y = centerHardFloor;
         if (physicsVerticalVelocity < 0) {
@@ -1964,6 +1970,14 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     vehicleState.terrainCompression = THREE.MathUtils.clamp(normalizedCompression, -1.2, 1.2);
     const groundedFloor = Math.max(compressionFloor, centerHardFloor);
     vehicleState.terrainGrounded = physicsPosition.y <= groundedFloor + 0.006 ? 1 : 0;
+    vehicleState.terrainPitch = physicsPitch;
+    vehicleState.terrainRoll = physicsRoll;
+}
+
+function getTerrainWheelSupportHeight(localX, localZ, groundHeight) {
+    terrainContactPoint.set(localX, TERRAIN_WHEEL_CENTER_HEIGHT, localZ);
+    terrainContactPoint.applyEuler(terrainContactEuler);
+    return groundHeight - (terrainContactPoint.y - TERRAIN_WHEEL_RADIUS);
 }
 
 function getBurnoutFactor(totalSpeed) {

@@ -15,6 +15,7 @@ import {
     DRIFT_SMOKE_LIFE_MIN,
     DRIFT_SMOKE_LIFE_MAX,
 } from './constants.js';
+import { isInsideLorienVelmoreGalleryRoomWorld } from './environment/lorien-gallery.js';
 
 const DEFAULT_SKID_QUALITY_PROFILE = Object.freeze({
     maxSmokeParticles: DRIFT_SMOKE_MAX_PARTICLES,
@@ -181,6 +182,27 @@ export function createSkidMarkController(scene, options = {}) {
             vehicle.localToWorld(worldRearRight);
             worldRearLeft.y = sampleSurfaceY(worldRearLeft.x, worldRearLeft.z);
             worldRearRight.y = sampleSurfaceY(worldRearRight.x, worldRearRight.z);
+
+            if (
+                isInsideLorienVelmoreGalleryRoomWorld(
+                    worldRearLeft.x,
+                    worldRearLeft.y,
+                    worldRearLeft.z,
+                    null,
+                    0.18
+                ) ||
+                isInsideLorienVelmoreGalleryRoomWorld(
+                    worldRearRight.x,
+                    worldRearRight.y,
+                    worldRearRight.z,
+                    null,
+                    0.18
+                )
+            ) {
+                resetWheelSamples();
+                return;
+            }
+
             spawnDriftSmoke(
                 worldRearLeft,
                 worldRearRight,

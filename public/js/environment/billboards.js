@@ -59,8 +59,8 @@ const BILLBOARD_ASSETS = {
         focusY: 0.5,
     },
     lorienVelmore: {
-        glowColor: 0xfff1d1,
-        accentColor: 0xc9ac84,
+        glowColor: 0xf8e8cf,
+        accentColor: 0xc5a57d,
         drawTexture: drawLorienVelmoreLightboxTexture,
     },
     animaator: {
@@ -156,30 +156,32 @@ export function createBillboardLayer(screenEntries = []) {
         face: 'south',
         assetKey: 'lorienVelmore',
         clickUrl: 'https://lorienvelmore.com/',
-        width: 10.8,
-        height: 2.45,
-        verticalRatio: 0.28,
-        surfaceOffset: 0.2,
+        width: 5.8,
+        height: 1.38,
+        verticalRatio: 0.152,
+        surfaceOffset: 0.08,
         mountArmLength: 0,
         displayYawOffset: 0,
         flushToWall: true,
         styleConfig: {
-            depth: 0.18,
-            framePadding: 0.14,
-            shellColor: 0xe7decf,
-            shellRoughness: 0.52,
-            shellMetalness: 0.18,
-            shellEmissiveIntensity: 0.08,
-            trimTopScale: 0.985,
-            trimBottomScale: 0.985,
-            trimTopThickness: 0.04,
-            trimBottomThickness: 0.04,
-            trimTopOffset: 0.028,
-            trimBottomOffset: 0.028,
-            frontGlowScale: 1.04,
+            depth: 0.08,
+            framePadding: 0.08,
+            shellColor: 0xf2ebdf,
+            shellRoughness: 0.82,
+            shellMetalness: 0.02,
+            shellEmissiveIntensity: 0.01,
+            trimTopScale: 0.88,
+            trimBottomScale: 0.88,
+            trimTopThickness: 0.025,
+            trimBottomThickness: 0.025,
+            trimTopOffset: 0.018,
+            trimBottomOffset: 0.018,
+            frontGlowScale: 1.01,
             backGlowScale: 1.01,
-            frontGlowOpacity: 0.16,
-            backGlowOpacity: 0.04,
+            frontGlowOpacity: 0.03,
+            backGlowOpacity: 0,
+            screenColor: 0xe8dbc5,
+            screenOpacity: 0.95,
         },
     });
     addWallNeonSign(layer, buildingPlacements.get('-3:-1'), {
@@ -1164,7 +1166,7 @@ function createDisplayPanel({
     const resolvedInitialAssetKey = initialAssetKey || playlistKeys[0];
     const texture =
         initialTexture || getBillboardTextureInternal(resolvedInitialAssetKey, width / height);
-    const screenMaterial = createLedScreenMaterial(texture);
+    const screenMaterial = createLedScreenMaterial(texture, styleConfig);
     const trimMaterial = createTrimMaterial(
         BILLBOARD_ASSETS[resolvedInitialAssetKey]?.accentColor || 0xffffff
     );
@@ -1192,7 +1194,7 @@ function createDisplayPanel({
     const trimMaterials = [trimMaterial];
 
     if (doubleSided) {
-        const backScreenMaterial = createLedScreenMaterial(texture);
+        const backScreenMaterial = createLedScreenMaterial(texture, styleConfig);
         const backScreen = new THREE.Mesh(screenGeometry, backScreenMaterial);
         backScreen.position.z = -(depth * 0.5 + 0.018);
         backScreen.rotation.y = Math.PI;
@@ -1279,12 +1281,21 @@ function applyScreenAsset(screenEntry, assetIndex) {
     screenEntry.currentIndex = assetIndex;
 }
 
-function createLedScreenMaterial(texture) {
-    return new THREE.MeshBasicMaterial({
+function createLedScreenMaterial(texture, styleConfig = {}) {
+    const screenColor = styleConfig.screenColor ?? new THREE.Color(1.08, 1.08, 1.08);
+    const screenOpacity = THREE.MathUtils.clamp(styleConfig.screenOpacity ?? 1, 0, 1);
+    const material = new THREE.MeshBasicMaterial({
         map: texture,
-        color: new THREE.Color(1.08, 1.08, 1.08),
+        transparent: screenOpacity < 0.999,
+        opacity: screenOpacity,
         toneMapped: false,
     });
+    if (screenColor instanceof THREE.Color) {
+        material.color.copy(screenColor);
+    } else {
+        material.color.set(screenColor);
+    }
+    return material;
 }
 
 function createTrimMaterial(color) {
@@ -1594,28 +1605,22 @@ function drawLorienVelmoreLightboxTexture(ctx, canvas, asset) {
     ctx.clearRect(0, 0, width, height);
 
     const bgGradient = ctx.createLinearGradient(0, 0, 0, height);
-    bgGradient.addColorStop(0, '#fffef8');
-    bgGradient.addColorStop(0.48, '#f8f2e6');
-    bgGradient.addColorStop(1, '#ece1cf');
+    bgGradient.addColorStop(0, '#faf6ef');
+    bgGradient.addColorStop(0.52, '#f1e7d8');
+    bgGradient.addColorStop(1, '#eadac4');
     ctx.fillStyle = bgGradient;
     ctx.fillRect(0, 0, width, height);
 
-    const halo = ctx.createRadialGradient(
-        width * 0.5,
-        height * 0.48,
-        width * 0.06,
-        width * 0.5,
-        height * 0.48,
-        width * 0.72
-    );
-    halo.addColorStop(0, 'rgba(255,255,255,0.9)');
-    halo.addColorStop(0.42, 'rgba(255,249,238,0.54)');
-    halo.addColorStop(1, 'rgba(255,249,238,0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(0, 0, width, height);
+    for (let i = 0; i < 320; i += 1) {
+        const x = Math.random() * width;
+        const y = Math.random() * height;
+        const alpha = 0.016 + Math.random() * 0.022;
+        ctx.fillStyle = `rgba(142, 120, 88, ${alpha})`;
+        ctx.fillRect(x, y, 1.2, 1.2);
+    }
 
-    ctx.strokeStyle = 'rgba(193, 164, 123, 0.72)';
-    ctx.lineWidth = Math.max(2, height * 0.032);
+    ctx.strokeStyle = 'rgba(193, 164, 123, 0.58)';
+    ctx.lineWidth = Math.max(1.5, height * 0.022);
     ctx.strokeRect(
         ctx.lineWidth * 0.5,
         ctx.lineWidth * 0.5,
@@ -1623,47 +1628,51 @@ function drawLorienVelmoreLightboxTexture(ctx, canvas, asset) {
         height - ctx.lineWidth
     );
 
-    const innerShadow = ctx.createLinearGradient(0, 0, width, 0);
-    innerShadow.addColorStop(0, 'rgba(120, 93, 57, 0.08)');
-    innerShadow.addColorStop(0.12, 'rgba(255,255,255,0)');
-    innerShadow.addColorStop(0.88, 'rgba(255,255,255,0)');
-    innerShadow.addColorStop(1, 'rgba(120, 93, 57, 0.08)');
-    ctx.fillStyle = innerShadow;
-    ctx.fillRect(0, 0, width, height);
+    const topRuleY = height * 0.24;
+    const bottomRuleY = height * 0.76;
+    ctx.strokeStyle = 'rgba(197, 168, 124, 0.45)';
+    ctx.lineWidth = Math.max(1, height * 0.012);
+    ctx.beginPath();
+    ctx.moveTo(width * 0.13, topRuleY);
+    ctx.lineTo(width * 0.87, topRuleY);
+    ctx.moveTo(width * 0.13, bottomRuleY);
+    ctx.lineTo(width * 0.87, bottomRuleY);
+    ctx.stroke();
 
     const text = 'LORIEN VELMORE';
-    let fontSize = height * 0.54;
-    let tracking = fontSize * 0.058;
+    let fontSize = height * 0.38;
+    let tracking = fontSize * 0.102;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
 
-    while (fontSize > height * 0.34) {
+    while (fontSize > height * 0.26) {
         ctx.font = `600 ${fontSize}px "Didot", "Bodoni MT", "Times New Roman", serif`;
-        tracking = fontSize * 0.058;
-        if (measureTrackedText(ctx, text, tracking) <= width * 0.88) {
+        tracking = fontSize * 0.102;
+        if (measureTrackedText(ctx, text, tracking) <= width * 0.72) {
             break;
         }
         fontSize -= 4;
     }
 
-    ctx.fillStyle = '#060606';
-    ctx.shadowColor = 'rgba(255,255,255,0.18)';
-    ctx.shadowBlur = Math.max(6, height * 0.09);
+    ctx.fillStyle = '#16120f';
+    ctx.shadowColor = 'rgba(255,255,255,0.08)';
+    ctx.shadowBlur = Math.max(2, height * 0.03);
     drawTrackedText(ctx, text, width * 0.5, height * 0.5, tracking);
     ctx.shadowBlur = 0;
 
     const sheen = ctx.createLinearGradient(0, 0, 0, height);
-    sheen.addColorStop(0, 'rgba(255,255,255,0.34)');
-    sheen.addColorStop(0.18, 'rgba(255,255,255,0.08)');
-    sheen.addColorStop(0.4, 'rgba(255,255,255,0)');
+    sheen.addColorStop(0, 'rgba(255,255,255,0.16)');
+    sheen.addColorStop(0.16, 'rgba(255,255,255,0.05)');
+    sheen.addColorStop(0.42, 'rgba(255,255,255,0)');
     ctx.fillStyle = sheen;
     ctx.fillRect(0, 0, width, height);
 
-    const accentGradient = ctx.createLinearGradient(0, 0, width, 0);
-    accentGradient.addColorStop(0, hexToRgba(asset.glowColor, 0.2));
-    accentGradient.addColorStop(0.5, 'rgba(255,255,255,0)');
-    accentGradient.addColorStop(1, hexToRgba(asset.accentColor, 0.18));
-    ctx.fillStyle = accentGradient;
+    const vignette = ctx.createLinearGradient(0, 0, width, 0);
+    vignette.addColorStop(0, 'rgba(83, 60, 31, 0.05)');
+    vignette.addColorStop(0.12, 'rgba(255,255,255,0)');
+    vignette.addColorStop(0.88, 'rgba(255,255,255,0)');
+    vignette.addColorStop(1, hexToRgba(asset.accentColor, 0.08));
+    ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, width, height);
 }
 

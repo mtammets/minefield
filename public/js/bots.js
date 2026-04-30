@@ -35,7 +35,7 @@ const BOT_INDICATOR_HEIGHT = 1.52;
 const BOT_INDICATOR_BOB_AMPLITUDE = 0.1;
 const BOT_INDICATOR_BOB_SPEED = 1.9;
 const BOT_INDICATOR_PULSE_SPEED = 4.2;
-const BOT_RIDE_HEIGHT = 0.06;
+const BOT_RIDE_HEIGHT = 0.034;
 const BOT_DRIFT_MIN_SPEED = 12.5;
 const BOT_DRIFT_ENTRY_HEADING = THREE.MathUtils.degToRad(18);
 const BOT_DRIFT_EXIT_HEADING = THREE.MathUtils.degToRad(10);
@@ -580,16 +580,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     }
 
     function resolvePendingMineDebrisSpawnBudget(dt) {
-        if (
-            dt > 1 / 32 ||
-            detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.9)
-        ) {
+        if (dt > 1 / 32 || detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.9)) {
             return BOT_MINE_DEBRIS_SPAWN_PER_FRAME_SEVERE_LOAD;
         }
-        if (
-            dt > 1 / 40 ||
-            detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.8)
-        ) {
+        if (dt > 1 / 40 || detachedDebrisPieces.length >= Math.floor(BOT_DEBRIS_MAX_PIECES * 0.8)) {
             return BOT_MINE_DEBRIS_SPAWN_PER_FRAME_UNDER_LOAD;
         }
         return BOT_MINE_DEBRIS_SPAWN_PER_FRAME;
@@ -600,7 +594,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             return false;
         }
         const queuedAtMs = Number(entry.queuedAtMs);
-        if (!Number.isFinite(queuedAtMs) || nowMs - queuedAtMs <= BOT_PENDING_MINE_DEBRIS_MAX_AGE_MS) {
+        if (
+            !Number.isFinite(queuedAtMs) ||
+            nowMs - queuedAtMs <= BOT_PENDING_MINE_DEBRIS_MAX_AGE_MS
+        ) {
             return false;
         }
         const playerX = Number(playerPosition?.x);
@@ -701,7 +698,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             velocity,
             angularVelocity,
             settled: false,
-            lifeSec: BOT_DEBRIS_MAX_LIFETIME_SEC + Math.random() * BOT_DEBRIS_MAX_LIFETIME_JITTER_SEC,
+            lifeSec:
+                BOT_DEBRIS_MAX_LIFETIME_SEC + Math.random() * BOT_DEBRIS_MAX_LIFETIME_JITTER_SEC,
         });
         trimDetachedDebrisLimit();
     }

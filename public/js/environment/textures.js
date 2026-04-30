@@ -534,6 +534,225 @@ export function createBuildingWindowTexture() {
     return texture;
 }
 
+export function createCurtainWallGlassTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 640;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#17365c');
+    baseGradient.addColorStop(0.34, '#102744');
+    baseGradient.addColorStop(0.72, '#0a1729');
+    baseGradient.addColorStop(1, '#08111d');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const skyReflection = ctx.createLinearGradient(0, 0, canvas.width, canvas.height * 0.45);
+    skyReflection.addColorStop(0, 'rgba(170, 212, 255, 0.18)');
+    skyReflection.addColorStop(0.38, 'rgba(116, 168, 225, 0.08)');
+    skyReflection.addColorStop(1, 'rgba(116, 168, 225, 0)');
+    ctx.fillStyle = skyReflection;
+    ctx.fillRect(0, 0, canvas.width, canvas.height * 0.58);
+
+    const panelCount = 3;
+    const outerPadding = 16;
+    const mullionWidth = 8;
+    const panelGap = 12;
+    const panelWidth =
+        (canvas.width - outerPadding * 2 - mullionWidth * 2 - panelGap * (panelCount - 1)) /
+        panelCount;
+
+    ctx.fillStyle = 'rgba(8, 16, 26, 0.82)';
+    ctx.fillRect(outerPadding - 6, 0, 12, canvas.height);
+    ctx.fillRect(canvas.width - outerPadding - 6, 0, 12, canvas.height);
+
+    for (let i = 0; i < panelCount; i += 1) {
+        const x = outerPadding + i * (panelWidth + panelGap);
+
+        const panelGradient = ctx.createLinearGradient(x, 0, x + panelWidth, 0);
+        panelGradient.addColorStop(0, 'rgba(24, 52, 84, 0.94)');
+        panelGradient.addColorStop(0.2, 'rgba(44, 90, 135, 0.72)');
+        panelGradient.addColorStop(0.52, 'rgba(18, 42, 68, 0.88)');
+        panelGradient.addColorStop(0.84, 'rgba(96, 150, 204, 0.3)');
+        panelGradient.addColorStop(1, 'rgba(18, 40, 66, 0.9)');
+        ctx.fillStyle = panelGradient;
+        ctx.fillRect(x, 0, panelWidth, canvas.height);
+
+        const specular = ctx.createLinearGradient(x, 0, x + panelWidth, 0);
+        specular.addColorStop(0, 'rgba(255, 255, 255, 0)');
+        specular.addColorStop(0.22, 'rgba(188, 226, 255, 0.12)');
+        specular.addColorStop(0.5, 'rgba(255, 255, 255, 0.03)');
+        specular.addColorStop(0.78, 'rgba(126, 184, 245, 0.1)');
+        specular.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = specular;
+        ctx.fillRect(x, 0, panelWidth, canvas.height);
+
+        const zoneCount = 5;
+        const zoneHeight = canvas.height / zoneCount;
+        for (let zoneIndex = 0; zoneIndex < zoneCount; zoneIndex += 1) {
+            const zoneTop = zoneIndex * zoneHeight;
+            const litHeight = zoneHeight * (0.18 + Math.random() * 0.14);
+            const litY = zoneTop + zoneHeight * (0.28 + Math.random() * 0.14);
+
+            if (Math.random() < 0.18) {
+                ctx.fillStyle = 'rgba(255, 236, 205, 0.17)';
+                ctx.fillRect(x + 5, litY, panelWidth - 10, litHeight);
+            } else if (Math.random() < 0.12) {
+                ctx.fillStyle = 'rgba(176, 214, 255, 0.1)';
+                ctx.fillRect(x + 6, litY, panelWidth - 12, litHeight * 0.82);
+            }
+        }
+
+        if (i < panelCount - 1) {
+            ctx.fillStyle = 'rgba(10, 18, 28, 0.88)';
+            ctx.fillRect(
+                x + panelWidth + panelGap * 0.5 - mullionWidth * 0.5,
+                0,
+                mullionWidth,
+                canvas.height
+            );
+        }
+    }
+
+    ctx.strokeStyle = 'rgba(210, 230, 255, 0.05)';
+    ctx.lineWidth = 2;
+    for (let y = 74; y < canvas.height; y += 116) {
+        ctx.beginPath();
+        ctx.moveTo(outerPadding, y + 0.5);
+        ctx.lineTo(canvas.width - outerPadding, y + 0.5);
+        ctx.stroke();
+    }
+
+    const verticalGlow = ctx.createLinearGradient(0, 0, canvas.width, 0);
+    verticalGlow.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    verticalGlow.addColorStop(0.28, 'rgba(172, 216, 255, 0.06)');
+    verticalGlow.addColorStop(0.5, 'rgba(255, 255, 255, 0.02)');
+    verticalGlow.addColorStop(0.76, 'rgba(172, 216, 255, 0.05)');
+    verticalGlow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = verticalGlow;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 2;
+    return texture;
+}
+
+export function createLuxuryMarbleTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    baseGradient.addColorStop(0, '#fbf6ef');
+    baseGradient.addColorStop(0.38, '#efe4d4');
+    baseGradient.addColorStop(0.72, '#f7f0e6');
+    baseGradient.addColorStop(1, '#e4d7c3');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 36; i += 1) {
+        const centerX = Math.random() * canvas.width;
+        const centerY = Math.random() * canvas.height;
+        const radius = 40 + Math.random() * 140;
+        const glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+        glow.addColorStop(0, 'rgba(255, 255, 255, 0.16)');
+        glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    const veinPalette = [
+        'rgba(171, 149, 120, 0.22)',
+        'rgba(120, 112, 116, 0.16)',
+        'rgba(201, 181, 151, 0.18)',
+    ];
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 32; i += 1) {
+        const startX = Math.random() * canvas.width;
+        const startY = Math.random() * canvas.height;
+        const endX = startX + (Math.random() - 0.5) * 260;
+        const endY = startY + (Math.random() - 0.5) * 260;
+        const cp1X = startX + (Math.random() - 0.5) * 120;
+        const cp1Y = startY + (Math.random() - 0.5) * 120;
+        const cp2X = endX + (Math.random() - 0.5) * 120;
+        const cp2Y = endY + (Math.random() - 0.5) * 120;
+        ctx.strokeStyle = veinPalette[i % veinPalette.length];
+        ctx.lineWidth = 1.2 + Math.random() * 3.1;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.bezierCurveTo(cp1X, cp1Y, cp2X, cp2Y, endX, endY);
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 2;
+    return texture;
+}
+
+export function createLuxuryGlassWindowTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#6f9dc9');
+    baseGradient.addColorStop(0.28, '#4e78a7');
+    baseGradient.addColorStop(0.7, '#22425f');
+    baseGradient.addColorStop(1, '#17314a');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const diagonal = ctx.createLinearGradient(0, 0, canvas.width, canvas.height * 0.86);
+    diagonal.addColorStop(0, 'rgba(245, 252, 255, 0.34)');
+    diagonal.addColorStop(0.24, 'rgba(184, 222, 255, 0.14)');
+    diagonal.addColorStop(0.5, 'rgba(255, 255, 255, 0.05)');
+    diagonal.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = diagonal;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    [
+        { y: 0.2, h: 0.12, alpha: 0.22 },
+        { y: 0.48, h: 0.1, alpha: 0.18 },
+        { y: 0.72, h: 0.12, alpha: 0.24 },
+    ].forEach((band) => {
+        ctx.fillStyle = `rgba(255, 242, 222, ${band.alpha})`;
+        ctx.fillRect(
+            canvas.width * 0.1,
+            canvas.height * band.y,
+            canvas.width * 0.8,
+            canvas.height * band.h
+        );
+    });
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.12, 0);
+    ctx.lineTo(canvas.width * 0.82, canvas.height);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 2;
+    return texture;
+}
+
 export function createSkyDomeTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 1024;

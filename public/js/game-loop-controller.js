@@ -466,7 +466,7 @@ export function createGameLoopController(options = {}) {
                 updateCarVisuals(vehicleState, frameDelta);
                 const introFinished = raceIntroController.update(frameDelta);
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
-                updateGroundMotion(car.position, 0, monumentRhythmState);
+                updateGroundMotion(car.position, 0, monumentRhythmState, frameDelta);
                 starsController.update(frameDelta);
                 if (introFinished) {
                     resetCameraTrackingState();
@@ -614,7 +614,7 @@ export function createGameLoopController(options = {}) {
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
                 updateCamera(car, cameraSpeed, frameDelta);
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
-                updateGroundMotion(car.position, cameraSpeed, monumentRhythmState);
+                updateGroundMotion(car.position, cameraSpeed, monumentRhythmState, frameDelta);
                 starsController.update(frameDelta);
                 if (!readPickupRoundFinished()) {
                     const botTrafficSystem = getBotTrafficSystem();
@@ -687,7 +687,7 @@ export function createGameLoopController(options = {}) {
             }
             starsController.update(frameDelta);
             const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
-            updateGroundMotion(car.position, 0, monumentRhythmState);
+            updateGroundMotion(car.position, 0, monumentRhythmState, frameDelta);
         } else {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
         }
@@ -748,6 +748,7 @@ export function createGameLoopController(options = {}) {
         audioFrameState.chargingLevel = chargingHudLevel;
         audioFrameState.worldMapVisible = worldMapOpen;
         audioFrameState.gameMode = readGameMode();
+        audioFrameState.playerPosition = car.position;
         measureStage('audio', () => {
             audioController?.update?.(frameDelta, audioFrameState);
         });

@@ -1,7 +1,15 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { SPEED_GLOW_MAX, TERRAIN_SEGMENTS } from './config.js';
+import {
+    LORIEN_VELMORE_GALLERY_SURFACE_OFFSET,
+    sampleLorienVelmoreGalleryFloorHeightWorld,
+} from './lorien-gallery.js';
 
-export function getGroundHeightAt(_x, _z) {
+export function getGroundHeightAt(x, z) {
+    const lorienGalleryHeight = sampleLorienVelmoreGalleryFloorHeightWorld(x, z);
+    if (Number.isFinite(lorienGalleryHeight)) {
+        return lorienGalleryHeight + LORIEN_VELMORE_GALLERY_SURFACE_OFFSET;
+    }
     return 0;
 }
 

@@ -22,13 +22,15 @@ export function createCityScenery() {
         group.userData.billboardScreens,
         group.userData.monumentEffects
     );
+    const buildingLayer = createBuildingLayer();
+    group.userData.buildingLayer = buildingLayer;
 
     group.add(createRoadLayer());
     group.add(createParkingLotLayer());
     group.add(monumentLayer);
     group.add(createSpawnMarkerLayer());
     group.add(createParkLayer());
-    group.add(createBuildingLayer());
+    group.add(buildingLayer);
     group.add(createBillboardLayer(group.userData.billboardScreens));
     group.add(createStreetLampLayer(group.userData.lampLights));
 

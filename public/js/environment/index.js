@@ -15,6 +15,7 @@ import { updateBillboardRuntime } from './billboards.js';
 import { updateMonumentRuntime } from './monument.js';
 import { createCityScenery } from './city-scenery.js';
 import { createWorldBoundary } from './boundary.js';
+import { updateBuildingRuntime } from './buildings.js';
 
 const ground = new THREE.Group();
 const cityScenery = new THREE.Group();
@@ -65,7 +66,12 @@ function ensureWorldBuilt() {
     };
 }
 
-function updateGroundMotion(playerPosition, playerSpeed = 0, monumentRhythmState = null) {
+function updateGroundMotion(
+    playerPosition,
+    playerSpeed = 0,
+    monumentRhythmState = null,
+    frameDelta = 1 / 60
+) {
     if (!environmentBuilt) {
         return;
     }
@@ -76,6 +82,7 @@ function updateGroundMotion(playerPosition, playerSpeed = 0, monumentRhythmState
         playerPosition,
     });
     updateBillboardRuntime(runtimeCityScenery);
+    updateBuildingRuntime(runtimeCityScenery.userData?.buildingLayer, playerPosition, frameDelta);
     updateMonumentRuntime(runtimeCityScenery, monumentRhythmState);
 }
 

@@ -1,4 +1,6 @@
 import { centralParkingLot } from './environment/layout.js';
+import { getLorienVelmoreGallerySilenceFactorWorld } from './environment/lorien-gallery.js';
+import { getLorienVelmoreGalleryVideoDisplayState } from './environment/buildings.js';
 
 const AUDIO_PREFS_STORAGE_KEY = 'silentdrift-audio-prefs-v1';
 const MONUMENT_MUSIC_SOUND_ID = 'monumentHookusPookusInstrumentalLoop01';
@@ -350,6 +352,32 @@ const MONUMENT_AUDIO_CONFIG = Object.freeze({
     reverbSendNear: 0.14,
     reverbSendFar: 0.42,
 });
+const LORIEN_GALLERY_VIDEO_BUS = 'ambience';
+const LORIEN_GALLERY_AUDIO_CONFIG = Object.freeze({
+    refDistance: 3.6,
+    maxDistance: 34,
+    rolloffFactor: 1.26,
+    fullPresenceDistance: 5.5,
+    audibleDistance: 24,
+    nearCutoffHz: 13800,
+    farCutoffHz: 2400,
+    nearWetLowpassHz: 6200,
+    farWetLowpassHz: 2100,
+    nearSourceGain: 1,
+    farSourceGain: 0.34,
+    nearDryGain: 0.86,
+    farDryGain: 0.22,
+    nearWetGain: 0.34,
+    farWetGain: 0.58,
+    nearDelaySec: 0.082,
+    farDelaySec: 0.118,
+    nearFeedback: 0.24,
+    farFeedback: 0.36,
+    delaySendNear: 0.18,
+    delaySendFar: 0.28,
+    reverbSendNear: 0.34,
+    reverbSendFar: 0.52,
+});
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -376,6 +404,8 @@ export function createAudioSystem({ camera = null } = {}) {
     let disposed = false;
     let monumentMusicInstance = null;
     let monumentImpulseBuffer = null;
+    let lorienGalleryVideoInstance = null;
+    let lorienGalleryImpulseBuffer = null;
     const monumentRhythmState = {
         active: 0,
         bass: 0,
@@ -478,6 +508,7 @@ export function createAudioSystem({ camera = null } = {}) {
             safeDisconnect(instance.gain);
         }
         loopInstances.clear();
+        disposeLorienGalleryVideoInstance();
         disposeMonumentMusicInstance();
 
         if (context) {
@@ -978,9 +1009,20 @@ export function createAudioSystem({ camera = null } = {}) {
               )
             : 0;
 
+        const playerPosition = frameState.playerPosition || null;
+        const lowerLevelSilenceFactor = playerPosition
+            ? getLorienVelmoreGallerySilenceFactorWorld(
+                  Number(playerPosition.x) || 0,
+                  Number(playerPosition.y) || 0,
+                  Number(playerPosition.z) || 0
+              )
+            : 0;
+
         const ambienceBase = welcomeVisible ? WELCOME_MENU_AMBIENCE_GAIN : 0.38;
         const ambienceGameplayBoost = driveAudioEnabled ? 0.2 : 0;
         const crowdGain = welcomeVisible ? WELCOME_MENU_CROWD_GAIN : driveAudioEnabled ? 0.2 : 0.1;
+        const ambienceOcclusion = Math.max(0.04, 1 - lowerLevelSilenceFactor * 0.96);
+        const crowdOcclusion = Math.max(0.02, 1 - lowerLevelSilenceFactor * 0.995);
 
         updateLoopLayer(
             'engineIdleLoop01',
@@ -1002,8 +1044,12 @@ export function createAudioSystem({ camera = null } = {}) {
             0.92 + chargingLevel * 0.24
         );
 
-        updateLoopLayer('cityAmbienceDayLoop01', ambienceBase + ambienceGameplayBoost, 1);
-        updateLoopLayer('raceCrowdFarLoop01', crowdGain, 0.96 + speedNorm * 0.06);
+        updateLoopLayer(
+            'cityAmbienceDayLoop01',
+            (ambienceBase + ambienceGameplayBoost) * ambienceOcclusion,
+            1
+        );
+        updateLoopLayer('raceCrowdFarLoop01', crowdGain * crowdOcclusion, 0.96 + speedNorm * 0.06);
 
         // Reserved loop: prepared for future per-mine beeper routing.
         updateLoopLayer('mineBeepLoop01', 0, 1);
@@ -1034,11 +1080,18 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         updateAudioListenerFromCamera(context, camera);
+        updateLorienGalleryVideoAudio({
+            isPaused,
+            welcomeVisible,
+            editModeActive,
+            pickupRoundFinished,
+        });
         updateMonumentMusic({
             isPaused,
             welcomeVisible,
             editModeActive,
             pickupRoundFinished,
+            lowerLevelSilenceFactor,
         });
     }
 
@@ -1368,9 +1421,11 @@ export function createAudioSystem({ camera = null } = {}) {
         const wideAreaMix = 1 - clampNumber(distance / MONUMENT_AUDIO_CONFIG.maxDistance, 0, 1, 0);
         const activeMix = shouldBeAudible ? 1 : 0;
         const definitionGain = SOUND_DEFINITIONS[MONUMENT_MUSIC_SOUND_ID]?.gain || 1;
+        const occlusionMix = 1 - clampNumber(frameState.lowerLevelSilenceFactor, 0, 1, 0);
 
         instance.sourceGain.gain.setTargetAtTime(
             activeMix *
+                occlusionMix *
                 definitionGain *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.farSourceGain,
@@ -1383,6 +1438,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.dryGain.gain.setTargetAtTime(
             activeMix *
+                occlusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.farDryGain,
                     MONUMENT_AUDIO_CONFIG.nearDryGain,
@@ -1393,6 +1449,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.wetGain.gain.setTargetAtTime(
             activeMix *
+                occlusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.farWetGain,
                     MONUMENT_AUDIO_CONFIG.nearWetGain,
@@ -1403,6 +1460,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.delaySend.gain.setTargetAtTime(
             activeMix *
+                occlusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.delaySendFar,
                     MONUMENT_AUDIO_CONFIG.delaySendNear,
@@ -1414,6 +1472,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.reverbSend.gain.setTargetAtTime(
             activeMix *
+                occlusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.reverbSendFar,
                     MONUMENT_AUDIO_CONFIG.reverbSendNear,
@@ -1460,6 +1519,290 @@ export function createAudioSystem({ camera = null } = {}) {
             now,
             0.28
         );
+    }
+
+    function updateLorienGalleryVideoAudio(frameState = {}) {
+        const videoDisplayState = getLorienVelmoreGalleryVideoDisplayState();
+        if (!videoDisplayState?.videoElement) {
+            if (lorienGalleryVideoInstance) {
+                disposeLorienGalleryVideoInstance();
+            }
+            return;
+        }
+
+        const instance = ensureLorienGalleryVideoInstance(videoDisplayState);
+        if (!instance || !context || !camera?.position) {
+            return;
+        }
+
+        const now = context.currentTime;
+        const x = Number(videoDisplayState.worldX) || 0;
+        const y = Number(videoDisplayState.worldY) || 0;
+        const z = Number(videoDisplayState.worldZ) || 0;
+        setPannerPosition(instance.panner, x, y, z, now);
+
+        const dx = (Number(camera.position.x) || 0) - x;
+        const dy = (Number(camera.position.y) || 0) - y;
+        const dz = (Number(camera.position.z) || 0) - z;
+        const distance = Math.hypot(dx, dz, dy * 0.72);
+        const nearMix =
+            1 -
+            clampNumber(
+                (distance - LORIEN_GALLERY_AUDIO_CONFIG.fullPresenceDistance) /
+                    Math.max(
+                        1,
+                        LORIEN_GALLERY_AUDIO_CONFIG.audibleDistance -
+                            LORIEN_GALLERY_AUDIO_CONFIG.fullPresenceDistance
+                    ),
+                0,
+                1,
+                0
+            );
+        const wideAreaMix =
+            1 - clampNumber(distance / LORIEN_GALLERY_AUDIO_CONFIG.maxDistance, 0, 1, 0);
+        const activeMix =
+            Boolean(videoDisplayState.isPlaybackActive) &&
+            !Boolean(frameState.isPaused) &&
+            !Boolean(frameState.welcomeVisible) &&
+            !Boolean(frameState.editModeActive) &&
+            !Boolean(frameState.pickupRoundFinished)
+                ? 1
+                : 0;
+
+        instance.sourceGain.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.farSourceGain,
+                    LORIEN_GALLERY_AUDIO_CONFIG.nearSourceGain,
+                    nearMix
+                ) *
+                (0.58 + wideAreaMix * 0.42),
+            now,
+            0.24
+        );
+        instance.dryGain.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.farDryGain,
+                    LORIEN_GALLERY_AUDIO_CONFIG.nearDryGain,
+                    nearMix
+                ),
+            now,
+            0.22
+        );
+        instance.wetGain.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.farWetGain,
+                    LORIEN_GALLERY_AUDIO_CONFIG.nearWetGain,
+                    nearMix
+                ),
+            now,
+            0.28
+        );
+        instance.delaySend.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.delaySendFar,
+                    LORIEN_GALLERY_AUDIO_CONFIG.delaySendNear,
+                    nearMix
+                ),
+            now,
+            0.26
+        );
+        instance.reverbSend.gain.setTargetAtTime(
+            activeMix *
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.reverbSendFar,
+                    LORIEN_GALLERY_AUDIO_CONFIG.reverbSendNear,
+                    nearMix
+                ),
+            now,
+            0.3
+        );
+        instance.toneFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                LORIEN_GALLERY_AUDIO_CONFIG.farCutoffHz,
+                LORIEN_GALLERY_AUDIO_CONFIG.nearCutoffHz,
+                nearMix
+            ),
+            now,
+            0.24
+        );
+        instance.wetFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                LORIEN_GALLERY_AUDIO_CONFIG.farWetLowpassHz,
+                LORIEN_GALLERY_AUDIO_CONFIG.nearWetLowpassHz,
+                nearMix
+            ),
+            now,
+            0.28
+        );
+        instance.delay.delayTime.setTargetAtTime(
+            lerpNumber(
+                LORIEN_GALLERY_AUDIO_CONFIG.farDelaySec,
+                LORIEN_GALLERY_AUDIO_CONFIG.nearDelaySec,
+                nearMix
+            ),
+            now,
+            0.24
+        );
+        instance.delayFeedback.gain.setTargetAtTime(
+            lerpNumber(
+                LORIEN_GALLERY_AUDIO_CONFIG.farFeedback,
+                LORIEN_GALLERY_AUDIO_CONFIG.nearFeedback,
+                nearMix
+            ),
+            now,
+            0.28
+        );
+    }
+
+    function ensureLorienGalleryVideoInstance(videoDisplayState) {
+        if (!isRealtimeAudioReady() || !context || !mixer) {
+            return null;
+        }
+
+        const mediaElement = videoDisplayState?.videoElement;
+        if (!mediaElement) {
+            return null;
+        }
+
+        if (lorienGalleryVideoInstance?.mediaElement === mediaElement) {
+            return lorienGalleryVideoInstance;
+        }
+
+        disposeLorienGalleryVideoInstance();
+
+        const busNode = mixer.buses[LORIEN_GALLERY_VIDEO_BUS] || mixer.buses.ambience;
+        if (!busNode) {
+            return null;
+        }
+
+        const mediaSource = context.createMediaElementSource(mediaElement);
+        mediaElement.muted = false;
+        mediaElement.defaultMuted = false;
+        mediaElement.removeAttribute('muted');
+        mediaElement.volume = 1;
+
+        const sourceGain = context.createGain();
+        sourceGain.gain.setValueAtTime(0, context.currentTime);
+
+        const toneFilter = context.createBiquadFilter();
+        toneFilter.type = 'lowpass';
+        toneFilter.frequency.setValueAtTime(
+            LORIEN_GALLERY_AUDIO_CONFIG.farCutoffHz,
+            context.currentTime
+        );
+        toneFilter.Q.setValueAtTime(0.84, context.currentTime);
+
+        const panner = context.createPanner();
+        panner.panningModel = 'HRTF';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = LORIEN_GALLERY_AUDIO_CONFIG.refDistance;
+        panner.maxDistance = LORIEN_GALLERY_AUDIO_CONFIG.maxDistance;
+        panner.rolloffFactor = LORIEN_GALLERY_AUDIO_CONFIG.rolloffFactor;
+        panner.coneInnerAngle = 360;
+        panner.coneOuterAngle = 360;
+        panner.coneOuterGain = 1;
+        setPannerPosition(
+            panner,
+            Number(videoDisplayState.worldX) || 0,
+            Number(videoDisplayState.worldY) || 0,
+            Number(videoDisplayState.worldZ) || 0,
+            context.currentTime
+        );
+
+        const dryGain = context.createGain();
+        dryGain.gain.setValueAtTime(0, context.currentTime);
+
+        const delaySend = context.createGain();
+        delaySend.gain.setValueAtTime(0, context.currentTime);
+        const delay = context.createDelay(1);
+        delay.delayTime.setValueAtTime(
+            LORIEN_GALLERY_AUDIO_CONFIG.farDelaySec,
+            context.currentTime
+        );
+        const delayFeedback = context.createGain();
+        delayFeedback.gain.setValueAtTime(
+            LORIEN_GALLERY_AUDIO_CONFIG.farFeedback,
+            context.currentTime
+        );
+
+        const reverbSend = context.createGain();
+        reverbSend.gain.setValueAtTime(0, context.currentTime);
+        const convolver = context.createConvolver();
+        lorienGalleryImpulseBuffer =
+            lorienGalleryImpulseBuffer || createGalleryHallImpulseBuffer(context, 2.1, 2.2);
+        convolver.buffer = lorienGalleryImpulseBuffer;
+
+        const wetFilter = context.createBiquadFilter();
+        wetFilter.type = 'lowpass';
+        wetFilter.frequency.setValueAtTime(
+            LORIEN_GALLERY_AUDIO_CONFIG.farWetLowpassHz,
+            context.currentTime
+        );
+
+        const wetGain = context.createGain();
+        wetGain.gain.setValueAtTime(0, context.currentTime);
+
+        mediaSource.connect(sourceGain);
+        sourceGain.connect(toneFilter);
+        toneFilter.connect(panner);
+        panner.connect(dryGain);
+        dryGain.connect(busNode);
+        panner.connect(delaySend);
+        delaySend.connect(delay);
+        delay.connect(delayFeedback);
+        delayFeedback.connect(delay);
+        delay.connect(wetFilter);
+        panner.connect(reverbSend);
+        reverbSend.connect(convolver);
+        convolver.connect(wetFilter);
+        wetFilter.connect(wetGain);
+        wetGain.connect(busNode);
+
+        lorienGalleryVideoInstance = {
+            mediaElement,
+            mediaSource,
+            sourceGain,
+            toneFilter,
+            panner,
+            dryGain,
+            delaySend,
+            delay,
+            delayFeedback,
+            reverbSend,
+            convolver,
+            wetFilter,
+            wetGain,
+        };
+
+        return lorienGalleryVideoInstance;
+    }
+
+    function disposeLorienGalleryVideoInstance() {
+        if (!lorienGalleryVideoInstance) {
+            return;
+        }
+        if (lorienGalleryVideoInstance.mediaElement) {
+            lorienGalleryVideoInstance.mediaElement.muted = true;
+            lorienGalleryVideoInstance.mediaElement.defaultMuted = true;
+            lorienGalleryVideoInstance.mediaElement.setAttribute('muted', '');
+        }
+        safeDisconnect(lorienGalleryVideoInstance.mediaSource);
+        safeDisconnect(lorienGalleryVideoInstance.sourceGain);
+        safeDisconnect(lorienGalleryVideoInstance.toneFilter);
+        safeDisconnect(lorienGalleryVideoInstance.panner);
+        safeDisconnect(lorienGalleryVideoInstance.dryGain);
+        safeDisconnect(lorienGalleryVideoInstance.delaySend);
+        safeDisconnect(lorienGalleryVideoInstance.delay);
+        safeDisconnect(lorienGalleryVideoInstance.delayFeedback);
+        safeDisconnect(lorienGalleryVideoInstance.reverbSend);
+        safeDisconnect(lorienGalleryVideoInstance.convolver);
+        safeDisconnect(lorienGalleryVideoInstance.wetFilter);
+        safeDisconnect(lorienGalleryVideoInstance.wetGain);
+        lorienGalleryVideoInstance = null;
     }
 
     function ensureMonumentMusicInstance() {
@@ -2109,6 +2452,41 @@ function createUrbanPlazaImpulseBuffer(audioContext, durationSec = 2.6, decay = 
             }
             if (tapSample + 2 < sampleCount) {
                 channelData[tapSample + 2] += tapStrength * 0.24;
+            }
+        }
+    }
+
+    return impulse;
+}
+
+function createGalleryHallImpulseBuffer(audioContext, durationSec = 1.9, decay = 2.1) {
+    const safeDuration = clampNumber(durationSec, 0.35, 4.2, 1.9);
+    const safeDecay = clampNumber(decay, 0.5, 5.2, 2.1);
+    const sampleRate = Math.max(22050, Math.round(audioContext?.sampleRate || 44100));
+    const sampleCount = Math.max(1, Math.floor(sampleRate * safeDuration));
+    const impulse = audioContext.createBuffer(2, sampleCount, sampleRate);
+    const tapTimes = [0.018, 0.037, 0.061, 0.094, 0.138, 0.196, 0.274, 0.386, 0.542, 0.761, 1.04];
+
+    for (let channelIndex = 0; channelIndex < impulse.numberOfChannels; channelIndex += 1) {
+        const channelData = impulse.getChannelData(channelIndex);
+        for (let i = 0; i < sampleCount; i += 1) {
+            const decayT = 1 - i / sampleCount;
+            channelData[i] = (Math.random() * 2 - 1) * Math.pow(decayT, safeDecay) * 0.12;
+        }
+
+        for (let tapIndex = 0; tapIndex < tapTimes.length; tapIndex += 1) {
+            const tapSample = Math.floor(tapTimes[tapIndex] * sampleRate);
+            if (tapSample >= sampleCount) {
+                break;
+            }
+            const tapStrength =
+                (1 - tapIndex / tapTimes.length) * (channelIndex === 0 ? 0.22 : 0.18);
+            channelData[tapSample] += tapStrength;
+            if (tapSample + 1 < sampleCount) {
+                channelData[tapSample + 1] += tapStrength * 0.58;
+            }
+            if (tapSample + 2 < sampleCount) {
+                channelData[tapSample + 2] += tapStrength * 0.28;
             }
         }
     }

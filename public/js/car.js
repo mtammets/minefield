@@ -2,7 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import { initializeWheels } from './wheels.js';
 import { addLightsToCar, addLuxuryBody, createSuspensionLinkage } from './carbody.js';
 
-const DEFAULT_CAR_BASE_RIDE_HEIGHT = 0.088;
+const DEFAULT_CAR_BASE_RIDE_HEIGHT = 0.034;
 const PLAYER_REAR_LIGHT_Z = 2.045;
 
 const SUSPENSION = {
@@ -24,6 +24,11 @@ const SUSPENSION = {
     terrainCompressionHeave: 0.086,
     terrainReboundHeave: 0.058,
     terrainVerticalSpeedHeave: 0.0085,
+    terrainPitchConflictAllowance: 0,
+    terrainPitchFadeStart: THREE.MathUtils.degToRad(0.35),
+    terrainPitchFadeEnd: THREE.MathUtils.degToRad(3.2),
+    terrainPitchOppositionFade: 1,
+    terrainPitchMotionFade: 0.88,
     damageRollPerWheel: THREE.MathUtils.degToRad(4.6),
     damagePitchPerWheel: THREE.MathUtils.degToRad(2.8),
     damageTurnRollGain: THREE.MathUtils.degToRad(1.8),
@@ -261,6 +266,23 @@ export function createCarRig(options = {}) {
         const stiffnessScale = getSuspensionStiffnessScale();
         const dampingScale = Math.sqrt(stiffnessScale);
         const motionScale = getSuspensionMotionScale();
+        const terrainGrounded = THREE.MathUtils.clamp(vehicleState.terrainGrounded ?? 1, 0, 1);
+        const terrainPitch = THREE.MathUtils.clamp(
+            vehicleState.terrainPitch || 0,
+            -THREE.MathUtils.degToRad(30),
+            THREE.MathUtils.degToRad(30)
+        );
+        const terrainPitchFactor =
+            terrainGrounded *
+            THREE.MathUtils.clamp(
+                (Math.abs(terrainPitch) - SUSPENSION.terrainPitchFadeStart) /
+                    Math.max(
+                        0.001,
+                        SUSPENSION.terrainPitchFadeEnd - SUSPENSION.terrainPitchFadeStart
+                    ),
+                0,
+                1
+            );
 
         const accelNorm = THREE.MathUtils.clamp(
             (vehicleState.acceleration || 0) / SUSPENSION.pitchAccelNorm,
@@ -307,6 +329,20 @@ export function createCarRig(options = {}) {
             -maxPitch,
             maxPitch
         );
+        if (terrainPitchFactor > 0 && targetPitchWithDamage !== 0 && terrainPitch !== 0) {
+            if (Math.sign(targetPitchWithDamage) !== Math.sign(terrainPitch)) {
+                targetPitchWithDamage = THREE.MathUtils.lerp(
+                    targetPitchWithDamage,
+                    0,
+                    terrainPitchFactor * SUSPENSION.terrainPitchOppositionFade
+                );
+            }
+            targetPitchWithDamage = THREE.MathUtils.lerp(
+                targetPitchWithDamage,
+                0,
+                terrainPitchFactor * SUSPENSION.terrainPitchMotionFade
+            );
+        }
 
         suspensionState.roadPhase += dt * (1.8 + speedRatio * 9.5);
         const roadShake =
@@ -319,7 +355,6 @@ export function createCarRig(options = {}) {
             -1.2,
             1.2
         );
-        const terrainGrounded = THREE.MathUtils.clamp(vehicleState.terrainGrounded ?? 1, 0, 1);
         const terrainVerticalSpeed = THREE.MathUtils.clamp(vehicleState.verticalSpeed || 0, -8, 8);
         const terrainCompressionHeave =
             -Math.max(0, terrainCompression) * SUSPENSION.terrainCompressionHeave;
