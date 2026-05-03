@@ -172,21 +172,31 @@ setPlayerTopSpeedLimitKph(
     })
 );
 
-const { objectiveUi, controlsHelpUi, botStatusUi, finalScoreboardUi, pauseMenuUi, welcomeModalUi } =
-    createRuntimeUiControllers({
-        toCssHex,
-        colorNameFromHex,
-        statusDefaultText: STATUS_DEFAULT_TEXT,
-        resolvePlayerCarColorHex,
-        getCarColorPresetIndex,
-        getIsCarDestroyed: () => runtimeState.isCarDestroyed,
-        getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
-        getGameSessionController: () => runtimeState.gameSessionController,
-        getInputController: () => runtimeState.inputController,
-        getIsInOnlineRoom: () => Boolean(runtimeState.multiplayerController?.isInRoom?.()),
-        onPrepareStart: prepareRuntimeForSessionStart,
-        onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
-    });
+const {
+    objectiveUi,
+    controlsHelpUi,
+    botStatusUi,
+    finalScoreboardUi,
+    pauseMenuUi,
+    welcomeModalUi,
+    speedometerUi,
+} = createRuntimeUiControllers({
+    toCssHex,
+    colorNameFromHex,
+    statusDefaultText: STATUS_DEFAULT_TEXT,
+    resolvePlayerCarColorHex,
+    getCarColorPresetIndex,
+    getIsCarDestroyed: () => runtimeState.isCarDestroyed,
+    getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
+    getGameSessionController: () => runtimeState.gameSessionController,
+    getInputController: () => runtimeState.inputController,
+    getGameMode: () => runtimeState.gameMode,
+    getIsInOnlineRoom: () => Boolean(runtimeState.multiplayerController?.isInRoom?.()),
+    getMineInventorySnapshot: () =>
+        runtimeState.mineController?.getLocalInventorySnapshot?.() || null,
+    onPrepareStart: prepareRuntimeForSessionStart,
+    onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
+});
 
 async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null, options = null) {
     const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
@@ -208,6 +218,8 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
         if (!snapshot || typeof snapshot !== 'object') {
             return;
         }
+
+        pauseMenuUi.refreshAudioStatus?.();
 
         const filesTotal = Math.max(0, Math.round(Number(snapshot.filesTotal) || 0));
         const filesReady = Math.max(0, Math.round(Number(snapshot.filesReady) || 0));
@@ -1617,6 +1629,7 @@ runtimeState.mineController = createMineSystemController({
         runtimeState.audioController?.onMineDeployed?.({
             thrown: mode === 'throw' || Boolean(mineSnapshot?.thrown),
         });
+        controlsHelpUi?.refreshMineInventory?.();
     },
     onMineDetonated({
         mineId = '',
@@ -2480,6 +2493,26 @@ pauseMenuUi.configureGraphicsControls({
         return cycleGraphicsQualityMode(step, { showStatus: false, persist: true });
     },
 });
+pauseMenuUi.configureAudioControls({
+    getSnapshot() {
+        return runtimeState.audioController?.getMixerSnapshot?.() || null;
+    },
+    onSetVolume(key, normalizedValue) {
+        return runtimeState.audioController?.setMixerVolume?.(key, normalizedValue) || null;
+    },
+    onToggleMute() {
+        return runtimeState.audioController?.toggleMute?.() || null;
+    },
+    async onUnlock() {
+        if (typeof runtimeState.audioController?.unlock !== 'function') {
+            return runtimeState.audioController?.getMixerSnapshot?.() || null;
+        }
+        await runtimeState.audioController.unlock({
+            waitForPreload: false,
+        });
+        return runtimeState.audioController?.getMixerSnapshot?.() || null;
+    },
+});
 syncRuntimeInputContext();
 
 runtimeState.inputController = createInputController({
@@ -2570,6 +2603,7 @@ runtimeState.gameLoopController = createGameLoopController({
     chargingProgressHudController,
     skidMarkController,
     welcomeModalUi,
+    speedometerUi,
     starsController,
     objectiveUi,
     botStatusUi,

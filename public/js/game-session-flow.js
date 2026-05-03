@@ -256,6 +256,7 @@ export function createGameSessionController({
         clearDriveKeys();
         resetCameraTrackingState();
         setCameraKeyboardControlsEnabled(false);
+        controlsHelpUi?.notifyGameplayRoundStart?.();
         raceIntroController.start();
         objectiveUi.showInfo('Starting countdown...', 1100);
     }
@@ -291,7 +292,6 @@ export function createGameSessionController({
             return;
         }
 
-        crashDebrisController.clearDebris();
         setIsCarDestroyed(false);
         car.visible = true;
         car.position.copy(playerSpawnState.position);
@@ -749,9 +749,11 @@ export function createGameSessionController({
         clearPendingRespawn();
         clearScorePopups();
         crashDebrisController.clearDebris();
+        mineController?.resetRoundInventory?.();
         if (normalizeGameMode(getGameMode()) !== 'online') {
             mineController?.clearAll?.();
         }
+        controlsHelpUi?.refreshMineInventory?.();
 
         objectiveUi.resetStatus();
         finalScoreboardUi.hide();

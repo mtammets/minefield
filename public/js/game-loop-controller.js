@@ -35,6 +35,7 @@ export function createGameLoopController(options = {}) {
         chargingProgressHudController,
         skidMarkController,
         welcomeModalUi,
+        speedometerUi = null,
         starsController,
         objectiveUi,
         botStatusUi,
@@ -426,6 +427,17 @@ export function createGameLoopController(options = {}) {
             audioFrameState.gameMode = readGameMode();
             audioController?.update?.(frameDelta, audioFrameState);
             scorePopupController?.update?.(camera, frameDelta);
+            speedometerUi?.update?.({
+                visible: false,
+                paused: true,
+                deltaTime: frameDelta,
+                speedKph: 0,
+                rawSpeedMps: 0,
+                gearIndex: 0,
+                throttle: 0,
+                destroyed: false,
+                batteryDepleted: false,
+            });
 
             if (typeof renderer.clear === 'function') {
                 measureStage('render', () => {
@@ -754,6 +766,23 @@ export function createGameLoopController(options = {}) {
         });
         measureStage('scorePopup', () => {
             scorePopupController?.update?.(camera, frameDelta);
+        });
+        const speedometerVehicleState = getVehicleState();
+        const rawSpeedMps = Number(speedometerVehicleState?.speed) || 0;
+        speedometerUi?.update?.({
+            visible:
+                !isWelcomeVisible &&
+                !isEditModeActive &&
+                !worldMapOpen &&
+                (readGameMode() === 'bots' || readGameMode() === 'online'),
+            paused: gamePaused,
+            deltaTime: frameDelta,
+            speedKph: Math.abs(rawSpeedMps) * 3.6,
+            rawSpeedMps,
+            gearIndex: speedometerVehicleState?.autoGearIndex,
+            throttle: speedometerVehicleState?.throttle,
+            destroyed: readCarDestroyed(),
+            batteryDepleted: readBatteryDepleted(),
         });
 
         const qualityAdaptiveAllowed =

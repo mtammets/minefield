@@ -85,6 +85,7 @@ export const MINE_ARM_DELAY_MS = 650;
 export const MINE_TTL_MS = 45000;
 export const MINE_TRIGGER_RADIUS = 1.5;
 export const MINE_MAX_PER_OWNER = 10;
+export const MINE_RACK_RELOAD_MS = 12000;
 export const MINE_THROW_SPEED = 24;
 export const MINE_THROW_VERTICAL_SPEED = 6.8;
 export const MINE_THROW_GRAVITY = 18;

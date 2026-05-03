@@ -4,6 +4,7 @@ import { createFinalScoreboardController } from './final-scoreboard-ui.js';
 import { createPauseMenuController } from './pause-menu-ui.js';
 import { createDonateUiController } from './donate-ui.js';
 import { createControlsHelpController } from './controls-ui.js';
+import { createSpeedometerController } from './speedometer-ui.js';
 
 export function createRuntimeUiControllers({
     toCssHex,
@@ -15,13 +16,17 @@ export function createRuntimeUiControllers({
     getSelectedCarColorHex,
     getGameSessionController,
     getInputController,
+    getGameMode = () => 'bots',
     getIsInOnlineRoom = () => false,
+    getMineInventorySnapshot = () => null,
     onPrepareStart,
     onDownloadPerformanceLog = null,
 }) {
     const objectiveUi = createNoopObjectiveUi();
     const controlsHelpUi = createControlsHelpController({
+        getGameMode,
         getIsInOnlineRoom,
+        getMineInventorySnapshot,
     });
 
     const botStatusUi = createBotStatusController({
@@ -80,6 +85,7 @@ export function createRuntimeUiControllers({
         },
     });
     donateUi.initialize();
+    const speedometerUi = createSpeedometerController();
 
     return {
         objectiveUi,
@@ -89,6 +95,7 @@ export function createRuntimeUiControllers({
         pauseMenuUi,
         welcomeModalUi,
         donateUi,
+        speedometerUi,
     };
 }
 

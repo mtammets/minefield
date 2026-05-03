@@ -556,6 +556,1097 @@ canvas#gameCanvas {
     color: rgba(173, 222, 255, 0.94);
 }
 
+:root {
+    --speedometer-hud-width: clamp(272px, 18.6vw, 338px);
+    --speedometer-hud-height: calc(var(--speedometer-hud-width) * 0.6875);
+    --speedometer-hud-bottom: max(6px, env(safe-area-inset-bottom));
+    --starter-controls-compact-height: 56px;
+    --starter-controls-compact-gap: 14px;
+    --multiplayer-panel-width: min(320px, calc(100vw - 22px));
+    --multiplayer-panel-right: 18px;
+    --multiplayer-panel-bottom: 18px;
+    --starter-controls-expanded-width: min(760px, calc(100vw - 28px));
+    --starter-controls-collapsed-width: var(--multiplayer-panel-width);
+    --starter-controls-collapsed-top: clamp(244px, 34vh, 344px);
+}
+
+#starterControlsHud {
+    --starter-controls-offset-x: -50%;
+    --starter-controls-offset-y: 0px;
+    --starter-controls-scale: 1;
+    position: fixed;
+    left: 50%;
+    right: auto;
+    top: clamp(14px, 2.1vw, 22px);
+    z-index: 7;
+    width: var(--starter-controls-expanded-width);
+    padding: 10px 10px 12px;
+    border: 1px solid rgba(158, 211, 255, 0.42);
+    border-radius: 24px;
+    background:
+        linear-gradient(168deg, rgba(10, 19, 34, 0.88), rgba(6, 12, 23, 0.86)),
+        radial-gradient(circle at 50% 0%, rgba(148, 205, 255, 0.12), rgba(148, 205, 255, 0) 58%);
+    box-shadow:
+        0 18px 48px rgba(0, 0, 0, 0.42),
+        inset 0 0 0 1px rgba(230, 243, 255, 0.05);
+    backdrop-filter: blur(12px) saturate(1.05);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(
+            var(--starter-controls-offset-x),
+            calc(var(--starter-controls-offset-y) - 10px)
+        )
+        scale(calc(var(--starter-controls-scale) * 0.982));
+    transform-origin: top center;
+    transition:
+        opacity 220ms ease,
+        transform 220ms ease,
+        filter 220ms ease,
+        width 220ms ease,
+        padding 220ms ease,
+        border-radius 220ms ease;
+}
+
+.starterControlsHudToggle {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgba(166, 211, 247, 0.34);
+    border-radius: 999px;
+    background: rgba(10, 20, 36, 0.72);
+    box-shadow:
+        0 8px 18px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(8px);
+    pointer-events: auto;
+    cursor: pointer;
+    transition:
+        transform 160ms ease,
+        border-color 180ms ease,
+        background 180ms ease,
+        box-shadow 180ms ease,
+        opacity 180ms ease;
+}
+
+.starterControlsHudToggle::before,
+.starterControlsHudToggle::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 10px;
+    height: 2px;
+    border-radius: 999px;
+    background: rgba(240, 248, 255, 0.94);
+    transform: translate(-50%, -50%);
+    transition:
+        transform 180ms ease,
+        opacity 180ms ease,
+        background 180ms ease;
+}
+
+.starterControlsHudToggle::after {
+    opacity: 0;
+    transform: translate(-50%, -50%) rotate(90deg);
+}
+
+.starterControlsHudToggle:hover {
+    transform: translateY(-1px);
+    border-color: rgba(197, 228, 255, 0.5);
+    background: rgba(13, 27, 46, 0.84);
+}
+
+.starterControlsHudToggle:active {
+    transform: translateY(0);
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlsHudToggle::after {
+    opacity: 1;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlsHudToggle {
+    top: 6px;
+    right: 6px;
+    width: 22px;
+    height: 22px;
+    border-color: rgba(171, 217, 251, 0.28);
+    background: rgba(7, 15, 29, 0.68);
+    box-shadow:
+        0 6px 14px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+#starterControlsHud[hidden] {
+    display: none;
+}
+
+#starterControlsHud.is-visible {
+    opacity: 1;
+    transform: translate(var(--starter-controls-offset-x), var(--starter-controls-offset-y))
+        scale(var(--starter-controls-scale));
+}
+
+#starterControlsHud.is-exiting {
+    opacity: 0;
+    transform: translate(
+            var(--starter-controls-offset-x),
+            calc(var(--starter-controls-offset-y) - 8px)
+        )
+        scale(calc(var(--starter-controls-scale) * 0.986));
+    filter: blur(4px);
+}
+
+#starterControlsHud[data-collapsed='true'] {
+    --starter-controls-offset-x: 0px;
+    --starter-controls-offset-y: 0px;
+    --starter-controls-scale: 0.72;
+    left: auto;
+    right: var(--multiplayer-panel-right);
+    top: var(--starter-controls-collapsed-top);
+    width: var(--starter-controls-collapsed-width);
+    padding: 4px 5px 5px;
+    border-radius: 14px;
+    transform-origin: top right;
+    background:
+        linear-gradient(168deg, rgba(9, 18, 31, 0.82), rgba(6, 12, 23, 0.8)),
+        radial-gradient(circle at 50% 0%, rgba(148, 205, 255, 0.08), rgba(148, 205, 255, 0) 58%);
+}
+
+#starterControlsHud::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    border: 1px solid rgba(186, 224, 255, 0.12);
+    pointer-events: none;
+}
+
+.starterControlsHudHeader {
+    padding: 2px 38px 8px 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+        opacity 180ms ease,
+        max-height 180ms ease,
+        padding 180ms ease;
+}
+
+.starterControlsHudEyebrow {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: rgba(190, 223, 248, 0.82);
+}
+
+.starterControlsHudGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    transition: gap 180ms ease;
+}
+
+.starterControlCard {
+    position: relative;
+    min-width: 0;
+    min-height: 122px;
+    padding: 12px;
+    border: 1px solid rgba(149, 204, 248, 0.22);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(13, 28, 47, 0.76), rgba(9, 17, 32, 0.88));
+    box-shadow: inset 0 0 0 1px rgba(234, 245, 255, 0.03);
+    transition:
+        opacity 200ms ease,
+        transform 180ms ease,
+        border-color 180ms ease,
+        box-shadow 180ms ease,
+        filter 180ms ease,
+        padding 180ms ease,
+        min-height 180ms ease;
+}
+
+.starterControlCard::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0.9;
+}
+
+.starterControlCard--drive::before {
+    background: radial-gradient(
+        circle at 50% 0%,
+        rgba(143, 205, 255, 0.16),
+        rgba(143, 205, 255, 0) 60%
+    );
+}
+
+.starterControlCard--drive {
+    --starter-key-accent: 126, 203, 255;
+}
+
+.starterControlCard--mines::before {
+    background: radial-gradient(
+        circle at 50% 0%,
+        rgba(255, 150, 120, 0.14),
+        rgba(255, 150, 120, 0) 60%
+    );
+}
+
+.starterControlCard--mines {
+    --starter-key-accent: 255, 156, 120;
+}
+
+.starterControlCard--camera::before {
+    background: radial-gradient(
+        circle at 50% 0%,
+        rgba(137, 243, 225, 0.14),
+        rgba(137, 243, 225, 0) 60%
+    );
+}
+
+.starterControlCard--camera {
+    --starter-key-accent: 136, 243, 225;
+}
+
+.starterControlCard[data-learned='true'] {
+    opacity: 0.62;
+    border-color: rgba(132, 198, 160, 0.32);
+}
+
+.starterControlCard.is-pulsing {
+    transform: translateY(-1px) scale(1.018);
+    border-color: rgba(221, 240, 255, 0.52);
+    box-shadow:
+        0 12px 24px rgba(0, 0, 0, 0.24),
+        inset 0 0 0 1px rgba(236, 246, 255, 0.08);
+}
+
+.starterControlHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.starterControlLabel {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.35px;
+    text-transform: uppercase;
+    color: rgba(231, 243, 255, 0.96);
+}
+
+.starterControlStateDot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(218, 236, 255, 0.36);
+    background: rgba(196, 221, 246, 0.18);
+    box-shadow: 0 0 0 0 rgba(164, 241, 192, 0);
+    transition:
+        background 180ms ease,
+        border-color 180ms ease,
+        box-shadow 180ms ease;
+}
+
+.starterControlCard[data-learned='true'] .starterControlStateDot {
+    border-color: rgba(171, 240, 193, 0.68);
+    background: rgba(116, 241, 167, 0.92);
+    box-shadow: 0 0 12px rgba(116, 241, 167, 0.32);
+}
+
+.starterDriveCluster {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+    transition:
+        margin-top 180ms ease,
+        gap 180ms ease;
+}
+
+.starterActionList {
+    margin-top: 14px;
+    display: grid;
+    gap: 8px;
+    transition:
+        margin-top 180ms ease,
+        gap 180ms ease;
+}
+
+.starterActionList--compact {
+    margin-top: 10px;
+    gap: 7px;
+}
+
+.starterActionRow,
+.starterCameraModifierRow {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+}
+
+.starterCameraLayout {
+    margin-top: 14px;
+}
+
+.starterCameraDivider {
+    color: rgba(186, 215, 239, 0.62);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+
+.starterActionText {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(193, 222, 247, 0.86);
+    transition:
+        opacity 180ms ease,
+        transform 180ms ease,
+        font-size 180ms ease,
+        max-width 180ms ease;
+}
+
+.starterKey {
+    min-width: 38px;
+    height: 34px;
+    padding: 0 10px;
+    border-radius: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(221, 241, 255, 0.24);
+    background: linear-gradient(180deg, rgba(233, 244, 255, 0.13), rgba(133, 171, 211, 0.05));
+    box-shadow:
+        0 8px 16px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    color: rgba(246, 250, 255, 0.98);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    line-height: 1;
+    flex: 0 0 auto;
+    transition:
+        min-width 180ms ease,
+        height 180ms ease,
+        padding 180ms ease,
+        font-size 180ms ease,
+        border-radius 180ms ease,
+        border-color 180ms ease,
+        background 180ms ease,
+        box-shadow 180ms ease,
+        color 180ms ease,
+        transform 140ms ease;
+}
+
+.starterKey--offset {
+    grid-column: 2;
+}
+
+.starterKey--wide {
+    min-width: 54px;
+    font-size: 12px;
+    letter-spacing: 0.9px;
+}
+
+.starterKey--range {
+    min-width: 58px;
+    font-size: 13px;
+}
+
+.starterKey[data-learned='true'] {
+    border-color: rgba(var(--starter-key-accent, 116, 241, 167), 0.9);
+    background: linear-gradient(
+        180deg,
+        rgba(var(--starter-key-accent, 116, 241, 167), 0.46),
+        rgba(var(--starter-key-accent, 116, 241, 167), 0.24)
+    );
+    box-shadow:
+        0 10px 18px rgba(0, 0, 0, 0.24),
+        0 0 24px rgba(var(--starter-key-accent, 116, 241, 167), 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    color: #f8fdff;
+}
+
+.starterKey.is-pulsing {
+    transform: translateY(-1px) scale(1.06);
+}
+
+body.world-map-open #starterControlsHud,
+body.edit-mode-active #starterControlsHud {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#starterMineRackHud {
+    position: fixed;
+    top: clamp(86px, 10vh, 128px);
+    right: clamp(14px, 2vw, 24px);
+    z-index: 6;
+    width: min(344px, calc(100vw - 28px));
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(-10px) scale(0.985);
+    transform-origin: top right;
+    transition:
+        opacity 220ms ease,
+        transform 220ms ease,
+        filter 220ms ease;
+}
+
+#starterMineRackHud[hidden] {
+    display: none;
+}
+
+#starterMineRackHud.is-visible {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+}
+
+.starterMineRackShell {
+    position: relative;
+    padding: 16px 16px 15px;
+    border: 1px solid rgba(255, 187, 151, 0.34);
+    border-radius: 24px;
+    background:
+        linear-gradient(168deg, rgba(12, 21, 36, 0.88), rgba(7, 13, 24, 0.84)),
+        radial-gradient(circle at 22% 18%, rgba(255, 154, 112, 0.12), rgba(255, 154, 112, 0) 38%);
+    box-shadow:
+        0 18px 44px rgba(0, 0, 0, 0.38),
+        inset 0 0 0 1px rgba(255, 239, 227, 0.04);
+    backdrop-filter: blur(14px) saturate(1.04);
+}
+
+.starterMineRackShell::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    border: 1px solid rgba(255, 217, 196, 0.1);
+}
+
+.starterMineRackHeader {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.starterMineRackHeaderMeta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.starterMineRackCountWrap {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.starterMineRackCount {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 0.9;
+    letter-spacing: 1.1px;
+    color: rgba(255, 247, 241, 0.98);
+    text-shadow:
+        0 0 26px rgba(255, 146, 102, 0.2),
+        0 10px 20px rgba(0, 0, 0, 0.22);
+}
+
+.starterMineRackCapacity {
+    margin-bottom: 4px;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    color: rgba(255, 209, 188, 0.72);
+}
+
+.starterMineRackCooldownText {
+    min-width: 42px;
+    text-align: right;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    color: rgba(255, 200, 176, 0.34);
+    opacity: 0.38;
+    transition:
+        color 180ms ease,
+        opacity 180ms ease,
+        transform 180ms ease;
+}
+
+.starterMineRackStatusDot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 211, 183, 0.48);
+    background: rgba(255, 178, 144, 0.2);
+    box-shadow: 0 0 0 0 rgba(255, 133, 96, 0);
+    transition:
+        background 180ms ease,
+        border-color 180ms ease,
+        box-shadow 180ms ease;
+}
+
+.starterMineRackCooldownTrack {
+    position: relative;
+    z-index: 1;
+    margin-top: 10px;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 192, 163, 0.12);
+    background: rgba(255, 171, 131, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.starterMineRackCooldownFill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(255, 120, 98, 0.94), rgba(255, 201, 144, 0.98));
+    box-shadow:
+        0 0 20px rgba(255, 146, 101, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+    transform: scaleX(1);
+    transform-origin: left center;
+    transition:
+        transform 80ms linear,
+        opacity 180ms ease,
+        filter 180ms ease;
+}
+
+.starterMineRackGrid {
+    position: relative;
+    z-index: 1;
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px 10px;
+}
+
+.starterMineCharge {
+    position: relative;
+    min-height: 48px;
+    display: block;
+    transform-origin: center;
+    filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.26));
+    transition:
+        opacity 200ms ease,
+        transform 200ms ease,
+        filter 200ms ease;
+}
+
+.starterMineChargeBase {
+    position: absolute;
+    left: 50%;
+    bottom: 8px;
+    width: 40px;
+    height: 13px;
+    border-radius: 999px;
+    border: 1px solid rgba(175, 198, 224, 0.2);
+    background: linear-gradient(180deg, rgba(50, 66, 84, 0.98), rgba(28, 40, 56, 0.98));
+    transform: translateX(-50%);
+    box-shadow:
+        0 5px 12px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.starterMineChargeTop {
+    position: absolute;
+    left: 50%;
+    bottom: 17px;
+    width: 24px;
+    height: 9px;
+    border-radius: 999px;
+    border: 1px solid rgba(149, 170, 196, 0.24);
+    background: linear-gradient(180deg, rgba(77, 96, 120, 0.98), rgba(48, 63, 83, 0.98));
+    transform: translateX(-50%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.starterMineChargeLed {
+    position: absolute;
+    left: 50%;
+    bottom: 20px;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: radial-gradient(
+        circle at 35% 35%,
+        rgba(255, 228, 220, 0.96),
+        #ff8d7d 48%,
+        #74252c 100%
+    );
+    transform: translateX(-50%);
+    box-shadow: 0 0 18px rgba(255, 121, 103, 0.42);
+}
+
+.starterMineChargePins {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(115, 138, 166, 0.92);
+    transform: translateX(-50%);
+    box-shadow:
+        0 -15px 0 rgba(115, 138, 166, 0.92),
+        0 15px 0 rgba(115, 138, 166, 0.92),
+        -15px 0 0 rgba(115, 138, 166, 0.92),
+        15px 0 0 rgba(115, 138, 166, 0.92),
+        -10px -10px 0 rgba(115, 138, 166, 0.92),
+        10px -10px 0 rgba(115, 138, 166, 0.92),
+        -10px 10px 0 rgba(115, 138, 166, 0.92),
+        10px 10px 0 rgba(115, 138, 166, 0.92);
+}
+
+.starterMineCharge[data-filled='false'] {
+    opacity: 0.22;
+    transform: translateY(4px) scale(0.88);
+    filter: grayscale(0.28) saturate(0.58);
+}
+
+.starterMineCharge[data-filled='false'] .starterMineChargeLed {
+    box-shadow: none;
+    background: radial-gradient(
+        circle at 35% 35%,
+        rgba(206, 217, 228, 0.56),
+        #8797ac 56%,
+        #33404f 100%
+    );
+}
+
+.starterMineCharge.is-spent-pulsing {
+    animation: starterMineRackSpend 380ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+#starterMineRackHud[data-cooldown-active='false'] .starterMineRackCooldownText {
+    color: rgba(175, 255, 205, 0.86);
+    opacity: 0.84;
+}
+
+#starterMineRackHud[data-cooldown-active='false'] .starterMineRackCooldownFill {
+    opacity: 0.18;
+    filter: saturate(0.75);
+}
+
+#starterMineRackHud[data-cooldown-active='true'] .starterMineRackCooldownText {
+    color: rgba(255, 220, 200, 0.98);
+    opacity: 1;
+    transform: translateY(0);
+}
+
+@keyframes starterMineRackSpend {
+    0% {
+        opacity: 1;
+        transform: translateY(0) scale(1.06);
+        filter: drop-shadow(0 0 22px rgba(255, 138, 96, 0.24));
+    }
+    52% {
+        opacity: 0.46;
+        transform: translateY(5px) scale(0.9);
+        filter: drop-shadow(0 0 10px rgba(255, 138, 96, 0.1));
+    }
+    100% {
+        opacity: 0.22;
+        transform: translateY(4px) scale(0.88);
+        filter: grayscale(0.28) saturate(0.58);
+    }
+}
+
+#starterMineRackHud[data-stock-state='mid'] .starterMineRackShell {
+    border-color: rgba(255, 186, 126, 0.42);
+}
+
+#starterMineRackHud[data-stock-state='mid'] .starterMineRackStatusDot {
+    border-color: rgba(255, 195, 132, 0.58);
+    background: rgba(255, 187, 120, 0.56);
+    box-shadow: 0 0 18px rgba(255, 164, 98, 0.18);
+}
+
+#starterMineRackHud[data-stock-state='low'] .starterMineRackShell,
+#starterMineRackHud[data-stock-state='empty'] .starterMineRackShell {
+    border-color: rgba(255, 140, 118, 0.46);
+}
+
+#starterMineRackHud[data-stock-state='low'] .starterMineRackStatusDot {
+    border-color: rgba(255, 142, 118, 0.72);
+    background: rgba(255, 125, 96, 0.8);
+    box-shadow: 0 0 20px rgba(255, 121, 92, 0.26);
+}
+
+#starterMineRackHud[data-stock-state='empty'] .starterMineRackShell {
+    background:
+        linear-gradient(168deg, rgba(16, 19, 30, 0.9), rgba(10, 12, 20, 0.88)),
+        radial-gradient(circle at 22% 18%, rgba(255, 108, 94, 0.12), rgba(255, 108, 94, 0) 38%);
+}
+
+#starterMineRackHud[data-stock-state='empty'] .starterMineRackStatusDot {
+    border-color: rgba(255, 118, 118, 0.72);
+    background: rgba(255, 102, 102, 0.82);
+    box-shadow: 0 0 22px rgba(255, 102, 102, 0.24);
+}
+
+#speedometerHud {
+    position: fixed;
+    left: 50%;
+    bottom: var(--speedometer-hud-bottom);
+    z-index: 6;
+    width: var(--speedometer-hud-width);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, 12px) scale(0.986);
+    transition:
+        opacity 220ms ease,
+        transform 220ms ease,
+        filter 220ms ease;
+}
+
+#speedometerHud[hidden] {
+    display: none;
+}
+
+#speedometerHud.is-visible {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+}
+
+.speedometerShell {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 320 / 220;
+    border: none;
+    border-radius: 28px 28px 22px 22px;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    overflow: visible;
+}
+
+.speedometerShell::before {
+    content: none;
+}
+
+.speedometerDial {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.speedometerArcTrack,
+.speedometerArcGlow,
+.speedometerArcProgress {
+    fill: none;
+    stroke-linecap: round;
+}
+
+.speedometerArcTrack {
+    stroke: rgba(80, 105, 136, 0.38);
+    stroke-width: 13;
+}
+
+.speedometerArcGlow {
+    stroke: rgba(137, 212, 255, 0.28);
+    stroke-width: 14;
+    stroke-dasharray: 0 100;
+    filter: blur(5px);
+    opacity: 0.92;
+}
+
+.speedometerArcProgress {
+    stroke: url(#speedometerArcGradient);
+    stroke-width: 10;
+    stroke-dasharray: 0 100;
+    filter: drop-shadow(0 0 14px rgba(126, 207, 255, 0.24));
+}
+
+.speedometerTicks {
+    opacity: 0.98;
+}
+
+.speedometerTick {
+    stroke: rgba(195, 225, 250, 0.36);
+    stroke-width: 2.4;
+}
+
+.speedometerTick--major {
+    stroke: rgba(230, 244, 255, 0.72);
+    stroke-width: 3.4;
+}
+
+.speedometerNeedleGroup {
+    transform-origin: 160px 176px;
+    transition: transform 82ms linear;
+}
+
+.speedometerNeedleShadow {
+    stroke: rgba(255, 119, 96, 0.26);
+    stroke-width: 8;
+    stroke-linecap: round;
+    filter: blur(4px);
+}
+
+.speedometerNeedle {
+    stroke: url(#speedometerNeedleGradient);
+    stroke-width: 4.5;
+    stroke-linecap: round;
+    filter: drop-shadow(0 0 9px rgba(255, 139, 112, 0.2));
+}
+
+.speedometerNeedleCapRing {
+    fill: rgba(9, 22, 39, 0.94);
+    stroke: rgba(167, 214, 251, 0.44);
+    stroke-width: 2;
+}
+
+.speedometerNeedleCap {
+    fill: rgba(233, 245, 255, 0.96);
+    stroke: rgba(255, 146, 119, 0.66);
+    stroke-width: 2;
+}
+
+.speedometerDialLabel {
+    fill: rgba(182, 214, 241, 0.76);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-anchor: middle;
+}
+
+.speedometerReadout {
+    position: absolute;
+    top: 104px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(190px, 70%);
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    text-align: center;
+}
+
+.speedometerKicker {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(180, 215, 243, 0.72);
+}
+
+.speedometerValue {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(42px, 3vw, 58px);
+    font-weight: 800;
+    line-height: 0.82;
+    letter-spacing: 1.8px;
+    color: rgba(242, 249, 255, 0.99);
+    text-shadow:
+        0 0 18px rgba(135, 210, 255, 0.16),
+        0 12px 20px rgba(0, 0, 0, 0.26);
+    font-variant-numeric: tabular-nums;
+}
+
+.speedometerMetaRow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.speedometerUnit,
+.speedometerDriveMode {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(188, 220, 246, 0.76);
+}
+
+.speedometerGear {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(152, 208, 252, 0.44);
+    background: rgba(22, 52, 82, 0.72);
+    color: rgba(240, 248, 255, 0.98);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    box-shadow:
+        0 10px 18px rgba(0, 0, 0, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#speedometerHud[data-tone='charged'] .speedometerShell {
+    border-color: rgba(145, 222, 255, 0.4);
+    box-shadow:
+        0 24px 58px rgba(0, 0, 0, 0.42),
+        0 0 30px rgba(126, 214, 255, 0.08),
+        inset 0 0 0 1px rgba(234, 245, 255, 0.05);
+}
+
+#speedometerHud[data-tone='attack'] .speedometerShell {
+    border-color: rgba(255, 172, 126, 0.46);
+}
+
+#speedometerHud[data-tone='attack'] .speedometerValue {
+    text-shadow:
+        0 0 20px rgba(255, 173, 126, 0.18),
+        0 12px 20px rgba(0, 0, 0, 0.26);
+}
+
+#speedometerHud[data-tone='critical'] .speedometerShell {
+    border-color: rgba(255, 193, 118, 0.44);
+}
+
+#speedometerHud[data-tone='critical'] .speedometerGear {
+    border-color: rgba(255, 194, 118, 0.58);
+    background: rgba(96, 68, 22, 0.72);
+    color: rgba(255, 243, 214, 0.98);
+}
+
+#speedometerHud[data-tone='destroyed'] .speedometerShell {
+    border-color: rgba(255, 118, 118, 0.42);
+    background:
+        radial-gradient(circle at 50% 92%, rgba(255, 102, 102, 0.14), rgba(255, 102, 102, 0) 38%),
+        linear-gradient(180deg, rgba(14, 16, 23, 0.92), rgba(10, 11, 18, 0.94));
+}
+
+#speedometerHud[data-tone='destroyed'] .speedometerValue {
+    color: rgba(255, 226, 226, 0.96);
+    text-shadow:
+        0 0 18px rgba(255, 119, 119, 0.16),
+        0 12px 20px rgba(0, 0, 0, 0.26);
+}
+
+#speedometerHud[data-tone='destroyed'] .speedometerGear {
+    border-color: rgba(255, 145, 145, 0.52);
+    background: rgba(92, 28, 34, 0.74);
+    color: rgba(255, 233, 233, 0.98);
+}
+
+#speedometerHud[data-motion='reverse'] .speedometerGear {
+    border-color: rgba(255, 181, 132, 0.56);
+    background: rgba(90, 57, 25, 0.76);
+    color: rgba(255, 242, 218, 0.98);
+}
+
+body.world-map-open #starterMineRackHud,
+body.edit-mode-active #starterMineRackHud {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.world-map-open #speedometerHud,
+body.edit-mode-active #speedometerHud {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlsHudHeader {
+    opacity: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlsHudGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlCard {
+    min-height: 58px;
+    padding: 6px 6px 5px;
+    border-radius: 12px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterDriveCluster,
+#starterControlsHud[data-collapsed='true'] .starterActionList,
+#starterControlsHud[data-collapsed='true'] .starterCameraLayout {
+    margin-top: 5px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterDriveCluster {
+    gap: 4px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterActionList {
+    gap: 4px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlLabel {
+    font-size: 8px;
+    letter-spacing: 0.9px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlStateDot {
+    opacity: 0;
+    transform: scale(0.65);
+}
+
+#starterControlsHud[data-collapsed='true'] .starterActionText {
+    opacity: 0;
+    transform: translateX(-4px);
+    max-width: 0;
+    overflow: hidden;
+    font-size: 8px;
+    letter-spacing: 0.7px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterKey {
+    min-width: 26px;
+    height: 22px;
+    padding: 0 6px;
+    border-radius: 8px;
+    font-size: 10px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterKey--wide {
+    min-width: 34px;
+    font-size: 8px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterKey--range {
+    min-width: 38px;
+    font-size: 9px;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterControlCard[data-learned='true'] {
+    opacity: 0.94;
+}
+
+#starterControlsHud[data-collapsed='true'] .starterActionRow,
+#starterControlsHud[data-collapsed='true'] .starterCameraModifierRow {
+    gap: 5px;
+}
+
 #worldMapOverlay {
     position: fixed;
     inset: 0;
@@ -1337,6 +2428,8 @@ body.race-intro-active #miniMapHud {
 }
 
 .pauseGraphicsPanel {
+    display: grid;
+    gap: 7px;
     border: 1px solid rgba(157, 198, 255, 0.35);
     border-radius: 10px;
     padding: 10px;
@@ -1361,7 +2454,188 @@ body.race-intro-active #miniMapHud {
 .pauseGraphicsActions {
     display: grid;
     grid-template-columns: 1fr;
-    margin-top: 7px;
+}
+
+.pauseAudioPanel {
+    display: grid;
+    gap: 9px;
+    border: 1px solid rgba(157, 198, 255, 0.35);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background:
+        radial-gradient(circle at top right, rgba(116, 199, 255, 0.12), transparent 38%),
+        linear-gradient(165deg, rgba(17, 31, 53, 0.7), rgba(11, 20, 36, 0.78));
+    box-shadow:
+        inset 0 0 0 1px rgba(215, 236, 255, 0.05),
+        0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.pauseAudioHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pauseAudioLabel {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: rgba(191, 222, 250, 0.92);
+}
+
+.pauseAudioStatus {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 66px;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(170, 207, 238, 0.3);
+    background: rgba(33, 58, 86, 0.64);
+    color: rgba(222, 241, 255, 0.94);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
+}
+
+.pauseAudioPanel[data-tone='ready'] .pauseAudioStatus {
+    border-color: rgba(148, 238, 186, 0.42);
+    background: rgba(34, 88, 60, 0.52);
+    color: rgba(224, 255, 232, 0.98);
+}
+
+.pauseAudioPanel[data-tone='priming'] .pauseAudioStatus {
+    border-color: rgba(245, 215, 135, 0.4);
+    background: rgba(92, 72, 28, 0.44);
+    color: rgba(255, 241, 198, 0.97);
+}
+
+.pauseAudioPanel[data-tone='locked'] .pauseAudioStatus {
+    border-color: rgba(137, 203, 255, 0.38);
+    background: rgba(31, 63, 98, 0.52);
+    color: rgba(223, 244, 255, 0.96);
+}
+
+.pauseAudioPanel[data-tone='offline'] .pauseAudioStatus {
+    border-color: rgba(210, 164, 164, 0.32);
+    background: rgba(74, 44, 48, 0.52);
+    color: rgba(255, 226, 226, 0.94);
+}
+
+.pauseAudioMeta {
+    font-size: 11px;
+    line-height: 1.45;
+    color: rgba(173, 209, 235, 0.86);
+}
+
+.pauseAudioActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.pauseBtn.audio {
+    border-color: rgba(164, 214, 255, 0.48);
+    background: linear-gradient(180deg, rgba(31, 67, 104, 0.8), rgba(19, 42, 72, 0.84));
+    color: rgba(236, 248, 255, 0.98);
+}
+
+.pauseBtn.audio:disabled {
+    cursor: default;
+    opacity: 0.7;
+    transform: none;
+    filter: none;
+}
+
+.pauseAudioPanel[data-muted='true'] .pauseBtn.audio:last-child {
+    border-color: rgba(244, 183, 123, 0.56);
+    background: linear-gradient(180deg, rgba(99, 67, 30, 0.78), rgba(72, 47, 20, 0.82));
+    color: rgba(255, 241, 209, 0.98);
+}
+
+.pauseAudioSliders {
+    display: grid;
+    gap: 8px;
+}
+
+.pauseAudioSliderRow {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) 44px;
+    gap: 10px;
+    align-items: center;
+}
+
+.pauseAudioSliderLabel {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: rgba(189, 224, 248, 0.92);
+}
+
+.pauseAudioSliderInput {
+    appearance: none;
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(138, 183, 221, 0.16);
+    background: linear-gradient(
+        90deg,
+        rgba(121, 214, 255, 0.98) 0%,
+        rgba(121, 214, 255, 0.98) var(--level, 0%),
+        rgba(43, 63, 92, 0.94) var(--level, 0%),
+        rgba(43, 63, 92, 0.94) 100%
+    );
+    box-shadow:
+        inset 0 1px 2px rgba(3, 6, 12, 0.48),
+        0 0 0 1px rgba(255, 255, 255, 0.02);
+    cursor: pointer;
+}
+
+.pauseAudioSliderInput::-webkit-slider-thumb {
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(233, 248, 255, 0.7);
+    background: radial-gradient(circle at 35% 35%, #f7fdff, #7ed9ff 70%, #4f9bd4 100%);
+    box-shadow:
+        0 0 0 3px rgba(126, 217, 255, 0.16),
+        0 4px 14px rgba(0, 0, 0, 0.32);
+}
+
+.pauseAudioSliderInput::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1px solid rgba(233, 248, 255, 0.7);
+    background: radial-gradient(circle at 35% 35%, #f7fdff, #7ed9ff 70%, #4f9bd4 100%);
+    box-shadow:
+        0 0 0 3px rgba(126, 217, 255, 0.16),
+        0 4px 14px rgba(0, 0, 0, 0.32);
+}
+
+.pauseAudioSliderValue {
+    text-align: right;
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(222, 241, 255, 0.94);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+    .pauseAudioMeta {
+        font-size: 10px;
+    }
+
+    .pauseAudioSliderRow {
+        grid-template-columns: 64px minmax(0, 1fr) 40px;
+        gap: 8px;
+    }
 }
 
 .pauseActions {
@@ -2140,10 +3414,10 @@ body.race-intro-active #miniMapHud {
 
 #multiplayerPanel {
     position: fixed;
-    right: 18px;
-    bottom: 18px;
+    right: var(--multiplayer-panel-right);
+    bottom: var(--multiplayer-panel-bottom);
     z-index: 11;
-    width: min(320px, calc(100vw - 22px));
+    width: var(--multiplayer-panel-width);
     border: 1px solid rgba(164, 214, 255, 0.54);
     border-radius: 14px;
     padding: 12px;
@@ -2612,9 +3886,68 @@ body.race-intro-active #botPanel {
 }
 
 @media (max-width: 720px) {
+    :root {
+        --multiplayer-panel-width: min(320px, calc(100vw - 20px));
+        --multiplayer-panel-right: 10px;
+        --multiplayer-panel-bottom: 10px;
+        --starter-controls-collapsed-top: clamp(220px, 33vh, 300px);
+    }
+
     #botPanel,
     #miniMapHud {
         display: none;
+    }
+
+    #starterMineRackHud {
+        top: 70px;
+        right: 10px;
+        width: min(292px, calc(100vw - 20px));
+    }
+
+    .starterMineRackShell {
+        padding: 13px 13px 12px;
+        border-radius: 20px;
+    }
+
+    .starterMineRackCount {
+        font-size: 36px;
+    }
+
+    .starterMineRackCooldownText {
+        min-width: 36px;
+        font-size: 12px;
+    }
+
+    .starterMineRackGrid {
+        gap: 10px 8px;
+    }
+
+    #starterControlsHud {
+        top: 10px;
+        left: 50%;
+        right: auto;
+        width: min(560px, calc(100vw - 20px));
+        padding: 9px;
+    }
+
+    #starterControlsHud[data-collapsed='true'] {
+        left: auto;
+        right: var(--multiplayer-panel-right);
+        width: var(--starter-controls-collapsed-width);
+    }
+
+    .starterControlsHudGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+    }
+
+    .starterControlCard {
+        min-height: 112px;
+        padding: 11px;
+    }
+
+    .starterControlCard--camera {
+        grid-column: 1 / -1;
     }
 
     #editModePanel {
@@ -2639,9 +3972,9 @@ body.race-intro-active #botPanel {
     }
 
     #multiplayerPanel {
-        right: 10px;
-        bottom: 10px;
-        width: min(320px, calc(100vw - 20px));
+        right: var(--multiplayer-panel-right);
+        bottom: var(--multiplayer-panel-bottom);
+        width: var(--multiplayer-panel-width);
         padding: 10px;
     }
 
@@ -2656,6 +3989,16 @@ body.race-intro-active #botPanel {
         top: 10px;
         transform: scale(0.88);
         transform-origin: top left;
+    }
+
+    #starterMineRackHud {
+        top: 78px;
+        right: 12px;
+        width: min(312px, calc(100vw - 24px));
+    }
+
+    #starterControlsHud {
+        width: min(680px, calc(100vw - 24px));
     }
 
     .leaderboardCard {
@@ -2697,6 +4040,122 @@ body.race-intro-active #botPanel {
 }
 
 @media (max-width: 620px) {
+    :root {
+        --starter-controls-collapsed-top: clamp(196px, 30vh, 264px);
+    }
+
+    #starterMineRackHud {
+        top: 66px;
+        right: 8px;
+        width: min(248px, calc(100vw - 16px));
+    }
+
+    .starterMineRackShell {
+        padding: 11px 11px 10px;
+        border-radius: 18px;
+    }
+
+    .starterMineRackCount {
+        font-size: 30px;
+    }
+
+    .starterMineRackCapacity {
+        margin-bottom: 3px;
+        font-size: 10px;
+    }
+
+    .starterMineRackHeaderMeta {
+        gap: 7px;
+    }
+
+    .starterMineRackCooldownText {
+        min-width: 32px;
+        font-size: 11px;
+        letter-spacing: 0.7px;
+    }
+
+    .starterMineRackCooldownTrack {
+        margin-top: 8px;
+        height: 4px;
+    }
+
+    .starterMineRackGrid {
+        margin-top: 12px;
+        gap: 8px 6px;
+    }
+
+    .starterMineCharge {
+        min-height: 40px;
+    }
+
+    .starterMineChargeBase {
+        width: 33px;
+        height: 11px;
+    }
+
+    .starterMineChargeTop {
+        bottom: 15px;
+        width: 20px;
+        height: 8px;
+    }
+
+    .starterMineChargeLed {
+        bottom: 18px;
+        width: 7px;
+        height: 7px;
+    }
+
+    .starterMineChargePins {
+        bottom: 13px;
+        box-shadow:
+            0 -13px 0 rgba(115, 138, 166, 0.92),
+            0 13px 0 rgba(115, 138, 166, 0.92),
+            -13px 0 0 rgba(115, 138, 166, 0.92),
+            13px 0 0 rgba(115, 138, 166, 0.92),
+            -9px -9px 0 rgba(115, 138, 166, 0.92),
+            9px -9px 0 rgba(115, 138, 166, 0.92),
+            -9px 9px 0 rgba(115, 138, 166, 0.92),
+            9px 9px 0 rgba(115, 138, 166, 0.92);
+    }
+
+    #starterControlsHud {
+        top: 8px;
+        left: 50%;
+        right: auto;
+        width: min(340px, calc(100vw - 18px));
+        padding: 8px;
+    }
+
+    #starterControlsHud[data-collapsed='true'] {
+        left: auto;
+        right: var(--multiplayer-panel-right);
+        width: var(--starter-controls-collapsed-width);
+    }
+
+    .starterControlsHudGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .starterControlCard--camera {
+        grid-column: auto;
+    }
+
+    .starterControlCard {
+        min-height: auto;
+    }
+
+    #starterControlsHud[data-collapsed='true'] .starterControlsHudGrid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    #starterControlsHud[data-collapsed='true'] .starterControlCard--camera {
+        grid-column: auto;
+    }
+
+    #starterControlsHud[data-collapsed='true'] .starterControlCard {
+        min-height: 60px;
+    }
+
     .leaderboardCard {
         border-radius: 15px;
         padding: 12px;

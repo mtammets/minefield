@@ -9,7 +9,8 @@ const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
     vehiclesVolume: 1,
     effectsVolume: 1,
-    ambienceVolume: 0.72,
+    ambienceVolume: 1,
+    musicVolume: 0.08,
     uiVolume: 0.9,
     muted: false,
 });
@@ -253,7 +254,7 @@ const SOUND_DEFINITIONS = Object.freeze({
     },
     monumentHookusPookusInstrumentalLoop01: {
         src: '/audio/ambience/monument_hookus_pookus_instrumental_loop_01.mp3',
-        bus: 'ambience',
+        bus: 'music',
         gain: 0.76,
         loop: true,
     },
@@ -305,6 +306,10 @@ const MIXER_SLIDERS = Object.freeze([
     {
         key: 'ambienceVolume',
         label: 'Ambience',
+    },
+    {
+        key: 'musicVolume',
+        label: 'Music',
     },
     {
         key: 'uiVolume',
@@ -432,6 +437,9 @@ export function createAudioSystem({ camera = null } = {}) {
         dispose,
         update,
         unlock: unlockAudio,
+        getMixerSnapshot,
+        setMixerVolume,
+        toggleMute,
         prepareForGameplay,
         getPreloadState,
         isGameplayReady() {
@@ -470,17 +478,10 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         ui = createAudioUi(prefs, {
             onToggleMute() {
-                prefs.muted = !prefs.muted;
-                persistAudioPrefs(prefs);
-                applyBusVolumes();
-                refreshUi();
-                playVariant('uiClickSoft', { gain: 0.55 });
+                toggleMute({ playFeedback: true });
             },
             onVolumeChanged(key, normalizedValue) {
-                prefs[key] = clampNumber(normalizedValue, 0, 1, DEFAULT_AUDIO_PREFS[key]);
-                persistAudioPrefs(prefs);
-                applyBusVolumes();
-                refreshUi();
+                setMixerVolume(key, normalizedValue);
             },
             onUnlockAudio() {
                 void unlockAudio();
@@ -605,6 +606,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const vehiclesGain = context.createGain();
         const effectsGain = context.createGain();
         const ambienceGain = context.createGain();
+        const musicGain = context.createGain();
         const uiGain = context.createGain();
 
         const glueCompressor = context.createDynamicsCompressor();
@@ -624,6 +626,7 @@ export function createAudioSystem({ camera = null } = {}) {
         vehiclesGain.connect(masterGain);
         effectsGain.connect(masterGain);
         ambienceGain.connect(masterGain);
+        musicGain.connect(masterGain);
         uiGain.connect(masterGain);
         masterGain.connect(glueCompressor);
         glueCompressor.connect(limiter);
@@ -635,6 +638,7 @@ export function createAudioSystem({ camera = null } = {}) {
                 vehicles: vehiclesGain,
                 effects: effectsGain,
                 ambience: ambienceGain,
+                music: musicGain,
                 ui: uiGain,
             },
         };
@@ -841,7 +845,45 @@ export function createAudioSystem({ camera = null } = {}) {
         mixer.buses.vehicles.gain.setTargetAtTime(prefs.vehiclesVolume, now, 0.03);
         mixer.buses.effects.gain.setTargetAtTime(prefs.effectsVolume, now, 0.03);
         mixer.buses.ambience.gain.setTargetAtTime(prefs.ambienceVolume, now, 0.03);
+        mixer.buses.music.gain.setTargetAtTime(prefs.musicVolume, now, 0.03);
         mixer.buses.ui.gain.setTargetAtTime(prefs.uiVolume, now, 0.03);
+    }
+
+    function getMixerSnapshot() {
+        const uiState = resolveAudioUiState();
+        return {
+            available: Boolean(AudioContextCtor),
+            unlocked,
+            gameplayReady,
+            muted: Boolean(prefs.muted),
+            statusTone: uiState.statusTone,
+            statusLabel: uiState.statusLabel,
+            statusText: uiState.statusText,
+            sliders: createMixerSliderSnapshot(),
+        };
+    }
+
+    function setMixerVolume(key, normalizedValue) {
+        if (!isMixerSliderKey(key)) {
+            return getMixerSnapshot();
+        }
+        prefs[key] = clampNumber(normalizedValue, 0, 1, DEFAULT_AUDIO_PREFS[key]);
+        persistAudioPrefs(prefs);
+        applyBusVolumes();
+        refreshUi();
+        return getMixerSnapshot();
+    }
+
+    function toggleMute(options = {}) {
+        const nextMuted = !prefs.muted;
+        prefs.muted = nextMuted;
+        persistAudioPrefs(prefs);
+        applyBusVolumes();
+        refreshUi();
+        if (options?.playFeedback) {
+            playVariant('uiClickSoft', { gain: 0.55 });
+        }
+        return getMixerSnapshot();
     }
 
     function refreshUi() {
@@ -849,35 +891,10 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
 
-        const preloadState = getPreloadState();
-        const filesTotal = preloadState.filesTotal;
-        const filesReady = preloadState.filesReady;
-        const filesFailed = preloadState.filesFailed;
-        const canUseAudio = Boolean(context);
-        const statusTone = !canUseAudio
-            ? 'offline'
-            : unlocked
-              ? 'ready'
-              : context?.state === 'suspended'
-                ? 'locked'
-                : 'offline';
-
-        ui.root.dataset.tone = statusTone;
+        const uiState = resolveAudioUiState();
+        ui.root.dataset.tone = uiState.statusTone;
         ui.muteBtn.textContent = prefs.muted ? 'UNMUTE' : 'MUTE';
-        if (!canUseAudio) {
-            ui.status.textContent = 'Audio unavailable in this browser';
-        } else if (!unlocked) {
-            ui.status.textContent = 'Tap/click to unlock audio';
-        } else if (preloadPromise && !preloadState.complete) {
-            ui.status.textContent = `Preparing gameplay audio (${filesReady}/${filesTotal})`;
-        } else if (gameplayReady) {
-            ui.status.textContent = `Audio ready (${filesReady}/${filesTotal})`;
-        } else {
-            ui.status.textContent = `Audio primed (${filesReady}/${filesTotal})`;
-        }
-        if (filesFailed > 0) {
-            ui.status.textContent += ` | Missing/invalid: ${filesFailed}`;
-        }
+        ui.status.textContent = uiState.statusText;
 
         for (let i = 0; i < MIXER_SLIDERS.length; i += 1) {
             const slider = MIXER_SLIDERS[i];
@@ -889,6 +906,63 @@ export function createAudioSystem({ camera = null } = {}) {
             row.input.value = String(Math.round(value * 100));
             row.value.textContent = `${Math.round(value * 100)}%`;
         }
+    }
+
+    function resolveAudioUiState() {
+        const preloadState = getPreloadState();
+        const filesTotal = preloadState.filesTotal;
+        const filesReady = preloadState.filesReady;
+        const filesFailed = preloadState.filesFailed;
+        const canUseAudio = Boolean(context);
+
+        let statusTone = 'offline';
+        let statusLabel = 'Offline';
+        let statusText = 'Audio unavailable in this browser';
+
+        if (canUseAudio && !unlocked) {
+            statusTone = context?.state === 'suspended' ? 'locked' : 'offline';
+            statusLabel = 'Locked';
+            statusText = 'Tap/click to unlock audio';
+        } else if (canUseAudio && preloadPromise && !preloadState.complete) {
+            statusTone = 'priming';
+            statusLabel = 'Loading';
+            statusText = `Preparing gameplay audio (${filesReady}/${filesTotal})`;
+        } else if (canUseAudio && gameplayReady) {
+            statusTone = 'ready';
+            statusLabel = 'Ready';
+            statusText = `Audio ready (${filesReady}/${filesTotal})`;
+        } else if (canUseAudio) {
+            statusTone = 'priming';
+            statusLabel = 'Primed';
+            statusText = `Audio primed (${filesReady}/${filesTotal})`;
+        }
+
+        if (filesFailed > 0) {
+            statusText += ` | Missing/invalid: ${filesFailed}`;
+        }
+
+        return {
+            statusTone,
+            statusLabel,
+            statusText,
+        };
+    }
+
+    function createMixerSliderSnapshot() {
+        const sliders = [];
+        for (let i = 0; i < MIXER_SLIDERS.length; i += 1) {
+            const slider = MIXER_SLIDERS[i];
+            sliders.push({
+                key: slider.key,
+                label: slider.label,
+                value: clampNumber(prefs[slider.key], 0, 1, DEFAULT_AUDIO_PREFS[slider.key]),
+            });
+        }
+        return sliders;
+    }
+
+    function isMixerSliderKey(key) {
+        return MIXER_SLIDERS.some((slider) => slider.key === key);
     }
 
     function installUnlockListeners() {
@@ -2318,12 +2392,34 @@ function updateAudioListenerFromCamera(context, camera) {
 }
 
 function createNoopAudioSystem() {
+    const getOfflineMixerSnapshot = () => ({
+        available: false,
+        unlocked: false,
+        gameplayReady: false,
+        muted: false,
+        statusTone: 'offline',
+        statusLabel: 'Offline',
+        statusText: 'Audio unavailable in this browser',
+        sliders: MIXER_SLIDERS.map((slider) => ({
+            key: slider.key,
+            label: slider.label,
+            value: DEFAULT_AUDIO_PREFS[slider.key],
+        })),
+    });
+
     return {
         initialize() {},
         dispose() {},
         update() {},
         unlock() {
             return Promise.resolve(false);
+        },
+        getMixerSnapshot: getOfflineMixerSnapshot,
+        setMixerVolume() {
+            return getOfflineMixerSnapshot();
+        },
+        toggleMute() {
+            return getOfflineMixerSnapshot();
         },
         prepareForGameplay() {
             return Promise.resolve(false);

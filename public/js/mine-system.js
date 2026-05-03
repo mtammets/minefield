@@ -5,6 +5,7 @@ import {
     MINE_TTL_MS,
     MINE_TRIGGER_RADIUS,
     MINE_MAX_PER_OWNER,
+    MINE_RACK_RELOAD_MS,
     MINE_THROW_SPEED,
     MINE_THROW_VERTICAL_SPEED,
     MINE_THROW_GRAVITY,
@@ -97,6 +98,8 @@ export function createMineSystemController(options = {}) {
     const detonationHaloTexture = createDetonationHaloTexture();
     const recentDetonations = new Map();
     const ownerLastDeployAtMs = new Map();
+    const ownerDeployedMineCountById = new Map();
+    const ownerRackReloadReadyAtMsById = new Map();
     const previousPositionByEntityKey = new Map();
     const mineMeshPool = [];
     const mineMarkerBuffer = [];
@@ -130,7 +133,9 @@ export function createMineSystemController(options = {}) {
         applyRoomMineSnapshot,
         handleRemoteMinePlaced,
         handleRemoteMineDetonated,
+        getLocalInventorySnapshot,
         getPerformanceSnapshot,
+        resetRoundInventory,
         clearAll,
         warmupGraphics,
     };
@@ -172,6 +177,7 @@ export function createMineSystemController(options = {}) {
         const useThrowMode = mode === 'throw';
         const ownerId = sanitizePlayerId(rawOwnerId);
         const ownerName = sanitizeOwnerName(rawOwnerName);
+        const now = Date.now();
 
         if (requireCanUseMines && !canUseMines()) {
             return {
@@ -190,23 +196,37 @@ export function createMineSystemController(options = {}) {
             };
         }
 
-        const now = Date.now();
+        refreshOwnerRackState(ownerId, now);
+        const rackReloadReadyAtMs = ownerRackReloadReadyAtMsById.get(ownerId) ?? 0;
+        const rackReloadRemainingMs =
+            rackReloadReadyAtMs > now ? Math.max(0, rackReloadReadyAtMs - now) : 0;
+        const ownerSpentMineCount = ownerDeployedMineCountById.get(ownerId) ?? 0;
+        const remainingMineCount = Math.max(0, MINE_MAX_PER_OWNER - ownerSpentMineCount);
+        if (remainingMineCount <= 0) {
+            return {
+                ok: false,
+                remainingMineCount: 0,
+                cooldownRemainingMs: rackReloadRemainingMs,
+                cooldownDurationMs: MINE_RACK_RELOAD_MS,
+                message:
+                    includePlayerMessages && rackReloadRemainingMs > 0
+                        ? `Mine rack reloading (${(rackReloadRemainingMs / 1000).toFixed(1)}s).`
+                        : includePlayerMessages
+                          ? 'Mine rack depleted.'
+                          : 'Mine inventory depleted.',
+            };
+        }
+
         const lastDeployAtMs = ownerLastDeployAtMs.get(ownerId) ?? -100_000;
         const cooldownRemainingMs = lastDeployAtMs + MINE_DEPLOY_COOLDOWN_MS - now;
         if (cooldownRemainingMs > 0) {
             return {
                 ok: false,
+                cooldownRemainingMs,
+                cooldownDurationMs: MINE_DEPLOY_COOLDOWN_MS,
                 message: includePlayerMessages
                     ? `Landmine reloading (${(cooldownRemainingMs / 1000).toFixed(1)}s).`
                     : 'Mine deployment cooldown active.',
-            };
-        }
-
-        const ownerMineCount = countOwnerMines(ownerId);
-        if (ownerMineCount >= MINE_MAX_PER_OWNER) {
-            return {
-                ok: false,
-                message: `Mine limit reached (${MINE_MAX_PER_OWNER}). Wait for detonation/expiry.`,
             };
         }
 
@@ -260,6 +280,11 @@ export function createMineSystemController(options = {}) {
 
         upsertMine(snapshot, { preferIncomingPosition: true });
         ownerLastDeployAtMs.set(ownerId, now);
+        const nextSpentMineCount = ownerSpentMineCount + 1;
+        ownerDeployedMineCountById.set(ownerId, nextSpentMineCount);
+        if (nextSpentMineCount >= MINE_MAX_PER_OWNER) {
+            ownerRackReloadReadyAtMsById.set(ownerId, now + MINE_RACK_RELOAD_MS);
+        }
         if (emitPlacedEvent) {
             emitMinePlaced(snapshot);
         }
@@ -274,6 +299,11 @@ export function createMineSystemController(options = {}) {
             ok: true,
             mineSnapshot: snapshot,
             mode: useThrowMode ? 'throw' : 'drop',
+            remainingMineCount: Math.max(0, remainingMineCount - 1),
+            cooldownDurationMs:
+                nextSpentMineCount >= MINE_MAX_PER_OWNER
+                    ? MINE_RACK_RELOAD_MS
+                    : MINE_DEPLOY_COOLDOWN_MS,
             message: includePlayerMessages
                 ? useThrowMode
                     ? 'Mine thrown ahead. It arms shortly after landing.'
@@ -672,9 +702,13 @@ export function createMineSystemController(options = {}) {
         }
 
         recentDetonations.set(mineId, now);
-        queueDetonationEffectSpawn(detonationPosition, {
-            preferLight: Boolean(context.localHit),
-        }, now);
+        queueDetonationEffectSpawn(
+            detonationPosition,
+            {
+                preferLight: Boolean(context.localHit),
+            },
+            now
+        );
         onMineDetonated({
             mineId,
             position: detonationPosition,
@@ -703,12 +737,7 @@ export function createMineSystemController(options = {}) {
                     context.detonationType === 'timed_throw' ? 'timed_throw' : undefined,
                 landedAt:
                     context.detonationType === 'timed_throw'
-                        ? clampFinite(
-                              context.landedAt,
-                              0,
-                              Number.MAX_SAFE_INTEGER,
-                              now
-                          )
+                        ? clampFinite(context.landedAt, 0, Number.MAX_SAFE_INTEGER, now)
                         : undefined,
             });
         }
@@ -823,7 +852,7 @@ export function createMineSystemController(options = {}) {
         }
         activeDetonationLightCount = 0;
         recentDetonations.clear();
-        ownerLastDeployAtMs.clear();
+        resetRoundInventory();
         previousPositionByEntityKey.clear();
         collisionWasEnabledLastFrame = false;
     }
@@ -914,6 +943,63 @@ export function createMineSystemController(options = {}) {
         return count;
     }
 
+    function getLocalInventorySnapshot() {
+        return getInventorySnapshotForOwner(getLocalPlayerId());
+    }
+
+    function getInventorySnapshotForOwner(ownerId) {
+        const sanitizedOwnerId = sanitizePlayerId(ownerId);
+        const now = Date.now();
+        refreshOwnerRackState(sanitizedOwnerId, now);
+        const deployedCount = sanitizedOwnerId
+            ? Math.max(0, Math.round(Number(ownerDeployedMineCountById.get(sanitizedOwnerId)) || 0))
+            : 0;
+        const remainingCount = Math.max(0, MINE_MAX_PER_OWNER - deployedCount);
+        const lastDeployAtMs = sanitizedOwnerId
+            ? (ownerLastDeployAtMs.get(sanitizedOwnerId) ?? 0)
+            : 0;
+        const deployCooldownReadyAtMs =
+            lastDeployAtMs > 0 ? lastDeployAtMs + MINE_DEPLOY_COOLDOWN_MS : 0;
+        const deployCooldownRemainingMs =
+            deployCooldownReadyAtMs > now ? Math.max(0, deployCooldownReadyAtMs - now) : 0;
+        const rackReloadReadyAtMs = sanitizedOwnerId
+            ? (ownerRackReloadReadyAtMsById.get(sanitizedOwnerId) ?? 0)
+            : 0;
+        const rackReloadRemainingMs =
+            rackReloadReadyAtMs > now ? Math.max(0, rackReloadReadyAtMs - now) : 0;
+        const rackReloadActive = remainingCount <= 0 && rackReloadRemainingMs > 0;
+        return {
+            ownerId: sanitizedOwnerId,
+            capacity: MINE_MAX_PER_OWNER,
+            deployedCount,
+            remainingCount,
+            activeCount: sanitizedOwnerId ? countOwnerMines(sanitizedOwnerId) : 0,
+            cooldownDurationMs: rackReloadActive ? MINE_RACK_RELOAD_MS : MINE_DEPLOY_COOLDOWN_MS,
+            cooldownReadyAtMs: rackReloadActive ? rackReloadReadyAtMs : deployCooldownReadyAtMs,
+            cooldownRemainingMs: rackReloadActive
+                ? rackReloadRemainingMs
+                : deployCooldownRemainingMs,
+        };
+    }
+
+    function resetRoundInventory() {
+        ownerLastDeployAtMs.clear();
+        ownerDeployedMineCountById.clear();
+        ownerRackReloadReadyAtMsById.clear();
+    }
+
+    function refreshOwnerRackState(ownerId, now = Date.now()) {
+        const sanitizedOwnerId = sanitizePlayerId(ownerId);
+        if (!sanitizedOwnerId) {
+            return;
+        }
+        const rackReloadReadyAtMs = ownerRackReloadReadyAtMsById.get(sanitizedOwnerId) ?? 0;
+        if (rackReloadReadyAtMs > 0 && rackReloadReadyAtMs <= now) {
+            ownerRackReloadReadyAtMsById.delete(sanitizedOwnerId);
+            ownerDeployedMineCountById.set(sanitizedOwnerId, 0);
+        }
+    }
+
     function prewarmMineMeshes() {
         for (let i = 0; i < MINE_MESH_POOL_PREWARM_COUNT; i += 1) {
             mineMeshPool.push(createMineMeshBundle());
@@ -958,8 +1044,7 @@ export function createMineSystemController(options = {}) {
         }
         lastDetonationQueuedAtMs = now;
 
-        const activePendingCount =
-            pendingDetonationSpawns.length - pendingDetonationSpawnReadIndex;
+        const activePendingCount = pendingDetonationSpawns.length - pendingDetonationSpawnReadIndex;
         if (activePendingCount >= MAX_PENDING_DETONATION_SPAWNS) {
             const dropped = dropQueuedDetonationEntry({ preferLight, distanceSq });
             if (!dropped) {
@@ -1072,10 +1157,16 @@ export function createMineSystemController(options = {}) {
     }
 
     function resolvePendingDetonationSpawnBudget(dt) {
-        if (dt > 1 / 32 || detonationEffects.length >= Math.floor(MAX_ACTIVE_DETONATION_EFFECTS * 0.9)) {
+        if (
+            dt > 1 / 32 ||
+            detonationEffects.length >= Math.floor(MAX_ACTIVE_DETONATION_EFFECTS * 0.9)
+        ) {
             return DETONATION_SPAWN_BUDGET_SEVERE_LOAD;
         }
-        if (dt > 1 / 44 || detonationEffects.length >= Math.floor(MAX_ACTIVE_DETONATION_EFFECTS * 0.72)) {
+        if (
+            dt > 1 / 44 ||
+            detonationEffects.length >= Math.floor(MAX_ACTIVE_DETONATION_EFFECTS * 0.72)
+        ) {
             return DETONATION_SPAWN_BUDGET_UNDER_LOAD;
         }
         return DETONATION_SPAWN_BUDGET_PER_FRAME;
@@ -1099,7 +1190,10 @@ export function createMineSystemController(options = {}) {
         disposeObject3d(bundle.group);
     }
 
-    function spawnDetonationEffect(position, { preferLight = false, burstIndex = 0, queueDelayMs = 0 } = {}) {
+    function spawnDetonationEffect(
+        position,
+        { preferLight = false, burstIndex = 0, queueDelayMs = 0 } = {}
+    ) {
         const deltaX = position.x - car.position.x;
         const deltaZ = position.z - car.position.z;
         const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
@@ -1902,6 +1996,18 @@ function createNoopMineSystemController() {
         applyRoomMineSnapshot() {},
         handleRemoteMinePlaced() {},
         handleRemoteMineDetonated() {},
+        getLocalInventorySnapshot() {
+            return {
+                ownerId: '',
+                capacity: MINE_MAX_PER_OWNER,
+                deployedCount: 0,
+                remainingCount: MINE_MAX_PER_OWNER,
+                activeCount: 0,
+                cooldownDurationMs: MINE_DEPLOY_COOLDOWN_MS,
+                cooldownReadyAtMs: 0,
+                cooldownRemainingMs: 0,
+            };
+        },
         getPerformanceSnapshot() {
             return {
                 pendingDetonationSpawns: 0,
@@ -1911,6 +2017,7 @@ function createNoopMineSystemController() {
                 droppedDetonationEffects: 0,
             };
         },
+        resetRoundInventory() {},
         clearAll() {},
         warmupGraphics() {
             return false;
