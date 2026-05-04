@@ -61,34 +61,28 @@ export function createUndergroundParkingLayer() {
         emissive: 0x0b1520,
         emissiveIntensity: 0.1,
     });
-    const glassWallMaterial = new THREE.MeshPhysicalMaterial({
+    const glassWallMaterial = new THREE.MeshStandardMaterial({
         color: 0xbfe7ff,
-        roughness: 0.1,
-        metalness: 0.02,
+        roughness: 0.18,
+        metalness: 0.08,
         transparent: true,
-        opacity: 0.28,
-        transmission: 0.58,
-        thickness: 0.24,
-        clearcoat: 1,
-        clearcoatRoughness: 0.08,
+        opacity: 0.22,
         emissive: 0x143448,
-        emissiveIntensity: 0.08,
+        emissiveIntensity: 0.14,
         side: THREE.DoubleSide,
     });
-    const glassRoofMaterial = new THREE.MeshPhysicalMaterial({
+    glassWallMaterial.depthWrite = false;
+    const glassRoofMaterial = new THREE.MeshStandardMaterial({
         color: 0xd7efff,
-        roughness: 0.06,
-        metalness: 0.04,
+        roughness: 0.12,
+        metalness: 0.1,
         transparent: true,
-        opacity: 0.44,
-        transmission: 0.32,
-        thickness: 0.36,
-        clearcoat: 1,
-        clearcoatRoughness: 0.04,
+        opacity: 0.34,
         emissive: 0x1b4a6a,
-        emissiveIntensity: 0.18,
+        emissiveIntensity: 0.22,
         side: THREE.DoubleSide,
     });
+    glassRoofMaterial.depthWrite = false;
     const trimMaterial = new THREE.MeshStandardMaterial({
         color: 0xa7c3dd,
         roughness: 0.42,
@@ -133,29 +127,34 @@ export function createUndergroundParkingLayer() {
         opacity: 0.94,
         toneMapped: false,
     });
-    layer.add(createParkingFloor(layout, floorMaterial));
-    layer.add(createParkingCeiling(layout, concreteMaterial, trimMaterial, lightMaterial));
-    layer.add(createPerimeterWalls(layout, concreteMaterial));
-    layer.add(createSupportCore(layout, concreteMaterial, trimMaterial));
-    layer.add(createSupportColumns(layout, concreteMaterial, trimMaterial));
-    layer.add(createLightingLayer(layout, lightMaterial, trimMaterial));
-    layer.add(createFloorMarkings(layout, lineMaterial));
-    layer.add(
-        createEntranceLayer(
-            layout,
-            entranceRoadMaterial,
-            concreteMaterial,
-            glassWallMaterial,
-            glassRoofMaterial,
-            trimMaterial,
-            portalAccentMaterial,
-            barrierPostMaterial,
-            barrierArmMaterial,
-            lightMaterial,
-            lineMaterial,
-            amberLineMaterial
-        )
+    const interiorLayer = new THREE.Group();
+    interiorLayer.name = 'undergroundParkingInterior';
+    interiorLayer.add(createParkingFloor(layout, floorMaterial));
+    interiorLayer.add(createParkingCeiling(layout, concreteMaterial, trimMaterial, lightMaterial));
+    interiorLayer.add(createPerimeterWalls(layout, concreteMaterial));
+    interiorLayer.add(createSupportCore(layout, concreteMaterial, trimMaterial));
+    interiorLayer.add(createSupportColumns(layout, concreteMaterial, trimMaterial));
+    interiorLayer.add(createLightingLayer(layout, lightMaterial, trimMaterial));
+    interiorLayer.add(createFloorMarkings(layout, lineMaterial));
+
+    const entranceLayer = createEntranceLayer(
+        layout,
+        entranceRoadMaterial,
+        concreteMaterial,
+        glassWallMaterial,
+        glassRoofMaterial,
+        trimMaterial,
+        portalAccentMaterial,
+        barrierPostMaterial,
+        barrierArmMaterial,
+        lightMaterial,
+        lineMaterial,
+        amberLineMaterial
     );
+
+    layer.userData.interiorLayer = interiorLayer;
+    layer.userData.entranceLayer = entranceLayer;
+    layer.add(interiorLayer, entranceLayer);
     registerUndergroundParkingObstacles(layout);
 
     return layer;

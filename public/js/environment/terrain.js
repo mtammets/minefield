@@ -20,6 +20,7 @@ import {
 } from './lorien-gallery.js';
 import {
     UNDERGROUND_PARKING_LAYOUT,
+    isInsideUndergroundParkingEntranceFootprint,
     sampleUndergroundParkingHeightWorld,
     shouldUseUndergroundParkingHeight,
 } from './underground-parking.js';
@@ -32,10 +33,16 @@ import {
 const WORLD_GROUND_OVERSCAN = 120;
 const GROUND_TEXTURE_SIZE = 4096;
 const PROMENADE_OVERSCAN = 9.5;
+const RUNTIME_VISIBILITY_RESTORE_KEY = '__runtimeVisibilityRestore';
 const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_FRONT = 0.55;
 const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_BACK = 0.25;
 const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_SIDE = 1.1;
 const CURB_WIDTH_WORLD = 0.22;
+const UNDERGROUND_SCENERY_VISIBILITY_MODES = Object.freeze({
+    surface: 'surface',
+    entrance: 'entrance',
+    underground: 'underground',
+});
 const ROAD_PATTERN_CONFIGS = Object.freeze({
     boulevard: {
         top: '#1d2d3b',
@@ -157,6 +164,8 @@ export function updateGroundMotionRuntime({
     playerSpeed = 0,
     playerPosition = null,
 }) {
+    updateUndergroundParkingSceneryVisibility(cityScenery, playerPosition);
+
     const speedRatio = THREE.MathUtils.clamp(Math.abs(playerSpeed) / SPEED_GLOW_MAX, 0, 1);
     const emissiveMaterial =
         ground?.userData?.baseSurfaceMaterial || ground?.userData?.baseSurface?.material || null;
@@ -165,7 +174,9 @@ export function updateGroundMotionRuntime({
         emissiveMaterial.emissiveIntensity = baseEmissive + speedRatio * 0.12;
     }
 
-    const lampLights = cityScenery?.userData?.lampLights || [];
+    const lampLights = cityScenery?.userData?.undergroundSurfaceSceneryHidden
+        ? []
+        : cityScenery?.userData?.lampLights || [];
     if (lampLights.length > 0) {
         const time = performance.now() * 0.0022;
         const lampBoost = 1.12 + speedRatio * 0.26;
@@ -175,8 +186,85 @@ export function updateGroundMotionRuntime({
             light.intensity = light.userData.baseIntensity * lampBoost * lampFlicker;
         });
     }
+}
 
-    void playerPosition;
+function updateUndergroundParkingSceneryVisibility(cityScenery, playerPosition) {
+    if (!cityScenery) {
+        return;
+    }
+
+    const mode = resolveUndergroundParkingSceneryVisibilityMode(playerPosition);
+    if (cityScenery.userData.undergroundSceneryVisibilityMode === mode) {
+        return;
+    }
+
+    cityScenery.userData.undergroundSceneryVisibilityMode = mode;
+    const undergroundParkingLayer = cityScenery.userData?.undergroundParkingLayer || null;
+    const interiorLayer = undergroundParkingLayer?.userData?.interiorLayer || null;
+    const showUndergroundInterior = mode !== UNDERGROUND_SCENERY_VISIBILITY_MODES.surface;
+    applyManagedVisibility(interiorLayer, showUndergroundInterior);
+
+    const showSurfaceScenery = mode !== UNDERGROUND_SCENERY_VISIBILITY_MODES.underground;
+    const surfaceLayers = Array.isArray(cityScenery.userData?.surfaceDetailLayers)
+        ? cityScenery.userData.surfaceDetailLayers
+        : [];
+    surfaceLayers.forEach((layer) => {
+        applyManagedVisibility(layer, showSurfaceScenery);
+    });
+    cityScenery.userData.undergroundSurfaceSceneryHidden = !showSurfaceScenery;
+}
+
+function resolveUndergroundParkingSceneryVisibilityMode(playerPosition) {
+    const playerX = Number(playerPosition?.x);
+    const playerY = Number(playerPosition?.y);
+    const playerZ = Number(playerPosition?.z);
+    if (!Number.isFinite(playerX) || !Number.isFinite(playerZ)) {
+        return UNDERGROUND_SCENERY_VISIBILITY_MODES.surface;
+    }
+
+    const layout = UNDERGROUND_PARKING_LAYOUT;
+    const insideInteriorBounds =
+        playerX >= layout.floorMinX - 1.4 &&
+        playerX <= layout.floorMaxX + 1.4 &&
+        playerZ >= layout.floorMinZ - 1.4 &&
+        playerZ <= layout.floorMaxZ + 1.4;
+    if (insideInteriorBounds && Number.isFinite(playerY) && playerY <= layout.surfaceY - 0.45) {
+        return UNDERGROUND_SCENERY_VISIBILITY_MODES.underground;
+    }
+
+    const nearEntrance = isInsideUndergroundParkingEntranceFootprint(playerX, playerZ, 14);
+    if (!nearEntrance) {
+        return UNDERGROUND_SCENERY_VISIBILITY_MODES.surface;
+    }
+
+    if (Number.isFinite(playerY) && playerY <= layout.surfaceY - 0.45) {
+        return UNDERGROUND_SCENERY_VISIBILITY_MODES.underground;
+    }
+
+    return UNDERGROUND_SCENERY_VISIBILITY_MODES.entrance;
+}
+
+function applyManagedVisibility(layer, visible) {
+    if (!layer) {
+        return;
+    }
+
+    if (visible) {
+        if (hasManagedVisibilityRestore(layer)) {
+            layer.visible = Boolean(layer.userData[RUNTIME_VISIBILITY_RESTORE_KEY]);
+            delete layer.userData[RUNTIME_VISIBILITY_RESTORE_KEY];
+        }
+        return;
+    }
+
+    if (!hasManagedVisibilityRestore(layer)) {
+        layer.userData[RUNTIME_VISIBILITY_RESTORE_KEY] = layer.visible !== false;
+    }
+    layer.visible = false;
+}
+
+function hasManagedVisibilityRestore(layer) {
+    return Object.prototype.hasOwnProperty.call(layer.userData, RUNTIME_VISIBILITY_RESTORE_KEY);
 }
 
 function resolveGroundSize(size) {

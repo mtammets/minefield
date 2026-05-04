@@ -78,9 +78,18 @@ function updateGroundMotion(
         playerSpeed,
         playerPosition,
     });
-    updateBillboardRuntime(runtimeCityScenery);
-    updateBuildingRuntime(runtimeCityScenery.userData?.buildingLayer, playerPosition, frameDelta);
-    updateMonumentRuntime(runtimeCityScenery, monumentRhythmState);
+    const surfaceSceneryHidden = Boolean(
+        runtimeCityScenery.userData?.undergroundSurfaceSceneryHidden
+    );
+    if (!surfaceSceneryHidden) {
+        updateBillboardRuntime(runtimeCityScenery);
+        updateBuildingRuntime(
+            runtimeCityScenery.userData?.buildingLayer,
+            playerPosition,
+            frameDelta
+        );
+        updateMonumentRuntime(runtimeCityScenery, monumentRhythmState);
+    }
 }
 
 export {

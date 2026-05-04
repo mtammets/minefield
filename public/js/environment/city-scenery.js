@@ -20,15 +20,32 @@ export function createCityScenery() {
         group.userData.billboardScreens,
         group.userData.monumentEffects
     );
+    const undergroundParkingLayer = createUndergroundParkingLayer();
+    const parkLayer = createParkLayer();
     const buildingLayer = createBuildingLayer();
+    const billboardLayer = createBillboardLayer(group.userData.billboardScreens);
+    const streetLampLayer = createStreetLampLayer(group.userData.lampLights);
+
+    group.userData.monumentLayer = monumentLayer;
+    group.userData.undergroundParkingLayer = undergroundParkingLayer;
+    group.userData.parkLayer = parkLayer;
     group.userData.buildingLayer = buildingLayer;
+    group.userData.billboardLayer = billboardLayer;
+    group.userData.streetLampLayer = streetLampLayer;
+    group.userData.surfaceDetailLayers = [
+        monumentLayer,
+        parkLayer,
+        buildingLayer,
+        billboardLayer,
+        streetLampLayer,
+    ];
 
     group.add(monumentLayer);
-    group.add(createUndergroundParkingLayer());
-    group.add(createParkLayer());
+    group.add(undergroundParkingLayer);
+    group.add(parkLayer);
     group.add(buildingLayer);
-    group.add(createBillboardLayer(group.userData.billboardScreens));
-    group.add(createStreetLampLayer(group.userData.lampLights));
+    group.add(billboardLayer);
+    group.add(streetLampLayer);
 
     return group;
 }
