@@ -6,7 +6,15 @@ import { addObstacleCircle } from './obstacles.js';
 import { isInsideUndergroundParkingEntranceFootprint } from './underground-parking.js';
 import { isInsideUpperDeckFootprint } from './upper-deck.js';
 
-const STREET_LAMP_EXCLUSION_KEYS = new Set(['-60:-16', '-28:-16', '-16:36', '-16:68', '16:44']);
+const STREET_LAMP_EXCLUSION_KEYS = new Set([
+    '-60:-16',
+    '-28:-16',
+    '-16:-60',
+    '-16:-28',
+    '-16:36',
+    '-16:68',
+    '16:44',
+]);
 
 export function createStreetLampLayer(_lampLights) {
     const layer = new THREE.Group();

@@ -21,6 +21,11 @@ const CONTROL_LAYOUTS = Object.freeze({
                     actionId: ACTION_IDS.mapToggle,
                 },
                 { label: 'Pause / Resume', actionId: ACTION_IDS.pauseToggle },
+                {
+                    label: 'Recover Vehicle',
+                    actionId: ACTION_IDS.recoverVehicle,
+                    hint: 'Low speed',
+                },
                 { label: 'Restart Round', actionId: ACTION_IDS.restartRound },
                 { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
             ]),
@@ -58,6 +63,11 @@ const CONTROL_LAYOUTS = Object.freeze({
                     actionId: ACTION_IDS.mapToggle,
                 },
                 { label: 'Pause / Resume', actionId: ACTION_IDS.pauseToggle },
+                {
+                    label: 'Recover Vehicle',
+                    actionId: ACTION_IDS.recoverVehicle,
+                    hint: 'Low speed',
+                },
                 { label: 'Restart Round', actionId: ACTION_IDS.restartRound },
                 { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
                 { label: 'Graphics Quality', actionId: ACTION_IDS.graphicsCycle },

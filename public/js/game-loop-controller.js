@@ -1,5 +1,9 @@
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 import { beginHeavyEventFrame, getHeavyEventBudgetSnapshot } from './frame-heavy-event-budget.js';
+import {
+    isInsideLorienVelmoreGalleryWorld,
+    isInsideUfoDiskoStoreWorld,
+} from './environment/buildings.js';
 import { updateUndergroundParkingRuntime } from './environment/underground-parking.js';
 
 const BOT_MINE_DEPLOY_MIN_SPEED = 8;
@@ -634,7 +638,19 @@ export function createGameLoopController(options = {}) {
                         !gamePaused &&
                         !isEditModeActive &&
                         !worldMapOpen &&
-                        !readPickupRoundFinished(),
+                        !readPickupRoundFinished() &&
+                        !isInsideUfoDiskoStoreWorld(
+                            car.position.x,
+                            car.position.y,
+                            car.position.z,
+                            0.28
+                        ) &&
+                        !isInsideLorienVelmoreGalleryWorld(
+                            car.position.x,
+                            car.position.y,
+                            car.position.z,
+                            0.18
+                        ),
                 });
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
                 updateGroundMotion(car.position, cameraSpeed, monumentRhythmState, frameDelta);

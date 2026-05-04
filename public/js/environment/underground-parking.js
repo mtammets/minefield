@@ -1020,18 +1020,8 @@ function createEntranceGlassAtriumWalls(layout, glassMaterial, trimMaterial, lig
     }
 
     const portalHeight = wallHeight + 0.2;
-    const portalWidth = entrance.canopyHalfWidth * 2 - 0.3;
     const endFrameDepth = 0.08;
-    const rearGlass = new THREE.Mesh(
-        new THREE.BoxGeometry(portalWidth, portalHeight, endFrameDepth),
-        glassMaterial
-    );
-    rearGlass.position.set(
-        entrance.centerX,
-        wallBaseY + portalHeight * 0.5 - 0.02,
-        entrance.canopyEndZ - 0.02
-    );
-    group.add(rearGlass);
+    const portalWidth = entrance.canopyHalfWidth * 2 - 0.3;
 
     const rearHead = new THREE.Mesh(
         new THREE.BoxGeometry(portalWidth + 0.2, 0.12, 0.12),
@@ -1149,16 +1139,6 @@ function createEntranceAutoBarriers(layout, postMaterial, armMaterial) {
     rightStripe.position.set(-armLength * 0.5 - 0.02, 0.05, 0);
     rightPivot.add(rightStripe);
 
-    const indicatorGeometry = new THREE.BoxGeometry(0.12, 0.12, 0.12);
-    const openIndicator = new THREE.Mesh(indicatorGeometry, greenLightMaterial);
-    openIndicator.position.set(entrance.centerX - 0.52, 1.24, barrierZ - 0.24);
-    openIndicator.visible = false;
-    group.add(openIndicator);
-
-    const closedIndicator = new THREE.Mesh(indicatorGeometry, redLightMaterial);
-    closedIndicator.position.set(entrance.centerX + 0.52, 1.24, barrierZ - 0.24);
-    group.add(closedIndicator);
-
     undergroundParkingRuntime.barrierSystems.push({
         leftPivot,
         rightPivot,
@@ -1167,8 +1147,8 @@ function createEntranceAutoBarriers(layout, postMaterial, armMaterial) {
         response: 8.4,
         triggerZ: barrierZ,
         triggerRadius: 14.5,
-        openIndicator,
-        closedIndicator,
+        openIndicator: null,
+        closedIndicator: null,
     });
 
     return group;
@@ -1301,17 +1281,6 @@ function createEntranceLighting(layout, lightMaterial, trimMaterial) {
         lightBar.position.set(entrance.centerX, layout.ceilingBottomY - 0.14, z);
         group.add(lightBar);
     }
-
-    const lipGlow = new THREE.Mesh(
-        new THREE.BoxGeometry(
-            getEntranceHalfWidthAtZ(entrance, entrance.topZ, 'surface') * 2 - 0.4,
-            0.08,
-            0.16
-        ),
-        trimMaterial
-    );
-    lipGlow.position.set(entrance.centerX, 0.16, entrance.topZ + 0.18);
-    group.add(lipGlow);
 
     return group;
 }

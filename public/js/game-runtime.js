@@ -2268,6 +2268,7 @@ runtimeState.gameSessionController = createGameSessionController({
     setCameraKeyboardControlsEnabled,
     resetCameraTrackingState,
     initializePlayerPhysics,
+    getVehicleState,
     setPlayerBatteryLevel,
     setPlayerBatteryDepleted,
     setPlayerCarBodyColor,
@@ -2837,6 +2838,9 @@ runtimeState.inputController = createInputController({
     },
     onRestartGameWithCountdown() {
         runtimeState.gameSessionController?.restartGameWithCountdown();
+    },
+    onRecoverVehicle() {
+        return runtimeState.gameSessionController?.recoverPlayerCar?.() || null;
     },
     onClearDriveKeys() {
         runtimeState.gameSessionController?.clearDriveKeys();

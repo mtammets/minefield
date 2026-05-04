@@ -30,6 +30,7 @@ export function createInputController(options = {}) {
         onRegisterControlAction = () => {},
         onStartNewGame = () => {},
         onShowWelcomeModal = () => {},
+        onRecoverVehicle = () => null,
         onDeployMine = () => null,
         toggleWorldMap = () => ({ open: false, message: null }),
         isWorldMapVisible = () => false,
@@ -128,6 +129,7 @@ export function createInputController(options = {}) {
             event.repeat &&
             (matchesAction(ACTION_IDS.fullscreenToggle) ||
                 matchesAction(ACTION_IDS.editModeToggle) ||
+                matchesAction(ACTION_IDS.recoverVehicle) ||
                 matchesAction(ACTION_IDS.restartRound) ||
                 matchesAction(ACTION_IDS.restartFromScoreboard) ||
                 matchesAction(ACTION_IDS.pauseToggle) ||
@@ -253,6 +255,18 @@ export function createInputController(options = {}) {
             }
             onRestartGameWithCountdown();
             reportAction(ACTION_IDS.restartRound);
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.recoverVehicle)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            const result = onRecoverVehicle();
+            if (result?.message) {
+                onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
+            }
+            reportAction(ACTION_IDS.recoverVehicle);
             return;
         }
 

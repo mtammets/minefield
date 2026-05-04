@@ -16,6 +16,8 @@ import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 const ELIMINATION_AUTOCOLLECT_POINTS_PER_PICKUP = 100;
 const ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT = 2;
 const ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION = 3;
+const VEHICLE_RECOVER_MAX_SPEED_KPH = 18;
+const VEHICLE_RECOVER_COOLDOWN_MS = 3500;
 const SCORE_MODEL_TEXT =
     'Pickup: 100 base x combo x (1 + risk + endgame). Mine kill: 220 base x chain x endgame x anti-farm.';
 
@@ -27,6 +29,7 @@ export function createGameSessionController({
     setCameraKeyboardControlsEnabled,
     resetCameraTrackingState,
     initializePlayerPhysics,
+    getVehicleState = () => ({ speed: 0 }),
     setPlayerBatteryLevel,
     setPlayerBatteryDepleted,
     setPlayerCarBodyColor,
@@ -94,6 +97,7 @@ export function createGameSessionController({
         typeof getBotTrafficSystem === 'function' ? getBotTrafficSystem : () => null;
     let pendingRoundPresentationRafHandle = null;
     let pendingRoundPresentationToken = 0;
+    let lastVehicleRecoverAt = -Number.POSITIVE_INFINITY;
     function getBotHudStateWithScores() {
         const botEntries = getBotSystem()?.getHudState?.() || [];
         return botEntries.map((bot) => ({
@@ -150,6 +154,7 @@ export function createGameSessionController({
         restartGameWithCountdown,
         clearPendingRespawn,
         snapCarToGround,
+        recoverPlayerCar,
         respawnPlayerCar,
         setBatteryDepletedState,
         updateBattery,
@@ -287,6 +292,72 @@ export function createGameSessionController({
         car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
     }
 
+    function recoverPlayerCar() {
+        if (getIsCarDestroyed()) {
+            return {
+                ok: false,
+                message:
+                    getPlayerCarsRemaining() > 0
+                        ? 'Car destroyed. Wait for respawn.'
+                        : 'No cars left. Press Q to restart.',
+                timeoutMs: 1800,
+            };
+        }
+
+        const speedMps = Math.abs(Number(getVehicleState()?.speed) || 0);
+        const speedKph = speedMps * 3.6;
+        if (speedKph > VEHICLE_RECOVER_MAX_SPEED_KPH) {
+            return {
+                ok: false,
+                message: `Slow below ${VEHICLE_RECOVER_MAX_SPEED_KPH} km/h to recover.`,
+                timeoutMs: 1500,
+            };
+        }
+
+        const now = Date.now();
+        const cooldownRemainingMs =
+            VEHICLE_RECOVER_COOLDOWN_MS - Math.max(0, now - lastVehicleRecoverAt);
+        if (cooldownRemainingMs > 0) {
+            return {
+                ok: false,
+                message: `Recover cooling down (${(cooldownRemainingMs / 1000).toFixed(1)}s).`,
+                timeoutMs: 1400,
+            };
+        }
+
+        const fallbackX = Number.isFinite(playerSpawnState?.position?.x)
+            ? playerSpawnState.position.x
+            : 0;
+        const fallbackZ = Number.isFinite(playerSpawnState?.position?.z)
+            ? playerSpawnState.position.z
+            : 0;
+        const targetX = Number.isFinite(car.position?.x) ? car.position.x : fallbackX;
+        const targetZ = Number.isFinite(car.position?.z) ? car.position.z : fallbackZ;
+        const targetHeading = Number.isFinite(car.rotation?.y)
+            ? car.rotation.y
+            : Number.isFinite(playerSpawnState?.rotationY)
+              ? playerSpawnState.rotationY
+              : 0;
+
+        clearDriveKeys();
+        car.visible = true;
+        car.position.set(targetX, 0, targetZ);
+        snapCarToGround();
+        car.position.y += 0.08;
+        car.rotation.set(0, targetHeading, 0);
+        resetCameraTrackingState();
+        initializePlayerPhysics(car);
+        setPhysicsAccumulator(0);
+        skidMarkController.reset?.();
+        lastVehicleRecoverAt = now;
+
+        return {
+            ok: true,
+            message: 'Vehicle recovered.',
+            timeoutMs: 1300,
+        };
+    }
+
     function respawnPlayerCar() {
         if (getPlayerCarsRemaining() <= 0) {
             return;
@@ -307,6 +378,7 @@ export function createGameSessionController({
         setBatteryDepletedState(false, { showStatus: false });
         initializePlayerPhysics(car);
         setPhysicsAccumulator(0);
+        lastVehicleRecoverAt = -Number.POSITIVE_INFINITY;
 
         objectiveUi.showInfo(
             `New car on track. Cars left: ${getPlayerCarsRemaining()}/${PLAYER_CAR_POOL_SIZE}.`,
@@ -799,6 +871,7 @@ export function createGameSessionController({
         clearDriveKeys();
         initializePlayerPhysics(car);
         setPhysicsAccumulator(0);
+        lastVehicleRecoverAt = -Number.POSITIVE_INFINITY;
     }
 
     function setSelectedPlayerCarColor(colorHex, options = {}) {

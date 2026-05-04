@@ -1,10 +1,16 @@
 import { centralParkingLot } from './environment/layout.js';
 import { getLorienVelmoreGallerySilenceFactorWorld } from './environment/lorien-gallery.js';
 import { getUndergroundParkingSilenceFactorWorld } from './environment/underground-parking.js';
-import { getLorienVelmoreGalleryVideoDisplayState } from './environment/buildings.js';
+import {
+    getUfoDiskoStoreAudioState,
+    getLorienVelmoreGalleryVideoDisplayState,
+    isInsideUfoDiskoStoreWorld,
+    getUfoDiskoStoreSilenceFactorWorld,
+} from './environment/buildings.js';
 
 const AUDIO_PREFS_STORAGE_KEY = 'silentdrift-audio-prefs-v1';
 const MONUMENT_MUSIC_SOUND_ID = 'monumentHookusPookusInstrumentalLoop01';
+const UFO_DISKO_STORE_MUSIC_SOUND_ID = 'ufoDiskoNebulaStore01';
 
 const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
@@ -259,6 +265,11 @@ const SOUND_DEFINITIONS = Object.freeze({
         gain: 0.76,
         loop: true,
     },
+    ufoDiskoNebulaStore01: {
+        src: '/audio/ufodisko/Nebula_pood.mp3',
+        bus: 'ambience',
+        gain: 0.42,
+    },
 });
 const SOUND_DEFINITION_IDS = Object.freeze(Object.keys(SOUND_DEFINITIONS));
 const LOOP_SOUND_IDS = Object.freeze(
@@ -384,6 +395,31 @@ const LORIEN_GALLERY_AUDIO_CONFIG = Object.freeze({
     reverbSendNear: 0.34,
     reverbSendFar: 0.52,
 });
+const UFO_DISKO_STORE_AUDIO_CONFIG = Object.freeze({
+    refDistance: 3.8,
+    maxDistance: 30,
+    rolloffFactor: 1.22,
+    fullPresenceDistance: 5.4,
+    audibleDistance: 22,
+    nearCutoffHz: 9800,
+    farCutoffHz: 1550,
+    nearWetLowpassHz: 4200,
+    farWetLowpassHz: 1650,
+    nearSourceGain: 1,
+    farSourceGain: 0.22,
+    nearDryGain: 0.84,
+    farDryGain: 0.12,
+    nearWetGain: 0.32,
+    farWetGain: 0.56,
+    nearDelaySec: 0.058,
+    farDelaySec: 0.124,
+    nearFeedback: 0.2,
+    farFeedback: 0.34,
+    delaySendNear: 0.12,
+    delaySendFar: 0.24,
+    reverbSendNear: 0.28,
+    reverbSendFar: 0.5,
+});
 const MINE_DETONATION_OCCLUSION_MIN_GAIN = 0.38;
 const MINE_DETONATION_OCCLUSION_MIN_RATE = 0.93;
 const MINE_DETONATION_OCCLUSION_MAX_LOWPASS_HZ = 18000;
@@ -416,6 +452,8 @@ export function createAudioSystem({ camera = null } = {}) {
     let monumentImpulseBuffer = null;
     let lorienGalleryVideoInstance = null;
     let lorienGalleryImpulseBuffer = null;
+    let ufoDiskoMusicInstance = null;
+    let ufoDiskoMusicImpulseBuffer = null;
     const monumentRhythmState = {
         active: 0,
         bass: 0,
@@ -518,6 +556,7 @@ export function createAudioSystem({ camera = null } = {}) {
         loopInstances.clear();
         disposeLorienGalleryVideoInstance();
         disposeMonumentMusicInstance();
+        disposeUfoDiskoMusicInstance();
 
         if (context) {
             void context.close().catch(() => {});
@@ -1163,6 +1202,12 @@ export function createAudioSystem({ camera = null } = {}) {
             editModeActive,
             pickupRoundFinished,
         });
+        updateUfoDiskoStoreMusic({
+            isPaused,
+            welcomeVisible,
+            editModeActive,
+            pickupRoundFinished,
+        });
         updateMonumentMusic({
             isPaused,
             welcomeVisible,
@@ -1289,6 +1334,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const z = Number(position.z) || 0;
         return Math.max(
             getLorienVelmoreGallerySilenceFactorWorld(x, y, z),
+            getUfoDiskoStoreSilenceFactorWorld(x, y, z),
             getUndergroundParkingSilenceFactorWorld(x, y, z)
         );
     }
@@ -1772,6 +1818,173 @@ export function createAudioSystem({ camera = null } = {}) {
         );
     }
 
+    function updateUfoDiskoStoreMusic(frameState = {}) {
+        const storeAudioState = getUfoDiskoStoreAudioState();
+        if (!storeAudioState) {
+            if (ufoDiskoMusicInstance) {
+                disposeUfoDiskoMusicInstance();
+            }
+            return;
+        }
+
+        const shouldBeAudible =
+            !Boolean(frameState.isPaused) &&
+            !Boolean(frameState.welcomeVisible) &&
+            !Boolean(frameState.editModeActive) &&
+            !Boolean(frameState.pickupRoundFinished);
+        const doorOpenAmount = clampNumber(storeAudioState.doorOpenAmount, 0, 1, 0);
+        const listenerPosition = runtime.playerPosition || camera?.position || null;
+        const listenerInside = Boolean(listenerPosition)
+            ? isInsideUfoDiskoStoreWorld(
+                  Number(listenerPosition.x) || 0,
+                  Number(listenerPosition.y) || 0,
+                  Number(listenerPosition.z) || 0,
+                  0.24
+              )
+            : false;
+        const shouldStartPlayback = listenerInside || doorOpenAmount > 0.06;
+
+        if (!shouldStartPlayback && !ufoDiskoMusicInstance) {
+            return;
+        }
+
+        const instance = ufoDiskoMusicInstance || ensureUfoDiskoMusicInstance();
+        if (!instance || !context || !camera?.position) {
+            return;
+        }
+
+        const now = context.currentTime;
+        const x = Number(storeAudioState.worldX) || 0;
+        const y = Number(storeAudioState.worldY) || 0;
+        const z = Number(storeAudioState.worldZ) || 0;
+        setPannerPosition(instance.panner, x, y, z, now);
+
+        const dx = (Number(camera.position.x) || 0) - x;
+        const dy = (Number(camera.position.y) || 0) - y;
+        const dz = (Number(camera.position.z) || 0) - z;
+        const distance = Math.hypot(dx, dz, dy * 0.74);
+        const nearMix =
+            1 -
+            clampNumber(
+                (distance - UFO_DISKO_STORE_AUDIO_CONFIG.fullPresenceDistance) /
+                    Math.max(
+                        1,
+                        UFO_DISKO_STORE_AUDIO_CONFIG.audibleDistance -
+                            UFO_DISKO_STORE_AUDIO_CONFIG.fullPresenceDistance
+                    ),
+                0,
+                1,
+                0
+            );
+        const wideAreaMix =
+            1 - clampNumber(distance / UFO_DISKO_STORE_AUDIO_CONFIG.maxDistance, 0, 1, 0);
+        const doorLeakMix = smoothstep(doorOpenAmount);
+        const audibleMix =
+            shouldBeAudible && (listenerInside || doorLeakMix > 0.02)
+                ? listenerInside
+                    ? 1
+                    : clampNumber(doorLeakMix * (0.36 + wideAreaMix * 0.44), 0, 0.72, 0)
+                : 0;
+        const definitionGain = SOUND_DEFINITIONS[UFO_DISKO_STORE_MUSIC_SOUND_ID]?.gain || 1;
+        const filterNearMix = clampNumber(nearMix * 0.72 + (listenerInside ? 0.28 : doorLeakMix * 0.14), 0, 1, 0);
+        const dryOutsideScale = 0.28 + doorLeakMix * 0.24;
+        const wetOutsideScale = 0.44 + doorLeakMix * 0.22;
+
+        instance.sourceGain.gain.setTargetAtTime(
+            audibleMix *
+                definitionGain *
+                lerpNumber(
+                    UFO_DISKO_STORE_AUDIO_CONFIG.farSourceGain,
+                    UFO_DISKO_STORE_AUDIO_CONFIG.nearSourceGain,
+                    nearMix
+                ) *
+                (listenerInside ? 1 : 0.62 + wideAreaMix * 0.24),
+            now,
+            0.42
+        );
+        instance.dryGain.gain.setTargetAtTime(
+            audibleMix *
+                lerpNumber(
+                    UFO_DISKO_STORE_AUDIO_CONFIG.farDryGain,
+                    UFO_DISKO_STORE_AUDIO_CONFIG.nearDryGain,
+                    nearMix
+                ) *
+                (listenerInside ? 1 : dryOutsideScale),
+            now,
+            0.36
+        );
+        instance.wetGain.gain.setTargetAtTime(
+            audibleMix *
+                lerpNumber(
+                    UFO_DISKO_STORE_AUDIO_CONFIG.farWetGain,
+                    UFO_DISKO_STORE_AUDIO_CONFIG.nearWetGain,
+                    nearMix
+                ) *
+                (listenerInside ? 1 : wetOutsideScale),
+            now,
+            0.4
+        );
+        instance.delaySend.gain.setTargetAtTime(
+            audibleMix *
+                lerpNumber(
+                    UFO_DISKO_STORE_AUDIO_CONFIG.delaySendFar,
+                    UFO_DISKO_STORE_AUDIO_CONFIG.delaySendNear,
+                    nearMix
+                ) *
+                (listenerInside ? 1 : 0.52 + doorLeakMix * 0.16),
+            now,
+            0.34
+        );
+        instance.reverbSend.gain.setTargetAtTime(
+            audibleMix *
+                lerpNumber(
+                    UFO_DISKO_STORE_AUDIO_CONFIG.reverbSendFar,
+                    UFO_DISKO_STORE_AUDIO_CONFIG.reverbSendNear,
+                    nearMix
+                ) *
+                (listenerInside ? 1 : 0.62 + doorLeakMix * 0.12),
+            now,
+            0.38
+        );
+        instance.toneFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                UFO_DISKO_STORE_AUDIO_CONFIG.farCutoffHz,
+                UFO_DISKO_STORE_AUDIO_CONFIG.nearCutoffHz,
+                filterNearMix
+            ),
+            now,
+            0.32
+        );
+        instance.toneFilter.Q.setTargetAtTime(lerpNumber(0.72, 1.24, filterNearMix), now, 0.3);
+        instance.wetFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                UFO_DISKO_STORE_AUDIO_CONFIG.farWetLowpassHz,
+                UFO_DISKO_STORE_AUDIO_CONFIG.nearWetLowpassHz,
+                filterNearMix
+            ),
+            now,
+            0.34
+        );
+        instance.delay.delayTime.setTargetAtTime(
+            lerpNumber(
+                UFO_DISKO_STORE_AUDIO_CONFIG.farDelaySec,
+                UFO_DISKO_STORE_AUDIO_CONFIG.nearDelaySec,
+                nearMix
+            ),
+            now,
+            0.28
+        );
+        instance.delayFeedback.gain.setTargetAtTime(
+            lerpNumber(
+                UFO_DISKO_STORE_AUDIO_CONFIG.farFeedback,
+                UFO_DISKO_STORE_AUDIO_CONFIG.nearFeedback,
+                nearMix
+            ),
+            now,
+            0.32
+        );
+    }
+
     function ensureLorienGalleryVideoInstance(videoDisplayState) {
         if (!isRealtimeAudioReady() || !context || !mixer) {
             return null;
@@ -1895,6 +2108,130 @@ export function createAudioSystem({ camera = null } = {}) {
         return lorienGalleryVideoInstance;
     }
 
+    function ensureUfoDiskoMusicInstance() {
+        if (!isRealtimeAudioReady() || !context || !mixer) {
+            return null;
+        }
+        if (ufoDiskoMusicInstance) {
+            return ufoDiskoMusicInstance;
+        }
+
+        const definition = SOUND_DEFINITIONS[UFO_DISKO_STORE_MUSIC_SOUND_ID];
+        const buffer = buffers.get(UFO_DISKO_STORE_MUSIC_SOUND_ID);
+        if (!definition || !buffer) {
+            void loadBuffer(UFO_DISKO_STORE_MUSIC_SOUND_ID);
+            return null;
+        }
+
+        const busNode = mixer.buses[definition.bus] || mixer.buses.ambience;
+        if (!busNode) {
+            return null;
+        }
+
+        const storeAudioState = getUfoDiskoStoreAudioState();
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+
+        const sourceGain = context.createGain();
+        sourceGain.gain.setValueAtTime(0, context.currentTime);
+
+        const toneFilter = context.createBiquadFilter();
+        toneFilter.type = 'lowpass';
+        toneFilter.frequency.setValueAtTime(
+            UFO_DISKO_STORE_AUDIO_CONFIG.farCutoffHz,
+            context.currentTime
+        );
+        toneFilter.Q.setValueAtTime(0.92, context.currentTime);
+
+        const panner = context.createPanner();
+        panner.panningModel = 'HRTF';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = UFO_DISKO_STORE_AUDIO_CONFIG.refDistance;
+        panner.maxDistance = UFO_DISKO_STORE_AUDIO_CONFIG.maxDistance;
+        panner.rolloffFactor = UFO_DISKO_STORE_AUDIO_CONFIG.rolloffFactor;
+        panner.coneInnerAngle = 360;
+        panner.coneOuterAngle = 360;
+        panner.coneOuterGain = 1;
+        setPannerPosition(
+            panner,
+            Number(storeAudioState?.worldX) || 0,
+            Number(storeAudioState?.worldY) || 0,
+            Number(storeAudioState?.worldZ) || 0,
+            context.currentTime
+        );
+
+        const dryGain = context.createGain();
+        dryGain.gain.setValueAtTime(0, context.currentTime);
+
+        const delaySend = context.createGain();
+        delaySend.gain.setValueAtTime(0, context.currentTime);
+        const delay = context.createDelay(0.5);
+        delay.delayTime.setValueAtTime(
+            UFO_DISKO_STORE_AUDIO_CONFIG.farDelaySec,
+            context.currentTime
+        );
+        const delayFeedback = context.createGain();
+        delayFeedback.gain.setValueAtTime(
+            UFO_DISKO_STORE_AUDIO_CONFIG.farFeedback,
+            context.currentTime
+        );
+
+        const reverbSend = context.createGain();
+        reverbSend.gain.setValueAtTime(0, context.currentTime);
+        const convolver = context.createConvolver();
+        ufoDiskoMusicImpulseBuffer =
+            ufoDiskoMusicImpulseBuffer || createGalleryHallImpulseBuffer(context, 1.35, 1.8);
+        convolver.buffer = ufoDiskoMusicImpulseBuffer;
+
+        const wetFilter = context.createBiquadFilter();
+        wetFilter.type = 'lowpass';
+        wetFilter.frequency.setValueAtTime(
+            UFO_DISKO_STORE_AUDIO_CONFIG.farWetLowpassHz,
+            context.currentTime
+        );
+
+        const wetGain = context.createGain();
+        wetGain.gain.setValueAtTime(0, context.currentTime);
+
+        source.connect(sourceGain);
+        sourceGain.connect(toneFilter);
+        toneFilter.connect(panner);
+        panner.connect(dryGain);
+        dryGain.connect(busNode);
+        panner.connect(delaySend);
+        delaySend.connect(delay);
+        delay.connect(delayFeedback);
+        delayFeedback.connect(delay);
+        delay.connect(wetFilter);
+        panner.connect(reverbSend);
+        reverbSend.connect(convolver);
+        convolver.connect(wetFilter);
+        wetFilter.connect(wetGain);
+        wetGain.connect(busNode);
+
+        const randomStartOffsetSec =
+            buffer.duration > 1.25 ? randomRange(0, Math.max(0.01, buffer.duration - 0.65)) : 0;
+        source.start(context.currentTime, randomStartOffsetSec);
+
+        ufoDiskoMusicInstance = {
+            source,
+            sourceGain,
+            toneFilter,
+            panner,
+            dryGain,
+            delaySend,
+            delay,
+            delayFeedback,
+            reverbSend,
+            convolver,
+            wetFilter,
+            wetGain,
+        };
+
+        return ufoDiskoMusicInstance;
+    }
+
     function disposeLorienGalleryVideoInstance() {
         if (!lorienGalleryVideoInstance) {
             return;
@@ -1917,6 +2254,26 @@ export function createAudioSystem({ camera = null } = {}) {
         safeDisconnect(lorienGalleryVideoInstance.wetFilter);
         safeDisconnect(lorienGalleryVideoInstance.wetGain);
         lorienGalleryVideoInstance = null;
+    }
+
+    function disposeUfoDiskoMusicInstance() {
+        if (!ufoDiskoMusicInstance) {
+            return;
+        }
+        safeStopSource(ufoDiskoMusicInstance.source);
+        safeDisconnect(ufoDiskoMusicInstance.source);
+        safeDisconnect(ufoDiskoMusicInstance.sourceGain);
+        safeDisconnect(ufoDiskoMusicInstance.toneFilter);
+        safeDisconnect(ufoDiskoMusicInstance.panner);
+        safeDisconnect(ufoDiskoMusicInstance.dryGain);
+        safeDisconnect(ufoDiskoMusicInstance.delaySend);
+        safeDisconnect(ufoDiskoMusicInstance.delay);
+        safeDisconnect(ufoDiskoMusicInstance.delayFeedback);
+        safeDisconnect(ufoDiskoMusicInstance.reverbSend);
+        safeDisconnect(ufoDiskoMusicInstance.convolver);
+        safeDisconnect(ufoDiskoMusicInstance.wetFilter);
+        safeDisconnect(ufoDiskoMusicInstance.wetGain);
+        ufoDiskoMusicInstance = null;
     }
 
     function ensureMonumentMusicInstance() {

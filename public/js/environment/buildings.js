@@ -17,6 +17,18 @@ import {
 
 const SPECIAL_BUILDING_VARIANTS = new Map([
     [
+        '-1:-3',
+        {
+            type: 'driveThrough',
+            passageAxis: 'z',
+            passageWidth: 6.4,
+            passageHeight: 6.7,
+            obstaclePadding: 0.08,
+            decorStyle: 'ufoDiskoRetail',
+            storeName: 'UFO DISKO',
+        },
+    ],
+    [
         '-3:-1',
         {
             type: 'driveThrough',
@@ -38,6 +50,19 @@ const SPECIAL_BUILDING_VARIANTS = new Map([
             groundLayout: 'galleryHall',
         },
     ],
+]);
+const UFO_DISKO_STORE_VARIANT_KEY = '-1:-3';
+const LORIEN_VELMORE_GALLERY_VARIANT_KEY = '-1:3';
+const UFO_DISKO_MERCH_TEXTURE_SOURCES = Object.freeze([
+    {
+        url: '/assets/Ufodisko/MERCH-5-scaled-e1742462042479-1689x2048.jpg',
+        removeWhiteBackground: true,
+    },
+    { url: '/assets/Ufodisko/Robotid-Kollane-back.jpg', removeWhiteBackground: true },
+    { url: '/assets/Ufodisko/Shirt-back-HP.jpg', removeWhiteBackground: true },
+    { url: '/assets/Ufodisko/Sissetulnukas-Pusa-back.jpg', removeWhiteBackground: true },
+    { url: '/assets/Ufodisko/UFOudufront.jpg', removeWhiteBackground: true },
+    { url: '/assets/Ufodisko/back-004-HP.png', removeWhiteBackground: true },
 ]);
 
 const LORIEN_VELMORE_DOOR_OPEN_SPEED = 2.8;
@@ -68,11 +93,17 @@ const LORIEN_DOOR_SCORCH_MARK_LIMIT = 10;
 const LORIEN_DOOR_SHATTER_VARIANT_COUNT = 4;
 const LORIEN_DOOR_CRACK_MARK_LIMIT = 8;
 const lorienGalleryArtworkTextureLoader = new THREE.TextureLoader();
+const ufoDiskoTextureLoader = new THREE.TextureLoader();
 const lorienGalleryArtworkTextureCache = new Map();
 let lorienVelmoreGalleryVideoDisplayState = null;
 let lorienManifestoWallTexture = null;
 let lorienDoorShatterTextures = null;
 let lorienScorchTexture = null;
+let ufoDiskoStoreSignTexture = null;
+const ufoDiskoTeeTextureCache = new Map();
+let ufoDiskoStoreFootprint = null;
+let lorienVelmoreGalleryBuilding = null;
+let ufoDiskoDoorOpenAmount = 0;
 
 export function getLorienVelmoreGalleryVideoDisplayState() {
     return lorienVelmoreGalleryVideoDisplayState;
@@ -84,6 +115,7 @@ export function createBuildingLayer() {
     layer.userData.lorienVelmoreAccentMaterials = [];
     layer.userData.lorienVelmoreVideoDisplays = [];
     lorienVelmoreGalleryVideoDisplayState = null;
+    ufoDiskoDoorOpenAmount = 0;
     const buildingGeometry = new THREE.BoxGeometry(1, 1, 1);
     const buildingWindowTexture = createBuildingWindowTexture();
     const buildingMaterial = new THREE.MeshStandardMaterial({
@@ -117,13 +149,19 @@ export function createBuildingLayer() {
                 buildingMaterial,
                 building
             );
-            const lorienDoorSystem = driveThroughMesh.userData?.lorienVelmoreDoorSystem || null;
+            const lorienDoorSystems = Array.isArray(
+                driveThroughMesh.userData?.lorienVelmoreDoorSystems
+            )
+                ? driveThroughMesh.userData.lorienVelmoreDoorSystems
+                : driveThroughMesh.userData?.lorienVelmoreDoorSystem
+                  ? [driveThroughMesh.userData.lorienVelmoreDoorSystem]
+                  : null;
             const lorienAccentMaterials =
                 driveThroughMesh.userData?.lorienVelmoreAccentMaterials || null;
             const lorienVideoDisplays =
                 driveThroughMesh.userData?.lorienVelmoreVideoDisplays || null;
-            if (lorienDoorSystem) {
-                layer.userData.lorienVelmoreDoorSystems.push(lorienDoorSystem);
+            if (Array.isArray(lorienDoorSystems) && lorienDoorSystems.length > 0) {
+                layer.userData.lorienVelmoreDoorSystems.push(...lorienDoorSystems);
             }
             if (Array.isArray(lorienAccentMaterials) && lorienAccentMaterials.length > 0) {
                 layer.userData.lorienVelmoreAccentMaterials.push(...lorienAccentMaterials);
@@ -185,19 +223,27 @@ export function updateBuildingRuntime(buildingLayer, playerPosition, frameDelta 
     if (Array.isArray(videoDisplays) && videoDisplays.length > 0) {
         updateLorienVelmoreGalleryVideoDisplays(videoDisplays, playerPosition);
     }
+    const resolvedDelta = Math.max(1 / 240, Number(frameDelta) || 1 / 60);
 
     if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
         setLorienVelmoreGalleryDoorOpenAmount(0);
+        ufoDiskoDoorOpenAmount = 0;
         return;
     }
 
-    const resolvedDelta = Math.max(1 / 240, Number(frameDelta) || 1 / 60);
     let maxOpenAmount = 0;
+    let maxUfoDiskoOpenAmount = 0;
     doorSystems.forEach((doorSystem) => {
         updateLorienVelmoreDoorSystem(doorSystem, playerPosition, resolvedDelta);
-        maxOpenAmount = Math.max(maxOpenAmount, doorSystem.openAmount || 0);
+        if (doorSystem?.affectsLorienGallerySilence !== false) {
+            maxOpenAmount = Math.max(maxOpenAmount, doorSystem.openAmount || 0);
+        }
+        if (doorSystem?.environmentAudioZone === 'ufoDiskoStore') {
+            maxUfoDiskoOpenAmount = Math.max(maxUfoDiskoOpenAmount, doorSystem.openAmount || 0);
+        }
     });
     setLorienVelmoreGalleryDoorOpenAmount(maxOpenAmount);
+    ufoDiskoDoorOpenAmount = clamp01(maxUfoDiskoOpenAmount);
 }
 
 export function resolveLorienVelmoreMineBarrierImpact(
@@ -453,6 +499,149 @@ function resolveSpecialBuildingVariant(building) {
     return SPECIAL_BUILDING_VARIANTS.get(`${building.gridX}:${building.gridZ}`) || null;
 }
 
+function getUfoDiskoStoreFootprint() {
+    if (ufoDiskoStoreFootprint) {
+        return ufoDiskoStoreFootprint;
+    }
+
+    const building = getBuildingPlacements().find(
+        (entry) => `${entry?.gridX}:${entry?.gridZ}` === UFO_DISKO_STORE_VARIANT_KEY
+    );
+    const variant = SPECIAL_BUILDING_VARIANTS.get(UFO_DISKO_STORE_VARIANT_KEY) || null;
+    if (!building || !variant) {
+        return null;
+    }
+
+    const axis = variant.passageAxis === 'x' ? 'x' : 'z';
+    const transverseSpan = axis === 'x' ? building.depth : building.width;
+    const passageWidth = THREE.MathUtils.clamp(variant.passageWidth, 4.8, transverseSpan - 3.6);
+    const passageHeight = THREE.MathUtils.clamp(variant.passageHeight, 4.4, building.height - 4.8);
+    const halfPassageWidth = passageWidth * 0.5;
+    const halfTravelSpan = (axis === 'x' ? building.width : building.depth) * 0.5;
+
+    ufoDiskoStoreFootprint = {
+        axis,
+        centerX: building.x,
+        centerZ: building.z,
+        minX: axis === 'x' ? building.x - halfTravelSpan : building.x - halfPassageWidth,
+        maxX: axis === 'x' ? building.x + halfTravelSpan : building.x + halfPassageWidth,
+        minZ: axis === 'x' ? building.z - halfPassageWidth : building.z - halfTravelSpan,
+        maxZ: axis === 'x' ? building.z + halfPassageWidth : building.z + halfTravelSpan,
+        minY: -0.6,
+        maxY: passageHeight + 1.2,
+    };
+
+    return ufoDiskoStoreFootprint;
+}
+
+function getLorienVelmoreGalleryBuilding() {
+    if (lorienVelmoreGalleryBuilding) {
+        return lorienVelmoreGalleryBuilding;
+    }
+
+    lorienVelmoreGalleryBuilding =
+        getBuildingPlacements().find(
+            (entry) => `${entry?.gridX}:${entry?.gridZ}` === LORIEN_VELMORE_GALLERY_VARIANT_KEY
+        ) || null;
+    return lorienVelmoreGalleryBuilding;
+}
+
+export function isInsideUfoDiskoStoreWorld(x, y, z, margin = 0) {
+    const footprint = getUfoDiskoStoreFootprint();
+    if (!footprint) {
+        return false;
+    }
+
+    const extraMargin = Math.max(0, Number(margin) || 0);
+    const resolvedX = Number(x);
+    const resolvedY = Number(y);
+    const resolvedZ = Number(z);
+    if (!Number.isFinite(resolvedX) || !Number.isFinite(resolvedY) || !Number.isFinite(resolvedZ)) {
+        return false;
+    }
+
+    return (
+        resolvedX >= footprint.minX - extraMargin &&
+        resolvedX <= footprint.maxX + extraMargin &&
+        resolvedZ >= footprint.minZ - extraMargin &&
+        resolvedZ <= footprint.maxZ + extraMargin &&
+        resolvedY >= footprint.minY - extraMargin &&
+        resolvedY <= footprint.maxY + extraMargin
+    );
+}
+
+export function isInsideLorienVelmoreGalleryWorld(x, y, z, margin = 0) {
+    const building = getLorienVelmoreGalleryBuilding();
+    if (!building) {
+        return false;
+    }
+
+    const resolvedX = Number(x);
+    const resolvedY = Number(y);
+    const resolvedZ = Number(z);
+    if (!Number.isFinite(resolvedX) || !Number.isFinite(resolvedY) || !Number.isFinite(resolvedZ)) {
+        return false;
+    }
+
+    return isInsideLorienVelmoreGalleryRoomWorld(
+        resolvedX,
+        resolvedY,
+        resolvedZ,
+        building,
+        Math.max(0, Number(margin) || 0)
+    );
+}
+
+export function getUfoDiskoStoreSilenceFactorWorld(x, y, z) {
+    const footprint = getUfoDiskoStoreFootprint();
+    if (!footprint) {
+        return 0;
+    }
+
+    const resolvedX = Number(x);
+    const resolvedY = Number(y);
+    const resolvedZ = Number(z);
+    if (!Number.isFinite(resolvedX) || !Number.isFinite(resolvedY) || !Number.isFinite(resolvedZ)) {
+        return 0;
+    }
+    if (!isInsideUfoDiskoStoreWorld(resolvedX, resolvedY, resolvedZ, 0.18)) {
+        return 0;
+    }
+
+    const localX = resolvedX - footprint.centerX;
+    const localZ = resolvedZ - footprint.centerZ;
+    const halfWidth = Math.max(0.1, (footprint.maxX - footprint.minX) * 0.5);
+    const halfDepth = Math.max(0.1, (footprint.maxZ - footprint.minZ) * 0.5);
+    const lateralDistance = footprint.axis === 'x' ? Math.abs(localZ) : Math.abs(localX);
+    const lateralHalfSpan = footprint.axis === 'x' ? halfDepth : halfWidth;
+    const lateralFactor =
+        1 - normalizedRange(lateralDistance, lateralHalfSpan - 0.18, lateralHalfSpan + 0.02);
+    const roofFactor = 1 - normalizedRange(resolvedY, footprint.maxY - 1.54, footprint.maxY + 0.12);
+    const enclosureFactor = clamp01(Math.min(lateralFactor, roofFactor));
+    if (enclosureFactor <= 0) {
+        return 0;
+    }
+
+    const doorClosedFactor = smoothstep01(1 - ufoDiskoDoorOpenAmount);
+    return clamp01(enclosureFactor * lerp(0.22, 1, doorClosedFactor));
+}
+
+export function getUfoDiskoStoreAudioState() {
+    const footprint = getUfoDiskoStoreFootprint();
+    if (!footprint) {
+        return null;
+    }
+
+    const ceilingY = footprint.maxY - 1.2;
+    return {
+        worldX: footprint.centerX,
+        worldY: ceilingY - 0.24,
+        worldZ: footprint.centerZ,
+        ceilingY,
+        doorOpenAmount: clamp01(ufoDiskoDoorOpenAmount),
+    };
+}
+
 function resolveBuildingTintColor(tint = 0) {
     return new THREE.Color().setHSL(0.58 + tint * 0.04, 0.2, 0.28 + tint * 0.08);
 }
@@ -475,17 +664,24 @@ function updateLorienVelmoreDoorSystem(doorSystem, playerPosition, frameDelta) {
     const localX = (Number(playerPosition?.x) || 0) - doorSystem.centerX;
     const localY = Number(playerPosition?.y) || 0;
     const localZ = (Number(playerPosition?.z) || 0) - doorSystem.centerZ;
-    const alignedWithOpening = Math.abs(localX) <= doorSystem.sensorHalfWidth;
+    const approachAxis = doorSystem.approachAxis === 'x' ? 'x' : 'z';
+    const localCross = approachAxis === 'x' ? localZ : localX;
+    const localApproach = approachAxis === 'x' ? localX : localZ;
+    const doorPlaneCoord = Number.isFinite(doorSystem.doorPlaneCoord)
+        ? doorSystem.doorPlaneCoord
+        : Number(doorSystem.doorPlaneZ) || 0;
+    const roomEndCoord = Number.isFinite(doorSystem.roomEndCoord)
+        ? doorSystem.roomEndCoord
+        : Number(doorSystem.roomEndZ) || doorPlaneCoord;
+    const insideDirection = Number(doorSystem.insideDirection) < 0 ? -1 : 1;
+    const relativeDepth = (localApproach - doorPlaneCoord) * insideDirection;
+    const relativeRoomEnd = (roomEndCoord - doorPlaneCoord) * insideDirection;
+    const alignedWithOpening = Math.abs(localCross) <= doorSystem.sensorHalfWidth;
     const withinHeight = localY <= doorSystem.sensorMaxY;
-    const outsideApproach =
-        localZ >= doorSystem.doorPlaneZ - doorSystem.outsideSensorDepth &&
-        localZ <= doorSystem.doorPlaneZ + 0.8;
-    const insideApproach =
-        localZ >= doorSystem.doorPlaneZ - 0.12 &&
-        localZ <= doorSystem.doorPlaneZ + doorSystem.insideSensorDepth;
+    const outsideApproach = relativeDepth >= -doorSystem.outsideSensorDepth && relativeDepth <= 0.8;
+    const insideApproach = relativeDepth >= -0.12 && relativeDepth <= doorSystem.insideSensorDepth;
     const deeperInside =
-        localZ >= doorSystem.doorPlaneZ + doorSystem.autoCloseDepth &&
-        localZ <= doorSystem.roomEndZ + 1.2;
+        relativeDepth >= doorSystem.autoCloseDepth && relativeDepth <= relativeRoomEnd + 1.2;
 
     doorSystem.targetOpen =
         alignedWithOpening && withinHeight && (outsideApproach || insideApproach) && !deeperInside
@@ -503,8 +699,15 @@ function updateLorienVelmoreDoorSystem(doorSystem, playerPosition, frameDelta) {
     );
 
     const slideDistance = doorSystem.travelDistance * doorSystem.openAmount;
-    doorSystem.leftPanel.position.x = doorSystem.leftClosedX - slideDistance;
-    doorSystem.rightPanel.position.x = doorSystem.rightClosedX + slideDistance;
+    const panelSlideAxis = doorSystem.panelSlideAxis === 'z' ? 'z' : 'x';
+    const leftClosedCoord = Number.isFinite(doorSystem.leftClosedCoord)
+        ? doorSystem.leftClosedCoord
+        : Number(doorSystem.leftClosedX) || 0;
+    const rightClosedCoord = Number.isFinite(doorSystem.rightClosedCoord)
+        ? doorSystem.rightClosedCoord
+        : Number(doorSystem.rightClosedX) || 0;
+    doorSystem.leftPanel.position[panelSlideAxis] = leftClosedCoord - slideDistance;
+    doorSystem.rightPanel.position[panelSlideAxis] = rightClosedCoord + slideDistance;
 
     const panels = doorSystem.panels;
     if (Array.isArray(panels) && panels.length > 0) {
@@ -956,6 +1159,7 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
 
     const axis = variant.passageAxis === 'z' ? 'z' : 'x';
     const isLuxuryLorien = variant.decorStyle === 'lorienVelmoreLuxury';
+    const isUfoDiskoRetail = variant.decorStyle === 'ufoDiskoRetail';
     const isGalleryHall = variant.groundLayout === 'galleryHall';
     const transverseSpan = axis === 'x' ? building.depth : building.width;
     const passageWidth = THREE.MathUtils.clamp(variant.passageWidth, 4.8, transverseSpan - 3.6);
@@ -964,6 +1168,20 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     const bridgeHeight = Math.max(2.4, building.height - passageHeight);
     const wingOffset = passageWidth * 0.5 + sideWingSpan * 0.5;
     const tintColor = resolveBuildingTintColor(building.tint);
+    const ufoInteriorWallTexture = isUfoDiskoRetail ? createLuxuryMarbleTexture() : null;
+    if (ufoInteriorWallTexture) {
+        ufoInteriorWallTexture.repeat.set(
+            Math.max(1, Math.round((axis === 'x' ? building.width : building.depth) / 4.8)),
+            Math.max(1, Math.round(passageHeight / 3.2))
+        );
+    }
+    const ufoInteriorCeilingTexture = isUfoDiskoRetail ? createLuxuryMarbleTexture() : null;
+    if (ufoInteriorCeilingTexture) {
+        ufoInteriorCeilingTexture.repeat.set(
+            Math.max(1, Math.round((axis === 'x' ? passageWidth : building.depth) / 4.6)),
+            Math.max(1, Math.round((axis === 'x' ? building.width : passageWidth) / 4.6))
+        );
+    }
     const shellMaterial =
         isLuxuryLorien && isGalleryHall
             ? new THREE.MeshStandardMaterial({
@@ -973,13 +1191,25 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
                   roughness: 0.74,
                   metalness: 0.18,
               })
-            : baseMaterial.clone();
+            : isUfoDiskoRetail
+              ? new THREE.MeshStandardMaterial({
+                    color: 0x0d1523,
+                    emissive: 0x08111d,
+                    emissiveIntensity: 0.18,
+                    roughness: 0.72,
+                    metalness: 0.28,
+                })
+              : baseMaterial.clone();
     if ('vertexColors' in shellMaterial) {
         shellMaterial.vertexColors = false;
     }
     if (!isLuxuryLorien || !isGalleryHall) {
         shellMaterial.color.copy(tintColor);
         shellMaterial.emissive.copy(new THREE.Color(0xa6b7d0).lerp(tintColor, 0.18));
+        if (isUfoDiskoRetail) {
+            shellMaterial.color.lerp(new THREE.Color(0x070f1b), 0.7);
+            shellMaterial.emissive.lerp(new THREE.Color(0x071830), 0.55);
+        }
     }
     const towerCoreMaterial =
         isLuxuryLorien && isGalleryHall
@@ -993,31 +1223,68 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
             : shellMaterial;
 
     const passageSurfaceMaterial = new THREE.MeshStandardMaterial({
-        color: isLuxuryLorien && isGalleryHall ? 0xe9e3d8 : isLuxuryLorien ? 0x261e18 : 0x121c28,
-        emissive: isLuxuryLorien && isGalleryHall ? 0x1b1713 : isLuxuryLorien ? 0x18110c : 0x0b121a,
-        emissiveIntensity: isLuxuryLorien && isGalleryHall ? 0.05 : isLuxuryLorien ? 0.22 : 0.16,
-        roughness: isLuxuryLorien && isGalleryHall ? 0.22 : isLuxuryLorien ? 0.62 : 0.94,
-        metalness: isLuxuryLorien && isGalleryHall ? 0.04 : isLuxuryLorien ? 0.08 : 0.04,
+        color:
+            isLuxuryLorien && isGalleryHall
+                ? 0xe9e3d8
+                : isUfoDiskoRetail
+                  ? 0x0f1724
+                  : isLuxuryLorien
+                    ? 0x261e18
+                    : 0x121c28,
+        emissive:
+            isLuxuryLorien && isGalleryHall
+                ? 0x1b1713
+                : isUfoDiskoRetail
+                  ? 0x05070c
+                  : isLuxuryLorien
+                    ? 0x18110c
+                    : 0x0b121a,
+        emissiveIntensity:
+            isLuxuryLorien && isGalleryHall
+                ? 0.05
+                : isUfoDiskoRetail
+                  ? 0.12
+                  : isLuxuryLorien
+                    ? 0.22
+                    : 0.16,
+        roughness:
+            isLuxuryLorien && isGalleryHall
+                ? 0.22
+                : isUfoDiskoRetail
+                  ? 0.2
+                  : isLuxuryLorien
+                    ? 0.62
+                    : 0.94,
+        metalness:
+            isLuxuryLorien && isGalleryHall
+                ? 0.04
+                : isUfoDiskoRetail
+                  ? 0.46
+                  : isLuxuryLorien
+                    ? 0.08
+                    : 0.04,
         side: THREE.DoubleSide,
+        map: isUfoDiskoRetail ? ufoInteriorCeilingTexture : null,
     });
     const innerWallMaterial = new THREE.MeshStandardMaterial({
-        color: isLuxuryLorien ? 0x1c1816 : 0x172333,
-        emissive: isLuxuryLorien ? 0x14100d : 0x111a24,
-        emissiveIntensity: isLuxuryLorien ? 0.16 : 0.12,
-        roughness: isLuxuryLorien ? 0.58 : 0.92,
-        metalness: isLuxuryLorien ? 0.1 : 0.03,
+        color: isUfoDiskoRetail ? 0x0b1119 : isLuxuryLorien ? 0x1c1816 : 0x172333,
+        emissive: isUfoDiskoRetail ? 0x050912 : isLuxuryLorien ? 0x14100d : 0x111a24,
+        emissiveIntensity: isUfoDiskoRetail ? 0.1 : isLuxuryLorien ? 0.16 : 0.12,
+        roughness: isUfoDiskoRetail ? 0.24 : isLuxuryLorien ? 0.58 : 0.92,
+        metalness: isUfoDiskoRetail ? 0.42 : isLuxuryLorien ? 0.1 : 0.03,
+        map: isUfoDiskoRetail ? ufoInteriorWallTexture : null,
     });
     const lorienTrimMaterial = new THREE.MeshStandardMaterial({
-        color: 0xc9ac84,
-        emissive: 0x43301d,
-        emissiveIntensity: 0.16,
-        roughness: 0.28,
-        metalness: 0.86,
+        color: isUfoDiskoRetail ? 0x67f1ff : 0xc9ac84,
+        emissive: isUfoDiskoRetail ? 0x134455 : 0x43301d,
+        emissiveIntensity: isUfoDiskoRetail ? 0.22 : 0.16,
+        roughness: isUfoDiskoRetail ? 0.2 : 0.28,
+        metalness: isUfoDiskoRetail ? 0.82 : 0.86,
     });
     const lorienLightMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffefcb,
+        color: isUfoDiskoRetail ? 0xff66eb : 0xffefcb,
         transparent: true,
-        opacity: 0.88,
+        opacity: isUfoDiskoRetail ? 0.92 : 0.88,
         toneMapped: false,
     });
 
@@ -1076,6 +1343,17 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
         group.add(mesh);
     });
 
+    if (isUfoDiskoRetail && !isGalleryHall) {
+        addUfoDiskoMixedUseFacade(group, baseGeometry, {
+            axis,
+            building,
+            passageWidth,
+            passageHeight,
+            trimMaterial: lorienTrimMaterial,
+            lightMaterial: lorienLightMaterial,
+        });
+    }
+
     if (isGalleryHall) {
         addLorienVelmoreTowerFacade(group, baseGeometry, {
             building,
@@ -1131,6 +1409,7 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     }
 
     let lorienDoorSystem = null;
+    let lorienDoorSystems = [];
     if (isLuxuryLorien && !isGalleryHall) {
         addLorienVelmoreLuxuryPassageDecor(group, baseGeometry, {
             axis,
@@ -1138,6 +1417,16 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
             passageWidth,
             passageHeight,
             isGalleryHall,
+        });
+    } else if (isUfoDiskoRetail && !isGalleryHall) {
+        lorienDoorSystems = addUfoDiskoRetailPassageDecor(group, baseGeometry, {
+            axis,
+            building,
+            passageWidth,
+            passageHeight,
+            trimMaterial: lorienTrimMaterial,
+            lightMaterial: lorienLightMaterial,
+            storeName: variant.storeName,
         });
     }
 
@@ -1168,10 +1457,452 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     }
 
     if (lorienDoorSystem) {
+        lorienDoorSystems.push(lorienDoorSystem);
         group.userData.lorienVelmoreDoorSystem = lorienDoorSystem;
+    }
+    if (lorienDoorSystems.length > 0) {
+        group.userData.lorienVelmoreDoorSystems = lorienDoorSystems;
     }
 
     return group;
+}
+
+function addUfoDiskoMixedUseFacade(
+    group,
+    baseGeometry,
+    { axis, building, passageWidth, passageHeight, trimMaterial, lightMaterial }
+) {
+    const travelSpan = axis === 'x' ? building.width : building.depth;
+    const crossSpan = axis === 'x' ? building.depth : building.width;
+    const wingSpan = Math.max(1.4, (crossSpan - passageWidth) * 0.5);
+    const facadeDepth = 0.18;
+    const podiumHeight = THREE.MathUtils.clamp(
+        Math.max(passageHeight + 0.72, building.height * 0.28),
+        passageHeight + 0.52,
+        building.height - 5.2
+    );
+    const upperHeight = Math.max(5.2, building.height - podiumHeight);
+    const roofCapHeight = THREE.MathUtils.clamp(upperHeight * 0.045, 0.86, 1.28);
+    const residentialFacadeHeight = Math.max(4.2, upperHeight - roofCapHeight);
+    const residentialFacadeCenterY = podiumHeight + residentialFacadeHeight * 0.5;
+    const podiumFrontTexture = createLuxuryMarbleTexture();
+    podiumFrontTexture.repeat.set(
+        Math.max(1, Math.round(crossSpan / 3.8)),
+        Math.max(2, Math.round(podiumHeight / 3.2))
+    );
+    const podiumSideTexture = createLuxuryMarbleTexture();
+    podiumSideTexture.repeat.set(
+        Math.max(2, Math.round(travelSpan / 4.2)),
+        Math.max(2, Math.round(podiumHeight / 3.2))
+    );
+    const residentialFrontTexture = createLuxuryMarbleTexture();
+    residentialFrontTexture.repeat.set(
+        Math.max(1, Math.round(crossSpan / 5.2)),
+        Math.max(2, Math.round(residentialFacadeHeight / 3.1))
+    );
+    const residentialSideTexture = createLuxuryMarbleTexture();
+    residentialSideTexture.repeat.set(
+        Math.max(2, Math.round(travelSpan / 5.2)),
+        Math.max(2, Math.round(residentialFacadeHeight / 3.1))
+    );
+
+    const podiumFrontMaterial = new THREE.MeshStandardMaterial({
+        color: 0x172231,
+        map: podiumFrontTexture,
+        emissive: 0x08111d,
+        emissiveIntensity: 0.12,
+        roughness: 0.22,
+        metalness: 0.22,
+    });
+    const podiumSideMaterial = new THREE.MeshStandardMaterial({
+        color: 0x13202d,
+        map: podiumSideTexture,
+        emissive: 0x08111b,
+        emissiveIntensity: 0.12,
+        roughness: 0.24,
+        metalness: 0.2,
+    });
+    const podiumRibMaterial = trimMaterial.clone();
+    podiumRibMaterial.color.setHex(0x2f7082);
+    podiumRibMaterial.emissive.setHex(0x0d2231);
+    podiumRibMaterial.emissiveIntensity = 0.16;
+    podiumRibMaterial.roughness = 0.28;
+    podiumRibMaterial.metalness = 0.84;
+    const podiumPlinthMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0b1018,
+        emissive: 0x050a11,
+        emissiveIntensity: 0.06,
+        roughness: 0.34,
+        metalness: 0.32,
+    });
+    const residentialFrontMaterial = new THREE.MeshStandardMaterial({
+        color: 0x5b6474,
+        map: residentialFrontTexture,
+        emissive: 0x141922,
+        emissiveIntensity: 0.05,
+        roughness: 0.62,
+        metalness: 0.1,
+    });
+    const residentialSideMaterial = new THREE.MeshStandardMaterial({
+        color: 0x56606f,
+        map: residentialSideTexture,
+        emissive: 0x141922,
+        emissiveIntensity: 0.05,
+        roughness: 0.64,
+        metalness: 0.09,
+    });
+    const residentialBandMaterial = new THREE.MeshStandardMaterial({
+        color: 0x2b3341,
+        emissive: 0x0f141d,
+        emissiveIntensity: 0.08,
+        roughness: 0.42,
+        metalness: 0.28,
+    });
+    const residentialRevealMaterial = new THREE.MeshStandardMaterial({
+        color: 0x202935,
+        emissive: 0x0e141d,
+        emissiveIntensity: 0.08,
+        roughness: 0.3,
+        metalness: 0.14,
+    });
+    const residentialFrameMaterial = new THREE.MeshStandardMaterial({
+        color: 0xaeb8c4,
+        emissive: 0x1a2634,
+        emissiveIntensity: 0.08,
+        roughness: 0.2,
+        metalness: 0.78,
+    });
+    const residentialGlassTexture = createLuxuryGlassWindowTexture();
+    residentialGlassTexture.repeat.set(1, Math.max(1, Math.round(residentialFacadeHeight / 2.6)));
+    const residentialGlassMaterial = createLorienTowerGlassMaterial(residentialGlassTexture);
+    residentialGlassMaterial.color.setHex(0xaec2d4);
+    residentialGlassMaterial.emissive.setHex(0x31404d);
+    residentialGlassMaterial.emissiveIntensity = 0.12;
+    residentialGlassMaterial.opacity = 0.84;
+    const residentialGlowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xfff1dc,
+        transparent: true,
+        opacity: 0.22,
+        toneMapped: false,
+    });
+    const residentialCoolGlowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xa7f4ff,
+        transparent: true,
+        opacity: 0.18,
+        toneMapped: false,
+    });
+    const crownLightMaterial = lightMaterial.clone();
+    crownLightMaterial.color.setHex(0x8df5ff);
+    crownLightMaterial.opacity = 0.18;
+
+    const addFacadeFace = (faceAxis, faceCoordinate, y, span, height, material, along = 0) => {
+        if (faceAxis === 'z') {
+            addDecorBox(group, baseGeometry, material, {
+                x: along,
+                y,
+                z: faceCoordinate,
+                width: span,
+                height,
+                depth: facadeDepth,
+            });
+        } else {
+            addDecorBox(group, baseGeometry, material, {
+                x: faceCoordinate,
+                y,
+                z: along,
+                width: facadeDepth,
+                height,
+                depth: span,
+            });
+        }
+    };
+
+    const addFacadeRibbon = (faceAxis, faceCoordinate, y, span, material, along = 0) => {
+        if (faceAxis === 'z') {
+            addDecorBox(group, baseGeometry, material, {
+                x: along,
+                y,
+                z: faceCoordinate,
+                width: span,
+                height: 0.05,
+                depth: 0.03,
+            });
+        } else {
+            addDecorBox(group, baseGeometry, material, {
+                x: faceCoordinate,
+                y,
+                z: along,
+                width: 0.03,
+                height: 0.05,
+                depth: span,
+            });
+        }
+    };
+
+    const addVerticalPilasters = ({
+        faceAxis,
+        faceCoordinate,
+        span,
+        y,
+        height,
+        count,
+        material,
+        edgeInset = 0.72,
+    }) => {
+        const resolvedCount = Math.max(1, Math.round(count));
+        if (resolvedCount === 1) {
+            addFacadeFace(faceAxis, faceCoordinate, y, 0.12, height, material);
+            return;
+        }
+        const usableSpan = Math.max(0.24, span - edgeInset * 2);
+        for (let index = 0; index < resolvedCount; index += 1) {
+            const t = resolvedCount === 1 ? 0.5 : index / (resolvedCount - 1);
+            const along = -usableSpan * 0.5 + usableSpan * t;
+            addFacadeFace(faceAxis, faceCoordinate, y, 0.12, height, material, along);
+        }
+    };
+
+    const rowCount = Math.max(
+        3,
+        Math.min(10, Math.floor((residentialFacadeHeight - 1.2) / 3.02))
+    );
+    const rowSpacing = residentialFacadeHeight / rowCount;
+    const windowHeight = THREE.MathUtils.clamp(rowSpacing - 0.9, 1.56, 2.12);
+    const residentialWindowFloat = facadeDepth * 0.38;
+    const addResidentialWindows = ({ faceAxis, faceCoordinate, span, edgeInset = 1.34 }) => {
+        const faceDirection = Math.sign(faceCoordinate) || 1;
+        const floatedFaceCoordinate = faceCoordinate + faceDirection * residentialWindowFloat;
+        const usableSpan = span - edgeInset * 2;
+        if (usableSpan <= 3.2) {
+            return;
+        }
+        const columnCount = Math.max(2, Math.min(7, Math.floor(usableSpan / 2.85)));
+        const columnSpacing = usableSpan / columnCount;
+        const windowWidth = THREE.MathUtils.clamp(columnSpacing - 0.68, 1.24, 1.92);
+
+        for (let row = 0; row < rowCount; row += 1) {
+            const windowY = podiumHeight + rowSpacing * (row + 0.5);
+            if (row < rowCount - 1) {
+                addFacadeFace(
+                    faceAxis,
+                    faceCoordinate,
+                    podiumHeight + rowSpacing * (row + 1) - 0.1,
+                    span - 0.72,
+                    0.08,
+                    residentialBandMaterial
+                );
+            }
+            for (let column = 0; column < columnCount; column += 1) {
+                const along =
+                    -usableSpan * 0.5 +
+                    columnSpacing * (column + 0.5) +
+                    (row % 2 === 0 ? -0.08 : 0.08);
+                const glowMaterial =
+                    (row + column) % 3 === 0
+                        ? residentialCoolGlowMaterial
+                        : residentialGlowMaterial;
+                addLorienLuxuryWindow(group, baseGeometry, {
+                    axis: faceAxis,
+                    faceCoordinate: floatedFaceCoordinate,
+                    along,
+                    y: windowY,
+                    width: windowWidth,
+                    height: windowHeight,
+                    frameMaterial: residentialFrameMaterial,
+                    glassMaterial: residentialGlassMaterial,
+                    revealMaterial: residentialRevealMaterial,
+                    trimMaterial: residentialBandMaterial,
+                    glowMaterial,
+                    paneCount: windowWidth > 1.6 ? 2 : 1,
+                });
+            }
+        }
+    };
+
+    const entryFaceAxis = axis === 'x' ? 'x' : 'z';
+    const sideFaceAxis = axis === 'x' ? 'z' : 'x';
+    const entryFaceCoord = travelSpan * 0.5 + facadeDepth * 0.5;
+    const sideFaceCoord = crossSpan * 0.5 + facadeDepth * 0.5;
+    const entrySidePanelWidth = Math.max(1.02, wingSpan - 0.28);
+    const entrySidePanelCenter = passageWidth * 0.5 + entrySidePanelWidth * 0.5 + 0.14;
+    const entrySpandrelHeight = Math.max(0.92, podiumHeight - passageHeight);
+    const entryPlinthHeight = 0.14;
+
+    [-1, 1].forEach((direction) => {
+        const faceCoordinate = direction * entryFaceCoord;
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            podiumHeight * 0.5,
+            entrySidePanelWidth,
+            podiumHeight,
+            podiumFrontMaterial,
+            -entrySidePanelCenter
+        );
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            podiumHeight * 0.5,
+            entrySidePanelWidth,
+            podiumHeight,
+            podiumFrontMaterial,
+            entrySidePanelCenter
+        );
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            passageHeight + entrySpandrelHeight * 0.5,
+            passageWidth + 1.34,
+            entrySpandrelHeight,
+            podiumFrontMaterial
+        );
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            entryPlinthHeight * 0.5,
+            entrySidePanelWidth,
+            entryPlinthHeight,
+            podiumPlinthMaterial,
+            -entrySidePanelCenter
+        );
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            entryPlinthHeight * 0.5,
+            entrySidePanelWidth,
+            entryPlinthHeight,
+            podiumPlinthMaterial,
+            entrySidePanelCenter
+        );
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            residentialFacadeCenterY,
+            crossSpan - 0.42,
+            residentialFacadeHeight,
+            residentialFrontMaterial
+        );
+        addFacadeFace(
+            entryFaceAxis,
+            faceCoordinate,
+            building.height - roofCapHeight * 0.5,
+            crossSpan - 0.18,
+            roofCapHeight,
+            residentialBandMaterial
+        );
+        addFacadeRibbon(
+            entryFaceAxis,
+            faceCoordinate - direction * 0.1,
+            podiumHeight - 0.34,
+            crossSpan - 0.82,
+            crownLightMaterial
+        );
+        addVerticalPilasters({
+            faceAxis: entryFaceAxis,
+            faceCoordinate: faceCoordinate - direction * 0.01,
+            span: crossSpan - 0.9,
+            y: residentialFacadeCenterY,
+            height: residentialFacadeHeight,
+            count: Math.max(3, Math.round(crossSpan / 3.6)),
+            material: residentialBandMaterial,
+            edgeInset: 1.18,
+        });
+        [-1, 1].forEach((sideDirection) => {
+            addFacadeFace(
+                entryFaceAxis,
+                faceCoordinate - direction * 0.02,
+                podiumHeight * 0.5,
+                0.18,
+                podiumHeight,
+                podiumRibMaterial,
+                sideDirection * (passageWidth * 0.5 + 0.36)
+            );
+            addFacadeFace(
+                entryFaceAxis,
+                faceCoordinate - direction * 0.02,
+                podiumHeight * 0.5,
+                0.12,
+                podiumHeight,
+                podiumRibMaterial,
+                sideDirection * (crossSpan * 0.5 - 0.36)
+            );
+        });
+        addResidentialWindows({
+            faceAxis: entryFaceAxis,
+            faceCoordinate: faceCoordinate - direction * 0.02,
+            span: crossSpan - 2.2,
+            edgeInset: 1.32,
+        });
+    });
+
+    [-1, 1].forEach((direction) => {
+        const faceCoordinate = direction * sideFaceCoord;
+        addFacadeFace(
+            sideFaceAxis,
+            faceCoordinate,
+            podiumHeight * 0.5,
+            travelSpan - 0.38,
+            podiumHeight,
+            podiumSideMaterial
+        );
+        addFacadeFace(
+            sideFaceAxis,
+            faceCoordinate,
+            0.22,
+            travelSpan - 0.46,
+            0.44,
+            podiumPlinthMaterial
+        );
+        addFacadeFace(
+            sideFaceAxis,
+            faceCoordinate,
+            residentialFacadeCenterY,
+            travelSpan - 0.34,
+            residentialFacadeHeight,
+            residentialSideMaterial
+        );
+        addFacadeFace(
+            sideFaceAxis,
+            faceCoordinate,
+            building.height - roofCapHeight * 0.5,
+            travelSpan - 0.14,
+            roofCapHeight,
+            residentialBandMaterial
+        );
+        addFacadeRibbon(
+            sideFaceAxis,
+            faceCoordinate - direction * 0.1,
+            podiumHeight - 0.34,
+            travelSpan - 0.72,
+            crownLightMaterial
+        );
+        addVerticalPilasters({
+            faceAxis: sideFaceAxis,
+            faceCoordinate: faceCoordinate - direction * 0.01,
+            span: travelSpan - 0.72,
+            y: podiumHeight * 0.5,
+            height: podiumHeight,
+            count: Math.max(4, Math.round(travelSpan / 4.1)),
+            material: podiumRibMaterial,
+            edgeInset: 0.88,
+        });
+        addVerticalPilasters({
+            faceAxis: sideFaceAxis,
+            faceCoordinate: faceCoordinate - direction * 0.01,
+            span: travelSpan - 0.86,
+            y: residentialFacadeCenterY,
+            height: residentialFacadeHeight,
+            count: Math.max(4, Math.round(travelSpan / 3.8)),
+            material: residentialBandMaterial,
+            edgeInset: 1.18,
+        });
+        addResidentialWindows({
+            faceAxis: sideFaceAxis,
+            faceCoordinate: faceCoordinate - direction * 0.02,
+            span: travelSpan - 2.1,
+            edgeInset: 1.44,
+        });
+    });
 }
 
 function addDriveThroughBuildingObstacles(building, variant) {
@@ -1352,6 +2083,1072 @@ function addLorienVelmoreLuxuryPassageDecor(
             depth: axis === 'x' ? passageWidth - 0.52 : 0.024,
         });
     });
+}
+
+function addUfoDiskoRetailPassageDecor(
+    group,
+    baseGeometry,
+    {
+        axis,
+        building,
+        passageWidth,
+        passageHeight,
+        trimMaterial,
+        lightMaterial,
+        storeName = 'UFO DISKO',
+    }
+) {
+    const travelSpan = axis === 'x' ? building.width : building.depth;
+    const passageLength = Math.max(4.8, travelSpan - 1.2);
+    const laneWidth = THREE.MathUtils.clamp(passageWidth * 0.48, 2.8, passageWidth - 1.9);
+    const floorWidth = Math.max(laneWidth + 0.8, passageWidth - 0.48);
+    const edgeBandOffset = laneWidth * 0.5 + 0.28;
+    const displayOffsets = [-passageLength * 0.26, 0, passageLength * 0.26];
+    const platformWidth = Math.max(0.94, (passageWidth - laneWidth) * 0.5 - 0.28);
+    const doorSystems = [];
+
+    const floorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x09111d,
+        emissive: 0x050c17,
+        emissiveIntensity: 0.14,
+        roughness: 0.34,
+        metalness: 0.3,
+    });
+    const laneMaterial = new THREE.MeshStandardMaterial({
+        color: 0x111a28,
+        emissive: 0x091325,
+        emissiveIntensity: 0.2,
+        roughness: 0.24,
+        metalness: 0.44,
+    });
+    const merchPlinthMaterial = new THREE.MeshStandardMaterial({
+        color: 0x1b2432,
+        emissive: 0x0d1520,
+        emissiveIntensity: 0.16,
+        roughness: 0.28,
+        metalness: 0.42,
+    });
+    const haloMaterial = new THREE.MeshBasicMaterial({
+        color: 0x78efff,
+        transparent: true,
+        opacity: 0.16,
+        toneMapped: false,
+        depthWrite: false,
+    });
+    const magentaHaloMaterial = new THREE.MeshBasicMaterial({
+        color: 0xff62da,
+        transparent: true,
+        opacity: 0.15,
+        toneMapped: false,
+        depthWrite: false,
+    });
+    const wallPanelTexture = createLuxuryMarbleTexture();
+    wallPanelTexture.repeat.set(
+        Math.max(1, Math.round(passageLength / 4.4)),
+        Math.max(1, Math.round(passageHeight / 3.1))
+    );
+    const wallInsetTexture = createLuxuryMarbleTexture();
+    wallInsetTexture.repeat.set(
+        Math.max(1, Math.round(passageLength / 4.8)),
+        Math.max(1, Math.round(passageHeight / 3.6))
+    );
+    const wallCoveTexture = createLuxuryMarbleTexture();
+    wallCoveTexture.repeat.set(
+        Math.max(1, Math.round(passageLength / 5.2)),
+        1
+    );
+    const wallPanelMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0d131b,
+        emissive: 0x060b12,
+        emissiveIntensity: 0.09,
+        roughness: 0.18,
+        metalness: 0.54,
+        map: wallPanelTexture,
+    });
+    const wallInsetMaterial = new THREE.MeshStandardMaterial({
+        color: 0x05080f,
+        emissive: 0x03060c,
+        emissiveIntensity: 0.05,
+        roughness: 0.16,
+        metalness: 0.42,
+        map: wallInsetTexture,
+    });
+    const wallCoveMaterial = new THREE.MeshStandardMaterial({
+        color: 0x101722,
+        emissive: 0x08111b,
+        emissiveIntensity: 0.08,
+        roughness: 0.16,
+        metalness: 0.5,
+        map: wallCoveTexture,
+    });
+
+    addUfoDiskoWallTreatments(group, baseGeometry, {
+        axis,
+        passageWidth,
+        passageLength,
+        passageHeight,
+        laneWidth,
+        displayOffsets,
+        trimMaterial,
+        wallPanelMaterial,
+        wallInsetMaterial,
+        wallCoveMaterial,
+    });
+
+    addDecorBox(group, baseGeometry, floorMaterial, {
+        x: 0,
+        y: 0.024,
+        z: 0,
+        width: axis === 'x' ? passageLength : floorWidth,
+        height: 0.02,
+        depth: axis === 'x' ? floorWidth : passageLength,
+    });
+    addDecorBox(group, baseGeometry, laneMaterial, {
+        x: 0,
+        y: 0.038,
+        z: 0,
+        width: axis === 'x' ? passageLength - 0.26 : laneWidth,
+        height: 0.022,
+        depth: axis === 'x' ? laneWidth : passageLength - 0.26,
+    });
+    [-1, 1].forEach((direction) => {
+        addDecorBox(group, baseGeometry, merchPlinthMaterial, {
+            x: axis === 'x' ? 0 : direction * (laneWidth * 0.5 + platformWidth * 0.5 + 0.18),
+            y: 0.052,
+            z: axis === 'x' ? direction * (laneWidth * 0.5 + platformWidth * 0.5 + 0.18) : 0,
+            width: axis === 'x' ? passageLength - 0.52 : platformWidth,
+            height: 0.05,
+            depth: axis === 'x' ? platformWidth : passageLength - 0.52,
+        });
+    });
+
+    addLorienLedRibbon(group, baseGeometry, {
+        x: axis === 'x' ? 0 : -edgeBandOffset,
+        y: 0.08,
+        z: axis === 'x' ? -edgeBandOffset : 0,
+        width: axis === 'x' ? passageLength - 0.76 : 0.05,
+        height: 0.03,
+        depth: axis === 'x' ? 0.05 : passageLength - 0.76,
+        axis,
+        segmentCount: Math.max(8, Math.round(passageLength / 1.8)),
+        segmentGap: 0.08,
+        haloColor: 0x62f0ff,
+        coreColor: 0xb9feff,
+        haloOpacity: 0.22,
+        coreOpacity: 0.72,
+        sweepSpeed: 0.0012,
+        sweepPhase: 0.08,
+        sweepBand: 0.18,
+    });
+    addLorienLedRibbon(group, baseGeometry, {
+        x: axis === 'x' ? 0 : edgeBandOffset,
+        y: 0.08,
+        z: axis === 'x' ? edgeBandOffset : 0,
+        width: axis === 'x' ? passageLength - 0.76 : 0.05,
+        height: 0.03,
+        depth: axis === 'x' ? 0.05 : passageLength - 0.76,
+        axis,
+        segmentCount: Math.max(8, Math.round(passageLength / 1.8)),
+        segmentGap: 0.08,
+        haloColor: 0xff62da,
+        coreColor: 0xffb6ef,
+        haloOpacity: 0.22,
+        coreOpacity: 0.72,
+        sweepSpeed: 0.0012,
+        sweepPhase: 0.54,
+        sweepBand: 0.18,
+        reverseSweep: true,
+    });
+    addLorienLedRibbon(group, baseGeometry, {
+        x: 0,
+        y: passageHeight - 0.18,
+        z: 0,
+        width: axis === 'x' ? passageLength - 0.92 : 0.08,
+        height: 0.04,
+        depth: axis === 'x' ? 0.08 : passageLength - 0.92,
+        axis,
+        segmentCount: Math.max(9, Math.round(passageLength / 1.6)),
+        segmentGap: 0.08,
+        haloColor: 0x65f6ff,
+        coreColor: 0xffffff,
+        haloOpacity: 0.18,
+        coreOpacity: 0.54,
+        sweepSpeed: 0.0009,
+        sweepPhase: 0.24,
+        sweepBand: 0.16,
+    });
+
+    displayOffsets.forEach((travelOffset, index) => {
+        addUfoDiskoMerchDisplay(group, baseGeometry, {
+            axis,
+            side: -1,
+            passageWidth,
+            travelOffset,
+            textureIndex: index,
+            trimMaterial,
+            plinthMaterial: merchPlinthMaterial,
+            haloMaterial,
+        });
+        addUfoDiskoMerchDisplay(group, baseGeometry, {
+            axis,
+            side: 1,
+            passageWidth,
+            travelOffset,
+            textureIndex: index + 3,
+            trimMaterial,
+            plinthMaterial: merchPlinthMaterial,
+            haloMaterial: magentaHaloMaterial,
+        });
+    });
+
+    [-1, 1].forEach((direction) => {
+        doorSystems.push(
+            createUfoDiskoAutomaticDoorSystem(group, baseGeometry, {
+                axis,
+                building,
+                passageWidth,
+                passageHeight,
+                portalDirection: direction,
+                trimMaterial,
+            })
+        );
+        addUfoDiskoPortalSign(group, {
+            axis,
+            passageWidth,
+            travelSpan,
+            direction,
+            y: passageHeight - 0.92,
+            storeName,
+            lightMaterial,
+        });
+    });
+
+    const discoBallMaterial = new THREE.MeshStandardMaterial({
+        color: 0xb7f7ff,
+        emissive: 0x1d5672,
+        emissiveIntensity: 0.24,
+        roughness: 0.16,
+        metalness: 0.92,
+    });
+    const discoBall = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), discoBallMaterial);
+    discoBall.position.set(0, passageHeight - 1.05, 0);
+    discoBall.castShadow = false;
+    discoBall.receiveShadow = false;
+    group.add(discoBall);
+
+    const discoRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.82, 0.05, 12, 40),
+        new THREE.MeshBasicMaterial({
+            color: 0x75f0ff,
+            transparent: true,
+            opacity: 0.28,
+            toneMapped: false,
+            depthWrite: false,
+        })
+    );
+    discoRing.rotation.x = Math.PI * 0.5;
+    discoRing.position.copy(discoBall.position);
+    discoRing.position.y -= 0.24;
+    group.add(discoRing);
+
+    addDecorBox(group, baseGeometry, trimMaterial, {
+        x: 0,
+        y: passageHeight - 0.48,
+        z: 0,
+        width: 0.06,
+        height: 0.88,
+        depth: 0.06,
+    });
+    addDecorBox(group, baseGeometry, haloMaterial, {
+        x: 0,
+        y: passageHeight - 1.05,
+        z: 0,
+        width: 1.42,
+        height: 0.08,
+        depth: 1.42,
+    });
+
+    return doorSystems.filter(Boolean);
+}
+
+function addUfoDiskoWallTreatments(
+    group,
+    baseGeometry,
+    {
+        axis,
+        passageWidth,
+        passageLength,
+        passageHeight,
+        laneWidth,
+        displayOffsets,
+        trimMaterial,
+        wallPanelMaterial,
+        wallInsetMaterial,
+        wallCoveMaterial,
+    }
+) {
+    const wallThickness = 0.16;
+    const insetThickness = 0.08;
+    const cassetteHeight = 4.18;
+    const cassetteDepth = 3.08;
+    const cassetteY = 2.44;
+    const sideWallCoord = passageWidth * 0.5 - wallThickness * 0.5 - 0.02;
+    const sideRibbonCoord = passageWidth * 0.5 - 0.18;
+    const topCoveY = passageHeight - 0.9;
+    const lowerBandY = 0.72;
+    const ceilingRunLength = Math.max(4.6, passageLength - 1.26);
+    const lowerBandLength = Math.max(4.2, passageLength - 1.08);
+    const cyanGlow = 0x72f3ff;
+    const magentaGlow = 0xff69df;
+
+    const addWallBox = (
+        material,
+        { sideDirection = 1, along = 0, y = 0, width = 0.12, height = 1, depth = 1 }
+    ) => {
+        if (axis === 'z') {
+            addDecorBox(group, baseGeometry, material, {
+                x: sideDirection * sideWallCoord,
+                y,
+                z: along,
+                width,
+                height,
+                depth,
+            });
+            return;
+        }
+        addDecorBox(group, baseGeometry, material, {
+            x: along,
+            y,
+            z: sideDirection * sideWallCoord,
+            width: depth,
+            height,
+            depth: width,
+        });
+    };
+
+    [-1, 1].forEach((sideDirection) => {
+        const sideGlow = sideDirection < 0 ? cyanGlow : magentaGlow;
+        const coreGlow = sideDirection < 0 ? 0xe2fdff : 0xffd4f6;
+
+        addWallBox(wallCoveMaterial, {
+            sideDirection,
+            along: 0,
+            y: topCoveY,
+            width: wallThickness,
+            height: 0.48,
+            depth: ceilingRunLength,
+        });
+        addWallBox(wallPanelMaterial, {
+            sideDirection,
+            along: 0,
+            y: lowerBandY,
+            width: wallThickness,
+            height: 1.22,
+            depth: lowerBandLength,
+        });
+
+        addLorienLedRibbon(group, baseGeometry, {
+            x: axis === 'x' ? 0 : sideDirection * sideRibbonCoord,
+            y: passageHeight - 1.02,
+            z: axis === 'x' ? sideDirection * sideRibbonCoord : 0,
+            width: axis === 'x' ? ceilingRunLength : 0.03,
+            height: 0.05,
+            depth: axis === 'x' ? 0.03 : ceilingRunLength,
+            axis,
+            segmentCount: Math.max(8, Math.round(ceilingRunLength / 1.45)),
+            segmentGap: 0.06,
+            haloColor: sideGlow,
+            coreColor: coreGlow,
+            haloOpacity: 0.18,
+            coreOpacity: 0.56,
+            sweepSpeed: 0.001,
+            sweepPhase: sideDirection < 0 ? 0.12 : 0.56,
+            sweepBand: 0.18,
+            reverseSweep: sideDirection > 0,
+        });
+
+        displayOffsets.forEach((travelOffset, index) => {
+            addWallBox(wallPanelMaterial, {
+                sideDirection,
+                along: travelOffset,
+                y: cassetteY,
+                width: wallThickness,
+                height: cassetteHeight,
+                depth: cassetteDepth,
+            });
+            addWallBox(wallInsetMaterial, {
+                sideDirection,
+                along: travelOffset,
+                y: cassetteY,
+                width: insetThickness,
+                height: cassetteHeight - 0.42,
+                depth: cassetteDepth - 0.34,
+            });
+            addWallBox(trimMaterial, {
+                sideDirection,
+                along: travelOffset,
+                y: cassetteY + cassetteHeight * 0.5 - 0.14,
+                width: 0.06,
+                height: 0.1,
+                depth: cassetteDepth - 0.22,
+            });
+
+            const edgeOffsets = [-cassetteDepth * 0.34, cassetteDepth * 0.34];
+            edgeOffsets.forEach((edgeOffset, edgeIndex) => {
+                addLorienLedRibbon(group, baseGeometry, {
+                    x:
+                        axis === 'z'
+                            ? sideDirection * (sideRibbonCoord - 0.02)
+                            : travelOffset + edgeOffset,
+                    y: 2.76,
+                    z:
+                        axis === 'z'
+                            ? travelOffset + edgeOffset
+                            : sideDirection * (sideRibbonCoord - 0.02),
+                    width: 0.03,
+                    height: 1.86,
+                    depth: 0.03,
+                    axis: 'y',
+                    segmentCount: 5,
+                    segmentGap: 0.06,
+                    haloColor: sideGlow,
+                    coreColor: coreGlow,
+                    haloOpacity: 0.2,
+                    coreOpacity: 0.62,
+                    sweepSpeed: 0.00105,
+                    sweepPhase:
+                        (sideDirection < 0 ? 0.08 : 0.44) + index * 0.14 + edgeIndex * 0.09,
+                    sweepBand: 0.22,
+                    reverseSweep: (index + edgeIndex) % 2 === 1,
+                });
+            });
+
+            addLorienLedRibbon(group, baseGeometry, {
+                x: axis === 'x' ? travelOffset : sideDirection * (sideRibbonCoord - 0.01),
+                y: 4.08,
+                z: axis === 'x' ? sideDirection * (sideRibbonCoord - 0.01) : travelOffset,
+                width: axis === 'x' ? 1.34 : 0.028,
+                height: 0.04,
+                depth: axis === 'x' ? 0.028 : 1.34,
+                axis,
+                segmentCount: 4,
+                segmentGap: 0.05,
+                haloColor: sideGlow,
+                coreColor: coreGlow,
+                haloOpacity: 0.16,
+                coreOpacity: 0.48,
+                sweepSpeed: 0.00092,
+                sweepPhase: 0.24 + index * 0.16 + (sideDirection > 0 ? 0.4 : 0),
+                sweepBand: 0.24,
+                reverseSweep: sideDirection > 0,
+            });
+
+            addWallBox(wallInsetMaterial, {
+                sideDirection,
+                along: travelOffset,
+                y: 4.48,
+                width: 0.06,
+                height: 0.36,
+                depth: 1.18,
+            });
+        });
+
+        const midOffsets = [-passageLength * 0.13, passageLength * 0.13];
+        midOffsets.forEach((travelOffset, index) => {
+            addWallBox(trimMaterial, {
+                sideDirection,
+                along: travelOffset,
+                y: 4.78,
+                width: 0.05,
+                height: 0.08,
+                depth: 0.86,
+            });
+            addLorienLedRibbon(group, baseGeometry, {
+                x: axis === 'x' ? travelOffset : sideDirection * (sideRibbonCoord - 0.015),
+                y: 4.92,
+                z: axis === 'x' ? sideDirection * (sideRibbonCoord - 0.015) : travelOffset,
+                width: axis === 'x' ? 0.72 : 0.022,
+                height: 0.03,
+                depth: axis === 'x' ? 0.022 : 0.72,
+                axis,
+                segmentCount: 3,
+                segmentGap: 0.04,
+                haloColor: sideGlow,
+                coreColor: coreGlow,
+                haloOpacity: 0.15,
+                coreOpacity: 0.42,
+                sweepSpeed: 0.00084,
+                sweepPhase: 0.18 + index * 0.32,
+                sweepBand: 0.28,
+                reverseSweep: sideDirection < 0,
+            });
+        });
+    });
+}
+
+function addUfoDiskoMerchDisplay(
+    group,
+    baseGeometry,
+    {
+        axis,
+        side = 1,
+        passageWidth,
+        travelOffset = 0,
+        textureIndex = 0,
+        trimMaterial,
+        plinthMaterial,
+        haloMaterial,
+    }
+) {
+    const sideDirection = side < 0 ? -1 : 1;
+    const displayWidth = 1.62;
+    const displayHeight = 2.24;
+    const shelfHeight = 0.84;
+    const hangerHeight = 2.92;
+    const panelThickness = 0.06;
+    const sideInset = passageWidth * 0.5 - 0.34;
+    const shelfDepth = 0.62;
+    const frameMaterial = trimMaterial.clone();
+    frameMaterial.color.lerp(new THREE.Color(0xffffff), 0.1);
+
+    const panelMaterial = new THREE.MeshBasicMaterial({
+        map: getUfoDiskoTeeTexture(textureIndex),
+        transparent: true,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+    });
+    const glowMaterial = haloMaterial.clone();
+    glowMaterial.opacity =
+        (Number(haloMaterial.opacity) || 0.16) * (textureIndex % 2 === 0 ? 1 : 0.9);
+
+    if (axis === 'z') {
+        addDecorBox(group, baseGeometry, plinthMaterial, {
+            x: sideDirection * (sideInset - shelfDepth * 0.5 - 0.08),
+            y: shelfHeight * 0.5,
+            z: travelOffset,
+            width: shelfDepth,
+            height: shelfHeight,
+            depth: 1.8,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: sideDirection * (sideInset - panelThickness * 0.5),
+            y: 2.08,
+            z: travelOffset,
+            width: panelThickness,
+            height: displayHeight + 0.16,
+            depth: displayWidth + 0.16,
+        });
+    } else {
+        addDecorBox(group, baseGeometry, plinthMaterial, {
+            x: travelOffset,
+            y: shelfHeight * 0.5,
+            z: sideDirection * (sideInset - shelfDepth * 0.5 - 0.08),
+            width: 1.8,
+            height: shelfHeight,
+            depth: shelfDepth,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: travelOffset,
+            y: 2.08,
+            z: sideDirection * (sideInset - panelThickness * 0.5),
+            width: displayWidth + 0.16,
+            height: displayHeight + 0.16,
+            depth: panelThickness,
+        });
+    }
+
+    addUfoDiskoDisplayPlane(group, {
+        axis,
+        sideDirection,
+        sideInset,
+        travelOffset,
+        width: displayWidth,
+        height: displayHeight,
+        y: 2.08,
+        surfaceOffset: 0.05,
+        material: glowMaterial,
+        glowScale: 1.08,
+    });
+    addUfoDiskoDisplayPlane(group, {
+        axis,
+        sideDirection,
+        sideInset,
+        travelOffset,
+        width: displayWidth,
+        height: displayHeight,
+        y: 2.08,
+        surfaceOffset: 0.08,
+        material: panelMaterial,
+    });
+
+    if (axis === 'z') {
+        addDecorBox(group, baseGeometry, trimMaterial, {
+            x: sideDirection * (sideInset - 0.18),
+            y: hangerHeight,
+            z: travelOffset,
+            width: 0.08,
+            height: 0.08,
+            depth: 1.34,
+        });
+    } else {
+        addDecorBox(group, baseGeometry, trimMaterial, {
+            x: travelOffset,
+            y: hangerHeight,
+            z: sideDirection * (sideInset - 0.18),
+            width: 1.34,
+            height: 0.08,
+            depth: 0.08,
+        });
+    }
+}
+
+function addUfoDiskoDisplayPlane(
+    group,
+    {
+        axis,
+        sideDirection,
+        sideInset,
+        travelOffset,
+        width,
+        height,
+        y,
+        surfaceOffset = 0.06,
+        material,
+        glowScale = 1,
+    }
+) {
+    const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(width * glowScale, height * glowScale),
+        material
+    );
+    plane.castShadow = false;
+    plane.receiveShadow = false;
+    if (axis === 'z') {
+        plane.position.set(sideDirection * (sideInset - surfaceOffset), y, travelOffset);
+        plane.rotation.y = sideDirection < 0 ? Math.PI * 0.5 : -Math.PI * 0.5;
+    } else {
+        plane.position.set(travelOffset, y, sideDirection * (sideInset - surfaceOffset));
+        plane.rotation.y = sideDirection < 0 ? 0 : Math.PI;
+    }
+    group.add(plane);
+}
+
+function addUfoDiskoPortalSign(
+    group,
+    {
+        axis,
+        passageWidth,
+        travelSpan,
+        direction = -1,
+        y = 5.6,
+        storeName = 'UFO DISKO',
+        lightMaterial,
+    }
+) {
+    const plateWidth =
+        direction < 0 ? Math.min(4.9, passageWidth + 0.88) : Math.min(3.8, passageWidth + 0.24);
+    const plateHeight = direction < 0 ? 1.22 : 0.92;
+    const signSize = direction < 0 ? 1.38 : 1.02;
+    const glowMaterial = lightMaterial.clone();
+    glowMaterial.opacity = direction < 0 ? 0.34 : 0.24;
+    glowMaterial.side = THREE.DoubleSide;
+    const plateMaterial = new THREE.MeshBasicMaterial({
+        color: 0x080c16,
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+    });
+    const signMaterial = new THREE.MeshBasicMaterial({
+        map: getUfoDiskoStoreSignTexture(storeName),
+        transparent: true,
+        alphaTest: 0.08,
+        toneMapped: false,
+        side: THREE.FrontSide,
+    });
+    const halo = new THREE.Mesh(
+        new THREE.PlaneGeometry(plateWidth * 1.1, plateHeight * 1.28),
+        glowMaterial
+    );
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(plateWidth, plateHeight), plateMaterial);
+    const portalOffset = direction * (travelSpan * 0.5 - 0.2);
+    let signRotationY = 0;
+    let approachOffset = 0;
+    let signPositionX = 0;
+    let signPositionZ = 0;
+
+    if (axis === 'z') {
+        signRotationY = direction < 0 ? Math.PI : 0;
+        approachOffset = direction;
+        signPositionZ = portalOffset + direction * 0.16;
+        halo.position.set(0, y, portalOffset + direction * 0.12);
+    } else {
+        signRotationY = direction < 0 ? -Math.PI * 0.5 : Math.PI * 0.5;
+        approachOffset = direction;
+        signPositionX = portalOffset + direction * 0.16;
+        halo.position.set(portalOffset + direction * 0.12, y, 0);
+    }
+    halo.rotation.y = signRotationY;
+    plate.rotation.y = signRotationY;
+
+    halo.renderOrder = 3;
+    halo.castShadow = false;
+    halo.receiveShadow = false;
+    plate.renderOrder = 4;
+    plate.castShadow = false;
+    plate.receiveShadow = false;
+    group.add(halo);
+    plate.position.copy(halo.position);
+    if (axis === 'z') {
+        plate.position.z += direction * 0.01;
+    } else {
+        plate.position.x += direction * 0.01;
+    }
+    group.add(plate);
+
+    const signOffsets = [0.012, -0.012];
+    signOffsets.forEach((offset, index) => {
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(signSize, signSize), signMaterial);
+        sign.position.set(
+            signPositionX + (axis === 'x' ? approachOffset * offset : 0),
+            y,
+            signPositionZ + (axis === 'z' ? approachOffset * offset : 0)
+        );
+        sign.rotation.y = signRotationY + (index === 0 ? 0 : Math.PI);
+        sign.renderOrder = 5;
+        sign.castShadow = false;
+        sign.receiveShadow = false;
+        group.add(sign);
+    });
+}
+
+function createUfoDiskoAutomaticDoorSystem(
+    group,
+    baseGeometry,
+    { axis, building, passageWidth, passageHeight, portalDirection = -1, trimMaterial }
+) {
+    const portalSide = portalDirection < 0 ? -1 : 1;
+    const insideDirection = -portalSide;
+    const travelSpan = axis === 'x' ? building.width : building.depth;
+    const doorHeight = THREE.MathUtils.clamp(passageHeight - 0.26, 5.18, passageHeight - 0.12);
+    const frameHeight = Math.min(passageHeight - 0.04, doorHeight + 0.12);
+    const doorBaseY = 0.05;
+    const openingHalfWidth = Math.max(2.25, Math.min(passageWidth * 0.5 - 0.24, 2.72));
+    const doorPanelWidth = openingHalfWidth + 0.14;
+    const doorClosedOffset = openingHalfWidth - doorPanelWidth * 0.5;
+    const doorTravelDistance = Math.max(1.12, openingHalfWidth - 0.58);
+    const portalCoord = portalSide * (travelSpan * 0.5 - 0.26);
+    const doorPlaneCoord = portalCoord + insideDirection * 0.2;
+    const roomEndCoord = portalCoord + insideDirection * (travelSpan - 0.86);
+    const transomHeight = Math.max(0.14, passageHeight - (doorBaseY + doorHeight) - 0.06);
+    const transomCenterY = doorBaseY + doorHeight + transomHeight * 0.5 + 0.02;
+    const frameMaterial = trimMaterial.clone();
+    frameMaterial.color.lerp(new THREE.Color(0xffffff), 0.08);
+    frameMaterial.emissive.lerp(new THREE.Color(0x1c3f5d), 0.22);
+    const glassMaterial = new THREE.MeshStandardMaterial({
+        color: 0xeefcff,
+        emissive: 0x3a1642,
+        emissiveIntensity: 0.1,
+        transparent: true,
+        opacity: 0.24,
+        roughness: 0.08,
+        metalness: 0.14,
+    });
+    const glowMaterial = new THREE.MeshBasicMaterial({
+        color: portalSide < 0 ? 0x68f2ff : 0xff7ae3,
+        transparent: true,
+        opacity: 0.28,
+        toneMapped: false,
+    });
+    const jambThickness = 0.18;
+    const lintelThickness = 0.14;
+    const stopThickness = 0.06;
+    const frameDepth = 0.18;
+    const sideSealWidth = Math.max(0.12, passageWidth * 0.5 - openingHalfWidth);
+    const revealDepth = Math.max(frameDepth, Math.abs(doorPlaneCoord - portalCoord) + frameDepth);
+    const sealCenterCoord = (portalCoord + doorPlaneCoord) * 0.5;
+    const transomGlassMaterial = glassMaterial.clone();
+    transomGlassMaterial.opacity = 0.3;
+
+    if (axis === 'z') {
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: -openingHalfWidth - sideSealWidth * 0.5,
+            y: passageHeight * 0.5,
+            z: sealCenterCoord,
+            width: sideSealWidth,
+            height: passageHeight - 0.02,
+            depth: revealDepth,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: openingHalfWidth + sideSealWidth * 0.5,
+            y: passageHeight * 0.5,
+            z: sealCenterCoord,
+            width: sideSealWidth,
+            height: passageHeight - 0.02,
+            depth: revealDepth,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: -openingHalfWidth - jambThickness * 0.5,
+            y: frameHeight * 0.5,
+            z: doorPlaneCoord,
+            width: jambThickness,
+            height: frameHeight,
+            depth: 0.18,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: openingHalfWidth + jambThickness * 0.5,
+            y: frameHeight * 0.5,
+            z: doorPlaneCoord,
+            width: jambThickness,
+            height: frameHeight,
+            depth: 0.18,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: 0,
+            y: doorHeight + 0.26,
+            z: doorPlaneCoord,
+            width: openingHalfWidth * 2 + 0.44,
+            height: lintelThickness,
+            depth: 0.18,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: 0,
+            y: transomCenterY,
+            z: doorPlaneCoord,
+            width: openingHalfWidth * 2 + 0.04,
+            height: transomHeight,
+            depth: frameDepth,
+        });
+        addDecorBox(group, baseGeometry, transomGlassMaterial, {
+            x: 0,
+            y: transomCenterY,
+            z: doorPlaneCoord + 0.01,
+            width: openingHalfWidth * 2 - 0.22,
+            height: Math.max(0.12, transomHeight - 0.12),
+            depth: 0.03,
+        });
+        addDecorBox(group, baseGeometry, glowMaterial, {
+            x: 0,
+            y: transomCenterY,
+            z: doorPlaneCoord - 0.018,
+            width: openingHalfWidth * 2 - 0.38,
+            height: Math.max(0.1, transomHeight - 0.22),
+            depth: 0.012,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: -openingHalfWidth + stopThickness * 0.5,
+            y: doorBaseY + doorHeight * 0.5,
+            z: doorPlaneCoord - 0.01,
+            width: stopThickness,
+            height: doorHeight + 0.02,
+            depth: frameDepth,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: openingHalfWidth - stopThickness * 0.5,
+            y: doorBaseY + doorHeight * 0.5,
+            z: doorPlaneCoord - 0.01,
+            width: stopThickness,
+            height: doorHeight + 0.02,
+            depth: frameDepth,
+        });
+    } else {
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: sealCenterCoord,
+            y: passageHeight * 0.5,
+            z: -openingHalfWidth - sideSealWidth * 0.5,
+            width: revealDepth,
+            height: passageHeight - 0.02,
+            depth: sideSealWidth,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: sealCenterCoord,
+            y: passageHeight * 0.5,
+            z: openingHalfWidth + sideSealWidth * 0.5,
+            width: revealDepth,
+            height: passageHeight - 0.02,
+            depth: sideSealWidth,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: doorPlaneCoord,
+            y: frameHeight * 0.5,
+            z: -openingHalfWidth - jambThickness * 0.5,
+            width: 0.18,
+            height: frameHeight,
+            depth: jambThickness,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: doorPlaneCoord,
+            y: frameHeight * 0.5,
+            z: openingHalfWidth + jambThickness * 0.5,
+            width: 0.18,
+            height: frameHeight,
+            depth: jambThickness,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: doorPlaneCoord,
+            y: doorHeight + 0.26,
+            z: 0,
+            width: 0.18,
+            height: lintelThickness,
+            depth: openingHalfWidth * 2 + 0.44,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: doorPlaneCoord,
+            y: transomCenterY,
+            z: 0,
+            width: frameDepth,
+            height: transomHeight,
+            depth: openingHalfWidth * 2 + 0.04,
+        });
+        addDecorBox(group, baseGeometry, transomGlassMaterial, {
+            x: doorPlaneCoord + 0.01,
+            y: transomCenterY,
+            z: 0,
+            width: 0.03,
+            height: Math.max(0.12, transomHeight - 0.12),
+            depth: openingHalfWidth * 2 - 0.22,
+        });
+        addDecorBox(group, baseGeometry, glowMaterial, {
+            x: doorPlaneCoord - 0.018,
+            y: transomCenterY,
+            z: 0,
+            width: 0.012,
+            height: Math.max(0.1, transomHeight - 0.22),
+            depth: openingHalfWidth * 2 - 0.38,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: doorPlaneCoord - 0.01,
+            y: doorBaseY + doorHeight * 0.5,
+            z: -openingHalfWidth + stopThickness * 0.5,
+            width: frameDepth,
+            height: doorHeight + 0.02,
+            depth: stopThickness,
+        });
+        addDecorBox(group, baseGeometry, frameMaterial, {
+            x: doorPlaneCoord - 0.01,
+            y: doorBaseY + doorHeight * 0.5,
+            z: openingHalfWidth - stopThickness * 0.5,
+            width: frameDepth,
+            height: doorHeight + 0.02,
+            depth: stopThickness,
+        });
+    }
+
+    addLorienLedRibbon(group, baseGeometry, {
+        x: axis === 'z' ? 0 : doorPlaneCoord - portalSide * 0.08,
+        y: doorHeight + 0.12,
+        z: axis === 'z' ? doorPlaneCoord - portalSide * 0.08 : 0,
+        width: axis === 'z' ? openingHalfWidth * 2 + 0.26 : 0.03,
+        height: 0.03,
+        depth: axis === 'z' ? 0.03 : openingHalfWidth * 2 + 0.26,
+        axis: axis === 'z' ? 'x' : 'z',
+        segmentCount: 9,
+        segmentGap: 0.04,
+        haloColor: portalSide < 0 ? 0x68f2ff : 0xff74e0,
+        coreColor: 0xffffff,
+        haloOpacity: 0.18,
+        coreOpacity: 0.66,
+        sweepSpeed: 0.00105,
+        sweepPhase: portalSide < 0 ? 0.1 : 0.58,
+        sweepBand: 0.2,
+    });
+
+    const leftDoorPanel = createLorienVelmoreDoorLeaf(baseGeometry, {
+        width: doorPanelWidth,
+        height: doorHeight,
+        frameMaterial,
+        glassMaterial,
+        glowMaterial,
+    });
+    const rightDoorPanel = createLorienVelmoreDoorLeaf(baseGeometry, {
+        width: doorPanelWidth,
+        height: doorHeight,
+        frameMaterial,
+        glassMaterial,
+        glowMaterial,
+    });
+    if (axis === 'z') {
+        leftDoorPanel.position.set(-doorClosedOffset, doorBaseY, doorPlaneCoord);
+        rightDoorPanel.position.set(doorClosedOffset, doorBaseY, doorPlaneCoord);
+        addDecorBox(leftDoorPanel, baseGeometry, frameMaterial, {
+            x: doorPanelWidth * 0.5 - 0.026,
+            y: doorHeight * 0.5,
+            z: -0.014,
+            width: 0.052,
+            height: doorHeight - 0.08,
+            depth: 0.024,
+        });
+        addDecorBox(rightDoorPanel, baseGeometry, frameMaterial, {
+            x: -doorPanelWidth * 0.5 + 0.026,
+            y: doorHeight * 0.5,
+            z: 0.014,
+            width: 0.052,
+            height: doorHeight - 0.08,
+            depth: 0.024,
+        });
+    } else {
+        leftDoorPanel.position.set(doorPlaneCoord, doorBaseY, -doorClosedOffset);
+        rightDoorPanel.position.set(doorPlaneCoord, doorBaseY, doorClosedOffset);
+        addDecorBox(leftDoorPanel, baseGeometry, frameMaterial, {
+            x: -0.014,
+            y: doorHeight * 0.5,
+            z: doorPanelWidth * 0.5 - 0.026,
+            width: 0.024,
+            height: doorHeight - 0.08,
+            depth: 0.052,
+        });
+        addDecorBox(rightDoorPanel, baseGeometry, frameMaterial, {
+            x: 0.014,
+            y: doorHeight * 0.5,
+            z: -doorPanelWidth * 0.5 + 0.026,
+            width: 0.024,
+            height: doorHeight - 0.08,
+            depth: 0.052,
+        });
+    }
+    group.add(leftDoorPanel);
+    group.add(rightDoorPanel);
+
+    const leftDoorPanelState = leftDoorPanel.userData?.lorienDoorPanelState || null;
+    const rightDoorPanelState = rightDoorPanel.userData?.lorienDoorPanelState || null;
+
+    return {
+        rootGroup: group,
+        centerX: building.x,
+        centerZ: building.z,
+        roomEndCoord,
+        doorPlaneCoord,
+        roomEndZ: axis === 'z' ? roomEndCoord : 0,
+        doorPlaneZ: axis === 'z' ? doorPlaneCoord : 0,
+        doorBaseY,
+        doorHeight,
+        panelDepth: LORIEN_DOOR_PANEL_DEPTH,
+        leftPanel: leftDoorPanel,
+        rightPanel: rightDoorPanel,
+        panels: [leftDoorPanelState, rightDoorPanelState].filter(Boolean),
+        leftClosedCoord: -doorClosedOffset,
+        rightClosedCoord: doorClosedOffset,
+        leftClosedX: axis === 'z' ? -doorClosedOffset : doorPlaneCoord,
+        rightClosedX: axis === 'z' ? doorClosedOffset : doorPlaneCoord,
+        travelDistance: doorTravelDistance,
+        openAmount: 0,
+        targetOpen: 0,
+        openSpeed: LORIEN_VELMORE_DOOR_OPEN_SPEED,
+        closeSpeed: LORIEN_VELMORE_DOOR_CLOSE_SPEED,
+        sensorHalfWidth: openingHalfWidth + 0.84,
+        sensorMaxY: frameHeight + 0.72,
+        outsideSensorDepth: 7.8,
+        insideSensorDepth: 2.8,
+        autoCloseDepth: 4.6,
+        glowMaterial: leftDoorPanelState?.glowMaterial || null,
+        scorchMarks: [],
+        glassBroken: false,
+        affectsLorienGallerySilence: false,
+        environmentAudioZone: 'ufoDiskoStore',
+        approachAxis: axis,
+        insideDirection,
+        panelSlideAxis: axis === 'z' ? 'x' : 'z',
+    };
 }
 
 function addDecorBox(group, baseGeometry, material, { x, y, z, width, height, depth }) {
@@ -1546,8 +3343,327 @@ function addLorienLedRibbon(
     }
 }
 
+function getUfoDiskoStoreSignTexture(storeName = 'UFO DISKO') {
+    if (ufoDiskoStoreSignTexture) {
+        return ufoDiskoStoreSignTexture;
+    }
+
+    ufoDiskoStoreSignTexture = ufoDiskoTextureLoader.load('/assets/Ufodisko/UD-logo-text.png');
+    ufoDiskoStoreSignTexture.colorSpace = THREE.SRGBColorSpace;
+    ufoDiskoStoreSignTexture.needsUpdate = true;
+
+    return ufoDiskoStoreSignTexture;
+}
+
+function getUfoDiskoTeeTexture(variantIndex = 0) {
+    const resolvedIndex = Math.abs(Math.round(variantIndex)) % 6;
+    if (ufoDiskoTeeTextureCache.has(resolvedIndex)) {
+        return ufoDiskoTeeTextureCache.get(resolvedIndex);
+    }
+    const merchSource = UFO_DISKO_MERCH_TEXTURE_SOURCES[resolvedIndex];
+    const texture = createCanvasTexture(768, 1024, (ctx, canvas) => {
+        drawUfoDiskoMerchCard(ctx, canvas, null);
+    });
+    texture.anisotropy = 4;
+
+    if (merchSource?.url) {
+        const image = new Image();
+        image.decoding = 'async';
+        image.onload = () => {
+            drawUfoDiskoMerchCard(ctxFromTextureCanvas(texture), texture.image, image, merchSource);
+            texture.needsUpdate = true;
+        };
+        image.src = merchSource.url;
+    }
+
+    ufoDiskoTeeTextureCache.set(resolvedIndex, texture);
+    return texture;
+}
+
+function ctxFromTextureCanvas(texture) {
+    return texture?.image?.getContext?.('2d') || null;
+}
+
+function drawUfoDiskoMerchCard(ctx, canvas, image = null, merchSource = null) {
+    if (!ctx || !canvas) {
+        return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawRoundedRect(ctx, 42, 42, canvas.width - 84, canvas.height - 84, 48);
+    const cardGradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    cardGradient.addColorStop(0, '#070b12');
+    cardGradient.addColorStop(0.48, '#101725');
+    cardGradient.addColorStop(1, '#05070c');
+    ctx.fillStyle = cardGradient;
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(116, 239, 255, 0.18)';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+
+    const halo = ctx.createRadialGradient(
+        canvas.width * 0.5,
+        canvas.height * 0.4,
+        10,
+        canvas.width * 0.5,
+        canvas.height * 0.4,
+        canvas.width * 0.32
+    );
+    halo.addColorStop(0, 'rgba(127, 242, 255, 0.24)');
+    halo.addColorStop(0.42, 'rgba(255, 98, 218, 0.09)');
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (!image) {
+        return;
+    }
+
+    const merchCanvas = createProcessedUfoDiskoMerchCanvas(image, {
+        removeWhiteBackground: merchSource?.removeWhiteBackground !== false,
+    });
+    const bounds = getCanvasOpaqueBounds(merchCanvas);
+    const sourceX = bounds?.minX ?? 0;
+    const sourceY = bounds?.minY ?? 0;
+    const sourceWidth = bounds ? bounds.maxX - bounds.minX + 1 : merchCanvas.width;
+    const sourceHeight = bounds ? bounds.maxY - bounds.minY + 1 : merchCanvas.height;
+    const targetWidth = canvas.width - 164;
+    const targetHeight = canvas.height - 168;
+    const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+    const drawWidth = sourceWidth * scale;
+    const drawHeight = sourceHeight * scale;
+    const targetX = canvas.width * 0.5 - drawWidth * 0.5;
+    const targetY = canvas.height * 0.5 - drawHeight * 0.5;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(110, 244, 255, 0.14)';
+    ctx.shadowBlur = 20;
+    ctx.drawImage(
+        merchCanvas,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        targetX,
+        targetY,
+        drawWidth,
+        drawHeight
+    );
+    ctx.restore();
+}
+
+function createProcessedUfoDiskoMerchCanvas(
+    image,
+    { removeWhiteBackground = true } = {}
+) {
+    const canvas = document.createElement('canvas');
+    canvas.width = image.naturalWidth || image.width || 1;
+    canvas.height = image.naturalHeight || image.height || 1;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return canvas;
+    }
+
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    if (removeWhiteBackground) {
+        eraseConnectedLightBackground(ctx, canvas);
+    }
+    return canvas;
+}
+
+function eraseConnectedLightBackground(ctx, canvas) {
+    const width = canvas.width;
+    const height = canvas.height;
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const { data } = imageData;
+    const visited = new Uint8Array(width * height);
+    const queue = new Int32Array(width * height);
+    let head = 0;
+    let tail = 0;
+
+    const enqueue = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) {
+            return;
+        }
+        const index = y * width + x;
+        if (visited[index]) {
+            return;
+        }
+        const pixelOffset = index * 4;
+        const r = data[pixelOffset];
+        const g = data[pixelOffset + 1];
+        const b = data[pixelOffset + 2];
+        const a = data[pixelOffset + 3];
+        const max = Math.max(r, g, b);
+        const min = Math.min(r, g, b);
+        const isLightBackground =
+            a < 24 || (max >= 236 && max - min <= 26) || (max >= 248 && max - min <= 48);
+        if (!isLightBackground) {
+            return;
+        }
+        visited[index] = 1;
+        queue[tail] = index;
+        tail += 1;
+    };
+
+    for (let x = 0; x < width; x += 1) {
+        enqueue(x, 0);
+        enqueue(x, height - 1);
+    }
+    for (let y = 0; y < height; y += 1) {
+        enqueue(0, y);
+        enqueue(width - 1, y);
+    }
+
+    while (head < tail) {
+        const index = queue[head];
+        head += 1;
+        const pixelOffset = index * 4;
+        data[pixelOffset + 3] = 0;
+
+        const x = index % width;
+        const y = (index - x) / width;
+        enqueue(x - 1, y);
+        enqueue(x + 1, y);
+        enqueue(x, y - 1);
+        enqueue(x, y + 1);
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+}
+
+function getCanvasOpaqueBounds(canvas) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return null;
+    }
+    const { width, height } = canvas;
+    const { data } = ctx.getImageData(0, 0, width, height);
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+
+    for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+            const alpha = data[(y * width + x) * 4 + 3];
+            if (alpha <= 14) {
+                continue;
+            }
+            if (x < minX) {
+                minX = x;
+            }
+            if (y < minY) {
+                minY = y;
+            }
+            if (x > maxX) {
+                maxX = x;
+            }
+            if (y > maxY) {
+                maxY = y;
+            }
+        }
+    }
+
+    if (maxX < minX || maxY < minY) {
+        return null;
+    }
+    return { minX, minY, maxX, maxY };
+}
+
+function createCanvasTexture(width, height, draw) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+        draw(ctx, canvas);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.generateMipmaps = false;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+    const resolvedRadius = Math.min(radius, width * 0.5, height * 0.5);
+    ctx.beginPath();
+    ctx.moveTo(x + resolvedRadius, y);
+    ctx.lineTo(x + width - resolvedRadius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + resolvedRadius);
+    ctx.lineTo(x + width, y + height - resolvedRadius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - resolvedRadius, y + height);
+    ctx.lineTo(x + resolvedRadius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - resolvedRadius);
+    ctx.lineTo(x, y + resolvedRadius);
+    ctx.quadraticCurveTo(x, y, x + resolvedRadius, y);
+    ctx.closePath();
+}
+
+function drawUfoDiskoSaucer(
+    ctx,
+    {
+        scale = 1,
+        hullColor = '#c8f8ff',
+        domeColor = '#ff8ee7',
+        beamColor = 'rgba(121, 244, 255, 0.26)',
+    } = {}
+) {
+    ctx.save();
+    ctx.scale(scale, scale);
+    ctx.fillStyle = beamColor;
+    ctx.beginPath();
+    ctx.moveTo(-70, 28);
+    ctx.lineTo(70, 28);
+    ctx.lineTo(24, 148);
+    ctx.lineTo(-24, 148);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = hullColor;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 120, 36, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = domeColor;
+    ctx.beginPath();
+    ctx.ellipse(0, -22, 52, 34, 0, Math.PI, 0, true);
+    ctx.fill();
+
+    ctx.fillStyle = '#102030';
+    for (let i = -2; i <= 2; i += 1) {
+        ctx.beginPath();
+        ctx.arc(i * 38, 2, 8, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
 function clamp01(value) {
     return THREE.MathUtils.clamp(value, 0, 1);
+}
+
+function smoothstep01(value) {
+    const t = clamp01(value);
+    return t * t * (3 - 2 * t);
+}
+
+function normalizedRange(value, start, end) {
+    if (value <= start) {
+        return 0;
+    }
+    if (value >= end) {
+        return 1;
+    }
+    return (value - start) / Math.max(0.001, end - start);
 }
 
 function lerp(start, end, t) {
