@@ -10,9 +10,25 @@ const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerH
 camera.position.set(0, 3, 8);
 
 let cameraViewMode = 6;
-let cinematicMode = false;
+let manualCinematicMode = false;
+let autoCinematicMode = false;
 let cinematicAngle = 0;
-const CINEMATIC_ORBIT_SPEED = 0.42;
+let cinematicOrbitProgress = 0;
+let cinematicLoopProgress = 0;
+let cinematicBlend = 0;
+let cinematicIdleTime = 0;
+let cinematicExitBoostTimer = 0;
+let cinematicWasActive = false;
+const AUTO_CINEMATIC_IDLE_SEC = 5;
+const CINEMATIC_LOOP_DURATION_SEC = 18;
+const CINEMATIC_LOOP_TRACK = Object.freeze([
+    { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
+    { t: 0.22, radius: 10.1, height: 5.5, fov: 71, lookAhead: 2.2, lookHeight: 1.02 },
+    { t: 0.48, radius: 7.3, height: 3.6, fov: 64, lookAhead: 1.9, lookHeight: 0.92 },
+    { t: 0.72, radius: 4.9, height: 1.55, fov: 56, lookAhead: 1.45, lookHeight: 0.84 },
+    { t: 0.9, radius: 6.4, height: 2.5, fov: 61, lookAhead: 1.7, lookHeight: 0.88 },
+    { t: 1, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
+]);
 let smoothedHeading = 0;
 let smoothedTurnBias = 0;
 let hasCameraState = false;
@@ -21,6 +37,10 @@ let cameraKeyboardControlsEnabled = true;
 const targetPosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
 const smoothedLookTarget = new THREE.Vector3();
+const baseTargetPosition = new THREE.Vector3();
+const baseLookTarget = new THREE.Vector3();
+const cinematicTargetPosition = new THREE.Vector3();
+const cinematicLookAtTarget = new THREE.Vector3();
 const roofCamLocalPosition = new THREE.Vector3(0.24, 1.92, 1.42);
 const roofScreenLookLocal = new THREE.Vector3(0, 0.72, 0.14);
 const roofCamWorldPosition = new THREE.Vector3();
@@ -51,7 +71,7 @@ document.addEventListener('keydown', (event) => {
         )
     ) {
         event.preventDefault();
-        cinematicMode = !cinematicMode;
+        setCinematicMode(!manualCinematicMode);
         return;
     }
 
@@ -68,12 +88,13 @@ document.addEventListener('keydown', (event) => {
         }
         event.preventDefault();
         cameraViewMode = index + 1;
-        cinematicMode = false;
+        autoCinematicMode = false;
+        setCinematicMode(false);
         return;
     }
 });
 
-function updateCamera(car, speed, deltaTime = 1 / 60) {
+function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     const dt = Math.min(deltaTime, 0.05);
     const speedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 20, 0, 1);
     const followResponsiveness = THREE.MathUtils.lerp(4, 7.5, speedRatio);
@@ -98,25 +119,60 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
     const turnBiasLerp = 1 - Math.exp(-6.5 * dt);
     smoothedTurnBias = THREE.MathUtils.lerp(smoothedTurnBias, turnBiasTarget, turnBiasLerp);
     smoothedHeading = lerpAngle(smoothedHeading, car.rotation.y, headingLerp);
+    const vehicleState = options.vehicleState || null;
+    const allowAutoCinematic = options.allowAutoCinematic !== false;
+    const driveInputActive =
+        Math.abs(Number(vehicleState?.throttle) || 0) > 0.06 ||
+        Math.abs(Number(vehicleState?.brake) || 0) > 0.05 ||
+        Math.abs(Number(vehicleState?.steerInput) || 0) > 0.08 ||
+        Boolean(options.handbrakeActive);
 
-    if (cinematicMode) {
-        cinematicAngle += dt * CINEMATIC_ORBIT_SPEED;
-        const cinematicRadius = 10;
-        const cinematicHeight = 5 + Math.sin(cinematicAngle * 2) * 1.8;
-
-        targetPosition.set(
-            car.position.x + Math.cos(cinematicAngle) * cinematicRadius,
-            car.position.y + cinematicHeight,
-            car.position.z + Math.sin(cinematicAngle) * cinematicRadius
-        );
-
-        camera.position.lerp(targetPosition, 1 - Math.exp(-3.8 * dt));
-        lookTarget.set(car.position.x, car.position.y + 1, car.position.z);
-        smoothedLookTarget.lerp(lookTarget, lookLerp);
-        camera.lookAt(smoothedLookTarget);
-        updateCameraFov(75, dt);
-        return;
+    if (!manualCinematicMode && allowAutoCinematic) {
+        if (driveInputActive) {
+            cinematicIdleTime = 0;
+            if (autoCinematicMode) {
+                autoCinematicMode = false;
+                cinematicExitBoostTimer = 1.1;
+            }
+        } else {
+            cinematicIdleTime += dt;
+            if (cinematicIdleTime >= AUTO_CINEMATIC_IDLE_SEC) {
+                autoCinematicMode = true;
+            }
+        }
+    } else {
+        cinematicIdleTime = 0;
+        if (!allowAutoCinematic) {
+            autoCinematicMode = false;
+        }
     }
+
+    const cinematicMode = manualCinematicMode || autoCinematicMode;
+    if (cinematicMode && !cinematicWasActive) {
+        syncCinematicEntryToCurrentView(car);
+    }
+    const cinematicBlendTarget = cinematicMode ? 1 : 0;
+    const cinematicBlendRate =
+        cinematicBlendTarget > cinematicBlend
+            ? 0.95
+            : cinematicExitBoostTimer > 0
+              ? 4.8
+              : 3.1;
+    cinematicBlend = THREE.MathUtils.lerp(
+        cinematicBlend,
+        cinematicBlendTarget,
+        1 - Math.exp(-cinematicBlendRate * dt)
+    );
+    cinematicExitBoostTimer = Math.max(0, cinematicExitBoostTimer - dt);
+
+    if (cinematicMode || cinematicBlend > 0.001) {
+        cinematicOrbitProgress =
+            (cinematicOrbitProgress + dt / CINEMATIC_LOOP_DURATION_SEC) % 1;
+        cinematicLoopProgress =
+            (cinematicLoopProgress + dt / CINEMATIC_LOOP_DURATION_SEC) % 1;
+        cinematicAngle = cinematicOrbitProgress * Math.PI * 2;
+    }
+    cinematicWasActive = cinematicMode;
 
     let followBlend = followLerp;
     let lookBlend = lookLerp;
@@ -124,40 +180,40 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
 
     switch (cameraViewMode) {
         case 1:
-            targetPosition.set(car.position.x, car.position.y + 2, car.position.z);
-            lookTarget.set(
+            baseTargetPosition.set(car.position.x, car.position.y + 2, car.position.z);
+            baseLookTarget.set(
                 car.position.x - Math.sin(smoothedHeading) * 10,
                 car.position.y + 2,
                 car.position.z - Math.cos(smoothedHeading) * 10
             );
             break;
         case 2:
-            targetPosition.set(car.position.x, car.position.y + 50, car.position.z);
-            lookTarget.set(car.position.x, car.position.y, car.position.z);
+            baseTargetPosition.set(car.position.x, car.position.y + 50, car.position.z);
+            baseLookTarget.set(car.position.x, car.position.y, car.position.z);
             break;
         case 3:
-            targetPosition.set(
+            baseTargetPosition.set(
                 car.position.x + Math.sin(smoothedHeading) * 4,
                 car.position.y + 1,
                 car.position.z + Math.cos(smoothedHeading) * 4
             );
-            lookTarget.set(car.position.x, car.position.y, car.position.z);
+            baseLookTarget.set(car.position.x, car.position.y, car.position.z);
             break;
         case 4:
-            targetPosition.set(
+            baseTargetPosition.set(
                 car.position.x + Math.cos(smoothedHeading) * 5,
                 car.position.y + 2,
                 car.position.z - Math.sin(smoothedHeading) * 5
             );
-            lookTarget.set(car.position.x, car.position.y + 1, car.position.z);
+            baseLookTarget.set(car.position.x, car.position.y + 1, car.position.z);
             break;
         case 5:
-            targetPosition.set(
+            baseTargetPosition.set(
                 car.position.x + Math.sin(smoothedHeading) * 10,
                 car.position.y + 8,
                 car.position.z + Math.cos(smoothedHeading) * 10
             );
-            lookTarget.set(car.position.x, car.position.y, car.position.z);
+            baseLookTarget.set(car.position.x, car.position.y, car.position.z);
             break;
         case 6: {
             const dynamicSpeedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 38, 0, 1);
@@ -179,12 +235,12 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
             const rightX = cosHeading;
             const rightZ = -sinHeading;
 
-            targetPosition.set(
+            baseTargetPosition.set(
                 car.position.x - forwardX * backDistance + rightX * sideOffset,
                 car.position.y + chaseHeight + turnLift,
                 car.position.z - forwardZ * backDistance + rightZ * sideOffset
             );
-            lookTarget.set(
+            baseLookTarget.set(
                 car.position.x + forwardX * lookAhead + rightX * lookSide,
                 car.position.y + THREE.MathUtils.lerp(0.75, 1.45, dynamicSpeedRatio),
                 car.position.z + forwardZ * lookAhead + rightZ * lookSide
@@ -201,8 +257,8 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
             car.localToWorld(roofCamWorldPosition);
             car.localToWorld(roofLookWorldPosition);
 
-            targetPosition.copy(roofCamWorldPosition);
-            lookTarget.copy(roofLookWorldPosition);
+            baseTargetPosition.copy(roofCamWorldPosition);
+            baseLookTarget.copy(roofLookWorldPosition);
             followBlend = 1 - Math.exp(-14 * dt);
             lookBlend = 1 - Math.exp(-16 * dt);
             targetFov = 36;
@@ -210,19 +266,26 @@ function updateCamera(car, speed, deltaTime = 1 / 60) {
         }
         case 8:
         default:
-            targetPosition.set(
+            baseTargetPosition.set(
                 car.position.x + Math.sin(smoothedHeading) * 6,
                 car.position.y + 3,
                 car.position.z + Math.cos(smoothedHeading) * 6
             );
-            lookTarget.set(car.position.x, car.position.y + 0.5, car.position.z);
+            baseLookTarget.set(car.position.x, car.position.y + 0.5, car.position.z);
             break;
     }
 
-    camera.position.lerp(targetPosition, followBlend);
-    smoothedLookTarget.lerp(lookTarget, lookBlend);
+    const cinematicShot = resolveCinematicShot(car, speed, dt);
+    targetPosition.copy(baseTargetPosition).lerp(cinematicTargetPosition, cinematicBlend);
+    lookTarget.copy(baseLookTarget).lerp(cinematicLookAtTarget, cinematicBlend);
+    const finalFollowBlend = THREE.MathUtils.lerp(followBlend, cinematicShot.followBlend, cinematicBlend);
+    const finalLookBlend = THREE.MathUtils.lerp(lookBlend, cinematicShot.lookBlend, cinematicBlend);
+    const finalFov = THREE.MathUtils.lerp(targetFov, cinematicShot.targetFov, cinematicBlend);
+
+    camera.position.lerp(targetPosition, finalFollowBlend);
+    smoothedLookTarget.lerp(lookTarget, finalLookBlend);
     camera.lookAt(smoothedLookTarget);
-    updateCameraFov(targetFov, dt);
+    updateCameraFov(finalFov, dt);
 }
 
 export { camera, updateCamera };
@@ -234,6 +297,123 @@ export function setCameraKeyboardControlsEnabled(nextEnabled) {
 export function resetCameraTrackingState() {
     hasCameraState = false;
     smoothedTurnBias = 0;
+    cinematicOrbitProgress = 0;
+    cinematicLoopProgress = 0;
+    cinematicBlend = 0;
+    cinematicIdleTime = 0;
+    cinematicExitBoostTimer = 0;
+    cinematicWasActive = false;
+}
+
+function setCinematicMode(nextEnabled) {
+    const enabled = Boolean(nextEnabled);
+    if (manualCinematicMode === enabled) {
+        return;
+    }
+    manualCinematicMode = enabled;
+    if (enabled) {
+        autoCinematicMode = false;
+    }
+    cinematicIdleTime = 0;
+    if (!enabled) {
+        cinematicWasActive = false;
+    }
+}
+
+function resolveCinematicShot(car, speed, dt) {
+    const speedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 28, 0, 1);
+    const followBlend = 1 - Math.exp(-THREE.MathUtils.lerp(3.8, 5.6, speedRatio) * dt);
+    const lookBlend = 1 - Math.exp(-THREE.MathUtils.lerp(4.6, 6.6, speedRatio) * dt);
+    const sinHeading = Math.sin(smoothedHeading);
+    const cosHeading = Math.cos(smoothedHeading);
+    const forwardX = -sinHeading;
+    const forwardZ = -cosHeading;
+    const loopSample = sampleCinematicLoopTrack(cinematicLoopProgress);
+    const cinematicRadius = loopSample.radius + speedRatio * 0.8;
+    const cinematicHeight = loopSample.height + speedRatio * 0.45;
+
+    cinematicTargetPosition.set(
+        car.position.x + Math.cos(cinematicAngle) * cinematicRadius,
+        car.position.y + cinematicHeight,
+        car.position.z + Math.sin(cinematicAngle) * cinematicRadius
+    );
+    cinematicLookAtTarget.set(
+        car.position.x + forwardX * (loopSample.lookAhead + speedRatio * 1.1),
+        car.position.y + loopSample.lookHeight,
+        car.position.z + forwardZ * (loopSample.lookAhead + speedRatio * 1.1)
+    );
+
+    const targetFov = loopSample.fov;
+
+    return {
+        followBlend,
+        lookBlend,
+        targetFov,
+    };
+}
+
+function sampleCinematicLoopTrack(progress) {
+    const normalized = THREE.MathUtils.euclideanModulo(progress, 1);
+    for (let index = 0; index < CINEMATIC_LOOP_TRACK.length - 1; index += 1) {
+        const from = CINEMATIC_LOOP_TRACK[index];
+        const to = CINEMATIC_LOOP_TRACK[index + 1];
+        if (normalized > to.t) {
+            continue;
+        }
+        const span = Math.max(0.0001, to.t - from.t);
+        const alpha = smoothstep01((normalized - from.t) / span);
+        return {
+            radius: THREE.MathUtils.lerp(from.radius, to.radius, alpha),
+            height: THREE.MathUtils.lerp(from.height, to.height, alpha),
+            fov: THREE.MathUtils.lerp(from.fov, to.fov, alpha),
+            lookAhead: THREE.MathUtils.lerp(from.lookAhead, to.lookAhead, alpha),
+            lookHeight: THREE.MathUtils.lerp(from.lookHeight, to.lookHeight, alpha),
+        };
+    }
+
+    const fallback = CINEMATIC_LOOP_TRACK[CINEMATIC_LOOP_TRACK.length - 1];
+    return {
+        radius: fallback.radius,
+        height: fallback.height,
+        fov: fallback.fov,
+        lookAhead: fallback.lookAhead,
+        lookHeight: fallback.lookHeight,
+    };
+}
+
+function syncCinematicEntryToCurrentView(car) {
+    const offsetX = camera.position.x - car.position.x;
+    const offsetZ = camera.position.z - car.position.z;
+    const radius = Math.hypot(offsetX, offsetZ);
+    const height = camera.position.y - car.position.y;
+    const orbitAngle = radius > 0.001 ? Math.atan2(offsetZ, offsetX) : 0;
+
+    cinematicAngle = orbitAngle;
+    cinematicOrbitProgress =
+        THREE.MathUtils.euclideanModulo(orbitAngle, Math.PI * 2) / (Math.PI * 2);
+    cinematicLoopProgress = findClosestCinematicTrackProgress(radius, height);
+}
+
+function findClosestCinematicTrackProgress(radius, height) {
+    let closestProgress = CINEMATIC_LOOP_TRACK[0].t;
+    let closestScore = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < CINEMATIC_LOOP_TRACK.length - 1; index += 1) {
+        const sample = CINEMATIC_LOOP_TRACK[index];
+        const radiusError = sample.radius - radius;
+        const heightError = sample.height - height;
+        const score = radiusError * radiusError + heightError * heightError * 2.6;
+        if (score >= closestScore) {
+            continue;
+        }
+        closestScore = score;
+        closestProgress = sample.t;
+    }
+    return closestProgress;
+}
+
+function smoothstep01(value) {
+    const t = THREE.MathUtils.clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
 }
 
 function lerpAngle(a, b, t) {

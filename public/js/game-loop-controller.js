@@ -624,7 +624,15 @@ export function createGameLoopController(options = {}) {
                 }
 
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
-                updateCamera(car, cameraSpeed, frameDelta);
+                updateCamera(car, cameraSpeed, frameDelta, {
+                    vehicleState: visualState,
+                    allowAutoCinematic:
+                        !readCarDestroyed() &&
+                        !gamePaused &&
+                        !isEditModeActive &&
+                        !worldMapOpen &&
+                        !readPickupRoundFinished(),
+                });
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
                 updateGroundMotion(car.position, cameraSpeed, monumentRhythmState, frameDelta);
                 starsController.update(frameDelta);
