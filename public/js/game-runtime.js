@@ -111,6 +111,7 @@ import { createMapUiController } from './map-ui.js';
 import { createAudioSystem } from './audio-system.js';
 import { createPickupScoringSystem } from './scoring-system.js';
 import { createScorePopupController } from './score-popup-ui.js';
+import { createGroundLayerDebugController } from './ground-layer-debug-ui.js';
 import {
     createGraphicsQualityController,
     GRAPHICS_QUALITY_MODES,
@@ -300,6 +301,7 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
             });
             await waitForAnimationFrames(1);
             ensureWorldBuilt();
+            groundLayerDebugController?.refresh?.();
             await waitForAnimationFrames(1);
             reportProgress({
                 stage: 'world',
@@ -721,6 +723,7 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
 }
 
 let mapUiController = null;
+let groundLayerDebugController = null;
 
 const initialSpawnX = Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x;
 const initialSpawnZ = Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z;
@@ -759,8 +762,14 @@ const chargingZoneController = createChargingZoneController(scene, chargingZones
     activationDelaySec: CHARGING_ZONE_ACTIVATION_DELAY_SEC,
     sampleGroundHeight: getGroundHeightAt,
 });
+groundLayerDebugController = createGroundLayerDebugController({ scene });
+groundLayerDebugController.refresh();
+groundLayerDebugController.setEditModeActive(false);
 const chargingProgressHudController = createChargingProgressHudController(scene, camera, {
     vehicle: car,
+    getChargingAnchor(target) {
+        return chargingZoneController.getHudAnchor?.(target) || null;
+    },
     getBatteryPercent() {
         return runtimeState.playerBattery;
     },
@@ -790,6 +799,7 @@ const carEditModeController = createCarEditModeController({
     onEditModeChanged(isActive) {
         setCameraKeyboardControlsEnabled(!isActive);
         runtimeState.gameSessionController?.clearDriveKeys();
+        groundLayerDebugController?.setEditModeActive?.(isActive);
         if (isActive) {
             runtimeState.gameSessionController?.setPauseState(false);
         }

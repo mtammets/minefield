@@ -5,14 +5,27 @@ import {
     BATTERY_CRITICAL_HUD_SHOW_THRESHOLD,
     BATTERY_CRITICAL_HUD_HIDE_THRESHOLD,
     CHARGING_BATTERY_GAIN_PER_SEC,
+    DRIVE_SURFACE_Y,
 } from './constants.js';
+import { markGroundDebugLayer } from './environment/ground-debug.js';
 
 export function createChargingProgressHudController(scene, camera, options = {}) {
     const vehicle = options.vehicle || null;
+    const getChargingAnchor =
+        typeof options.getChargingAnchor === 'function' ? options.getChargingAnchor : () => null;
     const getBatteryPercent =
         typeof options.getBatteryPercent === 'function' ? options.getBatteryPercent : () => 0;
     const getBatteryNormalized =
         typeof options.getBatteryNormalized === 'function' ? options.getBatteryNormalized : () => 0;
+    const chargeCompleteThreshold = THREE.MathUtils.clamp(
+        Number(options.chargeCompleteThreshold) || 99.6,
+        90,
+        100
+    );
+    const chargedBannerDurationSec = Math.max(
+        0.4,
+        Number(options.chargedBannerDurationSec) || 1.5
+    );
     const lowBatteryShowThreshold = THREE.MathUtils.clamp(
         Number(options.lowBatteryShowThreshold) || BATTERY_LOW_HUD_SHOW_THRESHOLD,
         0.02,
@@ -42,9 +55,16 @@ export function createChargingProgressHudController(scene, camera, options = {})
     const chargingBatteryGainPerSec = Number.isFinite(options.chargingBatteryGainPerSec)
         ? options.chargingBatteryGainPerSec
         : CHARGING_BATTERY_GAIN_PER_SEC;
+    const fallbackSnapshot = {
+        chargeCompletedThisFrame: false,
+    };
     const fallback = {
-        update() {},
-        reset() {},
+        update() {
+            return fallbackSnapshot;
+        },
+        reset() {
+            fallbackSnapshot.chargeCompletedThisFrame = false;
+        },
     };
     if (!scene || !camera || !vehicle) {
         return fallback;
@@ -87,6 +107,8 @@ export function createChargingProgressHudController(scene, camera, options = {})
     panelMesh.position.z = 0.01;
     root.add(panelMesh);
 
+    const chargingAnchor = new THREE.Vector3();
+    const lastChargingAnchor = new THREE.Vector3();
     const state = {
         visibleBlend: 0,
         displayPercent: THREE.MathUtils.clamp(getBatteryPercent(), 0, 100),
@@ -94,9 +116,15 @@ export function createChargingProgressHudController(scene, camera, options = {})
         scanPhase: Math.random() * Math.PI * 2,
         lowBatteryReminderActive: false,
         criticalBatteryAlertActive: false,
+        chargeCompleteLatched: false,
+        chargedHoldTimer: 0,
+        hasLastChargingAnchor: false,
+    };
+    const frameSnapshot = {
+        chargeCompletedThisFrame: false,
     };
 
-    drawPanel(state.displayPercent, 0, 0, false, false, false);
+    drawPanel(state.displayPercent, 0, 0, false, false, false, false);
     return {
         update(
             deltaTime = 1 / 60,
@@ -104,11 +132,16 @@ export function createChargingProgressHudController(scene, camera, options = {})
         ) {
             const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
             const charging = THREE.MathUtils.clamp(chargingLevel || 0, 0, 1);
+            frameSnapshot.chargeCompletedThisFrame = false;
             if (batteryDepleted) {
                 state.visibleBlend = 0;
+                state.chargeCompleteLatched = false;
+                state.chargedHoldTimer = 0;
+                state.hasLastChargingAnchor = false;
                 root.visible = false;
-                return;
+                return frameSnapshot;
             }
+            const batteryPercent = THREE.MathUtils.clamp(getBatteryPercent(), 0, 100);
             const batteryNormalized = THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
             if (state.lowBatteryReminderActive) {
                 state.lowBatteryReminderActive = batteryNormalized <= lowBatteryHideThreshold;
@@ -121,9 +154,36 @@ export function createChargingProgressHudController(scene, camera, options = {})
             } else if (batteryNormalized <= criticalBatteryShowThreshold) {
                 state.criticalBatteryAlertActive = true;
             }
-            const showLowBatteryReminder = enabled && !isCharging && state.lowBatteryReminderActive;
+            if (isCharging && batteryPercent >= chargeCompleteThreshold && !state.chargeCompleteLatched) {
+                state.chargeCompleteLatched = true;
+                state.chargedHoldTimer = chargedBannerDurationSec;
+                frameSnapshot.chargeCompletedThisFrame = true;
+            }
+            if (state.chargeCompleteLatched && state.chargedHoldTimer > 0) {
+                state.chargedHoldTimer = Math.max(0, state.chargedHoldTimer - dt);
+            }
+            if (!isCharging && state.chargedHoldTimer <= 0) {
+                state.chargeCompleteLatched = false;
+            }
+            if (batteryPercent < chargeCompleteThreshold - 1.5) {
+                state.chargeCompleteLatched = false;
+                state.chargedHoldTimer = 0;
+            }
+            const showCharged = state.chargeCompleteLatched && state.chargedHoldTimer > 0;
+            const showChargedIdle =
+                state.chargeCompleteLatched && state.chargedHoldTimer <= 0 && isCharging;
+            const showLowBatteryReminder =
+                enabled &&
+                !isCharging &&
+                !showCharged &&
+                !showChargedIdle &&
+                state.lowBatteryReminderActive;
             const targetVisible =
-                enabled && !batteryDepleted && (isCharging || showLowBatteryReminder) ? 1 : 0;
+                enabled &&
+                !batteryDepleted &&
+                (isCharging || showCharged || showChargedIdle || showLowBatteryReminder)
+                    ? 1
+                    : 0;
             const visibleRate = targetVisible > state.visibleBlend ? 8.8 : 7.2;
             state.visibleBlend = THREE.MathUtils.lerp(
                 state.visibleBlend,
@@ -133,12 +193,13 @@ export function createChargingProgressHudController(scene, camera, options = {})
 
             if (state.visibleBlend <= 0.002 && targetVisible <= 0) {
                 root.visible = false;
-                return;
+                return frameSnapshot;
             }
 
             root.visible = true;
-            const targetPercent = THREE.MathUtils.clamp(getBatteryPercent(), 0, 100);
-            const numberRate = isCharging ? 5.6 + charging * 9.2 : 4.2;
+            const targetPercent = batteryPercent;
+            const showChargingPresentation = isCharging && !showChargedIdle;
+            const numberRate = showChargingPresentation ? 5.6 + charging * 9.2 : 4.2;
             state.displayPercent = THREE.MathUtils.lerp(
                 state.displayPercent,
                 targetPercent,
@@ -148,41 +209,74 @@ export function createChargingProgressHudController(scene, camera, options = {})
             state.scanPhase += dt * (1.6 + charging * 4.2);
 
             const hoverPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 1.7);
-            const hudHeight = 1.56 + hoverPulse * (0.04 + charging * 0.08);
-            root.position.set(
-                vehicle.position.x,
-                vehicle.position.y + hudHeight,
-                vehicle.position.z
-            );
+            const useChargingAnchor =
+                showChargingPresentation || showCharged || showChargedIdle;
+            const anchor = useChargingAnchor ? getChargingAnchor(chargingAnchor) : null;
+            if (anchor) {
+                lastChargingAnchor.copy(anchor);
+                state.hasLastChargingAnchor = true;
+            }
+            if (useChargingAnchor && (anchor || state.hasLastChargingAnchor)) {
+                const sourceAnchor = anchor || lastChargingAnchor;
+                const anchorHover = hoverPulse * (0.05 + charging * 0.06);
+                root.position.set(sourceAnchor.x, sourceAnchor.y + anchorHover, sourceAnchor.z);
+            } else {
+                const hudHeight = 1.56 + hoverPulse * (0.04 + charging * 0.08);
+                root.position.set(
+                    vehicle.position.x,
+                    vehicle.position.y + hudHeight,
+                    vehicle.position.z
+                );
+            }
             root.quaternion.copy(camera.quaternion);
 
             const scalePulse = 1 + (0.012 + charging * 0.035) * Math.sin(state.scanPhase * 2.9);
-            const baseScale = 0.96 + state.visibleBlend * 0.2;
+            const compactChargingUi = useChargingAnchor;
+            const baseScale = compactChargingUi
+                ? 1.16 + state.visibleBlend * 0.14
+                : 0.96 + state.visibleBlend * 0.2;
             root.scale.setScalar(baseScale * scalePulse);
+            haloMesh.scale.setScalar(compactChargingUi ? 1.08 + charging * 0.06 : 1);
+            panelMesh.scale.set(compactChargingUi ? 0.72 : 1, compactChargingUi ? 0.82 : 1, 1);
+            panelMesh.position.y = compactChargingUi ? -0.14 : 0;
 
-            const haloPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 2.2);
+            const haloPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 1.8);
             const isCriticalBattery = state.criticalBatteryAlertActive;
+            const chargingGlow = showChargingPresentation
+                ? 0.08 + charging * (0.12 + haloPulse * 0.08)
+                : 0.1 + haloPulse * 0.08;
             haloMaterial.opacity =
-                state.visibleBlend *
-                (0.12 + charging * (0.28 + haloPulse * 0.24) + (isCriticalBattery ? 0.14 : 0));
+                state.visibleBlend * (chargingGlow + (isCriticalBattery ? 0.1 : 0));
             haloMaterial.color.setHex(isCriticalBattery ? 0xff4f5e : 0xffffff);
             haloMesh.rotation.z += dt * (0.08 + charging * 0.42);
-            panelMaterial.opacity = state.visibleBlend * (0.52 + charging * 0.36);
+            panelMaterial.opacity =
+                state.visibleBlend *
+                (showChargedIdle
+                    ? 0
+                    : showChargingPresentation || showCharged
+                      ? 0.72 + charging * 0.18
+                      : 0.52 + charging * 0.36);
 
             drawPanel(
                 state.displayPercent,
                 charging,
                 state.time,
-                isCharging,
+                showChargingPresentation,
                 showLowBatteryReminder,
-                isCriticalBattery
+                isCriticalBattery,
+                showCharged
             );
             panelTexture.needsUpdate = true;
+            return frameSnapshot;
         },
         reset() {
             state.visibleBlend = 0;
             state.lowBatteryReminderActive = false;
             state.criticalBatteryAlertActive = false;
+            state.chargeCompleteLatched = false;
+            state.chargedHoldTimer = 0;
+            state.hasLastChargingAnchor = false;
+            frameSnapshot.chargeCompletedThisFrame = false;
             root.visible = false;
         },
     };
@@ -193,7 +287,8 @@ export function createChargingProgressHudController(scene, camera, options = {})
         time,
         isCharging,
         showLowBatteryReminder,
-        isCriticalBattery
+        isCriticalBattery,
+        showCharged
     ) {
         const ctx = panelCtx;
         const w = panelCanvas.width;
@@ -259,9 +354,13 @@ export function createChargingProgressHudController(scene, camera, options = {})
         ctx.fillStyle = scanGradient;
         ctx.fillRect(px + 10, scanY - 24, pw - 20, 48);
 
-        const batteryLevel = THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
-        const bigPercentText = `${Math.round(displayPercent)}%`;
-        const subText = isCharging
+        const batteryLevel = showCharged
+            ? 1
+            : THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
+        const bigPercentText = showCharged ? 'CHARGED' : `${Math.round(displayPercent)}%`;
+        const subText = showCharged
+            ? 'Battery full. Drive on.'
+            : isCharging
             ? `LAADIMINE +${chargingBatteryGainPerSec.toFixed(1)}%/s`
             : isCriticalBattery
               ? 'CRITICAL BATTERY - CHARGE NOW'
@@ -273,7 +372,9 @@ export function createChargingProgressHudController(scene, camera, options = {})
         ctx.shadowColor = textShadow;
         ctx.shadowBlur = 28 + charging * 16 + (isCriticalBattery ? 10 : 0);
         ctx.fillStyle = bigTextColor;
-        ctx.font = '800 122px "Orbitron", "Trebuchet MS", sans-serif';
+        ctx.font = showCharged
+            ? '800 92px "Orbitron", "Trebuchet MS", sans-serif'
+            : '800 122px "Orbitron", "Trebuchet MS", sans-serif';
         ctx.fillText(bigPercentText, w * 0.5, py + 168);
 
         ctx.shadowBlur = 10;
@@ -311,16 +412,16 @@ export function createChargingProgressHudController(scene, camera, options = {})
         ctx.stroke();
         ctx.shadowBlur = 0;
 
-        const tickerValues = [];
-        for (let i = 0; i < 8; i += 1) {
-            const v = THREE.MathUtils.clamp(
-                displayPercent + (i - 3.5) * 0.9 + Math.sin(time * 2.6 + i * 0.86) * 1.35,
-                0,
-                100
-            );
-            tickerValues.push(`${v.toFixed(1)}%`);
-        }
-        const tickerText = tickerValues.join('    ');
+        const tickerText = showCharged
+            ? 'FULL BATTERY    SYSTEMS READY    FULL BATTERY    SYSTEMS READY'
+            : Array.from({ length: 8 }, (_, i) => {
+                  const v = THREE.MathUtils.clamp(
+                      displayPercent + (i - 3.5) * 0.9 + Math.sin(time * 2.6 + i * 0.86) * 1.35,
+                      0,
+                      100
+                  );
+                  return `${v.toFixed(1)}%`;
+              }).join('    ');
         ctx.save();
         const tickerX = px + 92;
         const tickerY = py + 332;
@@ -350,6 +451,30 @@ export function createChargingProgressHudController(scene, camera, options = {})
     }
 }
 
+function drawChargingBolt(ctx, x, y, scale = 1, options = {}) {
+    const fillStyle = options.fillStyle || 'rgba(228, 252, 255, 0.94)';
+    const shadowColor = options.shadowColor || 'rgba(116, 228, 255, 0.9)';
+    const shadowBlur = Number.isFinite(options.shadowBlur) ? options.shadowBlur : 0;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.fillStyle = fillStyle;
+    ctx.shadowColor = shadowColor;
+    ctx.shadowBlur = shadowBlur;
+    ctx.beginPath();
+    ctx.moveTo(-26, -56);
+    ctx.lineTo(6, -56);
+    ctx.lineTo(-10, -12);
+    ctx.lineTo(22, -12);
+    ctx.lineTo(-24, 56);
+    ctx.lineTo(-6, 12);
+    ctx.lineTo(-32, 12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
 function createChargingProgressHaloTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 768;
@@ -360,22 +485,42 @@ function createChargingProgressHaloTexture() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     const outer = ctx.createRadialGradient(cx, cy, 0, cx, cy, 340);
-    outer.addColorStop(0, 'rgba(178, 244, 255, 0.36)');
-    outer.addColorStop(0.56, 'rgba(118, 225, 255, 0.12)');
-    outer.addColorStop(1, 'rgba(118, 225, 255, 0)');
+    outer.addColorStop(0, 'rgba(194, 248, 255, 0.38)');
+    outer.addColorStop(0.34, 'rgba(142, 233, 255, 0.24)');
+    outer.addColorStop(0.7, 'rgba(112, 220, 255, 0.08)');
+    outer.addColorStop(1, 'rgba(112, 220, 255, 0)');
     ctx.fillStyle = outer;
     ctx.beginPath();
     ctx.arc(cx, cy, 340, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(200, 251, 255, 0.88)';
-    ctx.shadowColor = 'rgba(103, 220, 255, 0.9)';
-    ctx.shadowBlur = 18;
-    ctx.lineWidth = 20;
+    ctx.strokeStyle = 'rgba(210, 251, 255, 0.78)';
+    ctx.shadowColor = 'rgba(112, 224, 255, 0.82)';
+    ctx.shadowBlur = 22;
+    ctx.lineWidth = 14;
     ctx.beginPath();
     ctx.arc(cx, cy, 248, 0, Math.PI * 2);
     ctx.stroke();
     ctx.shadowBlur = 0;
+
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(1, 0.66);
+    const panelBloom = ctx.createRadialGradient(0, 0, 24, 0, 0, 272);
+    panelBloom.addColorStop(0, 'rgba(226, 252, 255, 0.34)');
+    panelBloom.addColorStop(0.42, 'rgba(150, 236, 255, 0.16)');
+    panelBloom.addColorStop(1, 'rgba(150, 236, 255, 0)');
+    ctx.fillStyle = panelBloom;
+    ctx.beginPath();
+    ctx.arc(0, 0, 272, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    drawChargingBolt(ctx, cx, cy - 110, 1.06, {
+        fillStyle: 'rgba(231, 252, 255, 0.94)',
+        shadowColor: 'rgba(122, 230, 255, 0.94)',
+        shadowBlur: 24,
+    });
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -385,7 +530,9 @@ function createChargingProgressHaloTexture() {
 
 export function createChargingZoneController(scene, chargingZones = [], options = {}) {
     const activationDelaySec = Math.max(0.2, Number(options.activationDelaySec) || 2);
-    const chargingSurfaceOffset = Math.max(0.02, Number(options.surfaceOffset) || 0.12);
+    const chargingSurfaceOffset = Number.isFinite(options.surfaceOffset)
+        ? Math.max(DRIVE_SURFACE_Y, Number(options.surfaceOffset))
+        : DRIVE_SURFACE_Y + 0.002;
     const sampleGroundHeight =
         typeof options.sampleGroundHeight === 'function' ? options.sampleGroundHeight : () => 0;
     const fallbackState = {
@@ -403,6 +550,9 @@ export function createChargingZoneController(scene, chargingZones = [], options 
             getVisualLevel() {
                 return 0;
             },
+            getHudAnchor() {
+                return null;
+            },
         };
     }
 
@@ -410,14 +560,10 @@ export function createChargingZoneController(scene, chargingZones = [], options 
     layer.name = 'charging_zone_fx_layer';
     scene.add(layer);
 
-    const padTexture = createChargingPadTexture();
-    const sweepTexture = createChargingSweepTexture();
-    const pulseTexture = createChargingPulseTexture();
-    const sparkTexture = createChargingSparkTexture();
-    const symbolTexture = createChargingZoneSymbolTexture();
+    const markerTexture = createChargingMarkerTexture();
+    const beaconTexture = createChargingBeaconTexture();
     const zoneVisuals = chargingZones.map((zone, index) => {
         const radius = Math.max(1.2, Number(zone.radius) || 2.45);
-        const coreRadius = radius * 0.86;
         const zoneBaseY = Number.isFinite(zone.y) ? zone.y : sampleGroundHeight(zone.x, zone.z);
         const anchorY = zoneBaseY + chargingSurfaceOffset;
 
@@ -426,10 +572,10 @@ export function createChargingZoneController(scene, chargingZones = [], options 
         zoneGroup.visible = true;
         layer.add(zoneGroup);
 
-        const padMaterial = new THREE.MeshBasicMaterial({
-            map: padTexture,
+        const markerMaterial = new THREE.MeshBasicMaterial({
+            map: markerTexture,
             transparent: true,
-            opacity: 0.05,
+            opacity: 0.6,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             depthTest: true,
@@ -437,145 +583,37 @@ export function createChargingZoneController(scene, chargingZones = [], options 
             toneMapped: false,
             fog: false,
         });
-        const pad = new THREE.Mesh(
-            new THREE.PlaneGeometry(radius * 2.74, radius * 2.74),
-            padMaterial
+        const marker = markGroundDebugLayer(
+            new THREE.Mesh(new THREE.PlaneGeometry(radius * 2.42, radius * 2.42), markerMaterial),
+            'charging_fx'
         );
-        pad.rotation.x = -Math.PI / 2;
-        zoneGroup.add(pad);
+        marker.rotation.x = -Math.PI / 2;
+        zoneGroup.add(marker);
 
-        const innerMaterial = new THREE.MeshBasicMaterial({
-            map: pulseTexture,
+        const beaconMaterial = new THREE.SpriteMaterial({
+            map: beaconTexture,
             transparent: true,
-            opacity: 0.06,
+            opacity: 0.58,
             blending: THREE.AdditiveBlending,
             depthWrite: false,
             depthTest: true,
-            side: THREE.DoubleSide,
             toneMapped: false,
             fog: false,
         });
-        const inner = new THREE.Mesh(
-            new THREE.PlaneGeometry(coreRadius * 2.12, coreRadius * 2.12),
-            innerMaterial
-        );
-        inner.rotation.x = -Math.PI / 2;
-        inner.position.y = 0.0035;
-        zoneGroup.add(inner);
-
-        const sweepMaterial = new THREE.MeshBasicMaterial({
-            map: sweepTexture,
-            transparent: true,
-            opacity: 0.08,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: true,
-            side: THREE.DoubleSide,
-            toneMapped: false,
-            fog: false,
-        });
-        const sweep = new THREE.Mesh(
-            new THREE.PlaneGeometry(radius * 2.7, radius * 2.7),
-            sweepMaterial
-        );
-        sweep.rotation.x = -Math.PI / 2;
-        sweep.position.y = 0.0062;
-        zoneGroup.add(sweep);
-
-        const counterSweepMaterial = new THREE.MeshBasicMaterial({
-            map: sweepTexture,
-            transparent: true,
-            opacity: 0.04,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: true,
-            side: THREE.DoubleSide,
-            toneMapped: false,
-            fog: false,
-        });
-        const counterSweep = new THREE.Mesh(
-            new THREE.PlaneGeometry(radius * 2.45, radius * 2.45),
-            counterSweepMaterial
-        );
-        counterSweep.rotation.x = -Math.PI / 2;
-        counterSweep.position.y = 0.0067;
-        counterSweep.scale.set(0.98, 0.98, 1);
-        zoneGroup.add(counterSweep);
-
-        const pulseMaterial = new THREE.MeshBasicMaterial({
-            map: pulseTexture,
-            transparent: true,
-            opacity: 0,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: true,
-            side: THREE.DoubleSide,
-            toneMapped: false,
-            fog: false,
-        });
-        const pulse = new THREE.Mesh(
-            new THREE.PlaneGeometry(coreRadius * 1.7, coreRadius * 1.7),
-            pulseMaterial
-        );
-        pulse.rotation.x = -Math.PI / 2;
-        pulse.position.y = 0.007;
-        zoneGroup.add(pulse);
-
-        const sparkMaterial = new THREE.MeshBasicMaterial({
-            map: sparkTexture,
-            transparent: true,
-            opacity: 0.02,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: true,
-            side: THREE.DoubleSide,
-            toneMapped: false,
-            fog: false,
-        });
-        const spark = new THREE.Mesh(
-            new THREE.PlaneGeometry(radius * 2.46, radius * 2.46),
-            sparkMaterial
-        );
-        spark.rotation.x = -Math.PI / 2;
-        spark.position.y = 0.0076;
-        zoneGroup.add(spark);
-
-        const symbolMaterial = new THREE.MeshBasicMaterial({
-            map: symbolTexture,
-            transparent: true,
-            opacity: 0.12,
-            blending: THREE.AdditiveBlending,
-            depthWrite: false,
-            depthTest: true,
-            side: THREE.DoubleSide,
-            toneMapped: false,
-            fog: false,
-        });
-        const symbol = new THREE.Mesh(
-            new THREE.PlaneGeometry(coreRadius * 1.26, coreRadius * 1.26),
-            symbolMaterial
-        );
-        symbol.rotation.x = -Math.PI / 2;
-        symbol.position.y = 0.008;
-        zoneGroup.add(symbol);
+        const beacon = markGroundDebugLayer(new THREE.Sprite(beaconMaterial), 'charging_fx');
+        beacon.position.y = 1.45;
+        beacon.scale.setScalar(radius * 1.9);
+        zoneGroup.add(beacon);
 
         return {
             index,
             x: zone.x,
             z: zone.z,
             radius,
-            pad,
-            inner,
-            sweep,
-            counterSweep,
-            pulse,
-            spark,
+            marker,
+            beacon,
             zoneGroup,
-            symbol,
-            symbolYaw: Math.random() * Math.PI * 2,
-            sweepYaw: Math.random() * Math.PI * 2,
-            counterSweepYaw: Math.random() * Math.PI * 2,
-            sparkYaw: Math.random() * Math.PI * 2,
+            beaconPhase: Math.random() * Math.PI * 2,
         };
     });
 
@@ -656,6 +694,18 @@ export function createChargingZoneController(scene, chargingZones = [], options 
         getVisualLevel() {
             return state.visualLevel;
         },
+        getHudAnchor(target = null) {
+            if (state.insideZoneIndex < 0) {
+                return null;
+            }
+            const zone = zoneVisuals[state.insideZoneIndex];
+            if (!zone) {
+                return null;
+            }
+            const destination =
+                target && typeof target.set === 'function' ? target : new THREE.Vector3();
+            return destination.set(zone.x, zone.zoneGroup.position.y + 2.1, zone.z);
+        },
     };
 
     function findInsideZoneIndex(x, z) {
@@ -686,57 +736,131 @@ export function createChargingZoneController(scene, chargingZones = [], options 
             const isInside = i === insideZoneIndex;
             const prep = isInside ? activationProgress : 0;
             const pulse = 0.5 + 0.5 * Math.sin(state.pulsePhase + zone.index * 0.82);
-            const fastPulse = 0.5 + 0.5 * Math.sin(state.pulsePhase * 1.72 + zone.index * 1.37);
             const prepEase = prep * prep * (3 - 2 * prep);
             const zoneActiveLevel = isInside ? activeLevel : 0;
-            const idleLevel = 1;
+            const hover = 0.5 + 0.5 * Math.sin(state.pulsePhase * 1.45 + zone.beaconPhase);
+            const guideFade = isInside
+                ? 1 - Math.max(prepEase * 0.74, zoneActiveLevel * 0.92)
+                : 1;
 
-            zone.pad.material.opacity =
-                0.045 +
-                idleLevel * 0.12 +
-                prepEase * 0.14 +
-                zoneActiveLevel * (0.18 + pulse * 0.24);
-            zone.pad.scale.setScalar(
-                1 + idleLevel * 0.016 + zoneActiveLevel * (0.02 + fastPulse * 0.04)
+            zone.marker.material.opacity =
+                0.56 + prepEase * 0.18 + zoneActiveLevel * (0.14 + pulse * 0.18);
+            zone.marker.scale.setScalar(
+                1 + prepEase * 0.03 + zoneActiveLevel * (0.03 + pulse * 0.04)
             );
 
-            zone.inner.material.opacity =
-                0.04 + idleLevel * 0.11 + prepEase * 0.2 + zoneActiveLevel * (0.2 + pulse * 0.3);
-            zone.inner.scale.setScalar(
-                1 + idleLevel * 0.015 + zoneActiveLevel * (0.04 + fastPulse * 0.07)
+            zone.beacon.material.opacity =
+                (0.26 + hover * 0.12) * guideFade + zoneActiveLevel * 0.04;
+            zone.beacon.position.y =
+                1.26 + hover * 0.16 + guideFade * 0.22 + zoneActiveLevel * 0.08;
+            zone.beacon.scale.setScalar(
+                zone.radius *
+                    (1.44 + hover * 0.08 + guideFade * 0.22 + zoneActiveLevel * 0.04)
             );
-
-            zone.sweep.material.opacity =
-                0.03 + idleLevel * 0.1 + prepEase * 0.17 + zoneActiveLevel * (0.16 + pulse * 0.26);
-            zone.counterSweep.material.opacity =
-                0.015 +
-                idleLevel * 0.07 +
-                prepEase * 0.09 +
-                zoneActiveLevel * (0.1 + fastPulse * 0.2);
-            zone.spark.material.opacity =
-                idleLevel * 0.035 + prepEase * 0.06 + zoneActiveLevel * (0.08 + fastPulse * 0.3);
-
-            const rippleTravel =
-                (state.pulsePhase * (0.11 + zoneActiveLevel * 0.16) + zone.index * 0.07) % 1;
-            zone.pulse.material.opacity =
-                idleLevel * (0.025 + pulse * 0.03) +
-                zoneActiveLevel * (0.16 + (1 - rippleTravel) * 0.38 + pulse * 0.12);
-            zone.pulse.scale.setScalar(
-                0.84 + idleLevel * 0.07 + rippleTravel * (0.64 + zoneActiveLevel * 0.82)
-            );
-
-            zone.symbolYaw += (0.12 + zoneActiveLevel * 1.55) * dt;
-            zone.sweepYaw += (0.26 + zoneActiveLevel * 2.5) * dt;
-            zone.counterSweepYaw -= (0.14 + zoneActiveLevel * 1.6) * dt;
-            zone.sparkYaw -= (0.22 + zoneActiveLevel * 3.2) * dt;
-            zone.sweep.rotation.z = zone.sweepYaw;
-            zone.counterSweep.rotation.z = zone.counterSweepYaw;
-            zone.spark.rotation.z = zone.sparkYaw;
-            zone.symbol.material.opacity =
-                0.12 + idleLevel * 0.12 + prepEase * 0.26 + zoneActiveLevel * (0.26 + pulse * 0.26);
-            zone.symbol.rotation.z = zone.symbolYaw;
         }
     }
+}
+
+function createChargingMarkerTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const outerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 450);
+    outerGlow.addColorStop(0, 'rgba(114, 234, 255, 0.16)');
+    outerGlow.addColorStop(0.5, 'rgba(74, 190, 235, 0.08)');
+    outerGlow.addColorStop(1, 'rgba(74, 190, 235, 0)');
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 450, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(188, 246, 255, 0.78)';
+    ctx.lineWidth = 24;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 306, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(16, 41, 60, 0.88)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 190, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(97, 224, 255, 0.9)';
+    ctx.shadowColor = 'rgba(83, 220, 255, 0.95)';
+    ctx.shadowBlur = 24;
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 22;
+    const arcs = [
+        { radius: 76, start: Math.PI * 1.14, end: Math.PI * 1.86 },
+        { radius: 118, start: Math.PI * 1.2, end: Math.PI * 1.8 },
+    ];
+    for (let i = 0; i < arcs.length; i += 1) {
+        const arc = arcs[i];
+        ctx.beginPath();
+        ctx.arc(cx, cy, arc.radius, arc.start, arc.end);
+        ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + 92);
+    ctx.lineTo(cx, cy + 4);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle = 'rgba(223, 253, 255, 1)';
+    ctx.beginPath();
+    ctx.arc(cx, cy + 118, 17, 0, Math.PI * 2);
+    ctx.fill();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 8;
+    return texture;
+}
+
+function createChargingBeaconTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    const cx = canvas.width * 0.5;
+    const cy = canvas.height * 0.5;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 220);
+    glow.addColorStop(0, 'rgba(220, 252, 255, 0.92)');
+    glow.addColorStop(0.14, 'rgba(160, 240, 255, 0.56)');
+    glow.addColorStop(0.38, 'rgba(104, 215, 245, 0.18)');
+    glow.addColorStop(1, 'rgba(96, 210, 245, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 220, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(205, 250, 255, 0.74)';
+    ctx.shadowColor = 'rgba(118, 226, 255, 0.84)';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 144, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    drawChargingBolt(ctx, cx, cy, 0.92, {
+        fillStyle: 'rgba(234, 253, 255, 0.9)',
+        shadowColor: 'rgba(116, 228, 255, 0.86)',
+        shadowBlur: 16,
+    });
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 8;
+    return texture;
 }
 
 function createChargingZoneSymbolTexture() {

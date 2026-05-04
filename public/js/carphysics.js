@@ -1,6 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import {
     OBSTACLE_CRASH_MIN_SPEED,
+    PLAYER_RIDE_HEIGHT,
     PLAYER_TOP_SPEED_LIMIT_STEP_KPH,
     PLAYER_TOP_SPEED_LIMIT_MIN_KPH,
     PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
@@ -168,7 +169,7 @@ const OBSTACLE_BROADPHASE_EXTRA_RADIUS = 6;
 const VEHICLE_COLLISION_MASS = 1.35;
 const VEHICLE_COLLISION_PENETRATION_SHARE = 0.94;
 // Keep the tire contact only slightly above rendered roads/surfaces.
-const VEHICLE_RIDE_HEIGHT = 0.034;
+const VEHICLE_RIDE_HEIGHT = PLAYER_RIDE_HEIGHT;
 const TERRAIN_WHEEL_RADIUS = 0.5;
 const TERRAIN_WHEEL_CENTER_HEIGHT = TERRAIN_WHEEL_RADIUS;
 // Terrain support should use the visual wheel footprint, not the shorter handling wheelbase.

@@ -1,8 +1,9 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { initializeWheels } from './wheels.js';
 import { addLightsToCar, addLuxuryBody, createSuspensionLinkage } from './carbody.js';
+import { PLAYER_RIDE_HEIGHT } from './constants.js';
 
-const DEFAULT_CAR_BASE_RIDE_HEIGHT = 0.034;
+const DEFAULT_CAR_BASE_RIDE_HEIGHT = PLAYER_RIDE_HEIGHT;
 const PLAYER_REAR_LIGHT_Z = 2.045;
 
 const SUSPENSION = {

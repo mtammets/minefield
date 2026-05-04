@@ -9,7 +9,6 @@ import {
 } from './config.js';
 import { worldBounds, cityMapLayout, chargingZones, playerSpawnPoint } from './layout.js';
 import { staticObstacles } from './obstacles.js';
-import { createGroundTexture } from './textures.js';
 import { getGroundHeightAt, createGround, updateGroundMotionRuntime } from './terrain.js';
 import { updateBillboardRuntime } from './billboards.js';
 import { updateMonumentRuntime } from './monument.js';
@@ -38,9 +37,7 @@ function ensureWorldBuilt() {
         };
     }
 
-    const groundTexture = createGroundTexture();
     const builtGround = createGround({
-        texture: groundTexture,
         size: [worldBounds.size + 120, worldBounds.size + 120],
         positionY: 0,
     });

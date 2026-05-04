@@ -58,6 +58,235 @@ export function createGroundTexture() {
     return texture;
 }
 
+export function createSignatureGrassTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#10281f');
+    baseGradient.addColorStop(0.38, '#143126');
+    baseGradient.addColorStop(1, '#0b1d17');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 18000; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 24 + Math.random() * 26;
+        ctx.fillStyle = `rgba(${value}, ${46 + Math.random() * 44}, ${34 + Math.random() * 26}, 0.18)`;
+        ctx.fillRect(x, y, 1.6, 1.6);
+    }
+
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4200; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const length = 4 + Math.random() * 10;
+        const heading = -Math.PI * 0.62 + Math.random() * Math.PI * 0.28;
+        const green = 112 + Math.random() * 96;
+        ctx.strokeStyle = `rgba(${34 + Math.random() * 20}, ${green}, ${54 + Math.random() * 28}, 0.1)`;
+        ctx.lineWidth = 0.8 + Math.random() * 0.9;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + Math.cos(heading) * length, y + Math.sin(heading) * length);
+        ctx.stroke();
+    }
+
+    for (let i = 0; i < 32; i += 1) {
+        const radius = 80 + Math.random() * 180;
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const wash = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        wash.addColorStop(0, 'rgba(118, 172, 143, 0.12)');
+        wash.addColorStop(0.58, 'rgba(68, 114, 92, 0.08)');
+        wash.addColorStop(1, 'rgba(14, 29, 23, 0)');
+        ctx.fillStyle = wash;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    ctx.strokeStyle = 'rgba(182, 230, 196, 0.05)';
+    for (let i = 0; i < 18; i += 1) {
+        const startX = Math.random() * canvas.width;
+        const startY = Math.random() * canvas.height;
+        const sway = 70 + Math.random() * 180;
+        ctx.lineWidth = 16 + Math.random() * 32;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.bezierCurveTo(
+            startX + sway * 0.18,
+            startY - sway * 0.22,
+            startX + sway * 0.66,
+            startY + sway * 0.18,
+            startX + sway,
+            startY - sway * 0.08
+        );
+        ctx.stroke();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(14, 14);
+    texture.anisotropy = 4;
+    return texture;
+}
+
+export function createPremiumSidewalkTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#6a7f96');
+    baseGradient.addColorStop(0.4, '#5a6f86');
+    baseGradient.addColorStop(1, '#485c72');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const slab = 82;
+    for (let row = 0; row < canvas.height / slab + 1; row += 1) {
+        for (let col = 0; col < canvas.width / slab + 1; col += 1) {
+            const x = col * slab;
+            const y = row * slab;
+            const lift = ((row + col) % 2 === 0 ? 1 : -1) * (5 + Math.random() * 7);
+            ctx.fillStyle = `rgba(${94 + lift}, ${112 + lift}, ${130 + lift}, 0.2)`;
+            ctx.fillRect(x + 2, y + 2, slab - 4, slab - 4);
+        }
+    }
+
+    ctx.strokeStyle = 'rgba(214, 231, 250, 0.18)';
+    ctx.lineWidth = 2;
+    for (let x = 0; x <= canvas.width; x += slab) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= canvas.height; y += slab) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(canvas.width, y + 0.5);
+        ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(235, 243, 252, 0.14)';
+    ctx.fillRect(0, 16, canvas.width, 7);
+    ctx.fillStyle = 'rgba(128, 191, 232, 0.1)';
+    ctx.fillRect(0, canvas.height - 22, canvas.width, 6);
+
+    for (let i = 0; i < 4200; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 172 + Math.random() * 46;
+        ctx.fillStyle = `rgba(${value}, ${value + 8}, ${value + 14}, 0.06)`;
+        ctx.fillRect(x, y, 1.2, 1.2);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2.6, 16);
+    texture.anisotropy = 4;
+    return texture;
+}
+
+export function createPromenadeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#31475d');
+    baseGradient.addColorStop(0.48, '#25384b');
+    baseGradient.addColorStop(1, '#1b2c3e');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 9600; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 58 + Math.random() * 34;
+        ctx.fillStyle = `rgba(${value}, ${value + 6}, ${value + 16}, 0.14)`;
+        ctx.fillRect(x, y, 2, 2);
+    }
+
+    const tile = 56;
+    ctx.strokeStyle = 'rgba(205, 223, 244, 0.08)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= canvas.width; x += tile) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, canvas.height);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= canvas.height; y += tile) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(canvas.width, y + 0.5);
+        ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(197, 214, 234, 0.1)';
+    ctx.fillRect(canvas.width * 0.42, 0, canvas.width * 0.16, canvas.height);
+    ctx.fillRect(0, canvas.height * 0.42, canvas.width, canvas.height * 0.16);
+
+    ctx.strokeStyle = 'rgba(228, 241, 255, 0.34)';
+    ctx.lineWidth = 12;
+    ctx.strokeRect(54, 54, canvas.width - 108, canvas.height - 108);
+
+    ctx.strokeStyle = 'rgba(255, 201, 118, 0.28)';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.arc(canvas.width * 0.5, canvas.height * 0.5, 152, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(canvas.width * 0.5, canvas.height * 0.5, 224, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(151, 223, 255, 0.16)';
+    ctx.lineWidth = 3;
+    ctx.setLineDash([18, 14]);
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.5, 82);
+    ctx.lineTo(canvas.width * 0.5, canvas.height - 82);
+    ctx.moveTo(82, canvas.height * 0.5);
+    ctx.lineTo(canvas.width - 82, canvas.height * 0.5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const glow = ctx.createRadialGradient(
+        canvas.width * 0.5,
+        canvas.height * 0.5,
+        10,
+        canvas.width * 0.5,
+        canvas.height * 0.5,
+        260
+    );
+    glow.addColorStop(0, 'rgba(198, 229, 255, 0.16)');
+    glow.addColorStop(0.5, 'rgba(126, 184, 227, 0.08)');
+    glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(canvas.width * 0.5, canvas.height * 0.5, 260, 0, Math.PI * 2);
+    ctx.fill();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 4;
+    return texture;
+}
+
 export function createRoadSurfaceTexture(styleTextureConfig = ROAD_STYLE_CONFIGS.avenue.texture) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;

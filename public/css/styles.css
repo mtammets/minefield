@@ -556,6 +556,153 @@ canvas#gameCanvas {
     color: rgba(173, 222, 255, 0.94);
 }
 
+#groundLayerDebugPanel {
+    position: fixed;
+    left: 18px;
+    top: 90px;
+    z-index: 8;
+    width: min(260px, calc(100vw - 36px));
+    padding: 10px;
+    border: 1px solid rgba(157, 210, 255, 0.48);
+    border-radius: 14px;
+    background: linear-gradient(166deg, rgba(9, 20, 36, 0.94), rgba(6, 13, 24, 0.92));
+    box-shadow:
+        0 16px 38px rgba(0, 0, 0, 0.42),
+        inset 0 0 0 1px rgba(220, 240, 255, 0.05);
+    backdrop-filter: blur(8px);
+}
+
+#groundLayerDebugPanel[data-open='false'] {
+    width: auto;
+}
+
+.groundLayerDebugHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.groundLayerDebugHeading {
+    min-width: 0;
+}
+
+.groundLayerDebugKicker {
+    font-size: 9px;
+    line-height: 1.2;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(165, 205, 232, 0.9);
+    font-weight: 700;
+}
+
+.groundLayerDebugTitle {
+    margin-top: 2px;
+    font-size: 15px;
+    line-height: 1.15;
+    letter-spacing: 0.35px;
+    color: rgba(233, 246, 255, 0.98);
+    font-weight: 800;
+}
+
+.groundLayerDebugCollapseBtn,
+.groundLayerDebugActionBtn {
+    border: 1px solid rgba(160, 206, 240, 0.4);
+    background: linear-gradient(180deg, rgba(18, 39, 60, 0.88), rgba(11, 25, 40, 0.88));
+    color: rgba(231, 245, 255, 0.98);
+    font-family: 'Sora', sans-serif;
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        filter 120ms ease,
+        transform 120ms ease;
+}
+
+.groundLayerDebugCollapseBtn:hover,
+.groundLayerDebugActionBtn:hover {
+    border-color: rgba(187, 224, 247, 0.72);
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+}
+
+.groundLayerDebugCollapseBtn {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    font-size: 18px;
+    line-height: 1;
+}
+
+.groundLayerDebugToolbar {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+}
+
+.groundLayerDebugActionBtn {
+    min-height: 28px;
+    padding: 0 8px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.85px;
+    text-transform: uppercase;
+}
+
+.groundLayerDebugBody {
+    margin-top: 10px;
+    display: grid;
+    gap: 6px;
+    max-height: min(42vh, 320px);
+    overflow: auto;
+    padding-right: 2px;
+}
+
+#groundLayerDebugPanel[data-open='false'] .groundLayerDebugToolbar,
+#groundLayerDebugPanel[data-open='false'] .groundLayerDebugBody {
+    display: none;
+}
+
+.groundLayerDebugRow {
+    display: grid;
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 9px;
+    border: 1px solid rgba(140, 192, 233, 0.26);
+    background: rgba(11, 25, 40, 0.58);
+    color: rgba(224, 241, 255, 0.97);
+}
+
+.groundLayerDebugCheckbox {
+    margin: 0;
+    accent-color: #8fd8ff;
+}
+
+.groundLayerDebugRowLabel {
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.groundLayerDebugRowCount {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    color: rgba(165, 209, 236, 0.9);
+}
+
+.groundLayerDebugEmpty {
+    padding: 8px;
+    border-radius: 9px;
+    border: 1px dashed rgba(140, 192, 233, 0.26);
+    color: rgba(173, 211, 236, 0.9);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
 :root {
     --speedometer-hud-width: clamp(272px, 18.6vw, 338px);
     --speedometer-hud-height: calc(var(--speedometer-hud-width) * 0.6875);

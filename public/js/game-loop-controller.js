@@ -717,7 +717,13 @@ export function createGameLoopController(options = {}) {
         chargingHudFrameState.isCharging = chargingHudActive;
         chargingHudFrameState.chargingLevel = chargingHudLevel;
         chargingHudFrameState.batteryDepleted = readBatteryDepleted();
-        chargingProgressHudController.update(frameDelta, chargingHudFrameState);
+        const chargingHudSnapshot = chargingProgressHudController.update(
+            frameDelta,
+            chargingHudFrameState
+        );
+        if (chargingHudSnapshot?.chargeCompletedThisFrame) {
+            objectiveUi.showInfo('CHARGED', 1400);
+        }
 
         skidMarkFrameState.enabled = skidMarksEnabled;
         skidMarkFrameState.vehicleState = skidMarkVehicleState;

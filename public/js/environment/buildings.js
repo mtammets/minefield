@@ -9,7 +9,6 @@ import {
     createLuxuryMarbleTexture,
 } from './textures.js';
 import {
-    LORIEN_VELMORE_GALLERY_SURFACE_OFFSET,
     getLorienVelmoreGalleryLayout as resolveLorienVelmoreGalleryLayout,
     isInsideLorienVelmoreGalleryRoomWorld,
     sampleLorienVelmoreGalleryFloorHeightLocal as resolveLorienVelmoreGalleryFloorHeightLocal,
@@ -64,6 +63,7 @@ const LORIEN_VELMORE_GALLERY_VIDEO_PLAYBACK_DELAY_MS = 2000;
 const lorienGalleryArtworkTextureLoader = new THREE.TextureLoader();
 const lorienGalleryArtworkTextureCache = new Map();
 let lorienVelmoreGalleryVideoDisplayState = null;
+let lorienManifestoWallTexture = null;
 
 export function getLorienVelmoreGalleryVideoDisplayState() {
     return lorienVelmoreGalleryVideoDisplayState;
@@ -554,21 +554,6 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
         });
     }
 
-    const passageFloor = isGalleryHall
-        ? createGalleryHallFloorMesh(building, passageSurfaceMaterial)
-        : new THREE.Mesh(
-              new THREE.PlaneGeometry(
-                  axis === 'x' ? building.width - 0.5 : passageWidth - 0.55,
-                  axis === 'x' ? passageWidth - 0.55 : building.depth - 0.5
-              ),
-              passageSurfaceMaterial
-          );
-    if (!isGalleryHall) {
-        passageFloor.rotation.x = -Math.PI / 2;
-        passageFloor.position.y = 0.028;
-    }
-    group.add(passageFloor);
-
     const passageCeiling = new THREE.Mesh(
         new THREE.PlaneGeometry(
             isGalleryHall
@@ -733,23 +718,6 @@ function addLorienVelmoreLuxuryPassageDecor(
     });
 
     if (!isGalleryHall) {
-        addDecorBox(group, baseGeometry, trimMaterial, {
-            x: 0,
-            y: 0.032,
-            z: 0,
-            width: axis === 'x' ? runnerLength + 0.18 : runnerWidth + 0.18,
-            height: 0.014,
-            depth: axis === 'x' ? runnerWidth + 0.18 : runnerLength + 0.18,
-        });
-        addDecorBox(group, baseGeometry, runnerMaterial, {
-            x: 0,
-            y: 0.042,
-            z: 0,
-            width: axis === 'x' ? runnerLength : runnerWidth,
-            height: 0.012,
-            depth: axis === 'x' ? runnerWidth : runnerLength,
-        });
-
         const skirtingOffset = passageWidth * 0.5 - 0.05;
         addDecorBox(group, baseGeometry, trimMaterial, {
             x: axis === 'x' ? 0 : -skirtingOffset,
@@ -2269,31 +2237,6 @@ function addLorienVelmoreSubterraneanHall(
         height: 0.16,
         depth: 0.34,
     });
-    addDecorBox(group, baseGeometry, bronzeMaterial, {
-        x: 0,
-        y: 0.024,
-        z: exteriorApronZ,
-        width: frontOpeningHalfWidth * 2 + 1.08,
-        height: 0.016,
-        depth: exteriorApronDepth,
-    });
-    addDecorBox(group, baseGeometry, floorFieldMaterial, {
-        x: 0,
-        y: 0.036,
-        z: exteriorApronZ,
-        width: frontOpeningHalfWidth * 2 + 0.84,
-        height: 0.018,
-        depth: exteriorApronDepth - 0.16,
-    });
-    addDecorBox(group, baseGeometry, bronzeMaterial, {
-        x: 0,
-        y: 0.034,
-        z: layout.hallStartZ + 0.18,
-        width: frontOpeningHalfWidth * 2 + 0.32,
-        height: 0.016,
-        depth: 0.32,
-    });
-
     addDecorBox(group, baseGeometry, doorFrameMaterial, {
         x: -frontOpeningHalfWidth - 0.12,
         y: entryFrameHeight * 0.5,
@@ -2417,6 +2360,14 @@ function addLorienVelmoreSubterraneanHall(
             height: 1.42,
             depth: 0.02,
         });
+    });
+
+    addLorienVelmoreExteriorManifesto(group, {
+        hallHalfWidth: layout.hallHalfWidth,
+        hallMidZ,
+        hallDepth,
+        wallThickness,
+        wallHeight: ceilingY,
     });
 
     addLorienVelmoreEntrancePlanters(group, baseGeometry, {
@@ -2884,6 +2835,77 @@ function addLorienVelmoreGroundLandscape(
         height: 0.1,
         depth: 0.56,
     });
+}
+
+function addLorienVelmoreExteriorManifesto(
+    group,
+    { hallHalfWidth, hallMidZ, hallDepth, wallThickness, wallHeight }
+) {
+    const panelWidth = Math.max(8.8, hallDepth - 1.3);
+    const panelHeight = THREE.MathUtils.clamp(wallHeight - 0.88, 3.9, 4.6);
+    const panel = new THREE.Mesh(
+        new THREE.PlaneGeometry(panelWidth, panelHeight),
+        new THREE.MeshBasicMaterial({
+            map: getLorienManifestoWallTexture(),
+            transparent: true,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+            alphaTest: 0.035,
+        })
+    );
+    panel.position.set(
+        hallHalfWidth + wallThickness + 0.035,
+        panelHeight * 0.5 + 0.38,
+        hallMidZ + 0.08
+    );
+    panel.rotation.y = Math.PI * 0.5;
+    panel.renderOrder = 3;
+    group.add(panel);
+}
+
+function getLorienManifestoWallTexture() {
+    if (lorienManifestoWallTexture) {
+        return lorienManifestoWallTexture;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 4096;
+    canvas.height = 2048;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        lorienManifestoWallTexture = new THREE.CanvasTexture(canvas);
+        return lorienManifestoWallTexture;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.fillStyle = '#211c18';
+    ctx.strokeStyle = 'rgba(244, 235, 221, 0.28)';
+    ctx.shadowBlur = 0;
+
+    ctx.font =
+        '600 188px "Didot", "Bodoni 72", "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif';
+    ctx.lineWidth = 10;
+    ctx.strokeText('THE ARCHITECT OF', canvas.width * 0.5, 364);
+    ctx.fillText('THE ARCHITECT OF', canvas.width * 0.5, 364);
+
+    ctx.font =
+        '500 448px "Didot", "Bodoni 72", "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif';
+    ctx.lineWidth = 14;
+    ctx.strokeText('ABSTRACT', canvas.width * 0.5, 980);
+    ctx.fillText('ABSTRACT', canvas.width * 0.5, 980);
+    ctx.strokeText('ELEGANCE', canvas.width * 0.5, 1460);
+    ctx.fillText('ELEGANCE', canvas.width * 0.5, 1460);
+
+    lorienManifestoWallTexture = new THREE.CanvasTexture(canvas);
+    lorienManifestoWallTexture.colorSpace = THREE.SRGBColorSpace;
+    lorienManifestoWallTexture.minFilter = THREE.LinearFilter;
+    lorienManifestoWallTexture.magFilter = THREE.LinearFilter;
+    lorienManifestoWallTexture.generateMipmaps = false;
+    lorienManifestoWallTexture.needsUpdate = true;
+    return lorienManifestoWallTexture;
 }
 
 function addLorienVelmoreGalleryElevator(
@@ -3445,19 +3467,6 @@ function createLorienVelmoreGalleryRearVideoDisplay(building, layout) {
             },
         },
     };
-}
-
-function createGalleryHallFloorMesh(building, material) {
-    const layout = getLorienVelmoreGalleryLayout(building);
-    const mesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(building.width - 0.5, building.depth - 0.5),
-        material
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = LORIEN_VELMORE_GALLERY_SURFACE_OFFSET;
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    return mesh;
 }
 
 function sampleLorienGalleryFloorHeightLocal(building, localX, localZ) {
