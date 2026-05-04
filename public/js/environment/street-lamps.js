@@ -3,6 +3,7 @@ import { CITY_GRID_RANGE, CITY_GRID_SPACING, CITY_ROAD_OFFSET } from './config.j
 import { isInsideCentralParkingLot } from './layout.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
+import { isInsideUpperDeckFootprint } from './upper-deck.js';
 
 const STREET_LAMP_EXCLUSION_KEYS = new Set([
     '-60:-16',
@@ -41,6 +42,9 @@ export function createStreetLampLayer(_lampLights) {
             const positionZ =
                 gridZ * CITY_GRID_SPACING + (Math.abs(gridZ) % 2 === 0 ? CITY_ROAD_OFFSET : 0);
             if (isInsideCentralParkingLot(positionX, positionZ, 2.2)) {
+                continue;
+            }
+            if (isInsideUpperDeckFootprint(positionX, positionZ, 1.2)) {
                 continue;
             }
             if (shouldSkipStreetLampPlacement(positionX, positionZ)) {

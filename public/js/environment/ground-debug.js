@@ -1,5 +1,6 @@
 export const GROUND_DEBUG_LAYER_META = Object.freeze([
     { id: 'terrain_base', label: 'Base terrain' },
+    { id: 'terrain_upper_deck', label: 'Upper deck' },
     { id: 'charging_fx', label: 'Charging FX' },
 ]);
 

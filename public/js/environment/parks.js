@@ -3,6 +3,7 @@ import { BUILDING_DISTRICT_RADIUS, CITY_GRID_RANGE, CITY_GRID_SPACING } from './
 import { randomFromGrid } from './grid-noise.js';
 import { addObstacleCircle } from './obstacles.js';
 import { getGroundHeightAt } from './terrain.js';
+import { isInsideUpperDeckFootprint } from './upper-deck.js';
 
 export function createParkLayer() {
     const layer = new THREE.Group();
@@ -44,6 +45,9 @@ export function createParkLayer() {
                 const x = centerX + (randomFromGrid(gridX, gridZ, 91 + i) - 0.5) * blockSpread * 2;
                 const z = centerZ + (randomFromGrid(gridX, gridZ, 95 + i) - 0.5) * blockSpread * 2;
                 const scale = 0.82 + randomFromGrid(gridX, gridZ, 99 + i) * 0.48;
+                if (isInsideUpperDeckFootprint(x, z, 1.6)) {
+                    continue;
+                }
                 trees.push({ x, z, scale });
             }
         }

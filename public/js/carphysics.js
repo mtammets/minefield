@@ -7,6 +7,7 @@ import {
     PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
 } from './constants.js';
 import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
+import { constrainPositionToUpperDeckDriveBounds } from './environment/upper-deck.js';
 
 export const keys = {
     forward: false,
@@ -232,6 +233,7 @@ const previousPhysicsPosition = new THREE.Vector3();
 const interpolatedPosition = new THREE.Vector3();
 const terrainContactEuler = new THREE.Euler(0, 0, 0, 'XYZ');
 const terrainContactPoint = new THREE.Vector3();
+const PLAYER_ROTATION_ORDER = 'YXZ';
 
 let physicsRotationY = 0;
 let previousPhysicsRotationY = 0;
@@ -420,6 +422,7 @@ export function setVehicleDamageState(nextDamageState = {}) {
 }
 
 export function initializePlayerPhysics(player) {
+    player.rotation.order = PLAYER_ROTATION_ORDER;
     vehicleState.speed = 0;
     vehicleState.acceleration = 0;
     vehicleState.steerInput = 0;
@@ -476,6 +479,7 @@ export function updatePlayerPhysics(
     if (!isPhysicsInitialized) {
         initializePlayerPhysics(player);
     }
+    player.rotation.order = PLAYER_ROTATION_ORDER;
 
     const dt = Math.min(deltaTime, 0.05);
     vehicleState.topSpeedLimitKph = clampTopSpeedLimitKph(vehicleState.topSpeedLimitKph);
@@ -711,8 +715,14 @@ export function updatePlayerPhysics(
         dynamicVehicles,
         vehicleState.velocity.length()
     );
+    applyUpperDeckConstraintResponse(
+        constrainPositionToUpperDeckDriveBounds(physicsPosition, previousPhysicsPosition)
+    );
     if (typeof sampleGroundHeight === 'function') {
         applyTerrainSupport(sampleGroundHeight, dt);
+        applyUpperDeckConstraintResponse(
+            constrainPositionToUpperDeckDriveBounds(physicsPosition, previousPhysicsPosition)
+        );
     } else {
         physicsPitch = moveToward(physicsPitch, 0, TERRAIN_TILT_RESPONSE * 0.5 * dt);
         physicsRoll = moveToward(physicsRoll, 0, TERRAIN_TILT_RESPONSE * 0.5 * dt);
@@ -1408,12 +1418,15 @@ export function applyInterpolatedPlayerTransform(player, alpha) {
         return;
     }
 
+    player.rotation.order = PLAYER_ROTATION_ORDER;
     const blend = THREE.MathUtils.clamp(alpha, 0, 1);
     interpolatedPosition.lerpVectors(previousPhysicsPosition, physicsPosition, blend);
     player.position.copy(interpolatedPosition);
-    player.rotation.x = THREE.MathUtils.lerp(previousPhysicsPitch, physicsPitch, blend);
-    player.rotation.y = lerpAngle(previousPhysicsRotationY, physicsRotationY, blend);
-    player.rotation.z = THREE.MathUtils.lerp(previousPhysicsRoll, physicsRoll, blend);
+    player.rotation.set(
+        THREE.MathUtils.lerp(previousPhysicsPitch, physicsPitch, blend),
+        lerpAngle(previousPhysicsRotationY, physicsRotationY, blend),
+        THREE.MathUtils.lerp(previousPhysicsRoll, physicsRoll, blend)
+    );
 }
 
 function constrainToWorld(position, worldBounds) {
@@ -1485,6 +1498,16 @@ function constrainToWorld(position, worldBounds) {
             impactNormal: new THREE.Vector3(normalX, 0, normalZ),
         };
     }
+}
+
+function applyUpperDeckConstraintResponse(constraintResult) {
+    if (!constraintResult || constraintResult.mode !== 'lower_block') {
+        return;
+    }
+    vehicleState.velocity.set(0, 0);
+    vehicleState.speed = 0;
+    vehicleState.acceleration = 0;
+    vehicleState.yawRate *= 0.4;
 }
 
 function updateDriverInputs(dt) {
@@ -1843,28 +1866,32 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     const frontLeftHeight = finiteNumberOr(
         sampleGroundHeight(
             physicsPosition.x + forwardX * frontOffset - rightX * trackOffset,
-            physicsPosition.z + forwardZ * frontOffset - rightZ * trackOffset
+            physicsPosition.z + forwardZ * frontOffset - rightZ * trackOffset,
+            fallbackGroundHeight
         ),
         fallbackGroundHeight
     );
     const frontRightHeight = finiteNumberOr(
         sampleGroundHeight(
             physicsPosition.x + forwardX * frontOffset + rightX * trackOffset,
-            physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset
+            physicsPosition.z + forwardZ * frontOffset + rightZ * trackOffset,
+            fallbackGroundHeight
         ),
         fallbackGroundHeight
     );
     const rearLeftHeight = finiteNumberOr(
         sampleGroundHeight(
             physicsPosition.x - forwardX * rearOffset - rightX * trackOffset,
-            physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset
+            physicsPosition.z - forwardZ * rearOffset - rightZ * trackOffset,
+            fallbackGroundHeight
         ),
         fallbackGroundHeight
     );
     const rearRightHeight = finiteNumberOr(
         sampleGroundHeight(
             physicsPosition.x - forwardX * rearOffset + rightX * trackOffset,
-            physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset
+            physicsPosition.z - forwardZ * rearOffset + rightZ * trackOffset,
+            fallbackGroundHeight
         ),
         fallbackGroundHeight
     );
@@ -1883,7 +1910,7 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
         TERRAIN_MAX_PITCH
     );
     const targetRoll = THREE.MathUtils.clamp(
-        Math.atan2(leftAverage - rightAverage, trackWidth),
+        Math.atan2(rightAverage - leftAverage, trackWidth),
         -TERRAIN_MAX_ROLL,
         TERRAIN_MAX_ROLL
     );
@@ -1893,7 +1920,7 @@ function applyTerrainSupport(sampleGroundHeight, dt) {
     terrainContactEuler.set(physicsPitch, 0, physicsRoll, 'XYZ');
 
     const centerHeight = finiteNumberOr(
-        sampleGroundHeight(physicsPosition.x, physicsPosition.z),
+        sampleGroundHeight(physicsPosition.x, physicsPosition.z, fallbackGroundHeight),
         (frontAverage + rearAverage) * 0.5
     );
     const averageHeight = (frontAverage + rearAverage) * 0.5;

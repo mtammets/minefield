@@ -1529,7 +1529,7 @@ export function createCrashDebrisController({
 
     function getDebrisGroundHeightAt(piece, x, z) {
         return (
-            sampleGroundHeight(x, z) +
+            sampleGroundHeight(x, z, piece?.mesh?.position?.y) +
             Math.max(
                 0,
                 Number.isFinite(piece?.groundClearance)

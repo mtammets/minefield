@@ -330,7 +330,7 @@ export function createMineSystemController(options = {}) {
             return null;
         }
 
-        const fallbackGroundY = getGroundHeightAt(sourceX, sourceZ);
+        const fallbackGroundY = getGroundHeightAt(sourceX, sourceZ, sourceY);
         const resolvedSourceY = Number.isFinite(sourceY) ? sourceY : fallbackGroundY;
         const heading = Number.isFinite(sourceHeading) ? sourceHeading : 0;
 
@@ -343,7 +343,11 @@ export function createMineSystemController(options = {}) {
         mineGroundPosition
             .set(sourceX, resolvedSourceY, sourceZ)
             .addScaledVector(mineForward, spawnOffset);
-        const groundHeight = getGroundHeightAt(mineGroundPosition.x, mineGroundPosition.z);
+        const groundHeight = getGroundHeightAt(
+            mineGroundPosition.x,
+            mineGroundPosition.z,
+            resolvedSourceY
+        );
         const spawnY = useThrowMode
             ? resolvedSourceY + MINE_THROW_UP_OFFSET
             : groundHeight + MINE_SURFACE_OFFSET;
@@ -455,8 +459,11 @@ export function createMineSystemController(options = {}) {
                 mine.mesh.position.addScaledVector(mine.velocity, dt);
 
                 const groundY =
-                    getGroundHeightAt(mine.mesh.position.x, mine.mesh.position.z) +
-                    MINE_SURFACE_OFFSET;
+                    getGroundHeightAt(
+                        mine.mesh.position.x,
+                        mine.mesh.position.z,
+                        mine.mesh.position.y
+                    ) + MINE_SURFACE_OFFSET;
                 if (mine.mesh.position.y <= groundY) {
                     mine.mesh.position.y = groundY;
                     mine.velocity.set(0, 0, 0);
@@ -465,8 +472,11 @@ export function createMineSystemController(options = {}) {
                 }
             } else {
                 const groundY =
-                    getGroundHeightAt(mine.mesh.position.x, mine.mesh.position.z) +
-                    MINE_SURFACE_OFFSET;
+                    getGroundHeightAt(
+                        mine.mesh.position.x,
+                        mine.mesh.position.z,
+                        mine.mesh.position.y
+                    ) + MINE_SURFACE_OFFSET;
                 mine.mesh.position.y = groundY;
             }
 

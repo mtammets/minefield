@@ -18,6 +18,11 @@ import {
     LORIEN_VELMORE_GALLERY_SURFACE_OFFSET,
     sampleLorienVelmoreGalleryFloorHeightWorld,
 } from './lorien-gallery.js';
+import {
+    UPPER_DECK_LAYOUT,
+    isInsideUpperDeckRampCorridor,
+    sampleUpperDeckHeight,
+} from './upper-deck.js';
 
 const WORLD_GROUND_OVERSCAN = 120;
 const GROUND_TEXTURE_SIZE = 4096;
@@ -69,12 +74,37 @@ const ROAD_PATTERN_CONFIGS = Object.freeze({
 let cachedGroundTexture = null;
 let cachedPatternSources = null;
 
-export function getGroundHeightAt(x, z) {
+export function getGroundHeightAt(x, z, preferredY = null) {
+    const lowerGroundHeight = getLowerGroundHeightAt(x, z);
+    const upperDeckHeight = sampleUpperDeckHeight(x, z);
+    if (!Number.isFinite(upperDeckHeight)) {
+        return lowerGroundHeight;
+    }
+    if (shouldUseUpperDeckHeight(x, z, upperDeckHeight, lowerGroundHeight, preferredY)) {
+        return upperDeckHeight;
+    }
+    return lowerGroundHeight;
+}
+
+function getLowerGroundHeightAt(x, z) {
     const lorienGalleryHeight = sampleLorienVelmoreGalleryFloorHeightWorld(x, z);
     if (Number.isFinite(lorienGalleryHeight)) {
         return lorienGalleryHeight + LORIEN_VELMORE_GALLERY_SURFACE_OFFSET;
     }
     return 0;
+}
+
+function shouldUseUpperDeckHeight(x, z, upperDeckHeight, lowerGroundHeight, preferredY) {
+    if (isInsideUpperDeckRampCorridor(x, z, 0.1)) {
+        return true;
+    }
+    if (!Number.isFinite(preferredY)) {
+        return false;
+    }
+
+    const heightDelta = Math.max(0, upperDeckHeight - lowerGroundHeight);
+    const captureMargin = THREE.MathUtils.clamp(heightDelta * 0.45, 0.9, 1.8);
+    return preferredY >= upperDeckHeight - captureMargin;
 }
 
 export function createGround({ size = null, positionY = 0 } = {}) {
@@ -90,15 +120,21 @@ export function createGround({ size = null, positionY = 0 } = {}) {
     });
     material.userData.baseEmissive = 0.058;
 
-    const mesh = markGroundDebugLayer(
+    const baseSurface = markGroundDebugLayer(
         new THREE.Mesh(new THREE.PlaneGeometry(resolvedSize.width, resolvedSize.depth), material),
         'terrain_base'
     );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = positionY;
-    mesh.receiveShadow = false;
-    mesh.castShadow = false;
-    return mesh;
+    baseSurface.rotation.x = -Math.PI / 2;
+    baseSurface.receiveShadow = false;
+    baseSurface.castShadow = false;
+
+    const root = new THREE.Group();
+    root.name = 'worldGround';
+    root.position.y = positionY;
+    root.userData.baseSurface = baseSurface;
+    root.add(baseSurface);
+    root.add(createUpperDeckStructure());
+    return root;
 }
 
 export function updateGroundMotionRuntime({
@@ -108,9 +144,10 @@ export function updateGroundMotionRuntime({
     playerPosition = null,
 }) {
     const speedRatio = THREE.MathUtils.clamp(Math.abs(playerSpeed) / SPEED_GLOW_MAX, 0, 1);
-    if (ground?.material) {
-        const baseEmissive = Number(ground.material.userData?.baseEmissive) || 0.058;
-        ground.material.emissiveIntensity = baseEmissive + speedRatio * 0.12;
+    const emissiveSurface = ground?.userData?.baseSurface || ground;
+    if (emissiveSurface?.material) {
+        const baseEmissive = Number(emissiveSurface.material.userData?.baseEmissive) || 0.058;
+        emissiveSurface.material.emissiveIntensity = baseEmissive + speedRatio * 0.12;
     }
 
     const lampLights = cityScenery?.userData?.lampLights || [];
@@ -136,6 +173,309 @@ function resolveGroundSize(size) {
         width: Number.isFinite(size[0]) ? size[0] : fallbackSize,
         depth: Number.isFinite(size[1]) ? size[1] : fallbackSize,
     };
+}
+
+function createUpperDeckStructure() {
+    const group = new THREE.Group();
+    group.name = 'upperDeckStructure';
+
+    const deckTexture = createPromenadeTexture();
+    deckTexture.repeat.set(1.85, 1.12);
+
+    const deckMaterial = new THREE.MeshStandardMaterial({
+        color: 0xc7d6e7,
+        map: deckTexture,
+        roughness: 0.82,
+        metalness: 0.1,
+        emissive: 0x11253a,
+        emissiveIntensity: 0.15,
+        side: THREE.DoubleSide,
+    });
+    const railMaterial = new THREE.MeshStandardMaterial({
+        color: 0xe1edf7,
+        roughness: 0.28,
+        metalness: 0.58,
+        emissive: 0x5db8ff,
+        emissiveIntensity: 0.12,
+    });
+    const trussMaterial = new THREE.MeshStandardMaterial({
+        color: 0x4b5e76,
+        roughness: 0.7,
+        metalness: 0.24,
+        emissive: 0x0d1725,
+        emissiveIntensity: 0.08,
+    });
+
+    const deckSurface = markGroundDebugLayer(
+        new THREE.Mesh(createUpperDeckSurfaceGeometry(), deckMaterial),
+        'terrain_upper_deck'
+    );
+    deckSurface.position.set(UPPER_DECK_LAYOUT.centerX, 0.045, UPPER_DECK_LAYOUT.centerZ);
+    deckSurface.receiveShadow = false;
+    deckSurface.castShadow = false;
+    group.add(deckSurface);
+
+    group.add(createUpperDeckStringers(trussMaterial));
+    group.add(createUpperDeckRailSystem(railMaterial));
+    group.add(createUpperDeckArchRibs(trussMaterial));
+    group.add(createUpperDeckAnchorPiers(trussMaterial));
+
+    return group;
+}
+
+function createUpperDeckSurfaceGeometry() {
+    const geometry = new THREE.PlaneGeometry(
+        UPPER_DECK_LAYOUT.halfLength * 2,
+        UPPER_DECK_LAYOUT.outerHalfWidth * 2,
+        96,
+        24
+    );
+    const positions = geometry.attributes.position;
+
+    for (let i = 0; i < positions.count; i += 1) {
+        const localX = positions.getX(i);
+        const localDepth = positions.getY(i);
+        const height =
+            sampleUpperDeckHeight(
+                UPPER_DECK_LAYOUT.centerX + localX,
+                UPPER_DECK_LAYOUT.centerZ - localDepth
+            ) || 0;
+        positions.setZ(i, height);
+    }
+
+    geometry.rotateX(-Math.PI / 2);
+    positions.needsUpdate = true;
+    geometry.computeVertexNormals();
+    return geometry;
+}
+
+function createUpperDeckStringers(material) {
+    const group = new THREE.Group();
+    group.name = 'upperDeckStringers';
+    const offsets = [-UPPER_DECK_LAYOUT.driveHalfWidth * 0.52, 0, UPPER_DECK_LAYOUT.driveHalfWidth * 0.52];
+
+    offsets.forEach((zOffset) => {
+        const curve = createUpperDeckDeckCurve(zOffset, -0.46, 40);
+        const stringer = markGroundDebugLayer(
+            new THREE.Mesh(new THREE.TubeGeometry(curve, 88, 0.18, 8, false), material),
+            'terrain_upper_deck'
+        );
+        stringer.castShadow = false;
+        stringer.receiveShadow = false;
+        group.add(stringer);
+    });
+
+    return group;
+}
+
+function createUpperDeckRailSystem(material) {
+    const group = new THREE.Group();
+    group.name = 'upperDeckRailSystem';
+    const railEndInset = 3.8;
+
+    const railOffsets = [
+        UPPER_DECK_LAYOUT.outerHalfWidth - 0.72,
+        -(UPPER_DECK_LAYOUT.outerHalfWidth - 0.72),
+    ];
+
+    railOffsets.forEach((zOffset) => {
+        const topRail = markGroundDebugLayer(
+            new THREE.Mesh(
+                new THREE.TubeGeometry(
+                    createUpperDeckDeckCurve(zOffset, 1.06, 32, railEndInset, railEndInset),
+                    72,
+                    0.1,
+                    8,
+                    false
+                ),
+                material
+            ),
+            'terrain_upper_deck'
+        );
+        topRail.castShadow = false;
+        topRail.receiveShadow = false;
+        group.add(topRail);
+
+        const midRail = markGroundDebugLayer(
+            new THREE.Mesh(
+                new THREE.TubeGeometry(
+                    createUpperDeckDeckCurve(zOffset, 0.56, 32, railEndInset, railEndInset),
+                    72,
+                    0.072,
+                    8,
+                    false
+                ),
+                material
+            ),
+            'terrain_upper_deck'
+        );
+        midRail.castShadow = false;
+        midRail.receiveShadow = false;
+        group.add(midRail);
+    });
+
+    const postGeometry = new THREE.BoxGeometry(0.12, 0.94, 0.12);
+    const capGeometry = new THREE.BoxGeometry(0.28, 0.08, 0.28);
+    for (
+        let localX = -UPPER_DECK_LAYOUT.halfLength + railEndInset + 0.55;
+        localX <= UPPER_DECK_LAYOUT.halfLength - railEndInset - 0.55;
+        localX += 2.5
+    ) {
+        const baseY =
+            sampleUpperDeckHeight(
+                UPPER_DECK_LAYOUT.centerX + localX,
+                UPPER_DECK_LAYOUT.centerZ
+            ) || 0;
+        railOffsets.forEach((zOffset) => {
+            const post = markGroundDebugLayer(
+                new THREE.Mesh(postGeometry, material),
+                'terrain_upper_deck'
+            );
+            post.position.set(
+                UPPER_DECK_LAYOUT.centerX + localX,
+                baseY + 0.46,
+                UPPER_DECK_LAYOUT.centerZ + zOffset
+            );
+            post.castShadow = false;
+            post.receiveShadow = false;
+            group.add(post);
+
+            const cap = markGroundDebugLayer(
+                new THREE.Mesh(capGeometry, material),
+                'terrain_upper_deck'
+            );
+            cap.position.set(
+                UPPER_DECK_LAYOUT.centerX + localX,
+                baseY + 0.95,
+                UPPER_DECK_LAYOUT.centerZ + zOffset
+            );
+            cap.castShadow = false;
+            cap.receiveShadow = false;
+            group.add(cap);
+        });
+    }
+
+    return group;
+}
+
+function createUpperDeckArchRibs(material) {
+    const group = new THREE.Group();
+    group.name = 'upperDeckArchRibs';
+    const archOffsets = [-12, 0, 12];
+
+    archOffsets.forEach((xOffset) => {
+        const archCurve = createUpperDeckArchCurve(xOffset);
+        const arch = markGroundDebugLayer(
+            new THREE.Mesh(new THREE.TubeGeometry(archCurve, 48, 0.2, 10, false), material),
+            'terrain_upper_deck'
+        );
+        arch.castShadow = false;
+        arch.receiveShadow = false;
+        group.add(arch);
+    });
+
+    return group;
+}
+
+function createUpperDeckAnchorPiers(material) {
+    const group = new THREE.Group();
+    group.name = 'upperDeckAnchorPiers';
+    const pierGeometry = new THREE.BoxGeometry(1.8, 1.15, 2.5);
+    const capGeometry = new THREE.BoxGeometry(2.3, 0.28, 2.9);
+    const endOffsets = [
+        -UPPER_DECK_LAYOUT.halfLength + 1.6,
+        UPPER_DECK_LAYOUT.halfLength - 1.6,
+    ];
+    const pierZOffsets = [
+        UPPER_DECK_LAYOUT.outerHalfWidth - 1.3,
+        -(UPPER_DECK_LAYOUT.outerHalfWidth - 1.3),
+    ];
+
+    endOffsets.forEach((xOffset) => {
+        const deckHeight =
+            sampleUpperDeckHeight(
+                UPPER_DECK_LAYOUT.centerX + xOffset,
+                UPPER_DECK_LAYOUT.centerZ
+            ) || 0;
+        pierZOffsets.forEach((zOffset) => {
+            const pier = markGroundDebugLayer(
+                new THREE.Mesh(pierGeometry, material),
+                'terrain_upper_deck'
+            );
+            pier.position.set(
+                UPPER_DECK_LAYOUT.centerX + xOffset,
+                Math.max(0.58, deckHeight * 0.32),
+                UPPER_DECK_LAYOUT.centerZ + zOffset
+            );
+            pier.castShadow = false;
+            pier.receiveShadow = false;
+            group.add(pier);
+
+            const cap = markGroundDebugLayer(
+                new THREE.Mesh(capGeometry, material),
+                'terrain_upper_deck'
+            );
+            cap.position.set(
+                UPPER_DECK_LAYOUT.centerX + xOffset,
+                Math.max(1.1, deckHeight * 0.32 + 0.56),
+                UPPER_DECK_LAYOUT.centerZ + zOffset
+            );
+            cap.castShadow = false;
+            cap.receiveShadow = false;
+            group.add(cap);
+        });
+    });
+
+    return group;
+}
+
+function createUpperDeckDeckCurve(
+    zOffset = 0,
+    heightOffset = 0,
+    pointCount = 24,
+    startInset = 0,
+    endInset = 0
+) {
+    const points = [];
+    const localMinX = -UPPER_DECK_LAYOUT.halfLength + Math.max(0, startInset);
+    const localMaxX = UPPER_DECK_LAYOUT.halfLength - Math.max(0, endInset);
+    for (let index = 0; index <= pointCount; index += 1) {
+        const t = index / pointCount;
+        const localX = THREE.MathUtils.lerp(
+            localMinX,
+            localMaxX,
+            t
+        );
+        const baseY =
+            sampleUpperDeckHeight(
+                UPPER_DECK_LAYOUT.centerX + localX,
+                UPPER_DECK_LAYOUT.centerZ
+            ) || 0;
+        points.push(
+            new THREE.Vector3(
+                UPPER_DECK_LAYOUT.centerX + localX,
+                baseY + heightOffset,
+                UPPER_DECK_LAYOUT.centerZ + zOffset
+            )
+        );
+    }
+    return new THREE.CatmullRomCurve3(points);
+}
+
+function createUpperDeckArchCurve(xOffset = 0) {
+    const span = UPPER_DECK_LAYOUT.outerHalfWidth - 0.9;
+    const archPeak =
+        UPPER_DECK_LAYOUT.deckBaseHeight + UPPER_DECK_LAYOUT.deckCrownRise * 0.44;
+    const centerX = UPPER_DECK_LAYOUT.centerX + xOffset;
+    const centerZ = UPPER_DECK_LAYOUT.centerZ;
+
+    return new THREE.CatmullRomCurve3([
+        new THREE.Vector3(centerX, 0.16, centerZ - span),
+        new THREE.Vector3(centerX, archPeak * 0.38, centerZ - span * 0.56),
+        new THREE.Vector3(centerX, archPeak, centerZ),
+        new THREE.Vector3(centerX, archPeak * 0.38, centerZ + span * 0.56),
+        new THREE.Vector3(centerX, 0.16, centerZ + span),
+    ]);
 }
 
 function getOrCreateWorldGroundTexture(size) {

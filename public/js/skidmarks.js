@@ -180,8 +180,12 @@ export function createSkidMarkController(scene, options = {}) {
             worldRearRight.copy(localRearRight);
             vehicle.localToWorld(worldRearLeft);
             vehicle.localToWorld(worldRearRight);
-            worldRearLeft.y = sampleSurfaceY(worldRearLeft.x, worldRearLeft.z);
-            worldRearRight.y = sampleSurfaceY(worldRearRight.x, worldRearRight.z);
+            worldRearLeft.y = sampleSurfaceY(worldRearLeft.x, worldRearLeft.z, vehicle.position.y);
+            worldRearRight.y = sampleSurfaceY(
+                worldRearRight.x,
+                worldRearRight.z,
+                vehicle.position.y
+            );
 
             if (
                 isInsideLorienVelmoreGalleryRoomWorld(
@@ -327,8 +331,8 @@ export function createSkidMarkController(scene, options = {}) {
         state.hasPreviousWheelSample = false;
     }
 
-    function sampleSurfaceY(x, z) {
-        const height = sampleGroundHeight(x, z);
+    function sampleSurfaceY(x, z, preferredY = null) {
+        const height = sampleGroundHeight(x, z, preferredY);
         const resolvedHeight = Number.isFinite(height) ? height : 0;
         return Math.max(resolvedHeight, SKID_MARK_SURFACE_BASE_HEIGHT) + SKID_MARK_SURFACE_OFFSET;
     }
