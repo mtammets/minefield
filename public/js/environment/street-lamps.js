@@ -3,15 +3,10 @@ import { CITY_GRID_RANGE, CITY_GRID_SPACING, CITY_ROAD_OFFSET } from './config.j
 import { isInsideCentralParkingLot } from './layout.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
+import { isInsideUndergroundParkingEntranceFootprint } from './underground-parking.js';
 import { isInsideUpperDeckFootprint } from './upper-deck.js';
 
-const STREET_LAMP_EXCLUSION_KEYS = new Set([
-    '-60:-16',
-    '-28:-16',
-    '-16:36',
-    '-16:68',
-    '16:44',
-]);
+const STREET_LAMP_EXCLUSION_KEYS = new Set(['-60:-16', '-28:-16', '-16:36', '-16:68', '16:44']);
 
 export function createStreetLampLayer(_lampLights) {
     const layer = new THREE.Group();
@@ -44,6 +39,9 @@ export function createStreetLampLayer(_lampLights) {
             if (isInsideCentralParkingLot(positionX, positionZ, 2.2)) {
                 continue;
             }
+            if (isInsideUndergroundParkingEntranceFootprint(positionX, positionZ, 1.2)) {
+                continue;
+            }
             if (isInsideUpperDeckFootprint(positionX, positionZ, 1.2)) {
                 continue;
             }
@@ -57,7 +55,10 @@ export function createStreetLampLayer(_lampLights) {
             pole.castShadow = false;
             pole.receiveShadow = false;
             layer.add(pole);
-            addObstacleCircle(positionX, positionZ, 0.58, 'lamp_post');
+            addObstacleCircle(positionX, positionZ, 0.58, 'lamp_post', {
+                minY: baseY - 0.35,
+                maxY: baseY + 9.2,
+            });
 
             const lampHead = new THREE.Mesh(headGeometry, glowMaterial);
             lampHead.position.set(positionX, baseY + 8.6, positionZ);

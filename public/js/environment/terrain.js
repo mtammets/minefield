@@ -19,6 +19,11 @@ import {
     sampleLorienVelmoreGalleryFloorHeightWorld,
 } from './lorien-gallery.js';
 import {
+    UNDERGROUND_PARKING_LAYOUT,
+    sampleUndergroundParkingHeightWorld,
+    shouldUseUndergroundParkingHeight,
+} from './underground-parking.js';
+import {
     UPPER_DECK_LAYOUT,
     isInsideUpperDeckRampCorridor,
     sampleUpperDeckHeight,
@@ -27,6 +32,9 @@ import {
 const WORLD_GROUND_OVERSCAN = 120;
 const GROUND_TEXTURE_SIZE = 4096;
 const PROMENADE_OVERSCAN = 9.5;
+const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_FRONT = 0.55;
+const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_BACK = 0.25;
+const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_SIDE = 1.1;
 const CURB_WIDTH_WORLD = 0.22;
 const ROAD_PATTERN_CONFIGS = Object.freeze({
     boulevard: {
@@ -75,7 +83,7 @@ let cachedGroundTexture = null;
 let cachedPatternSources = null;
 
 export function getGroundHeightAt(x, z, preferredY = null) {
-    const lowerGroundHeight = getLowerGroundHeightAt(x, z);
+    const lowerGroundHeight = getLowerGroundHeightAt(x, z, preferredY);
     const upperDeckHeight = sampleUpperDeckHeight(x, z);
     if (!Number.isFinite(upperDeckHeight)) {
         return lowerGroundHeight;
@@ -86,7 +94,14 @@ export function getGroundHeightAt(x, z, preferredY = null) {
     return lowerGroundHeight;
 }
 
-function getLowerGroundHeightAt(x, z) {
+function getLowerGroundHeightAt(x, z, preferredY = null) {
+    const undergroundParkingHeight = sampleUndergroundParkingHeightWorld(x, z);
+    if (
+        Number.isFinite(undergroundParkingHeight) &&
+        shouldUseUndergroundParkingHeight(preferredY, x, z, undergroundParkingHeight)
+    ) {
+        return undergroundParkingHeight;
+    }
     const lorienGalleryHeight = sampleLorienVelmoreGalleryFloorHeightWorld(x, z);
     if (Number.isFinite(lorienGalleryHeight)) {
         return lorienGalleryHeight + LORIEN_VELMORE_GALLERY_SURFACE_OFFSET;
@@ -120,18 +135,17 @@ export function createGround({ size = null, positionY = 0 } = {}) {
     });
     material.userData.baseEmissive = 0.058;
 
-    const baseSurface = markGroundDebugLayer(
-        new THREE.Mesh(new THREE.PlaneGeometry(resolvedSize.width, resolvedSize.depth), material),
-        'terrain_base'
-    );
-    baseSurface.rotation.x = -Math.PI / 2;
-    baseSurface.receiveShadow = false;
-    baseSurface.castShadow = false;
+    const baseSurface = markGroundDebugLayer(new THREE.Group(), 'terrain_base');
+    baseSurface.name = 'worldBaseTerrain';
+    createBaseTerrainSections(resolvedSize, material).forEach((sectionMesh) => {
+        baseSurface.add(sectionMesh);
+    });
 
     const root = new THREE.Group();
     root.name = 'worldGround';
     root.position.y = positionY;
     root.userData.baseSurface = baseSurface;
+    root.userData.baseSurfaceMaterial = material;
     root.add(baseSurface);
     root.add(createUpperDeckStructure());
     return root;
@@ -144,10 +158,11 @@ export function updateGroundMotionRuntime({
     playerPosition = null,
 }) {
     const speedRatio = THREE.MathUtils.clamp(Math.abs(playerSpeed) / SPEED_GLOW_MAX, 0, 1);
-    const emissiveSurface = ground?.userData?.baseSurface || ground;
-    if (emissiveSurface?.material) {
-        const baseEmissive = Number(emissiveSurface.material.userData?.baseEmissive) || 0.058;
-        emissiveSurface.material.emissiveIntensity = baseEmissive + speedRatio * 0.12;
+    const emissiveMaterial =
+        ground?.userData?.baseSurfaceMaterial || ground?.userData?.baseSurface?.material || null;
+    if (emissiveMaterial) {
+        const baseEmissive = Number(emissiveMaterial.userData?.baseEmissive) || 0.058;
+        emissiveMaterial.emissiveIntensity = baseEmissive + speedRatio * 0.12;
     }
 
     const lampLights = cityScenery?.userData?.lampLights || [];
@@ -173,6 +188,83 @@ function resolveGroundSize(size) {
         width: Number.isFinite(size[0]) ? size[0] : fallbackSize,
         depth: Number.isFinite(size[1]) ? size[1] : fallbackSize,
     };
+}
+
+function createBaseTerrainSections(size, material) {
+    const groundBounds = {
+        minX: -size.width * 0.5,
+        maxX: size.width * 0.5,
+        minZ: -size.depth * 0.5,
+        maxZ: size.depth * 0.5,
+        width: size.width,
+        depth: size.depth,
+    };
+    const cutout = getUndergroundParkingEntranceTerrainCutoutBounds(groundBounds);
+    const sections = [
+        {
+            minX: groundBounds.minX,
+            maxX: cutout.minX,
+            minZ: groundBounds.minZ,
+            maxZ: groundBounds.maxZ,
+        },
+        {
+            minX: cutout.maxX,
+            maxX: groundBounds.maxX,
+            minZ: groundBounds.minZ,
+            maxZ: groundBounds.maxZ,
+        },
+        {
+            minX: cutout.minX,
+            maxX: cutout.maxX,
+            minZ: groundBounds.minZ,
+            maxZ: cutout.minZ,
+        },
+        {
+            minX: cutout.minX,
+            maxX: cutout.maxX,
+            minZ: cutout.maxZ,
+            maxZ: groundBounds.maxZ,
+        },
+    ];
+
+    return sections
+        .map((sectionBounds) => createBaseTerrainSectionMesh(sectionBounds, groundBounds, material))
+        .filter(Boolean);
+}
+
+function createBaseTerrainSectionMesh(sectionBounds, groundBounds, material) {
+    const width = sectionBounds.maxX - sectionBounds.minX;
+    const depth = sectionBounds.maxZ - sectionBounds.minZ;
+    if (width <= 0.05 || depth <= 0.05) {
+        return null;
+    }
+
+    const centerX = (sectionBounds.minX + sectionBounds.maxX) * 0.5;
+    const centerZ = (sectionBounds.minZ + sectionBounds.maxZ) * 0.5;
+    const geometry = new THREE.PlaneGeometry(width, depth);
+    remapBaseTerrainSectionUvs(geometry, centerX, centerZ, groundBounds);
+    geometry.rotateX(-Math.PI / 2);
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(centerX, 0, centerZ);
+    mesh.receiveShadow = false;
+    mesh.castShadow = false;
+    return mesh;
+}
+
+function remapBaseTerrainSectionUvs(geometry, centerX, centerZ, groundBounds) {
+    const positions = geometry.attributes.position;
+    const uvs = geometry.attributes.uv;
+
+    for (let index = 0; index < positions.count; index += 1) {
+        const worldX = centerX + positions.getX(index);
+        const worldZ = centerZ - positions.getY(index);
+        const u = (worldX - groundBounds.minX) / groundBounds.width;
+        const v = 1 - (worldZ - groundBounds.minZ) / groundBounds.depth;
+        uvs.setXY(index, u, v);
+    }
+
+    uvs.needsUpdate = true;
 }
 
 function createUpperDeckStructure() {
@@ -252,7 +344,11 @@ function createUpperDeckSurfaceGeometry() {
 function createUpperDeckStringers(material) {
     const group = new THREE.Group();
     group.name = 'upperDeckStringers';
-    const offsets = [-UPPER_DECK_LAYOUT.driveHalfWidth * 0.52, 0, UPPER_DECK_LAYOUT.driveHalfWidth * 0.52];
+    const offsets = [
+        -UPPER_DECK_LAYOUT.driveHalfWidth * 0.52,
+        0,
+        UPPER_DECK_LAYOUT.driveHalfWidth * 0.52,
+    ];
 
     offsets.forEach((zOffset) => {
         const curve = createUpperDeckDeckCurve(zOffset, -0.46, 40);
@@ -322,10 +418,8 @@ function createUpperDeckRailSystem(material) {
         localX += 2.5
     ) {
         const baseY =
-            sampleUpperDeckHeight(
-                UPPER_DECK_LAYOUT.centerX + localX,
-                UPPER_DECK_LAYOUT.centerZ
-            ) || 0;
+            sampleUpperDeckHeight(UPPER_DECK_LAYOUT.centerX + localX, UPPER_DECK_LAYOUT.centerZ) ||
+            0;
         railOffsets.forEach((zOffset) => {
             const post = markGroundDebugLayer(
                 new THREE.Mesh(postGeometry, material),
@@ -361,7 +455,7 @@ function createUpperDeckRailSystem(material) {
 function createUpperDeckArchRibs(material) {
     const group = new THREE.Group();
     group.name = 'upperDeckArchRibs';
-    const archOffsets = [-12, 0, 12];
+    const archOffsets = [-12, 12];
 
     archOffsets.forEach((xOffset) => {
         const archCurve = createUpperDeckArchCurve(xOffset);
@@ -382,10 +476,7 @@ function createUpperDeckAnchorPiers(material) {
     group.name = 'upperDeckAnchorPiers';
     const pierGeometry = new THREE.BoxGeometry(1.8, 1.15, 2.5);
     const capGeometry = new THREE.BoxGeometry(2.3, 0.28, 2.9);
-    const endOffsets = [
-        -UPPER_DECK_LAYOUT.halfLength + 1.6,
-        UPPER_DECK_LAYOUT.halfLength - 1.6,
-    ];
+    const endOffsets = [-UPPER_DECK_LAYOUT.halfLength + 1.6, UPPER_DECK_LAYOUT.halfLength - 1.6];
     const pierZOffsets = [
         UPPER_DECK_LAYOUT.outerHalfWidth - 1.3,
         -(UPPER_DECK_LAYOUT.outerHalfWidth - 1.3),
@@ -393,10 +484,8 @@ function createUpperDeckAnchorPiers(material) {
 
     endOffsets.forEach((xOffset) => {
         const deckHeight =
-            sampleUpperDeckHeight(
-                UPPER_DECK_LAYOUT.centerX + xOffset,
-                UPPER_DECK_LAYOUT.centerZ
-            ) || 0;
+            sampleUpperDeckHeight(UPPER_DECK_LAYOUT.centerX + xOffset, UPPER_DECK_LAYOUT.centerZ) ||
+            0;
         pierZOffsets.forEach((zOffset) => {
             const pier = markGroundDebugLayer(
                 new THREE.Mesh(pierGeometry, material),
@@ -441,16 +530,10 @@ function createUpperDeckDeckCurve(
     const localMaxX = UPPER_DECK_LAYOUT.halfLength - Math.max(0, endInset);
     for (let index = 0; index <= pointCount; index += 1) {
         const t = index / pointCount;
-        const localX = THREE.MathUtils.lerp(
-            localMinX,
-            localMaxX,
-            t
-        );
+        const localX = THREE.MathUtils.lerp(localMinX, localMaxX, t);
         const baseY =
-            sampleUpperDeckHeight(
-                UPPER_DECK_LAYOUT.centerX + localX,
-                UPPER_DECK_LAYOUT.centerZ
-            ) || 0;
+            sampleUpperDeckHeight(UPPER_DECK_LAYOUT.centerX + localX, UPPER_DECK_LAYOUT.centerZ) ||
+            0;
         points.push(
             new THREE.Vector3(
                 UPPER_DECK_LAYOUT.centerX + localX,
@@ -464,8 +547,7 @@ function createUpperDeckDeckCurve(
 
 function createUpperDeckArchCurve(xOffset = 0) {
     const span = UPPER_DECK_LAYOUT.outerHalfWidth - 0.9;
-    const archPeak =
-        UPPER_DECK_LAYOUT.deckBaseHeight + UPPER_DECK_LAYOUT.deckCrownRise * 0.44;
+    const archPeak = UPPER_DECK_LAYOUT.deckBaseHeight + UPPER_DECK_LAYOUT.deckCrownRise * 0.44;
     const centerX = UPPER_DECK_LAYOUT.centerX + xOffset;
     const centerZ = UPPER_DECK_LAYOUT.centerZ;
 
@@ -593,7 +675,13 @@ function overlayGrassAtmosphere(ctx, bounds) {
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-    const districtFrame = worldToCanvasRect(bounds, 0, 0, worldBounds.size + 8, worldBounds.size + 8);
+    const districtFrame = worldToCanvasRect(
+        bounds,
+        0,
+        0,
+        worldBounds.size + 8,
+        worldBounds.size + 8
+    );
     ctx.strokeStyle = 'rgba(154, 213, 180, 0.05)';
     ctx.lineWidth = 8;
     ctx.strokeRect(districtFrame.x, districtFrame.y, districtFrame.width, districtFrame.height);
@@ -712,7 +800,13 @@ function drawAllIntersectionTiles(ctx, bounds, patterns) {
     roadAxisLineDescriptors.xLines.forEach((xLine) => {
         roadAxisLineDescriptors.zLines.forEach((zLine) => {
             const variant = resolveIntersectionVariant(xLine, zLine);
-            const rect = worldToCanvasRect(bounds, xLine.coordinate, zLine.coordinate, ROAD_WIDTH, ROAD_WIDTH);
+            const rect = worldToCanvasRect(
+                bounds,
+                xLine.coordinate,
+                zLine.coordinate,
+                ROAD_WIDTH,
+                ROAD_WIDTH
+            );
             const source = patterns.intersections[variant] || patterns.intersections.standard;
             ctx.drawImage(source, rect.x, rect.y, rect.width, rect.height);
             overlayIntersectionBlend(ctx, rect, variant);
@@ -792,6 +886,166 @@ function drawWorldEdgeVignette(ctx) {
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 }
 
+function getUndergroundParkingEntranceTerrainCutoutBounds(groundBounds = null) {
+    const entrance = UNDERGROUND_PARKING_LAYOUT.entrance;
+    const halfWidth =
+        getUndergroundParkingEntranceHalfWidthAtZ(entrance, entrance.approachMinZ, 'wall') +
+        UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_SIDE;
+    const bounds = {
+        minX: entrance.centerX - halfWidth,
+        maxX: entrance.centerX + halfWidth,
+        minZ: entrance.approachMinZ - UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_FRONT,
+        maxZ: entrance.cutoutEndZ + UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_BACK,
+    };
+    if (!groundBounds) {
+        return bounds;
+    }
+
+    return {
+        minX: Math.max(groundBounds.minX, bounds.minX),
+        maxX: Math.min(groundBounds.maxX, bounds.maxX),
+        minZ: Math.max(groundBounds.minZ, bounds.minZ),
+        maxZ: Math.min(groundBounds.maxZ, bounds.maxZ),
+    };
+}
+
+function drawUndergroundParkingEntranceSurface(ctx, bounds) {
+    const entrance = UNDERGROUND_PARKING_LAYOUT.entrance;
+    const cutout = getUndergroundParkingEntranceTerrainCutoutBounds();
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    traceUndergroundParkingEntranceCutoutRect(
+        ctx,
+        bounds,
+        entrance.centerX,
+        cutout.minZ,
+        cutout.maxZ,
+        (cutout.maxX - cutout.minX) * 0.5
+    );
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.58)';
+    ctx.lineWidth = 10;
+    traceUndergroundParkingEntranceCutoutRect(
+        ctx,
+        bounds,
+        entrance.centerX,
+        cutout.minZ,
+        cutout.maxZ,
+        (cutout.maxX - cutout.minX) * 0.5
+    );
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(191, 232, 255, 0.12)';
+    ctx.lineWidth = 2;
+    traceUndergroundParkingEntranceCutoutRect(
+        ctx,
+        bounds,
+        entrance.centerX,
+        cutout.minZ,
+        cutout.maxZ,
+        (cutout.maxX - cutout.minX) * 0.5
+    );
+    ctx.stroke();
+    ctx.restore();
+}
+
+function traceUndergroundParkingEntrancePath(ctx, bounds, minZ, maxZ, profile = 'cutout') {
+    const entrance = UNDERGROUND_PARKING_LAYOUT.entrance;
+    const stepCount = 18;
+    const leftPoints = [];
+    const rightPoints = [];
+
+    for (let index = 0; index <= stepCount; index += 1) {
+        const t = index / stepCount;
+        const z = THREE.MathUtils.lerp(minZ, maxZ, t);
+        const halfWidth = getUndergroundParkingEntranceHalfWidthAtZ(entrance, z, profile);
+        leftPoints.push(worldToCanvasPoint(bounds, entrance.centerX - halfWidth, z));
+        rightPoints.push(worldToCanvasPoint(bounds, entrance.centerX + halfWidth, z));
+    }
+
+    if (leftPoints.length === 0 || rightPoints.length === 0) {
+        return;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(leftPoints[0].x, leftPoints[0].y);
+    for (let index = 1; index < leftPoints.length; index += 1) {
+        ctx.lineTo(leftPoints[index].x, leftPoints[index].y);
+    }
+    for (let index = rightPoints.length - 1; index >= 0; index -= 1) {
+        ctx.lineTo(rightPoints[index].x, rightPoints[index].y);
+    }
+    ctx.closePath();
+}
+
+function getUndergroundParkingEntranceHalfWidthAtZ(entrance, z, profile = 'cutout') {
+    const flare = 1 - clamp01((z - entrance.topZ) / Math.max(0.001, entrance.flareLength));
+
+    if (profile === 'apron') {
+        return entrance.apronHalfWidth + flare * entrance.apronTopFlareExtra;
+    }
+    if (profile === 'surface') {
+        return entrance.surfaceHalfWidth + flare * entrance.surfaceTopFlareExtra;
+    }
+    if (profile === 'wall') {
+        return entrance.wallHalfWidth + flare * entrance.wallTopFlareExtra;
+    }
+    return entrance.cutoutHalfWidth + flare * entrance.cutoutTopFlareExtra;
+}
+
+function traceUndergroundParkingEntranceCutoutRect(ctx, bounds, centerX, minZ, maxZ, halfWidth) {
+    const rect = worldToCanvasRect(
+        bounds,
+        centerX,
+        (minZ + maxZ) * 0.5,
+        halfWidth * 2,
+        maxZ - minZ
+    );
+    ctx.beginPath();
+    ctx.rect(rect.x, rect.y, rect.width, rect.height);
+}
+
+function drawUndergroundParkingGuideLine(ctx, bounds, x, startZ, endZ) {
+    const start = worldToCanvasPoint(bounds, x, startZ);
+    const end = worldToCanvasPoint(bounds, x, endZ);
+    ctx.save();
+    ctx.strokeStyle = 'rgba(219, 235, 250, 0.84)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+    ctx.restore();
+}
+
+function drawUndergroundParkingCenterArrow(ctx, bounds, centerX, centerZ) {
+    const tip = worldToCanvasPoint(bounds, centerX, centerZ + 1.2);
+    const base = worldToCanvasPoint(bounds, centerX, centerZ - 0.9);
+    const wingLeft = worldToCanvasPoint(bounds, centerX - 1.15, centerZ + 0.05);
+    const wingRight = worldToCanvasPoint(bounds, centerX + 1.15, centerZ + 0.05);
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 211, 141, 0.9)';
+    ctx.fillStyle = 'rgba(255, 211, 141, 0.42)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(base.x, base.y);
+    ctx.lineTo(tip.x, tip.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(wingLeft.x, wingLeft.y);
+    ctx.lineTo(wingRight.x, wingRight.y);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
 function drawTiledPattern(ctx, sourceCanvas, rect, options = {}) {
     const tileWidth = Math.max(8, Number(options.tileWidth) || rect.width);
     const tileHeight = Math.max(8, Number(options.tileHeight) || tileWidth);
@@ -827,7 +1081,11 @@ function drawPatternEllipse(ctx, sourceCanvas, centerX, centerY, radiusX, radius
 }
 
 function resolveIntersectionVariant(xLine, zLine) {
-    if (chargingZoneIntersectionKeys.has(`${Math.round(xLine.coordinate)}:${Math.round(zLine.coordinate)}`)) {
+    if (
+        chargingZoneIntersectionKeys.has(
+            `${Math.round(xLine.coordinate)}:${Math.round(zLine.coordinate)}`
+        )
+    ) {
         return 'charging';
     }
     if (xLine.styleKey === 'boulevard' || zLine.styleKey === 'boulevard') {
@@ -873,4 +1131,8 @@ function worldToCanvasPoint(bounds, x, z) {
         x: u * GROUND_TEXTURE_SIZE,
         y: (1 - v) * GROUND_TEXTURE_SIZE,
     };
+}
+
+function clamp01(value) {
+    return Math.min(1, Math.max(0, value));
 }

@@ -1,5 +1,6 @@
 import { centralParkingLot } from './environment/layout.js';
 import { getLorienVelmoreGallerySilenceFactorWorld } from './environment/lorien-gallery.js';
+import { getUndergroundParkingSilenceFactorWorld } from './environment/underground-parking.js';
 import { getLorienVelmoreGalleryVideoDisplayState } from './environment/buildings.js';
 
 const AUDIO_PREFS_STORAGE_KEY = 'silentdrift-audio-prefs-v1';
@@ -383,6 +384,10 @@ const LORIEN_GALLERY_AUDIO_CONFIG = Object.freeze({
     reverbSendNear: 0.34,
     reverbSendFar: 0.52,
 });
+const MINE_DETONATION_OCCLUSION_MIN_GAIN = 0.38;
+const MINE_DETONATION_OCCLUSION_MIN_RATE = 0.93;
+const MINE_DETONATION_OCCLUSION_MAX_LOWPASS_HZ = 18000;
+const MINE_DETONATION_OCCLUSION_MIN_LOWPASS_HZ = 950;
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -430,6 +435,8 @@ export function createAudioSystem({ camera = null } = {}) {
         worldMapVisible: false,
         lastChargingActive: false,
         lastBatteryDepleted: false,
+        playerPosition: null,
+        lowerLevelSilenceFactor: 0,
     };
 
     return {
@@ -1084,13 +1091,9 @@ export function createAudioSystem({ camera = null } = {}) {
             : 0;
 
         const playerPosition = frameState.playerPosition || null;
-        const lowerLevelSilenceFactor = playerPosition
-            ? getLorienVelmoreGallerySilenceFactorWorld(
-                  Number(playerPosition.x) || 0,
-                  Number(playerPosition.y) || 0,
-                  Number(playerPosition.z) || 0
-              )
-            : 0;
+        const lowerLevelSilenceFactor = getWorldSilenceFactorAtPosition(playerPosition);
+        runtime.playerPosition = playerPosition;
+        runtime.lowerLevelSilenceFactor = lowerLevelSilenceFactor;
 
         const ambienceBase = welcomeVisible ? WELCOME_MENU_AMBIENCE_GAIN : 0.38;
         const ambienceGameplayBoost = driveAudioEnabled ? 0.2 : 0;
@@ -1249,7 +1252,7 @@ export function createAudioSystem({ camera = null } = {}) {
         });
     }
 
-    function onMineDetonated({ localHit = false, distanceMeters = 0 } = {}) {
+    function onMineDetonated({ localHit = false, distanceMeters = 0, position = null } = {}) {
         if (!isRealtimeAudioReady()) {
             return;
         }
@@ -1260,10 +1263,47 @@ export function createAudioSystem({ camera = null } = {}) {
         const isNear = localHit || distanceMeters <= 18;
         const normalizedDistance = clampNumber(distanceMeters, 0, 120, 18);
         const distanceFade = 1 - clampNumber(normalizedDistance / 120, 0, 1, 0);
+        const occlusion = resolveMineDetonationOcclusion(position);
+        const occlusionGain = lerpNumber(1, MINE_DETONATION_OCCLUSION_MIN_GAIN, occlusion);
+        const occlusionRate = lerpNumber(1, MINE_DETONATION_OCCLUSION_MIN_RATE, occlusion);
         playOneShot(isNear ? 'mineDetonateNear01' : 'mineDetonateFar01', {
-            gain: isNear ? 0.96 : clampNumber(0.35 + distanceFade * 0.55, 0.24, 0.78, 0.42),
-            rateScale: randomRange(0.97, 1.04),
+            gain:
+                (isNear ? 0.96 : clampNumber(0.35 + distanceFade * 0.55, 0.24, 0.78, 0.42)) *
+                occlusionGain,
+            rateScale: randomRange(0.97, 1.04) * occlusionRate,
+            lowpassHz: lerpNumber(
+                MINE_DETONATION_OCCLUSION_MAX_LOWPASS_HZ,
+                MINE_DETONATION_OCCLUSION_MIN_LOWPASS_HZ,
+                occlusion
+            ),
+            lowpassQ: lerpNumber(0.12, 0.96, occlusion),
         });
+    }
+
+    function getWorldSilenceFactorAtPosition(position = null) {
+        if (!position) {
+            return 0;
+        }
+        const x = Number(position.x) || 0;
+        const y = Number(position.y) || 0;
+        const z = Number(position.z) || 0;
+        return Math.max(
+            getLorienVelmoreGallerySilenceFactorWorld(x, y, z),
+            getUndergroundParkingSilenceFactorWorld(x, y, z)
+        );
+    }
+
+    function resolveMineDetonationOcclusion(position) {
+        const listenerPosition = runtime.playerPosition;
+        if (!listenerPosition || !position) {
+            return 0;
+        }
+
+        const listenerSilenceFactor = clampNumber(runtime.lowerLevelSilenceFactor, 0, 1, 0);
+        const sourceSilenceFactor = getWorldSilenceFactorAtPosition(position);
+        return smoothstep(
+            clampNumber(Math.abs(listenerSilenceFactor - sourceSilenceFactor), 0, 1, 0)
+        );
     }
 
     function onPlayerExplosion({ impactSpeed = 0 } = {}) {
@@ -2145,13 +2185,28 @@ export function createAudioSystem({ camera = null } = {}) {
 
         const rateScale = clampNumber(options.rateScale, 0.6, 1.6, 1);
         source.playbackRate.setValueAtTime(rateScale, now);
+        const lowpassHz = Number(options.lowpassHz);
+        const shouldUseLowpass = Number.isFinite(lowpassHz) && lowpassHz > 20;
+        let oneShotFilter = null;
+        if (shouldUseLowpass) {
+            oneShotFilter = context.createBiquadFilter();
+            oneShotFilter.type = 'lowpass';
+            oneShotFilter.frequency.setValueAtTime(clampNumber(lowpassHz, 80, 22000, 22000), now);
+            oneShotFilter.Q.setValueAtTime(clampNumber(options.lowpassQ, 0.0001, 12, 0.24), now);
+        }
 
         source.connect(oneShotGain);
-        oneShotGain.connect(busNode);
+        if (oneShotFilter) {
+            oneShotGain.connect(oneShotFilter);
+            oneShotFilter.connect(busNode);
+        } else {
+            oneShotGain.connect(busNode);
+        }
 
         source.onended = () => {
             safeDisconnect(source);
             safeDisconnect(oneShotGain);
+            safeDisconnect(oneShotFilter);
         };
 
         source.start(startAt);
@@ -2518,6 +2573,11 @@ function averageAnalyserRange(data, startBin, endBinExclusive) {
 function lerpNumber(start, end, alpha) {
     const safeAlpha = clampNumber(alpha, 0, 1, 0);
     return start + (end - start) * safeAlpha;
+}
+
+function smoothstep(value) {
+    const t = clampNumber(value, 0, 1, 0);
+    return t * t * (3 - 2 * t);
 }
 
 function createUrbanPlazaImpulseBuffer(audioContext, durationSec = 2.6, decay = 2.4) {

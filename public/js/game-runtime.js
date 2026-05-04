@@ -117,6 +117,11 @@ import {
     GRAPHICS_QUALITY_MODES,
 } from './graphics-quality-controller.js';
 import { preloadBillboardMedia } from './environment/billboards.js';
+import {
+    applyLorienVelmoreMineDetonation,
+    appendLorienVelmoreDoorCollisionObstacles,
+    resolveLorienVelmoreMineBarrierImpact,
+} from './environment/buildings.js';
 import { MONUMENT_SCREEN_VIDEO_URLS } from './environment/monument.js';
 import {
     INPUT_CONTEXTS,
@@ -849,7 +854,7 @@ const raceIntroController = createRaceIntroController({
         runtimeState.audioController?.onRaceIntroGo?.();
     },
 });
-const starsController = addStars(scene);
+const starsController = addStars(scene, camera);
 const SHOW_ONLY_LOCAL_SCORE_POPUPS = true;
 const SCORE_AUDIT_PEAK_COMBO_MIN = 1;
 const SCORE_AUDIT_PEAK_CHAIN_MIN = 1;
@@ -1566,10 +1571,16 @@ const appliedCrashDamageTuning =
     physicsCrashDamageTuning;
 persistCrashDamageTuning(appliedCrashDamageTuning);
 const mineOtherVehicleTargetsBuffer = [];
+const lorienDoorCollisionObstacleBuffer = [];
 runtimeState.mineController = createMineSystemController({
     scene,
     car,
     getGroundHeightAt,
+    staticObstacles,
+    resolveThrownMineSpecialImpact(trace) {
+        const buildingLayer = ensureWorldBuilt().cityScenery.userData?.buildingLayer || null;
+        return resolveLorienVelmoreMineBarrierImpact(buildingLayer, trace);
+    },
     getVehicleState,
     getOtherVehicleTargets: () => {
         if (runtimeState.gameMode !== 'bots') {
@@ -1651,10 +1662,13 @@ runtimeState.mineController = createMineSystemController({
         ownerScore = 0,
         ownerScoring = null,
     }) {
+        const buildingLayer = ensureWorldBuilt().cityScenery.userData?.buildingLayer || null;
+        applyLorienVelmoreMineDetonation(buildingLayer, position);
         const distanceMeters = position?.distanceTo?.(car.position) || 0;
         runtimeState.audioController?.onMineDetonated?.({
             localHit: Boolean(localHit),
             distanceMeters,
+            position,
         });
         const ownerCollectorId = resolveMineOwnerCollectorId(ownerId);
         const targetCollectorId = normalizeOptionalScoreAuditCollectorId(targetPlayerId);
@@ -2644,6 +2658,13 @@ runtimeState.gameLoopController = createGameLoopController({
     consumeCrashCollision,
     worldBounds,
     staticObstacles,
+    getDynamicObstacleCandidates() {
+        const buildingLayer = ensureWorldBuilt().cityScenery.userData?.buildingLayer || null;
+        return appendLorienVelmoreDoorCollisionObstacles(
+            buildingLayer,
+            lorienDoorCollisionObstacleBuffer
+        );
+    },
     physicsStep,
     maxPhysicsStepsPerFrame: MAX_PHYSICS_STEPS_PER_FRAME,
     roundTotalPickups: ROUND_TOTAL_PICKUPS,

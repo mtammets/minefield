@@ -423,7 +423,10 @@ export function createMonumentLayer(screenEntries = [], effectEntries = []) {
     }
 
     const fountainCollisionRadius = basinOuterRadius + 0.24;
-    addObstacleCircle(centerX, centerZ, fountainCollisionRadius, 'building');
+    addObstacleCircle(centerX, centerZ, fountainCollisionRadius, 'building', {
+        minY: baseY - 0.3,
+        maxY: baseY + 12.6,
+    });
 
     freezeStaticHierarchy(layer);
 

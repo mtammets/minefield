@@ -984,44 +984,68 @@ export function createLuxuryGlassWindowTexture() {
 
 export function createSkyDomeTexture() {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 512;
+    canvas.width = 1536;
+    canvas.height = 768;
     const ctx = canvas.getContext('2d');
 
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    gradient.addColorStop(0, '#3567a6');
-    gradient.addColorStop(0.34, '#1c3554');
-    gradient.addColorStop(0.7, '#0b1524');
-    gradient.addColorStop(1, '#060c17');
+    gradient.addColorStop(0, '#02040b');
+    gradient.addColorStop(0.22, '#050a16');
+    gradient.addColorStop(0.52, '#0a1524');
+    gradient.addColorStop(0.8, '#152741');
+    gradient.addColorStop(1, '#2c4d70');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    const horizonGlow = ctx.createRadialGradient(
-        canvas.width * 0.5,
-        canvas.height * 0.62,
-        18,
-        canvas.width * 0.5,
-        canvas.height * 0.62,
-        canvas.width * 0.68
-    );
-    horizonGlow.addColorStop(0, 'rgba(120, 186, 255, 0.25)');
-    horizonGlow.addColorStop(1, 'rgba(120, 186, 255, 0)');
-    ctx.fillStyle = horizonGlow;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const zenithLift = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.36);
+    zenithLift.addColorStop(0, 'rgba(110, 148, 214, 0.16)');
+    zenithLift.addColorStop(0.5, 'rgba(110, 148, 214, 0.05)');
+    zenithLift.addColorStop(1, 'rgba(110, 148, 214, 0)');
+    ctx.fillStyle = zenithLift;
+    ctx.fillRect(0, 0, canvas.width, canvas.height * 0.36);
 
-    for (let i = 0; i < 170; i += 1) {
+    const horizonGlow = ctx.createLinearGradient(0, canvas.height * 0.58, 0, canvas.height);
+    horizonGlow.addColorStop(0, 'rgba(92, 162, 255, 0)');
+    horizonGlow.addColorStop(0.68, 'rgba(92, 162, 255, 0.05)');
+    horizonGlow.addColorStop(1, 'rgba(92, 162, 255, 0.18)');
+    ctx.fillStyle = horizonGlow;
+    ctx.fillRect(0, canvas.height * 0.58, canvas.width, canvas.height * 0.42);
+
+    const cityGlow = ctx.createLinearGradient(0, canvas.height * 0.6, 0, canvas.height);
+    cityGlow.addColorStop(0, 'rgba(255, 196, 136, 0)');
+    cityGlow.addColorStop(0.7, 'rgba(255, 196, 136, 0.05)');
+    cityGlow.addColorStop(1, 'rgba(255, 196, 136, 0.16)');
+    ctx.fillStyle = cityGlow;
+    ctx.fillRect(0, canvas.height * 0.56, canvas.width, canvas.height * 0.44);
+
+    const upperFalloff = ctx.createLinearGradient(0, 0, 0, canvas.height * 0.66);
+    upperFalloff.addColorStop(0, 'rgba(255, 255, 255, 0.03)');
+    upperFalloff.addColorStop(0.42, 'rgba(255, 255, 255, 0.012)');
+    upperFalloff.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = upperFalloff;
+    ctx.fillRect(0, 0, canvas.width, canvas.height * 0.66);
+
+    for (let i = 0; i < 1800; i += 1) {
         const x = Math.random() * canvas.width;
-        const y = Math.random() * (canvas.height * 0.48);
-        const size = 0.7 + Math.random() * 1.6;
-        const alpha = 0.18 + Math.random() * 0.35;
-        ctx.fillStyle = `rgba(198, 225, 255, ${alpha})`;
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
+        const y = Math.random() * canvas.height;
+        const alpha = 0.012 + Math.random() * 0.028;
+        const value = 176 + Math.random() * 46;
+        ctx.fillStyle = `rgba(${value}, ${value + 10}, ${value + 22}, ${alpha})`;
+        ctx.fillRect(x, y, 1.6, 1.6);
     }
+
+    const vignette = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0.12)');
+    vignette.addColorStop(0.28, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(0.82, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.28)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.anisotropy = 2;
     return texture;
 }

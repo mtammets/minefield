@@ -60,10 +60,19 @@ const LORIEN_VELMORE_GALLERY_ARTWORK_ASPECT_RATIOS = Object.freeze({
 });
 const LORIEN_VELMORE_GALLERY_VIDEO_URL = '/assets/Lorienvelmore/lorien_video.mp4';
 const LORIEN_VELMORE_GALLERY_VIDEO_PLAYBACK_DELAY_MS = 2000;
+const LORIEN_DOOR_GLASS_BREAK_DISTANCE = 2.25;
+const LORIEN_DOOR_GLASS_BREAK_DISTANCE_SQ =
+    LORIEN_DOOR_GLASS_BREAK_DISTANCE * LORIEN_DOOR_GLASS_BREAK_DISTANCE;
+const LORIEN_DOOR_PANEL_DEPTH = 0.08;
+const LORIEN_DOOR_SCORCH_MARK_LIMIT = 10;
+const LORIEN_DOOR_SHATTER_VARIANT_COUNT = 4;
+const LORIEN_DOOR_CRACK_MARK_LIMIT = 8;
 const lorienGalleryArtworkTextureLoader = new THREE.TextureLoader();
 const lorienGalleryArtworkTextureCache = new Map();
 let lorienVelmoreGalleryVideoDisplayState = null;
 let lorienManifestoWallTexture = null;
+let lorienDoorShatterTextures = null;
+let lorienScorchTexture = null;
 
 export function getLorienVelmoreGalleryVideoDisplayState() {
     return lorienVelmoreGalleryVideoDisplayState;
@@ -189,6 +198,156 @@ export function updateBuildingRuntime(buildingLayer, playerPosition, frameDelta 
         maxOpenAmount = Math.max(maxOpenAmount, doorSystem.openAmount || 0);
     });
     setLorienVelmoreGalleryDoorOpenAmount(maxOpenAmount);
+}
+
+export function resolveLorienVelmoreMineBarrierImpact(
+    buildingLayer,
+    { startX = 0, startY = 0, startZ = 0, endX = 0, endY = 0, endZ = 0, collisionRadius = 0 } = {}
+) {
+    const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
+    if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
+        return null;
+    }
+
+    let bestImpact = null;
+    for (let index = 0; index < doorSystems.length; index += 1) {
+        const doorSystem = doorSystems[index];
+        const panels = doorSystem?.panels;
+        if (!Array.isArray(panels) || panels.length === 0) {
+            continue;
+        }
+
+        const panelBaseY = Number(doorSystem.doorBaseY) || 0;
+        const panelHeight = Math.max(0, Number(doorSystem.doorHeight) || 0);
+        const panelTopY = panelBaseY + panelHeight;
+        const panelDepth = Math.max(0.02, Number(doorSystem.panelDepth) || LORIEN_DOOR_PANEL_DEPTH);
+
+        for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
+            const panelState = panels[panelIndex];
+            if (!panelState) {
+                continue;
+            }
+
+            const panelGroup = panelState.group;
+            const panelWidth = Math.max(0.2, Number(panelState.width) || 0);
+            const panelHalfWidth = panelWidth * 0.5;
+            const panelHalfDepth = panelDepth * 0.5;
+            const panelCenterX = (Number(doorSystem.centerX) || 0) + (panelGroup?.position?.x || 0);
+            const panelCenterZ = (Number(doorSystem.centerZ) || 0) + (panelGroup?.position?.z || 0);
+            const impact = segmentImpactExpandedAabbXZ({
+                startX,
+                startZ,
+                endX,
+                endZ,
+                minX: panelCenterX - panelHalfWidth - collisionRadius,
+                maxX: panelCenterX + panelHalfWidth + collisionRadius,
+                minZ: panelCenterZ - panelHalfDepth - collisionRadius,
+                maxZ: panelCenterZ + panelHalfDepth + collisionRadius,
+            });
+            if (!impact) {
+                continue;
+            }
+
+            const impactY = THREE.MathUtils.lerp(startY, endY, impact.t);
+            if (impactY < panelBaseY - collisionRadius || impactY > panelTopY + collisionRadius) {
+                continue;
+            }
+
+            if (!bestImpact || impact.t < bestImpact.t) {
+                bestImpact = {
+                    ...impact,
+                    y: impactY,
+                };
+            }
+        }
+    }
+
+    return bestImpact;
+}
+
+export function applyLorienVelmoreMineDetonation(buildingLayer, detonationPosition) {
+    if (!detonationPosition || typeof detonationPosition !== 'object') {
+        return false;
+    }
+
+    const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
+    if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
+        return false;
+    }
+
+    let affectedAnyDoor = false;
+    for (let index = 0; index < doorSystems.length; index += 1) {
+        const doorSystem = doorSystems[index];
+        const panels = doorSystem?.panels;
+        if (!Array.isArray(panels) || panels.length === 0) {
+            continue;
+        }
+        const detonationVariants = new Set();
+
+        for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
+            const panelState = panels[panelIndex];
+            if (!panelState?.group) {
+                continue;
+            }
+            if (
+                distanceSqToLorienDoorPanel(detonationPosition, doorSystem, panelState) >
+                LORIEN_DOOR_GLASS_BREAK_DISTANCE_SQ
+            ) {
+                continue;
+            }
+
+            setLorienVelmoreDoorPanelBroken(doorSystem, panelState, true);
+            addLorienDoorCrackMark(doorSystem, panelState, detonationPosition, detonationVariants);
+            addLorienDoorScorchMark(doorSystem, panelState, detonationPosition);
+            affectedAnyDoor = true;
+        }
+    }
+
+    return affectedAnyDoor;
+}
+
+export function appendLorienVelmoreDoorCollisionObstacles(buildingLayer, outputBuffer = []) {
+    const result = Array.isArray(outputBuffer) ? outputBuffer : [];
+    result.length = 0;
+
+    const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
+    if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
+        return result;
+    }
+
+    for (let index = 0; index < doorSystems.length; index += 1) {
+        const doorSystem = doorSystems[index];
+        const panels = doorSystem?.panels;
+        if (!Array.isArray(panels) || panels.length === 0) {
+            continue;
+        }
+
+        const panelDepth = Math.max(
+            0.12,
+            (Number(doorSystem.panelDepth) || LORIEN_DOOR_PANEL_DEPTH) * 0.5 + 0.05
+        );
+        for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
+            const panelState = panels[panelIndex];
+            const panelGroup = panelState?.group;
+            const panelWidth = Math.max(0.2, Number(panelState?.width) || 0);
+            if (!panelGroup || !Number.isFinite(panelWidth)) {
+                continue;
+            }
+
+            const panelCenterX = (Number(doorSystem.centerX) || 0) + (panelGroup.position.x || 0);
+            const panelCenterZ = (Number(doorSystem.centerZ) || 0) + (panelGroup.position.z || 0);
+            result.push({
+                type: 'aabb',
+                minX: panelCenterX - panelWidth * 0.5,
+                maxX: panelCenterX + panelWidth * 0.5,
+                minZ: panelCenterZ - panelDepth,
+                maxZ: panelCenterZ + panelDepth,
+                category: 'building',
+            });
+        }
+    }
+
+    return result;
 }
 
 export function getBuildingPlacements() {
@@ -347,9 +506,382 @@ function updateLorienVelmoreDoorSystem(doorSystem, playerPosition, frameDelta) {
     doorSystem.leftPanel.position.x = doorSystem.leftClosedX - slideDistance;
     doorSystem.rightPanel.position.x = doorSystem.rightClosedX + slideDistance;
 
-    if (doorSystem.glowMaterial) {
+    const panels = doorSystem.panels;
+    if (Array.isArray(panels) && panels.length > 0) {
+        panels.forEach((panelState) => {
+            syncLorienVelmoreDoorPanelVisualState(panelState, doorSystem.openAmount);
+        });
+    } else if (doorSystem.glowMaterial) {
         doorSystem.glowMaterial.opacity = 0.22 + doorSystem.openAmount * 0.14;
     }
+}
+
+function syncLorienVelmoreDoorPanelVisualState(panelState, openAmount = 0) {
+    if (!panelState) {
+        return;
+    }
+
+    const broken = Boolean(panelState.broken);
+    if (panelState.glassMaterial) {
+        panelState.glassMaterial.opacity = broken ? 0.34 : 0.24;
+        panelState.glassMaterial.emissiveIntensity = broken ? 0.04 : 0.06;
+        panelState.glassMaterial.roughness = broken ? 0.18 : 0.08;
+        panelState.glassMaterial.metalness = broken ? 0.04 : 0.1;
+        panelState.glassMaterial.color.setHex(broken ? 0xecf4fb : 0xf8fbff);
+    }
+    if (panelState.glowMaterial) {
+        panelState.glowMaterial.opacity = broken
+            ? 0.14 + openAmount * 0.05
+            : 0.22 + openAmount * 0.14;
+    }
+    if (Array.isArray(panelState.crackMarks)) {
+        for (let index = 0; index < panelState.crackMarks.length; index += 1) {
+            const crackEntry = panelState.crackMarks[index];
+            if (!crackEntry) {
+                continue;
+            }
+            if (crackEntry.material) {
+                crackEntry.material.opacity = broken ? crackEntry.baseOpacity || 0.92 : 0;
+            }
+            if (Array.isArray(crackEntry.meshes)) {
+                crackEntry.meshes.forEach((mesh) => {
+                    if (mesh) {
+                        mesh.visible = broken;
+                    }
+                });
+            }
+        }
+    }
+}
+
+function setLorienVelmoreDoorPanelBroken(doorSystem, panelState, broken = true) {
+    if (!panelState) {
+        return;
+    }
+    panelState.broken = Boolean(broken);
+    syncLorienVelmoreDoorPanelVisualState(panelState, Number(doorSystem?.openAmount) || 0);
+    if (doorSystem) {
+        doorSystem.glassBroken = Array.isArray(doorSystem.panels)
+            ? doorSystem.panels.some((entry) => Boolean(entry?.broken))
+            : panelState.broken;
+    }
+}
+
+function distanceSqToLorienDoorPanel(position, doorSystem, panelState) {
+    const panelCenterX = (Number(doorSystem?.centerX) || 0) + (panelState?.group?.position?.x || 0);
+    const panelCenterZ = (Number(doorSystem?.centerZ) || 0) + (panelState?.group?.position?.z || 0);
+    const panelHalfWidth = Math.max(0.12, (Number(panelState?.width) || 0) * 0.5);
+    const panelHalfDepth = Math.max(
+        0.02,
+        (Number(doorSystem?.panelDepth) || LORIEN_DOOR_PANEL_DEPTH) * 0.5
+    );
+    const panelBaseY = Number(doorSystem?.doorBaseY) || 0;
+    const panelTopY = panelBaseY + Math.max(0.2, Number(doorSystem?.doorHeight) || 0);
+    const nearestX = THREE.MathUtils.clamp(
+        position.x,
+        panelCenterX - panelHalfWidth,
+        panelCenterX + panelHalfWidth
+    );
+    const nearestY = THREE.MathUtils.clamp(position.y, panelBaseY, panelTopY);
+    const nearestZ = THREE.MathUtils.clamp(
+        position.z,
+        panelCenterZ - panelHalfDepth,
+        panelCenterZ + panelHalfDepth
+    );
+    const deltaX = position.x - nearestX;
+    const deltaY = position.y - nearestY;
+    const deltaZ = position.z - nearestZ;
+    return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+}
+
+function addLorienDoorScorchMark(doorSystem, panelState, detonationPosition) {
+    if (!doorSystem?.scorchMarks || !panelState?.group) {
+        return;
+    }
+
+    const halfWidth = Math.max(0.32, (Number(panelState.width) || 0) * 0.5 - 0.24);
+    const localCenterX = panelState.group.position.x || 0;
+    const localImpactX = (Number(detonationPosition.x) || 0) - (Number(doorSystem.centerX) || 0);
+    const localImpactY = (Number(detonationPosition.y) || 0) - (Number(doorSystem.doorBaseY) || 0);
+    const localImpactZ =
+        (Number(detonationPosition.z) || 0) -
+        ((Number(doorSystem.centerZ) || 0) + (panelState.group.position.z || 0));
+    const scorchMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({
+            map: getLorienScorchTexture(),
+            transparent: true,
+            opacity: 0.54,
+            alphaTest: 0.02,
+            color: 0x1b1512,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+            depthWrite: false,
+        })
+    );
+    scorchMesh.position.set(
+        THREE.MathUtils.clamp(localImpactX - localCenterX, -halfWidth, halfWidth),
+        THREE.MathUtils.clamp(
+            localImpactY,
+            0.42,
+            Math.max(0.7, (Number(panelState.height) || 0) - 0.32)
+        ),
+        localImpactZ < 0 ? -0.022 : 0.022
+    );
+    const scorchSize = lerp(0.78, 1.26, Math.random());
+    scorchMesh.scale.set(scorchSize, scorchSize * lerp(0.9, 1.18, Math.random()), 1);
+    scorchMesh.rotation.z = (Math.random() - 0.5) * 1.1;
+    scorchMesh.renderOrder = 6;
+    scorchMesh.castShadow = false;
+    scorchMesh.receiveShadow = false;
+    panelState.group.add(scorchMesh);
+
+    const scorchEntry = {
+        panelState,
+        mesh: scorchMesh,
+    };
+    doorSystem.scorchMarks.push(scorchEntry);
+    if (Array.isArray(panelState.scorchMarks)) {
+        panelState.scorchMarks.push(scorchEntry);
+    }
+
+    while (doorSystem.scorchMarks.length > LORIEN_DOOR_SCORCH_MARK_LIMIT) {
+        const oldest = doorSystem.scorchMarks.shift();
+        removeLorienDoorScorchEntry(oldest);
+    }
+}
+
+function addLorienDoorCrackMark(
+    doorSystem,
+    panelState,
+    detonationPosition,
+    usedVariantIndexes = null
+) {
+    if (!panelState?.group) {
+        return;
+    }
+
+    if (!Array.isArray(panelState.crackMarks)) {
+        panelState.crackMarks = [];
+    }
+
+    const glassWidth = Math.max(
+        0.5,
+        Number(panelState.glassWidth) || Number(panelState.width) || 1
+    );
+    const glassHeight = Math.max(
+        0.5,
+        Number(panelState.glassHeight) || Number(panelState.height) || 1
+    );
+    const glassHalfWidth = Math.max(0.2, glassWidth * 0.5 - 0.04);
+    const glassHalfHeight = Math.max(0.2, glassHeight * 0.5 - 0.06);
+    const localCenterX = panelState.group.position.x || 0;
+    const localImpactX = (Number(detonationPosition.x) || 0) - (Number(doorSystem?.centerX) || 0);
+    const localImpactY =
+        (Number(detonationPosition.y) || 0) -
+        ((Number(doorSystem?.doorBaseY) || 0) + (Number(panelState.height) || 0) * 0.5);
+    const localImpactZ =
+        (Number(detonationPosition.z) || 0) -
+        ((Number(doorSystem?.centerZ) || 0) + (panelState.group.position.z || 0));
+    const crackVariantIndex = resolveLorienDoorCrackVariantIndex(panelState, usedVariantIndexes);
+    const variantConfig = getLorienDoorCrackVariantConfig(crackVariantIndex);
+    const crackMaterial = new THREE.MeshBasicMaterial({
+        map: getLorienDoorShatterTexture(crackVariantIndex),
+        transparent: true,
+        opacity: panelState.broken ? 0.92 : 0,
+        alphaTest: 0.02,
+        color: 0xf2f7ff,
+        toneMapped: false,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+    });
+    const crackScale = lerp(0.86, 1.18, Math.random());
+    const crackWidth = variantConfig.fullGlass
+        ? glassWidth * variantConfig.widthScale
+        : Math.max(
+              0.72,
+              Math.min(glassWidth * 0.82, crackScale * glassWidth * variantConfig.widthScale)
+          );
+    const crackHeight = variantConfig.fullGlass
+        ? glassHeight * variantConfig.heightScale
+        : Math.max(
+              0.72,
+              Math.min(glassHeight * 0.82, crackScale * glassHeight * variantConfig.heightScale)
+          );
+    const frontMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(crackWidth, crackHeight),
+        crackMaterial
+    );
+    const backMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(crackWidth, crackHeight),
+        crackMaterial
+    );
+    const crackLocalX = variantConfig.fullGlass
+        ? glassHalfWidth * variantConfig.centerX
+        : THREE.MathUtils.clamp(
+              (localImpactX - localCenterX) * variantConfig.positionInfluence,
+              -glassHalfWidth,
+              glassHalfWidth
+          );
+    const crackLocalY = variantConfig.fullGlass
+        ? glassHalfHeight * variantConfig.centerY
+        : THREE.MathUtils.clamp(
+              localImpactY * variantConfig.positionInfluence,
+              -glassHalfHeight * 0.78,
+              glassHalfHeight * 0.82
+          );
+    const crackRotation = variantConfig.fullGlass
+        ? variantConfig.baseRotation + (Math.random() - 0.5) * variantConfig.rotationJitter
+        : (Math.random() - 0.5) * Math.PI * variantConfig.rotationJitter;
+
+    frontMesh.position.set(crackLocalX, panelState.height * 0.5 + crackLocalY, 0.018);
+    frontMesh.rotation.z = crackRotation;
+    frontMesh.renderOrder = 6 + panelState.crackMarks.length;
+    frontMesh.visible = Boolean(panelState.broken);
+    frontMesh.castShadow = false;
+    frontMesh.receiveShadow = false;
+    panelState.group.add(frontMesh);
+
+    backMesh.position.set(crackLocalX, panelState.height * 0.5 + crackLocalY, -0.018);
+    backMesh.rotation.y = Math.PI;
+    backMesh.rotation.z = -crackRotation;
+    backMesh.renderOrder = frontMesh.renderOrder;
+    backMesh.visible = Boolean(panelState.broken);
+    backMesh.castShadow = false;
+    backMesh.receiveShadow = false;
+    panelState.group.add(backMesh);
+
+    const crackEntry = {
+        material: crackMaterial,
+        meshes: [frontMesh, backMesh],
+        baseOpacity: 0.92,
+        variantIndex: crackVariantIndex,
+    };
+    panelState.crackMarks.push(crackEntry);
+    if (usedVariantIndexes instanceof Set) {
+        usedVariantIndexes.add(crackVariantIndex);
+    }
+
+    while (panelState.crackMarks.length > LORIEN_DOOR_CRACK_MARK_LIMIT) {
+        const oldest = panelState.crackMarks.shift();
+        removeLorienDoorCrackEntry(oldest);
+    }
+}
+
+function resolveLorienDoorCrackVariantIndex(panelState, usedVariantIndexes = null) {
+    const allVariantIndexes = [];
+    for (
+        let variantIndex = 0;
+        variantIndex < LORIEN_DOOR_SHATTER_VARIANT_COUNT;
+        variantIndex += 1
+    ) {
+        allVariantIndexes.push(variantIndex);
+    }
+
+    const availableForDoor =
+        usedVariantIndexes instanceof Set && usedVariantIndexes.size > 0
+            ? allVariantIndexes.filter((variantIndex) => !usedVariantIndexes.has(variantIndex))
+            : allVariantIndexes;
+    const panelRecentVariantIndexes = Array.isArray(panelState?.crackMarks)
+        ? panelState.crackMarks
+              .map((entry) => Number(entry?.variantIndex))
+              .filter(Number.isInteger)
+              .slice(-2)
+        : [];
+    const preferredPool = availableForDoor.filter(
+        (variantIndex) => !panelRecentVariantIndexes.includes(variantIndex)
+    );
+    const selectionPool =
+        preferredPool.length > 0
+            ? preferredPool
+            : availableForDoor.length > 0
+              ? availableForDoor
+              : allVariantIndexes;
+    return selectionPool[Math.floor(Math.random() * selectionPool.length)] || 0;
+}
+
+function getLorienDoorCrackVariantConfig(variantIndex) {
+    switch (variantIndex) {
+        case 1:
+            return {
+                fullGlass: true,
+                widthScale: 0.96,
+                heightScale: 0.96,
+                centerX: 0,
+                centerY: -0.02,
+                baseRotation: -0.03,
+                rotationJitter: 0.12,
+                positionInfluence: 0,
+            };
+        case 2:
+            return {
+                fullGlass: true,
+                widthScale: 0.92,
+                heightScale: 0.9,
+                centerX: 0.03,
+                centerY: 0.02,
+                baseRotation: 0.02,
+                rotationJitter: 0.16,
+                positionInfluence: 0,
+            };
+        case 3:
+            return {
+                fullGlass: false,
+                widthScale: 0.72,
+                heightScale: 0.68,
+                centerX: 0,
+                centerY: 0,
+                baseRotation: 0,
+                rotationJitter: 0.7,
+                positionInfluence: 0.34,
+            };
+        default:
+            return {
+                fullGlass: false,
+                widthScale: 0.6,
+                heightScale: 0.58,
+                centerX: 0,
+                centerY: 0,
+                baseRotation: 0,
+                rotationJitter: 0.9,
+                positionInfluence: 0.42,
+            };
+    }
+}
+
+function removeLorienDoorScorchEntry(entry) {
+    if (!entry?.mesh) {
+        return;
+    }
+    if (entry.mesh.parent) {
+        entry.mesh.parent.remove(entry.mesh);
+    }
+    entry.mesh.geometry?.dispose?.();
+    entry.mesh.material?.dispose?.();
+    if (Array.isArray(entry.panelState?.scorchMarks)) {
+        const index = entry.panelState.scorchMarks.indexOf(entry);
+        if (index >= 0) {
+            entry.panelState.scorchMarks.splice(index, 1);
+        }
+    }
+}
+
+function removeLorienDoorCrackEntry(entry) {
+    if (!entry) {
+        return;
+    }
+    if (Array.isArray(entry.meshes)) {
+        entry.meshes.forEach((mesh) => {
+            if (!mesh) {
+                return;
+            }
+            if (mesh.parent) {
+                mesh.parent.remove(mesh);
+            }
+            mesh.geometry?.dispose?.();
+        });
+    }
+    entry.material?.dispose?.();
 }
 
 function updateLorienVelmoreAccentMaterials(accentMaterials) {
@@ -927,8 +1459,7 @@ function addLorienLedRibbon(
 
     for (let i = 0; i < safeSegmentCount; i += 1) {
         const ribbonPosition = safeSegmentCount <= 1 ? 0.5 : (i + 0.5) / safeSegmentCount;
-        const offset =
-            -totalLength * 0.5 + segmentLength * 0.5 + i * (segmentLength + resolvedGap);
+        const offset = -totalLength * 0.5 + segmentLength * 0.5 + i * (segmentLength + resolvedGap);
         const segmentCenter = { x, y, z };
         if (axis === 'x') {
             segmentCenter.x += offset;
@@ -1874,6 +2405,8 @@ function createLorienVelmoreDoorLeaf(
     const leaf = new THREE.Group();
     const stileWidth = 0.08;
     const railHeight = 0.08;
+    const leafGlassMaterial = glassMaterial.clone();
+    const leafGlowMaterial = glowMaterial.clone();
 
     addDecorBox(leaf, baseGeometry, frameMaterial, {
         x: -width * 0.5 + stileWidth * 0.5,
@@ -1881,7 +2414,7 @@ function createLorienVelmoreDoorLeaf(
         z: 0,
         width: stileWidth,
         height,
-        depth: 0.08,
+        depth: LORIEN_DOOR_PANEL_DEPTH,
     });
     addDecorBox(leaf, baseGeometry, frameMaterial, {
         x: width * 0.5 - stileWidth * 0.5,
@@ -1889,7 +2422,7 @@ function createLorienVelmoreDoorLeaf(
         z: 0,
         width: stileWidth,
         height,
-        depth: 0.08,
+        depth: LORIEN_DOOR_PANEL_DEPTH,
     });
     addDecorBox(leaf, baseGeometry, frameMaterial, {
         x: 0,
@@ -1897,7 +2430,7 @@ function createLorienVelmoreDoorLeaf(
         z: 0,
         width: width,
         height: railHeight,
-        depth: 0.08,
+        depth: LORIEN_DOOR_PANEL_DEPTH,
     });
     addDecorBox(leaf, baseGeometry, frameMaterial, {
         x: 0,
@@ -1905,9 +2438,9 @@ function createLorienVelmoreDoorLeaf(
         z: 0,
         width: width,
         height: railHeight,
-        depth: 0.08,
+        depth: LORIEN_DOOR_PANEL_DEPTH,
     });
-    addDecorBox(leaf, baseGeometry, glassMaterial, {
+    const glassMesh = addDecorBox(leaf, baseGeometry, leafGlassMaterial, {
         x: 0,
         y: height * 0.5,
         z: 0,
@@ -1915,7 +2448,7 @@ function createLorienVelmoreDoorLeaf(
         height: height - 0.22,
         depth: 0.02,
     });
-    addDecorBox(leaf, baseGeometry, glowMaterial, {
+    const glowMesh = addDecorBox(leaf, baseGeometry, leafGlowMaterial, {
         x: 0,
         y: height * 0.5,
         z: -0.01,
@@ -1923,6 +2456,22 @@ function createLorienVelmoreDoorLeaf(
         height: height - 0.36,
         depth: 0.01,
     });
+
+    leaf.userData.lorienDoorPanelState = {
+        group: leaf,
+        width,
+        height,
+        glassWidth: width - 0.16,
+        glassHeight: height - 0.22,
+        glassMesh,
+        glassMaterial: leafGlassMaterial,
+        glowMesh,
+        glowMaterial: leafGlowMaterial,
+        crackMarks: [],
+        broken: false,
+        scorchMarks: [],
+    };
+    syncLorienVelmoreDoorPanelVisualState(leaf.userData.lorienDoorPanelState, 0);
 
     return leaf;
 }
@@ -2059,6 +2608,7 @@ function addLorienVelmoreSubterraneanHall(
     const exteriorApronDepth = 2.3;
     const exteriorApronZ = layout.hallStartZ - exteriorApronDepth * 0.5 + 0.08;
     const frontFacadeZ = layout.hallStartZ + wallThickness * 0.5;
+    const doorBaseY = 0.05;
 
     const interiorWallMaterial = new THREE.MeshStandardMaterial({
         color: 0xf7f4ee,
@@ -2528,8 +3078,9 @@ function addLorienVelmoreSubterraneanHall(
         glassMaterial: doorGlassMaterial,
         glowMaterial: doorGlowMaterial,
     });
-    leftDoorPanel.position.set(-doorClosedOffsetX, 0.05, doorPlaneZ);
+    leftDoorPanel.position.set(-doorClosedOffsetX, doorBaseY, doorPlaneZ);
     group.add(leftDoorPanel);
+    const leftDoorPanelState = leftDoorPanel.userData?.lorienDoorPanelState || null;
 
     const rightDoorPanel = createLorienVelmoreDoorLeaf(baseGeometry, {
         width: doorPanelWidth,
@@ -2538,8 +3089,9 @@ function addLorienVelmoreSubterraneanHall(
         glassMaterial: doorGlassMaterial,
         glowMaterial: doorGlowMaterial,
     });
-    rightDoorPanel.position.set(doorClosedOffsetX, 0.05, doorPlaneZ);
+    rightDoorPanel.position.set(doorClosedOffsetX, doorBaseY, doorPlaneZ);
     group.add(rightDoorPanel);
+    const rightDoorPanelState = rightDoorPanel.userData?.lorienDoorPanelState || null;
 
     addDecorBox(group, baseGeometry, doorFrameMaterial, {
         x: 0,
@@ -2551,12 +3103,17 @@ function addLorienVelmoreSubterraneanHall(
     });
 
     return {
+        rootGroup: group,
         centerX: layout.centerX,
         centerZ: layout.centerZ,
         roomEndZ: layout.hallEndZ,
         doorPlaneZ,
+        doorBaseY,
+        doorHeight,
+        panelDepth: LORIEN_DOOR_PANEL_DEPTH,
         leftPanel: leftDoorPanel,
         rightPanel: rightDoorPanel,
+        panels: [leftDoorPanelState, rightDoorPanelState].filter(Boolean),
         leftClosedX: -doorClosedOffsetX,
         rightClosedX: doorClosedOffsetX,
         travelDistance: doorTravelDistance,
@@ -2569,7 +3126,9 @@ function addLorienVelmoreSubterraneanHall(
         outsideSensorDepth: 8.8,
         insideSensorDepth: 2.6,
         autoCloseDepth: 3.8,
-        glowMaterial: doorGlowMaterial,
+        glowMaterial: leftDoorPanelState?.glowMaterial || null,
+        scorchMarks: [],
+        glassBroken: false,
     };
 }
 
@@ -3452,8 +4011,7 @@ function createLorienVelmoreGalleryRearVideoDisplay(building, layout) {
 
                 if (!displayState.isPlaybackPending) {
                     displayState.isPlaybackPending = true;
-                    pendingStartAtMs =
-                        now + LORIEN_VELMORE_GALLERY_VIDEO_PLAYBACK_DELAY_MS;
+                    pendingStartAtMs = now + LORIEN_VELMORE_GALLERY_VIDEO_PLAYBACK_DELAY_MS;
                     syncVisualState();
                     return;
                 }
@@ -3475,8 +4033,7 @@ function sampleLorienGalleryFloorHeightLocal(building, localX, localZ) {
 
 function getLorienGalleryArtworkDisplayDimensions(artworkUrl, targetHeight = 2.12) {
     const safeHeight = Math.max(0.2, Number(targetHeight) || 2.12);
-    const aspectRatio =
-        LORIEN_VELMORE_GALLERY_ARTWORK_ASPECT_RATIOS[artworkUrl] || 864 / 1130;
+    const aspectRatio = LORIEN_VELMORE_GALLERY_ARTWORK_ASPECT_RATIOS[artworkUrl] || 864 / 1130;
     return {
         width: safeHeight * aspectRatio,
         height: safeHeight,
@@ -3524,4 +4081,385 @@ function getLorienGalleryArtworkTexture(artworkUrl) {
     texture.wrapT = THREE.ClampToEdgeWrapping;
     lorienGalleryArtworkTextureCache.set(resolvedArtworkUrl, texture);
     return texture;
+}
+
+function getLorienDoorShatterTexture(variantIndex = 0) {
+    const resolvedVariantIndex = THREE.MathUtils.euclideanModulo(
+        Math.round(Number(variantIndex) || 0),
+        LORIEN_DOOR_SHATTER_VARIANT_COUNT
+    );
+    if (!Array.isArray(lorienDoorShatterTextures)) {
+        lorienDoorShatterTextures = new Array(LORIEN_DOOR_SHATTER_VARIANT_COUNT).fill(null);
+    }
+    if (lorienDoorShatterTextures[resolvedVariantIndex]) {
+        return lorienDoorShatterTextures[resolvedVariantIndex];
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        const fallbackTexture = new THREE.CanvasTexture(canvas);
+        lorienDoorShatterTextures[resolvedVariantIndex] = fallbackTexture;
+        return fallbackTexture;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawLorienDoorShatterVariant(ctx, canvas, resolvedVariantIndex);
+
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 22; i += 1) {
+        const shardX =
+            seededLorienDoorVariantValue(resolvedVariantIndex, 200 + i * 3) * canvas.width;
+        const shardY =
+            seededLorienDoorVariantValue(resolvedVariantIndex, 201 + i * 3) * canvas.height;
+        const shardRadius =
+            10 + seededLorienDoorVariantValue(resolvedVariantIndex, 202 + i * 3) * 26;
+        const gradient = ctx.createRadialGradient(shardX, shardY, 0, shardX, shardY, shardRadius);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0.92)');
+        gradient.addColorStop(0.72, 'rgba(0, 0, 0, 0.36)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(shardX, shardY, shardRadius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    texture.needsUpdate = true;
+    lorienDoorShatterTextures[resolvedVariantIndex] = texture;
+    return texture;
+}
+
+function drawLorienDoorShatterVariant(ctx, canvas, variantIndex) {
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    switch (variantIndex) {
+        case 1:
+            drawLorienDoorDiagonalShearCrack(ctx, canvas, variantIndex);
+            break;
+        case 2:
+            drawLorienDoorTwinImpactCrack(ctx, canvas, variantIndex);
+            break;
+        case 3:
+            drawLorienDoorEdgeFanCrack(ctx, canvas, variantIndex);
+            break;
+        default:
+            drawLorienDoorStarburstCrack(ctx, canvas, variantIndex);
+            break;
+    }
+}
+
+function drawLorienDoorStarburstCrack(ctx, canvas, variantIndex) {
+    const centerX = canvas.width * 0.28;
+    const centerY = canvas.height * 0.3;
+    const ringRadius = canvas.width * 0.16;
+    ctx.strokeStyle = 'rgba(215, 232, 248, 0.9)';
+
+    for (let rayIndex = 0; rayIndex < 17; rayIndex += 1) {
+        const angleBase = (Math.PI * 2 * rayIndex) / 17;
+        const angleJitter = (seededLorienDoorVariantValue(variantIndex, rayIndex + 1) - 0.5) * 0.42;
+        const startRadius =
+            ringRadius * (0.28 + seededLorienDoorVariantValue(variantIndex, 30 + rayIndex) * 0.46);
+        const startX = centerX + Math.cos(angleBase + angleJitter) * startRadius;
+        const startY = centerY + Math.sin(angleBase + angleJitter) * startRadius;
+        ctx.lineWidth = 2.2 + seededLorienDoorVariantValue(variantIndex, 60 + rayIndex) * 2.5;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        let currentX = startX;
+        let currentY = startY;
+        for (let segmentIndex = 0; segmentIndex < 3; segmentIndex += 1) {
+            const branchAngle =
+                angleBase +
+                angleJitter +
+                (seededLorienDoorVariantValue(variantIndex, 90 + rayIndex * 4 + segmentIndex) -
+                    0.5) *
+                    0.7;
+            const branchLength =
+                38 +
+                seededLorienDoorVariantValue(variantIndex, 120 + rayIndex * 4 + segmentIndex) * 62;
+            currentX += Math.cos(branchAngle) * branchLength;
+            currentY += Math.sin(branchAngle) * branchLength;
+            ctx.lineTo(currentX, currentY);
+        }
+        ctx.stroke();
+    }
+
+    ctx.lineWidth = 1.4;
+    ctx.strokeStyle = 'rgba(230, 240, 248, 0.46)';
+    for (let ringIndex = 0; ringIndex < 3; ringIndex += 1) {
+        ctx.beginPath();
+        ctx.arc(
+            centerX,
+            centerY,
+            ringRadius * (0.88 + ringIndex * 0.2),
+            Math.PI * (0.18 + ringIndex * 0.14),
+            Math.PI * (1.22 + ringIndex * 0.18)
+        );
+        ctx.stroke();
+    }
+}
+
+function drawLorienDoorDiagonalShearCrack(ctx, canvas, variantIndex) {
+    const startX = canvas.width * 0.1;
+    const startY = canvas.height * 0.18;
+    const endX = canvas.width * 0.88;
+    const endY = canvas.height * 0.82;
+    ctx.strokeStyle = 'rgba(228, 238, 248, 0.92)';
+    ctx.lineWidth = 4.4;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(canvas.width * 0.34, canvas.height * 0.32);
+    ctx.lineTo(canvas.width * 0.56, canvas.height * 0.46);
+    ctx.lineTo(endX, endY);
+    ctx.stroke();
+
+    for (let branchIndex = 0; branchIndex < 13; branchIndex += 1) {
+        const t = 0.08 + (branchIndex / 12) * 0.84;
+        const pivotX = THREE.MathUtils.lerp(startX, endX, t);
+        const pivotY = THREE.MathUtils.lerp(startY, endY, t);
+        const direction = branchIndex % 2 === 0 ? -1 : 1;
+        const angle =
+            Math.PI * 0.5 * direction +
+            (seededLorienDoorVariantValue(variantIndex, 200 + branchIndex) - 0.5) * 0.48;
+        const length = 32 + seededLorienDoorVariantValue(variantIndex, 220 + branchIndex) * 86;
+        ctx.lineWidth = 1.8 + seededLorienDoorVariantValue(variantIndex, 240 + branchIndex) * 2;
+        ctx.beginPath();
+        ctx.moveTo(pivotX, pivotY);
+        ctx.lineTo(pivotX + Math.cos(angle) * length, pivotY + Math.sin(angle) * length);
+        ctx.stroke();
+    }
+
+    ctx.strokeStyle = 'rgba(216, 229, 242, 0.38)';
+    ctx.lineWidth = 1.2;
+    for (let seamIndex = 0; seamIndex < 5; seamIndex += 1) {
+        const seamX = canvas.width * (0.22 + seamIndex * 0.12);
+        ctx.beginPath();
+        ctx.moveTo(seamX, canvas.height * 0.08);
+        ctx.lineTo(seamX + canvas.width * 0.06, canvas.height * 0.2);
+        ctx.stroke();
+    }
+}
+
+function drawLorienDoorTwinImpactCrack(ctx, canvas, variantIndex) {
+    const impacts = [
+        { x: canvas.width * 0.28, y: canvas.height * 0.58, radius: canvas.width * 0.1 },
+        { x: canvas.width * 0.72, y: canvas.height * 0.42, radius: canvas.width * 0.09 },
+    ];
+    ctx.strokeStyle = 'rgba(224, 236, 247, 0.9)';
+    impacts.forEach((impact, impactIndex) => {
+        for (let rayIndex = 0; rayIndex < 9; rayIndex += 1) {
+            const angle =
+                (Math.PI * 2 * rayIndex) / 9 +
+                seededLorienDoorVariantValue(variantIndex, 300 + impactIndex * 20 + rayIndex) *
+                    0.34;
+            const startX = impact.x + Math.cos(angle) * impact.radius * 0.34;
+            const startY = impact.y + Math.sin(angle) * impact.radius * 0.34;
+            const length =
+                28 +
+                seededLorienDoorVariantValue(variantIndex, 330 + impactIndex * 20 + rayIndex) * 58;
+            ctx.lineWidth = 1.8 + seededLorienDoorVariantValue(variantIndex, 360 + rayIndex) * 2;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(startX + Math.cos(angle) * length, startY + Math.sin(angle) * length);
+            ctx.stroke();
+        }
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = 'rgba(240, 246, 250, 0.4)';
+        ctx.beginPath();
+        ctx.arc(impact.x, impact.y, impact.radius, Math.PI * 0.1, Math.PI * 1.8);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(224, 236, 247, 0.9)';
+    });
+
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(impacts[0].x + 12, impacts[0].y - 18);
+    ctx.lineTo(canvas.width * 0.46, canvas.height * 0.5);
+    ctx.lineTo(impacts[1].x - 10, impacts[1].y + 12);
+    ctx.stroke();
+}
+
+function drawLorienDoorEdgeFanCrack(ctx, canvas, variantIndex) {
+    const originX = canvas.width * 0.48;
+    const originY = canvas.height * 0.86;
+    ctx.strokeStyle = 'rgba(220, 234, 246, 0.9)';
+
+    for (let fanIndex = 0; fanIndex < 14; fanIndex += 1) {
+        const angle =
+            -Math.PI * 0.78 +
+            (fanIndex / 13) * Math.PI * 0.62 +
+            (seededLorienDoorVariantValue(variantIndex, 400 + fanIndex) - 0.5) * 0.14;
+        const length = 54 + seededLorienDoorVariantValue(variantIndex, 430 + fanIndex) * 114;
+        ctx.lineWidth = 2 + seededLorienDoorVariantValue(variantIndex, 460 + fanIndex) * 2.2;
+        ctx.beginPath();
+        ctx.moveTo(originX, originY);
+        ctx.lineTo(originX + Math.cos(angle) * length, originY + Math.sin(angle) * length);
+        ctx.stroke();
+    }
+
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.18, canvas.height * 0.92);
+    ctx.lineTo(canvas.width * 0.42, canvas.height * 0.8);
+    ctx.lineTo(canvas.width * 0.8, canvas.height * 0.88);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(238, 245, 250, 0.34)';
+    ctx.lineWidth = 1.2;
+    for (let arcIndex = 0; arcIndex < 4; arcIndex += 1) {
+        ctx.beginPath();
+        ctx.arc(
+            originX,
+            originY,
+            canvas.width * (0.16 + arcIndex * 0.08),
+            -Math.PI * 0.9,
+            -Math.PI * 0.24
+        );
+        ctx.stroke();
+    }
+}
+
+function seededLorienDoorVariantValue(variantIndex, seed) {
+    const value = Math.sin((variantIndex + 1) * 91.173 + seed * 17.371) * 43758.5453123;
+    return value - Math.floor(value);
+}
+
+function getLorienScorchTexture() {
+    if (lorienScorchTexture) {
+        return lorienScorchTexture;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 384;
+    canvas.height = 384;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        lorienScorchTexture = new THREE.CanvasTexture(canvas);
+        return lorienScorchTexture;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const centerX = canvas.width * 0.5;
+    const centerY = canvas.height * 0.5;
+    const outerGradient = ctx.createRadialGradient(centerX, centerY, 18, centerX, centerY, 176);
+    outerGradient.addColorStop(0, 'rgba(10, 8, 8, 0.88)');
+    outerGradient.addColorStop(0.24, 'rgba(18, 14, 12, 0.78)');
+    outerGradient.addColorStop(0.56, 'rgba(24, 18, 16, 0.42)');
+    outerGradient.addColorStop(1, 'rgba(24, 18, 16, 0)');
+    ctx.fillStyle = outerGradient;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 176, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 14; i += 1) {
+        const smudgeX = centerX + (Math.random() - 0.5) * 130;
+        const smudgeY = centerY + (Math.random() - 0.5) * 130;
+        const smudgeRadius = 16 + Math.random() * 36;
+        const fade = ctx.createRadialGradient(smudgeX, smudgeY, 0, smudgeX, smudgeY, smudgeRadius);
+        fade.addColorStop(0, 'rgba(0, 0, 0, 0.34)');
+        fade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = fade;
+        ctx.beginPath();
+        ctx.arc(smudgeX, smudgeY, smudgeRadius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    lorienScorchTexture = new THREE.CanvasTexture(canvas);
+    lorienScorchTexture.colorSpace = THREE.SRGBColorSpace;
+    lorienScorchTexture.anisotropy = 2;
+    lorienScorchTexture.needsUpdate = true;
+    return lorienScorchTexture;
+}
+
+function segmentImpactExpandedAabbXZ({
+    startX = 0,
+    startZ = 0,
+    endX = 0,
+    endZ = 0,
+    minX = 0,
+    maxX = 0,
+    minZ = 0,
+    maxZ = 0,
+} = {}) {
+    if (
+        ![startX, startZ, endX, endZ, minX, maxX, minZ, maxZ].every(Number.isFinite) ||
+        minX > maxX ||
+        minZ > maxZ
+    ) {
+        return null;
+    }
+
+    const dirX = endX - startX;
+    const dirZ = endZ - startZ;
+    let tMin = 0;
+    let tMax = 1;
+    let hitNormalX = 0;
+    let hitNormalZ = 0;
+
+    if (Math.abs(dirX) <= 1e-8) {
+        if (startX < minX || startX > maxX) {
+            return null;
+        }
+    } else {
+        const invX = 1 / dirX;
+        let tx1 = (minX - startX) * invX;
+        let tx2 = (maxX - startX) * invX;
+        let nearNormalX = -1;
+        if (tx1 > tx2) {
+            [tx1, tx2] = [tx2, tx1];
+            nearNormalX = 1;
+        }
+        if (tx1 > tMin) {
+            tMin = tx1;
+            hitNormalX = nearNormalX;
+            hitNormalZ = 0;
+        }
+        tMax = Math.min(tMax, tx2);
+        if (tMin > tMax) {
+            return null;
+        }
+    }
+
+    if (Math.abs(dirZ) <= 1e-8) {
+        if (startZ < minZ || startZ > maxZ) {
+            return null;
+        }
+    } else {
+        const invZ = 1 / dirZ;
+        let tz1 = (minZ - startZ) * invZ;
+        let tz2 = (maxZ - startZ) * invZ;
+        let nearNormalZ = -1;
+        if (tz1 > tz2) {
+            [tz1, tz2] = [tz2, tz1];
+            nearNormalZ = 1;
+        }
+        if (tz1 > tMin) {
+            tMin = tz1;
+            hitNormalX = 0;
+            hitNormalZ = nearNormalZ;
+        }
+        tMax = Math.min(tMax, tz2);
+        if (tMin > tMax) {
+            return null;
+        }
+    }
+
+    if (tMin < 0 || tMin > 1) {
+        return null;
+    }
+
+    return {
+        t: tMin,
+        x: startX + dirX * tMin,
+        z: startZ + dirZ * tMin,
+        normalX: hitNormalX,
+        normalZ: hitNormalZ,
+    };
 }

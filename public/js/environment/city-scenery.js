@@ -5,6 +5,7 @@ import { createParkLayer } from './parks.js';
 import { createBuildingLayer } from './buildings.js';
 import { createBillboardLayer } from './billboards.js';
 import { createStreetLampLayer } from './street-lamps.js';
+import { createUndergroundParkingLayer } from './underground-parking.js';
 
 export function createCityScenery() {
     const group = new THREE.Group();
@@ -23,6 +24,7 @@ export function createCityScenery() {
     group.userData.buildingLayer = buildingLayer;
 
     group.add(monumentLayer);
+    group.add(createUndergroundParkingLayer());
     group.add(createParkLayer());
     group.add(buildingLayer);
     group.add(createBillboardLayer(group.userData.billboardScreens));

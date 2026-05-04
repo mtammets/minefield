@@ -54,7 +54,7 @@ function createChargingZones() {
     const roadStep = CITY_GRID_SPACING * 2;
     const majorStep = roadStep * 2;
     const anchors = [
-        [0, -majorStep],
+        [majorStep, -majorStep],
         [0, -roadStep],
         [-roadStep, -roadStep],
         [roadStep, -roadStep],

@@ -1,5 +1,6 @@
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 import { beginHeavyEventFrame, getHeavyEventBudgetSnapshot } from './frame-heavy-event-budget.js';
+import { updateUndergroundParkingRuntime } from './environment/underground-parking.js';
 
 const BOT_MINE_DEPLOY_MIN_SPEED = 8;
 const BOT_MINE_DEPLOY_MAX_DISTANCE = 24;
@@ -64,6 +65,7 @@ export function createGameLoopController(options = {}) {
         consumeCrashCollision,
         worldBounds,
         staticObstacles,
+        getDynamicObstacleCandidates = null,
         physicsStep = 1 / 120,
         maxPhysicsStepsPerFrame = 6,
         roundTotalPickups = 30,
@@ -567,7 +569,8 @@ export function createGameLoopController(options = {}) {
                             worldBounds,
                             staticObstacles,
                             vehicleCollisionSnapshotBuffer,
-                            getGroundHeightAt
+                            getGroundHeightAt,
+                            getDynamicObstacleCandidates
                         );
                         physicsAccumulator -= physicsStep;
                         physicsSteps += 1;
@@ -775,6 +778,7 @@ export function createGameLoopController(options = {}) {
         audioFrameState.worldMapVisible = worldMapOpen;
         audioFrameState.gameMode = readGameMode();
         audioFrameState.playerPosition = car.position;
+        updateUndergroundParkingRuntime(car.position, frameDelta);
         measureStage('audio', () => {
             audioController?.update?.(frameDelta, audioFrameState);
         });

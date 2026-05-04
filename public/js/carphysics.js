@@ -7,6 +7,7 @@ import {
     PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
 } from './constants.js';
 import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
+import { constrainPositionToUndergroundParkingDriveBounds } from './environment/underground-parking.js';
 import { constrainPositionToUpperDeckDriveBounds } from './environment/upper-deck.js';
 
 export const keys = {
@@ -163,6 +164,7 @@ const VEHICLE_COLLISION_RADIUS = 1.34;
 const VEHICLE_COLLISION_HALF_WIDTH = 1.45;
 const VEHICLE_COLLISION_HALF_LENGTH = 2.3;
 const OBSTACLE_COLLISION_ITERATIONS = 4;
+const OBSTACLE_VERTICAL_CONTACT_MARGIN = 0.32;
 const HORIZONTAL_COLLISION_STEP_FACTOR = 0.42;
 const MAX_HORIZONTAL_COLLISION_SUBSTEPS = 7;
 const OBSTACLE_BROADPHASE_CELL_SIZE = 12;
@@ -228,6 +230,7 @@ const forward = new THREE.Vector2();
 const right = new THREE.Vector2();
 const movement = new THREE.Vector3();
 const collisionNormal = new THREE.Vector2();
+const mergedObstacleCandidates = [];
 const physicsPosition = new THREE.Vector3();
 const previousPhysicsPosition = new THREE.Vector3();
 const interpolatedPosition = new THREE.Vector3();
@@ -249,6 +252,7 @@ let isPhysicsInitialized = false;
 let pendingCrashCollision = null;
 const pendingVehicleCollisionContacts = [];
 const EMPTY_COLLISION_CONTACTS = Object.freeze([]);
+const EMPTY_OBSTACLE_CANDIDATES = Object.freeze([]);
 const obstacleBroadphaseByArray = new WeakMap();
 const vehicleDamageState = {
     wheelLossCount: 0,
@@ -474,7 +478,8 @@ export function updatePlayerPhysics(
     worldBounds = null,
     staticObstacles = null,
     dynamicVehicles = null,
-    sampleGroundHeight = null
+    sampleGroundHeight = null,
+    resolveDynamicObstacleCandidates = null
 ) {
     if (!isPhysicsInitialized) {
         initializePlayerPhysics(player);
@@ -713,15 +718,25 @@ export function updatePlayerPhysics(
         worldBounds,
         staticObstacles,
         dynamicVehicles,
-        vehicleState.velocity.length()
+        vehicleState.velocity.length(),
+        resolveDynamicObstacleCandidates
     );
     applyUpperDeckConstraintResponse(
         constrainPositionToUpperDeckDriveBounds(physicsPosition, previousPhysicsPosition)
+    );
+    applyUndergroundParkingConstraintResponse(
+        constrainPositionToUndergroundParkingDriveBounds(physicsPosition, previousPhysicsPosition)
     );
     if (typeof sampleGroundHeight === 'function') {
         applyTerrainSupport(sampleGroundHeight, dt);
         applyUpperDeckConstraintResponse(
             constrainPositionToUpperDeckDriveBounds(physicsPosition, previousPhysicsPosition)
+        );
+        applyUndergroundParkingConstraintResponse(
+            constrainPositionToUndergroundParkingDriveBounds(
+                physicsPosition,
+                previousPhysicsPosition
+            )
         );
     } else {
         physicsPitch = moveToward(physicsPitch, 0, TERRAIN_TILT_RESPONSE * 0.5 * dt);
@@ -745,7 +760,8 @@ function integrateHorizontalMovement(
     worldBounds,
     staticObstacles,
     dynamicVehicles,
-    impactSpeed = 0
+    impactSpeed = 0,
+    resolveDynamicObstacleCandidates = null
 ) {
     const moveX = movementDelta.x;
     const moveZ = movementDelta.z;
@@ -770,9 +786,35 @@ function integrateHorizontalMovement(
             staticObstacles,
             maxStepDistance + OBSTACLE_BROADPHASE_EXTRA_RADIUS
         );
-        constrainToObstacles(position, obstacleCandidates, impactSpeed);
+        const dynamicObstacleCandidates =
+            typeof resolveDynamicObstacleCandidates === 'function'
+                ? resolveDynamicObstacleCandidates(
+                      position,
+                      maxStepDistance + OBSTACLE_BROADPHASE_EXTRA_RADIUS
+                  )
+                : null;
+        constrainToObstacles(
+            position,
+            mergeObstacleCandidates(obstacleCandidates, dynamicObstacleCandidates),
+            impactSpeed
+        );
         constrainToVehicles(position, dynamicVehicles);
     }
+}
+
+function mergeObstacleCandidates(primaryCandidates, secondaryCandidates) {
+    const hasPrimary = Array.isArray(primaryCandidates) && primaryCandidates.length > 0;
+    const hasSecondary = Array.isArray(secondaryCandidates) && secondaryCandidates.length > 0;
+    if (!hasPrimary) {
+        return hasSecondary ? secondaryCandidates : EMPTY_OBSTACLE_CANDIDATES;
+    }
+    if (!hasSecondary) {
+        return primaryCandidates;
+    }
+
+    mergedObstacleCandidates.length = 0;
+    mergedObstacleCandidates.push(...primaryCandidates, ...secondaryCandidates);
+    return mergedObstacleCandidates;
 }
 
 function resolveObstacleCandidates(position, staticObstacles, searchRadius = 0) {
@@ -933,6 +975,9 @@ function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
 
         for (let i = 0; i < obstacleCandidates.length; i += 1) {
             const obstacle = obstacleCandidates[i];
+            if (!isObstacleActiveAtHeight(obstacle, position.y)) {
+                continue;
+            }
             if (obstacle.type === 'circle') {
                 const nx = position.x - obstacle.x;
                 const nz = position.z - obstacle.z;
@@ -1077,6 +1122,19 @@ function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
             };
         }
     }
+}
+
+function isObstacleActiveAtHeight(obstacle, sampleY = 0) {
+    if (!obstacle || !Number.isFinite(sampleY)) {
+        return true;
+    }
+
+    const minY = Number.isFinite(obstacle.minY) ? obstacle.minY : Number.NEGATIVE_INFINITY;
+    const maxY = Number.isFinite(obstacle.maxY) ? obstacle.maxY : Number.POSITIVE_INFINITY;
+    return (
+        sampleY >= minY - OBSTACLE_VERTICAL_CONTACT_MARGIN &&
+        sampleY <= maxY + OBSTACLE_VERTICAL_CONTACT_MARGIN
+    );
 }
 
 function constrainToVehicles(position, dynamicVehicles = null) {
@@ -1508,6 +1566,16 @@ function applyUpperDeckConstraintResponse(constraintResult) {
     vehicleState.speed = 0;
     vehicleState.acceleration = 0;
     vehicleState.yawRate *= 0.4;
+}
+
+function applyUndergroundParkingConstraintResponse(constraintResult) {
+    if (!constraintResult || constraintResult.mode !== 'illegal_entry') {
+        return;
+    }
+    vehicleState.velocity.set(0, 0);
+    vehicleState.speed = 0;
+    vehicleState.acceleration = 0;
+    vehicleState.yawRate *= 0.3;
 }
 
 function updateDriverInputs(dt) {

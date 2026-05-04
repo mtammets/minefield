@@ -533,7 +533,10 @@ function addPoleMountedBillboard(layer, screenEntries, options) {
     billboard.rotation.y = options.rotationY || 0;
     layer.add(billboard);
 
-    addObstacleCircle(options.x, options.z, options.obstacleRadius || 0.85, 'billboard_support');
+    addObstacleCircle(options.x, options.z, options.obstacleRadius || 0.85, 'billboard_support', {
+        minY: baseY - 0.35,
+        maxY: baseY + options.screenCenterY + options.height * 0.7 + 1.2,
+    });
 }
 
 function addStreetKiosk(layer, screenEntries, options) {
@@ -551,7 +554,10 @@ function addStreetKiosk(layer, screenEntries, options) {
     kiosk.rotation.y = options.rotationY || 0;
     layer.add(kiosk);
 
-    addObstacleCircle(options.x, options.z, options.obstacleRadius || 0.9, 'billboard_kiosk');
+    addObstacleCircle(options.x, options.z, options.obstacleRadius || 0.9, 'billboard_kiosk', {
+        minY: baseY - 0.35,
+        maxY: baseY + options.screenCenterY + options.height * 0.65 + 0.9,
+    });
 }
 
 function createWallMountedBillboardMesh({

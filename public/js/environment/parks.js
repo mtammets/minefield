@@ -82,7 +82,10 @@ export function createParkLayer() {
 
         canopyColor.setHSL(0.33 + randomFromGrid(index, trees.length, 121) * 0.03, 0.42, 0.28);
         canopies.setColorAt(index, canopyColor);
-        addObstacleCircle(tree.x, tree.z, 0.62 * tree.scale, 'tree');
+        addObstacleCircle(tree.x, tree.z, 0.62 * tree.scale, 'tree', {
+            minY: baseY - 0.3,
+            maxY: baseY + 5.6 * tree.scale,
+        });
     });
 
     trunks.instanceMatrix.needsUpdate = true;

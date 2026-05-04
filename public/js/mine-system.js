@@ -59,6 +59,19 @@ const MINE_DETONATION_COOL_COLOR = new THREE.Color(0xff4a32);
 const MINE_MESH_POOL_MAX = 24;
 const MINE_MESH_POOL_PREWARM_COUNT = 10;
 const DEFAULT_TARGET_COLLISION_RADIUS = 1.34;
+const MINE_THROW_COLLISION_RADIUS = 0.4;
+const MINE_THROW_COLLISION_PUSHBACK = 0.03;
+const MINE_THROW_BOUNCE_DAMPING = 0.42;
+const MINE_THROW_BOUNCE_VERTICAL_DAMPING = 0.58;
+const GROUND_SCORCH_MARK_MAX = 36;
+const GROUND_SCORCH_MARK_Y_OFFSET = 0.028;
+const GROUND_SCORCH_MARK_MIN_SIZE = 1.35;
+const GROUND_SCORCH_MARK_MAX_SIZE = 2.45;
+const MINE_CHAIN_REACTION_RADIUS = 4.2;
+const MINE_CHAIN_REACTION_RADIUS_SQ = MINE_CHAIN_REACTION_RADIUS * MINE_CHAIN_REACTION_RADIUS;
+const MINE_CHAIN_REACTION_BASE_DELAY_MS = 65;
+const MINE_CHAIN_REACTION_STEP_DELAY_MS = 48;
+const MINE_CHAIN_REACTION_DELAY_JITTER_MS = 24;
 const POSITION_HISTORY_MAX_AGE_MS = 260;
 const POSITION_HISTORY_RETENTION_MS = 4000;
 
@@ -72,6 +85,8 @@ export function createMineSystemController(options = {}) {
         scene,
         car,
         getGroundHeightAt = () => 0,
+        staticObstacles = [],
+        resolveThrownMineSpecialImpact = () => null,
         getVehicleState = () => ({}),
         getOtherVehicleTargets = () => [],
         getLocalPlayerId = () => '',
@@ -96,6 +111,8 @@ export function createMineSystemController(options = {}) {
     const detonationShockwaveTexture = createDetonationShockwaveTexture();
     const detonationCoreTexture = createDetonationCoreTexture();
     const detonationHaloTexture = createDetonationHaloTexture();
+    const groundScorchGeometry = new THREE.PlaneGeometry(1, 1);
+    const groundScorchTexture = createGroundScorchTexture();
     const recentDetonations = new Map();
     const ownerLastDeployAtMs = new Map();
     const ownerDeployedMineCountById = new Map();
@@ -103,7 +120,10 @@ export function createMineSystemController(options = {}) {
     const previousPositionByEntityKey = new Map();
     const mineMeshPool = [];
     const mineMarkerBuffer = [];
+    const groundScorchMarks = [];
     const pendingDetonationSpawns = [];
+    const pendingChainReactionDetonations = [];
+    const pendingChainReactionMineIds = new Set();
     let mineSequence = 0;
     let collisionWasEnabledLastFrame = false;
     let activeDetonationLightCount = 0;
@@ -379,6 +399,7 @@ export function createMineSystemController(options = {}) {
         if (now - lastDetonationQueuedAtMs > DETONATION_BURST_WINDOW_MS) {
             detonationBurstCount = 0;
         }
+        processPendingChainReactionDetonations(now);
         const localPlayerId = sanitizePlayerId(context.localPlayerId || getLocalPlayerId());
         const localCarPosition = context.localCarPosition || car.position;
         const enableLocalCollision = Boolean(context.enableLocalCollision);
@@ -455,8 +476,50 @@ export function createMineSystemController(options = {}) {
             }
 
             if (mine.thrown && !mine.landed) {
+                const previousX = mine.mesh.position.x;
+                const previousY = mine.mesh.position.y;
+                const previousZ = mine.mesh.position.z;
                 mine.velocity.y -= MINE_THROW_GRAVITY * dt;
-                mine.mesh.position.addScaledVector(mine.velocity, dt);
+                const nextX = previousX + mine.velocity.x * dt;
+                const nextY = previousY + mine.velocity.y * dt;
+                const nextZ = previousZ + mine.velocity.z * dt;
+                const specialImpact = resolveThrownMineSpecialImpact({
+                    startX: previousX,
+                    startY: previousY,
+                    startZ: previousZ,
+                    endX: nextX,
+                    endY: nextY,
+                    endZ: nextZ,
+                    collisionRadius: MINE_THROW_COLLISION_RADIUS,
+                });
+                const obstacleImpact = resolveThrownMineObstacleImpact({
+                    startX: previousX,
+                    startY: previousY,
+                    startZ: previousZ,
+                    endX: nextX,
+                    endY: nextY,
+                    endZ: nextZ,
+                    collisionRadius: MINE_THROW_COLLISION_RADIUS,
+                    obstacles: staticObstacles,
+                });
+                const resolvedImpact = resolveEarliestThrownMineImpact(
+                    specialImpact,
+                    obstacleImpact
+                );
+                if (resolvedImpact) {
+                    mine.mesh.position.set(
+                        resolvedImpact.x + resolvedImpact.normalX * MINE_THROW_COLLISION_PUSHBACK,
+                        resolvedImpact.y,
+                        resolvedImpact.z + resolvedImpact.normalZ * MINE_THROW_COLLISION_PUSHBACK
+                    );
+                    applyThrownMineBounceResponse(
+                        mine.velocity,
+                        resolvedImpact.normalX,
+                        resolvedImpact.normalZ
+                    );
+                } else {
+                    mine.mesh.position.set(nextX, nextY, nextZ);
+                }
 
                 const groundY =
                     getGroundHeightAt(
@@ -691,6 +754,7 @@ export function createMineSystemController(options = {}) {
 
     function detonateMine(mineId, context = {}) {
         const now = Date.now();
+        removePendingChainReactionDetonation(mineId);
         if (recentDetonations.has(mineId)) {
             return;
         }
@@ -712,6 +776,11 @@ export function createMineSystemController(options = {}) {
         }
 
         recentDetonations.set(mineId, now);
+        const chainedMineIds = findNearbyChainReactionMineIds(
+            detonationPosition,
+            mineId,
+            MINE_CHAIN_REACTION_RADIUS_SQ
+        );
         queueDetonationEffectSpawn(
             detonationPosition,
             {
@@ -719,6 +788,7 @@ export function createMineSystemController(options = {}) {
             },
             now
         );
+        spawnGroundScorchMark(detonationPosition);
         onMineDetonated({
             mineId,
             position: detonationPosition,
@@ -769,6 +839,256 @@ export function createMineSystemController(options = {}) {
                 target: context.otherTarget,
             });
         }
+
+        queueChainReactionDetonations(
+            chainedMineIds,
+            {
+                triggerPlayerId: sanitizePlayerId(context.triggerPlayerId),
+            },
+            now
+        );
+    }
+
+    function applyThrownMineBounceResponse(velocity, normalX = 0, normalZ = 0) {
+        if (!velocity) {
+            return;
+        }
+        const normalLength = Math.hypot(normalX, normalZ);
+        if (!Number.isFinite(normalLength) || normalLength <= 1e-6) {
+            velocity.multiplyScalar(MINE_THROW_BOUNCE_DAMPING);
+            velocity.y = Math.max(velocity.y * MINE_THROW_BOUNCE_VERTICAL_DAMPING, 0);
+            return;
+        }
+
+        const nx = normalX / normalLength;
+        const nz = normalZ / normalLength;
+        const inwardSpeed = velocity.x * nx + velocity.z * nz;
+        if (inwardSpeed < 0) {
+            velocity.x -= 2 * inwardSpeed * nx;
+            velocity.z -= 2 * inwardSpeed * nz;
+        }
+        velocity.x *= MINE_THROW_BOUNCE_DAMPING;
+        velocity.z *= MINE_THROW_BOUNCE_DAMPING;
+        velocity.y = Math.max(velocity.y * MINE_THROW_BOUNCE_VERTICAL_DAMPING, 0);
+    }
+
+    function spawnGroundScorchMark(detonationPosition) {
+        if (!detonationPosition) {
+            return;
+        }
+
+        const scorchY = getGroundHeightAt(
+            detonationPosition.x,
+            detonationPosition.z,
+            detonationPosition.y
+        );
+        if (!Number.isFinite(scorchY)) {
+            return;
+        }
+
+        const scorchMaterial = new THREE.MeshBasicMaterial({
+            map: groundScorchTexture,
+            transparent: true,
+            opacity: 0.5,
+            alphaTest: 0.02,
+            color: 0x161210,
+            toneMapped: false,
+            depthWrite: false,
+        });
+        const scorchMesh = new THREE.Mesh(groundScorchGeometry, scorchMaterial);
+        scorchMesh.position.set(
+            detonationPosition.x,
+            scorchY + GROUND_SCORCH_MARK_Y_OFFSET,
+            detonationPosition.z
+        );
+        scorchMesh.rotation.x = -Math.PI * 0.5;
+        scorchMesh.rotation.z = Math.random() * Math.PI * 2;
+        const scorchSize = THREE.MathUtils.lerp(
+            GROUND_SCORCH_MARK_MIN_SIZE,
+            GROUND_SCORCH_MARK_MAX_SIZE,
+            Math.random()
+        );
+        scorchMesh.scale.set(scorchSize, scorchSize, 1);
+        scorchMesh.renderOrder = 1;
+        scorchMesh.castShadow = false;
+        scorchMesh.receiveShadow = false;
+        scene.add(scorchMesh);
+        groundScorchMarks.push({
+            mesh: scorchMesh,
+            material: scorchMaterial,
+        });
+
+        while (groundScorchMarks.length > GROUND_SCORCH_MARK_MAX) {
+            removeGroundScorchMarkAt(0);
+        }
+    }
+
+    function removeGroundScorchMarkAt(index) {
+        if (index < 0 || index >= groundScorchMarks.length) {
+            return;
+        }
+        const [entry] = groundScorchMarks.splice(index, 1);
+        if (!entry?.mesh) {
+            return;
+        }
+        scene.remove(entry.mesh);
+        entry.material?.dispose?.();
+    }
+
+    function findNearbyChainReactionMineIds(
+        detonationPosition,
+        sourceMineId = '',
+        maxDistanceSq = MINE_CHAIN_REACTION_RADIUS_SQ
+    ) {
+        if (!detonationPosition || minesById.size === 0) {
+            return [];
+        }
+
+        const chainMineCandidates = [];
+        for (const [candidateMineId, candidateMine] of minesById.entries()) {
+            if (!candidateMine || candidateMineId === sourceMineId) {
+                continue;
+            }
+            if (recentDetonations.has(candidateMineId)) {
+                continue;
+            }
+
+            const dx = candidateMine.mesh.position.x - detonationPosition.x;
+            const dy = candidateMine.mesh.position.y - detonationPosition.y;
+            const dz = candidateMine.mesh.position.z - detonationPosition.z;
+            const distanceSq = dx * dx + dy * dy + dz * dz;
+            if (distanceSq > maxDistanceSq) {
+                continue;
+            }
+            chainMineCandidates.push({
+                mineId: candidateMineId,
+                distanceSq,
+            });
+        }
+
+        chainMineCandidates.sort((leftCandidate, rightCandidate) => {
+            if (leftCandidate.distanceSq !== rightCandidate.distanceSq) {
+                return leftCandidate.distanceSq - rightCandidate.distanceSq;
+            }
+            return compareMineIds(leftCandidate.mineId, rightCandidate.mineId);
+        });
+
+        return chainMineCandidates.map((candidate) => candidate.mineId);
+    }
+
+    function queueChainReactionDetonations(chainMineIds = [], context = {}, now = Date.now()) {
+        if (!Array.isArray(chainMineIds) || chainMineIds.length === 0) {
+            return;
+        }
+
+        const triggerPlayerId = sanitizePlayerId(context.triggerPlayerId);
+        for (let index = 0; index < chainMineIds.length; index += 1) {
+            const chainedMineId = sanitizeMineId(chainMineIds[index]);
+            if (!chainedMineId || recentDetonations.has(chainedMineId)) {
+                continue;
+            }
+            const chainedMine = minesById.get(chainedMineId);
+            if (!chainedMine) {
+                continue;
+            }
+
+            const detonateAt = now + computeChainReactionDetonationDelayMs(chainedMineId, index);
+            if (pendingChainReactionMineIds.has(chainedMineId)) {
+                for (
+                    let pendingIndex = 0;
+                    pendingIndex < pendingChainReactionDetonations.length;
+                    pendingIndex += 1
+                ) {
+                    const pendingDetonation = pendingChainReactionDetonations[pendingIndex];
+                    if (pendingDetonation?.mineId !== chainedMineId) {
+                        continue;
+                    }
+                    pendingDetonation.detonateAt = Math.min(
+                        pendingDetonation.detonateAt,
+                        detonateAt
+                    );
+                    break;
+                }
+                continue;
+            }
+
+            pendingChainReactionDetonations.push({
+                mineId: chainedMineId,
+                detonateAt,
+                triggerPlayerId,
+            });
+            pendingChainReactionMineIds.add(chainedMineId);
+        }
+
+        pendingChainReactionDetonations.sort((leftEntry, rightEntry) => {
+            if (leftEntry.detonateAt !== rightEntry.detonateAt) {
+                return leftEntry.detonateAt - rightEntry.detonateAt;
+            }
+            return compareMineIds(leftEntry.mineId, rightEntry.mineId);
+        });
+    }
+
+    function processPendingChainReactionDetonations(now = Date.now()) {
+        while (pendingChainReactionDetonations.length > 0) {
+            const nextPendingDetonation = pendingChainReactionDetonations[0];
+            if (!nextPendingDetonation || nextPendingDetonation.detonateAt > now) {
+                break;
+            }
+
+            pendingChainReactionDetonations.shift();
+            pendingChainReactionMineIds.delete(nextPendingDetonation.mineId);
+            if (
+                recentDetonations.has(nextPendingDetonation.mineId) ||
+                !minesById.has(nextPendingDetonation.mineId)
+            ) {
+                continue;
+            }
+
+            detonateMine(nextPendingDetonation.mineId, {
+                emitNetworkEvent: false,
+                triggerPlayerId: nextPendingDetonation.triggerPlayerId,
+                targetPlayerId: '',
+                localHit: false,
+                detonationType: 'chain_reaction',
+            });
+        }
+    }
+
+    function removePendingChainReactionDetonation(mineId) {
+        const sanitizedMineId = sanitizeMineId(mineId);
+        if (!sanitizedMineId || pendingChainReactionDetonations.length === 0) {
+            pendingChainReactionMineIds.delete(sanitizedMineId);
+            return;
+        }
+
+        pendingChainReactionMineIds.delete(sanitizedMineId);
+        for (
+            let pendingIndex = pendingChainReactionDetonations.length - 1;
+            pendingIndex >= 0;
+            pendingIndex -= 1
+        ) {
+            if (pendingChainReactionDetonations[pendingIndex]?.mineId !== sanitizedMineId) {
+                continue;
+            }
+            pendingChainReactionDetonations.splice(pendingIndex, 1);
+        }
+    }
+
+    function computeChainReactionDetonationDelayMs(mineId, orderIndex = 0) {
+        const indexOffset = Math.max(0, Math.floor(orderIndex)) * MINE_CHAIN_REACTION_STEP_DELAY_MS;
+        let hash = 0;
+        for (let index = 0; index < mineId.length; index += 1) {
+            hash = (hash * 31 + mineId.charCodeAt(index)) >>> 0;
+        }
+        const jitter = hash % (MINE_CHAIN_REACTION_DELAY_JITTER_MS + 1);
+        return MINE_CHAIN_REACTION_BASE_DELAY_MS + indexOffset + jitter;
+    }
+
+    function compareMineIds(leftMineId = '', rightMineId = '') {
+        if (leftMineId === rightMineId) {
+            return 0;
+        }
+        return leftMineId < rightMineId ? -1 : 1;
     }
 
     function getPerformanceSnapshot() {
@@ -852,6 +1172,8 @@ export function createMineSystemController(options = {}) {
         for (const mineId of Array.from(minesById.keys())) {
             removeMine(mineId);
         }
+        pendingChainReactionDetonations.length = 0;
+        pendingChainReactionMineIds.clear();
         pendingDetonationSpawns.length = 0;
         pendingDetonationSpawnReadIndex = 0;
         detonationBurstCount = 0;
@@ -862,6 +1184,9 @@ export function createMineSystemController(options = {}) {
         }
         activeDetonationLightCount = 0;
         recentDetonations.clear();
+        while (groundScorchMarks.length > 0) {
+            removeGroundScorchMarkAt(groundScorchMarks.length - 1);
+        }
         resetRoundInventory();
         previousPositionByEntityKey.clear();
         collisionWasEnabledLastFrame = false;
@@ -1667,6 +1992,53 @@ function createDetonationHaloTexture() {
     return texture;
 }
 
+function createGroundScorchTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 384;
+    canvas.height = 384;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        return texture;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const centerX = canvas.width * 0.5;
+    const centerY = canvas.height * 0.5;
+    const outerGradient = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, 168);
+    outerGradient.addColorStop(0, 'rgba(14, 10, 10, 0.92)');
+    outerGradient.addColorStop(0.28, 'rgba(20, 14, 12, 0.72)');
+    outerGradient.addColorStop(0.62, 'rgba(18, 14, 12, 0.28)');
+    outerGradient.addColorStop(1, 'rgba(18, 14, 12, 0)');
+    ctx.fillStyle = outerGradient;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 168, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 16; i += 1) {
+        const smudgeX = centerX + (Math.random() - 0.5) * 126;
+        const smudgeY = centerY + (Math.random() - 0.5) * 126;
+        const smudgeRadius = 16 + Math.random() * 34;
+        const fade = ctx.createRadialGradient(smudgeX, smudgeY, 0, smudgeX, smudgeY, smudgeRadius);
+        fade.addColorStop(0, 'rgba(0, 0, 0, 0.36)');
+        fade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = fade;
+        ctx.beginPath();
+        ctx.arc(smudgeX, smudgeY, smudgeRadius, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+}
+
 function createMineMeshBundle() {
     const group = new THREE.Group();
     group.name = 'landmine';
@@ -1872,6 +2244,245 @@ function pruneMovementHistory(previousPositionByEntityKey, activeEntityKeys, now
             previousPositionByEntityKey.delete(entityKey);
         }
     }
+}
+
+function resolveThrownMineObstacleImpact({
+    startX = 0,
+    startY = 0,
+    startZ = 0,
+    endX = 0,
+    endY = 0,
+    endZ = 0,
+    collisionRadius = MINE_THROW_COLLISION_RADIUS,
+    obstacles = [],
+} = {}) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) {
+        return null;
+    }
+
+    let bestImpact = null;
+    const segmentMinY = Math.min(startY, endY);
+    const segmentMaxY = Math.max(startY, endY);
+    for (let index = 0; index < obstacles.length; index += 1) {
+        const obstacle = obstacles[index];
+        if (
+            !isThrownMineObstacleActiveAtHeight(obstacle, segmentMinY, segmentMaxY, collisionRadius)
+        ) {
+            continue;
+        }
+        let impact = null;
+        if (obstacle?.type === 'circle') {
+            impact = segmentImpactCircleExpandedXZ({
+                startX,
+                startZ,
+                endX,
+                endZ,
+                centerX: Number(obstacle.x),
+                centerZ: Number(obstacle.z),
+                radius: Math.max(0, Number(obstacle.radius) || 0) + collisionRadius,
+            });
+        } else if (obstacle?.type === 'aabb') {
+            impact = segmentImpactExpandedAabbXZ({
+                startX,
+                startZ,
+                endX,
+                endZ,
+                minX: Number(obstacle.minX) - collisionRadius,
+                maxX: Number(obstacle.maxX) + collisionRadius,
+                minZ: Number(obstacle.minZ) - collisionRadius,
+                maxZ: Number(obstacle.maxZ) + collisionRadius,
+            });
+        }
+
+        if (!impact) {
+            continue;
+        }
+        if (!bestImpact || impact.t < bestImpact.t) {
+            bestImpact = impact;
+        }
+    }
+
+    if (!bestImpact) {
+        return null;
+    }
+
+    return {
+        ...bestImpact,
+        y: THREE.MathUtils.lerp(startY, endY, bestImpact.t),
+    };
+}
+
+function isThrownMineObstacleActiveAtHeight(
+    obstacle,
+    segmentMinY = 0,
+    segmentMaxY = 0,
+    collisionRadius = 0
+) {
+    if (!obstacle) {
+        return false;
+    }
+
+    const minY = Number.isFinite(obstacle.minY) ? obstacle.minY : Number.NEGATIVE_INFINITY;
+    const maxY = Number.isFinite(obstacle.maxY) ? obstacle.maxY : Number.POSITIVE_INFINITY;
+    return (
+        segmentMaxY >= minY - Math.max(0, collisionRadius) &&
+        segmentMinY <= maxY + Math.max(0, collisionRadius)
+    );
+}
+
+function resolveEarliestThrownMineImpact(primaryImpact, secondaryImpact) {
+    if (!primaryImpact) {
+        return secondaryImpact || null;
+    }
+    if (!secondaryImpact) {
+        return primaryImpact;
+    }
+    return primaryImpact.t <= secondaryImpact.t ? primaryImpact : secondaryImpact;
+}
+
+function segmentImpactCircleExpandedXZ({
+    startX = 0,
+    startZ = 0,
+    endX = 0,
+    endZ = 0,
+    centerX = 0,
+    centerZ = 0,
+    radius = 0,
+} = {}) {
+    if (
+        !Number.isFinite(startX) ||
+        !Number.isFinite(startZ) ||
+        !Number.isFinite(endX) ||
+        !Number.isFinite(endZ) ||
+        !Number.isFinite(centerX) ||
+        !Number.isFinite(centerZ) ||
+        !Number.isFinite(radius) ||
+        radius <= 0
+    ) {
+        return null;
+    }
+
+    const dirX = endX - startX;
+    const dirZ = endZ - startZ;
+    const originX = startX - centerX;
+    const originZ = startZ - centerZ;
+    const a = dirX * dirX + dirZ * dirZ;
+    if (a <= 1e-8) {
+        return null;
+    }
+    const b = 2 * (originX * dirX + originZ * dirZ);
+    const c = originX * originX + originZ * originZ - radius * radius;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) {
+        return null;
+    }
+
+    const root = Math.sqrt(discriminant);
+    const tNear = (-b - root) / (2 * a);
+    const tFar = (-b + root) / (2 * a);
+    const t = tNear >= 0 && tNear <= 1 ? tNear : tFar >= 0 && tFar <= 1 ? tFar : null;
+    if (t === null) {
+        return null;
+    }
+
+    const x = startX + dirX * t;
+    const z = startZ + dirZ * t;
+    const normalX = x - centerX;
+    const normalZ = z - centerZ;
+    const normalLength = Math.hypot(normalX, normalZ) || 1;
+    return {
+        t,
+        x,
+        z,
+        normalX: normalX / normalLength,
+        normalZ: normalZ / normalLength,
+    };
+}
+
+function segmentImpactExpandedAabbXZ({
+    startX = 0,
+    startZ = 0,
+    endX = 0,
+    endZ = 0,
+    minX = 0,
+    maxX = 0,
+    minZ = 0,
+    maxZ = 0,
+} = {}) {
+    if (
+        ![startX, startZ, endX, endZ, minX, maxX, minZ, maxZ].every(Number.isFinite) ||
+        minX > maxX ||
+        minZ > maxZ
+    ) {
+        return null;
+    }
+
+    const dirX = endX - startX;
+    const dirZ = endZ - startZ;
+    let tMin = 0;
+    let tMax = 1;
+    let hitNormalX = 0;
+    let hitNormalZ = 0;
+
+    if (Math.abs(dirX) <= 1e-8) {
+        if (startX < minX || startX > maxX) {
+            return null;
+        }
+    } else {
+        const invX = 1 / dirX;
+        let tx1 = (minX - startX) * invX;
+        let tx2 = (maxX - startX) * invX;
+        let nearNormalX = -1;
+        if (tx1 > tx2) {
+            [tx1, tx2] = [tx2, tx1];
+            nearNormalX = 1;
+        }
+        if (tx1 > tMin) {
+            tMin = tx1;
+            hitNormalX = nearNormalX;
+            hitNormalZ = 0;
+        }
+        tMax = Math.min(tMax, tx2);
+        if (tMin > tMax) {
+            return null;
+        }
+    }
+
+    if (Math.abs(dirZ) <= 1e-8) {
+        if (startZ < minZ || startZ > maxZ) {
+            return null;
+        }
+    } else {
+        const invZ = 1 / dirZ;
+        let tz1 = (minZ - startZ) * invZ;
+        let tz2 = (maxZ - startZ) * invZ;
+        let nearNormalZ = -1;
+        if (tz1 > tz2) {
+            [tz1, tz2] = [tz2, tz1];
+            nearNormalZ = 1;
+        }
+        if (tz1 > tMin) {
+            tMin = tz1;
+            hitNormalX = 0;
+            hitNormalZ = nearNormalZ;
+        }
+        tMax = Math.min(tMax, tz2);
+        if (tMin > tMax) {
+            return null;
+        }
+    }
+
+    if (tMin < 0 || tMin > 1) {
+        return null;
+    }
+
+    return {
+        t: tMin,
+        x: startX + dirX * tMin,
+        z: startZ + dirZ * tMin,
+        normalX: hitNormalX,
+        normalZ: hitNormalZ,
+    };
 }
 
 function movementIntersectsMineRadius({

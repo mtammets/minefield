@@ -71,8 +71,11 @@ export function isInsideUpperDeckUnderpassCorridor(x, z, margin = 0) {
     const localAbsX = Math.abs(x - BRIDGE_CENTER_X);
     const localAbsZ = Math.abs(z - BRIDGE_CENTER_Z);
     return (
+        // The underpass runs along the bridge width (z), while the supported driving lane below
+        // stays centered on the bridge span axis (x).
+        localAbsX <= BRIDGE_UNDERPASS_HALF_WIDTH + safeMargin &&
         resolveBridgeDeckHeight(localAbsX) >= BRIDGE_UNDERPASS_MIN_CLEARANCE &&
-        localAbsZ <= BRIDGE_UNDERPASS_HALF_WIDTH + safeMargin
+        localAbsZ <= BRIDGE_OUTER_HALF_WIDTH + safeMargin
     );
 }
 
