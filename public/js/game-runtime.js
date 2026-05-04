@@ -103,7 +103,7 @@ import { createGameSessionController } from './game-session-flow.js';
 import { createInputController } from './input-controller.js';
 import { createGameLoopController } from './game-loop-controller.js';
 import { createGameRuntimeState } from './game-runtime-state.js';
-import { initializeScene, initializeRenderer } from './game-bootstrap.js';
+import { initializeScene, initializeRenderer, applyRendererSettings } from './game-bootstrap.js';
 import { createRuntimeUiControllers } from './game-runtime-ui.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
@@ -152,6 +152,9 @@ const STARTUP_SECTOR_PREWARM_RADII = Object.freeze([38, 72, 96]);
 const STARTUP_SECTOR_PREWARM_HEIGHT = 18;
 const STARTUP_SECTOR_PREWARM_LOOKAT_HEIGHT = 1.8;
 const STARTUP_SECTOR_PREWARM_DIRECTIONS = Object.freeze([0, 45, 90, 135, 180, 225, 270, 315]);
+const RUNTIME_GRAPHICS_RECOVERY_REQUEST_COOLDOWN_MS = 900;
+const RUNTIME_GRAPHICS_RECOVERY_STATUS_COOLDOWN_MS = 2400;
+const RUNTIME_SCENE_REPAIR_STATUS_COOLDOWN_MS = 2400;
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
@@ -166,6 +169,11 @@ const runtimeState = createGameRuntimeState({
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
 let runtimeGraphicsWarmupReady = false;
+let runtimeGraphicsRecoveryPromise = null;
+let runtimeGraphicsLastRecoveryRequestAtMs = -Number.POSITIVE_INFINITY;
+let runtimeGraphicsLastStatusAtMs = -Number.POSITIVE_INFINITY;
+let runtimeSceneRepairLastStatusAtMs = -Number.POSITIVE_INFINITY;
+let runtimeGraphicsContextLossCount = 0;
 runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
 const performanceDiagnosticsController = createNoopPerformanceDiagnosticsController();
@@ -1275,6 +1283,272 @@ function getCollectorScoreAuditSnapshot(collectorId = 'player') {
     };
 }
 
+function isFiniteVector3Like(value = null) {
+    return Number.isFinite(value?.x) && Number.isFinite(value?.y) && Number.isFinite(value?.z);
+}
+
+function isFiniteEulerLike(value = null) {
+    return Number.isFinite(value?.x) && Number.isFinite(value?.y) && Number.isFinite(value?.z);
+}
+
+function isMainCameraStateRenderable() {
+    return (
+        Boolean(camera?.isCamera) &&
+        isFiniteVector3Like(camera.position) &&
+        Number.isFinite(camera.aspect) &&
+        camera.aspect > 0 &&
+        Number.isFinite(camera.fov) &&
+        camera.fov > 0 &&
+        Number.isFinite(camera.near) &&
+        Number.isFinite(camera.far) &&
+        camera.far > camera.near
+    );
+}
+
+function isRendererContextLost() {
+    try {
+        const context = renderer?.getContext?.();
+        return Boolean(
+            context && typeof context.isContextLost === 'function' && context.isContextLost()
+        );
+    } catch {
+        return false;
+    }
+}
+
+function resolveSafePlayerPose() {
+    const fallbackX = Number.isFinite(playerSpawnState?.position?.x)
+        ? playerSpawnState.position.x
+        : 0;
+    const fallbackZ = Number.isFinite(playerSpawnState?.position?.z)
+        ? playerSpawnState.position.z
+        : 0;
+    const safeX = Number.isFinite(car.position?.x) ? car.position.x : fallbackX;
+    const safeZ = Number.isFinite(car.position?.z) ? car.position.z : fallbackZ;
+    const safeGroundY = getGroundHeightAt(safeX, safeZ) + PLAYER_RIDE_HEIGHT;
+    return {
+        x: safeX,
+        y: safeGroundY,
+        z: safeZ,
+        rotationY: Number.isFinite(car.rotation?.y)
+            ? car.rotation.y
+            : Number.isFinite(playerSpawnState?.rotationY)
+              ? playerSpawnState.rotationY
+              : 0,
+    };
+}
+
+function restoreMainCameraToSafePose(targetPose = resolveSafePlayerPose()) {
+    const pose =
+        targetPose && typeof targetPose === 'object' ? targetPose : resolveSafePlayerPose();
+    camera.position.set(pose.x, pose.y + 3.2, pose.z + 8.4);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(pose.x, pose.y + 1.1, pose.z);
+    camera.aspect = window.innerWidth / Math.max(1, window.innerHeight);
+    camera.updateProjectionMatrix();
+    resetCameraTrackingState();
+}
+
+function repairRuntimeSceneState(reason = 'unknown') {
+    let repairedPlayerPose = false;
+    let repairedCamera = false;
+
+    if (!isFiniteVector3Like(car.position) || !isFiniteEulerLike(car.rotation)) {
+        car.position.copy(playerSpawnState.position);
+        car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
+        car.rotation.set(0, playerSpawnState.rotationY, 0);
+        initializePlayerPhysics(car);
+        runtimeState.physicsAccumulator = 0;
+        repairedPlayerPose = true;
+    }
+
+    if (!isMainCameraStateRenderable()) {
+        restoreMainCameraToSafePose(resolveSafePlayerPose());
+        repairedCamera = true;
+    }
+
+    if (!repairedPlayerPose && !repairedCamera) {
+        return false;
+    }
+
+    const nowMs = performance.now();
+    if (nowMs - runtimeSceneRepairLastStatusAtMs >= RUNTIME_SCENE_REPAIR_STATUS_COOLDOWN_MS) {
+        objectiveUi.showInfo('Scene state recovered after a graphics fault.', 2200);
+        runtimeSceneRepairLastStatusAtMs = nowMs;
+    }
+
+    recordPerformanceDiagnosticEvent('runtime_scene_state_repaired', {
+        reason,
+        repairedPlayerPose,
+        repairedCamera,
+        isCarDestroyed: Boolean(runtimeState.isCarDestroyed),
+        gameMode: runtimeState.gameMode,
+    });
+    return true;
+}
+
+async function requestRuntimeGraphicsRecovery(reason = 'render-failure', options = {}) {
+    const force = Boolean(options?.force);
+    const nowMs = performance.now();
+    if (
+        !force &&
+        runtimeGraphicsRecoveryPromise == null &&
+        nowMs - runtimeGraphicsLastRecoveryRequestAtMs <
+            RUNTIME_GRAPHICS_RECOVERY_REQUEST_COOLDOWN_MS
+    ) {
+        return false;
+    }
+
+    if (runtimeGraphicsRecoveryPromise) {
+        return runtimeGraphicsRecoveryPromise;
+    }
+
+    runtimeGraphicsLastRecoveryRequestAtMs = nowMs;
+    if (nowMs - runtimeGraphicsLastStatusAtMs >= RUNTIME_GRAPHICS_RECOVERY_STATUS_COOLDOWN_MS) {
+        objectiveUi.showInfo('Graphics fault detected. Attempting recovery...', 2200);
+        runtimeGraphicsLastStatusAtMs = nowMs;
+    }
+
+    runtimeGraphicsRecoveryPromise = (async () => {
+        try {
+            if (isRendererContextLost()) {
+                return false;
+            }
+
+            runtimeGraphicsWarmupReady = false;
+            repairRuntimeSceneState(`${reason}:preflight`);
+            ensureWorldBuilt();
+            applyRendererSettings(renderer, { renderSettings });
+            await waitForAnimationFrames(2);
+            const recovered = await prepareGraphicsForSessionStart(runtimeState.gameMode, {
+                reportProgress() {},
+            });
+            if (recovered !== false) {
+                objectiveUi.showInfo('Graphics recovered.', 1600);
+            } else {
+                objectiveUi.showInfo(
+                    'Graphics recovery is incomplete. Reload if the scene stays blank.',
+                    2600
+                );
+            }
+            recordPerformanceDiagnosticEvent('runtime_graphics_recovered', {
+                reason,
+                contextLossCount: runtimeGraphicsContextLossCount,
+                gameMode: runtimeState.gameMode,
+                recovered: recovered !== false,
+            });
+            return recovered !== false;
+        } catch (error) {
+            const message =
+                typeof error?.message === 'string' && error.message.trim()
+                    ? error.message.trim()
+                    : 'Unknown graphics recovery failure';
+            objectiveUi.showInfo(
+                'Graphics recovery failed. Reload if the scene stays blank.',
+                2800
+            );
+            recordPerformanceDiagnosticEvent('runtime_graphics_recovery_failed', {
+                reason,
+                message,
+                contextLossCount: runtimeGraphicsContextLossCount,
+                gameMode: runtimeState.gameMode,
+            });
+            console.error('Graphics recovery failed:', error);
+            return false;
+        } finally {
+            runtimeGraphicsRecoveryPromise = null;
+        }
+    })();
+
+    return runtimeGraphicsRecoveryPromise;
+}
+
+function handleRuntimeRenderFailure(reason = 'render-failure', error = null) {
+    const contextLost = isRendererContextLost();
+    repairRuntimeSceneState(`${reason}:repair`);
+
+    const message =
+        typeof error?.message === 'string' && error.message.trim() ? error.message.trim() : '';
+    recordPerformanceDiagnosticEvent('runtime_render_failure', {
+        reason,
+        message,
+        contextLost,
+        contextLossCount: runtimeGraphicsContextLossCount,
+        gameMode: runtimeState.gameMode,
+    });
+
+    if (contextLost) {
+        return false;
+    }
+
+    void requestRuntimeGraphicsRecovery(reason);
+    return false;
+}
+
+function installRuntimeGraphicsRecoveryGuards() {
+    const canvas = renderer?.domElement;
+    if (!canvas || canvas.dataset.runtimeGraphicsGuardInstalled === 'true') {
+        return;
+    }
+
+    canvas.dataset.runtimeGraphicsGuardInstalled = 'true';
+
+    const originalRender = renderer.render.bind(renderer);
+    renderer.render = (sceneArg, cameraArg) => {
+        if (isRendererContextLost()) {
+            handleRuntimeRenderFailure('context-lost-render-skip');
+            return;
+        }
+
+        repairRuntimeSceneState('pre-render');
+
+        try {
+            originalRender(sceneArg, cameraArg);
+        } catch (error) {
+            handleRuntimeRenderFailure('renderer.render', error);
+        }
+    };
+
+    canvas.addEventListener('webglcontextlost', (event) => {
+        event.preventDefault();
+        runtimeGraphicsContextLossCount += 1;
+        recordPerformanceDiagnosticEvent('webgl_context_lost', {
+            contextLossCount: runtimeGraphicsContextLossCount,
+            gameMode: runtimeState.gameMode,
+        });
+        if (
+            performance.now() - runtimeGraphicsLastStatusAtMs >=
+            RUNTIME_GRAPHICS_RECOVERY_STATUS_COOLDOWN_MS
+        ) {
+            objectiveUi.showInfo('Graphics context lost. Waiting for browser restore...', 2600);
+            runtimeGraphicsLastStatusAtMs = performance.now();
+        }
+    });
+
+    canvas.addEventListener('webglcontextrestored', () => {
+        recordPerformanceDiagnosticEvent('webgl_context_restored', {
+            contextLossCount: runtimeGraphicsContextLossCount,
+            gameMode: runtimeState.gameMode,
+        });
+        void requestRuntimeGraphicsRecovery('webgl-context-restored', {
+            force: true,
+        });
+    });
+
+    canvas.addEventListener('webglcontextcreationerror', (event) => {
+        const message =
+            typeof event?.statusMessage === 'string' && event.statusMessage.trim()
+                ? event.statusMessage.trim()
+                : 'WebGL context creation failed';
+        objectiveUi.showInfo('Graphics startup failed. Reload the page.', 3200);
+        recordPerformanceDiagnosticEvent('webgl_context_creation_error', {
+            message,
+            gameMode: runtimeState.gameMode,
+        });
+        console.error('WebGL context creation failed:', message);
+    });
+}
+
 function awardLocalMineKillScore({ ownerCollectorId = '', targetCollectorId = '' } = {}) {
     const collectorId = resolveMineOwnerCollectorId(ownerCollectorId);
     if (!collectorId) {
@@ -2159,6 +2433,8 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     audioController: runtimeState.audioController,
 });
+
+installRuntimeGraphicsRecoveryGuards();
 
 function syncRuntimeInputContext() {
     runtimeState.inputContext = resolveGameplayInputContext({

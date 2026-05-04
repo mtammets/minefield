@@ -24,6 +24,14 @@ export function initializeRenderer({ renderSettings }) {
         antialias: false,
         powerPreference: 'high-performance',
     });
+    applyRendererSettings(renderer, { renderSettings });
+    return renderer;
+}
+
+export function applyRendererSettings(renderer, { renderSettings }) {
+    if (!renderer || !renderSettings) {
+        return renderer;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, renderSettings.maxPixelRatio));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.outputColorSpace = THREE.SRGBColorSpace;
