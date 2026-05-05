@@ -9,7 +9,6 @@ import {
     MINE_THROW_SPEED,
     MINE_THROW_VERTICAL_SPEED,
     MINE_THROW_GRAVITY,
-    MINE_THROW_AUTO_DETONATE_DELAY_MS,
 } from './constants.js';
 import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
@@ -60,9 +59,6 @@ const MINE_MESH_POOL_MAX = 24;
 const MINE_MESH_POOL_PREWARM_COUNT = 10;
 const DEFAULT_TARGET_COLLISION_RADIUS = 1.34;
 const MINE_THROW_COLLISION_RADIUS = 0.4;
-const MINE_THROW_COLLISION_PUSHBACK = 0.03;
-const MINE_THROW_BOUNCE_DAMPING = 0.42;
-const MINE_THROW_BOUNCE_VERTICAL_DAMPING = 0.58;
 const GROUND_SCORCH_MARK_MAX = 36;
 const GROUND_SCORCH_MARK_Y_OFFSET = 0.028;
 const GROUND_SCORCH_MARK_MIN_SIZE = 1.35;
@@ -79,6 +75,12 @@ const mineForward = new THREE.Vector3();
 const mineThrowVelocity = new THREE.Vector3();
 const mineGroundPosition = new THREE.Vector3();
 const queuedDetonationPosition = new THREE.Vector3();
+const thrownMineClosestPointsScratch = {
+    ax: 0,
+    az: 0,
+    bx: 0,
+    bz: 0,
+};
 
 export function createMineSystemController(options = {}) {
     const {
@@ -326,7 +328,7 @@ export function createMineSystemController(options = {}) {
                     : MINE_DEPLOY_COOLDOWN_MS,
             message: includePlayerMessages
                 ? useThrowMode
-                    ? 'Mine thrown ahead. It arms shortly after landing.'
+                    ? 'Mine thrown ahead. It detonates on impact.'
                     : 'Mine dropped behind your car.'
                 : '',
         };
@@ -475,6 +477,8 @@ export function createMineSystemController(options = {}) {
                 continue;
             }
 
+            const localOwnMine =
+                Boolean(localPlayerId) && mine.ownerId && mine.ownerId === localPlayerId;
             if (mine.thrown && !mine.landed) {
                 const previousX = mine.mesh.position.x;
                 const previousY = mine.mesh.position.y;
@@ -506,21 +510,81 @@ export function createMineSystemController(options = {}) {
                     specialImpact,
                     obstacleImpact
                 );
-                if (resolvedImpact) {
-                    mine.mesh.position.set(
-                        resolvedImpact.x + resolvedImpact.normalX * MINE_THROW_COLLISION_PUSHBACK,
-                        resolvedImpact.y,
-                        resolvedImpact.z + resolvedImpact.normalZ * MINE_THROW_COLLISION_PUSHBACK
+                let thrownImpact = resolvedImpact;
+                if (enableLocalCollision && localMovement && localPlayerId && !localOwnMine) {
+                    thrownImpact = resolveEarliestThrownMineImpact(
+                        thrownImpact,
+                        resolveThrownMineMovementImpact({
+                            startX: previousX,
+                            startY: previousY,
+                            startZ: previousZ,
+                            endX: nextX,
+                            endY: nextY,
+                            endZ: nextZ,
+                            movement: localMovement,
+                            triggerPlayerId: mine.ownerId,
+                            targetPlayerId: localPlayerId,
+                            localHit: true,
+                            emitNetworkEvent: false,
+                        })
                     );
-                    applyThrownMineBounceResponse(
-                        mine.velocity,
-                        resolvedImpact.normalX,
-                        resolvedImpact.normalZ
-                    );
-                } else {
-                    mine.mesh.position.set(nextX, nextY, nextZ);
                 }
 
+                if (enableLocalCollision) {
+                    for (
+                        let targetIndex = 0;
+                        targetIndex < otherMovementTargets.length;
+                        targetIndex += 1
+                    ) {
+                        const target = otherMovementTargets[targetIndex];
+                        if (target.mineImmune) {
+                            continue;
+                        }
+                        if (target.ownerId && target.ownerId === mine.ownerId) {
+                            continue;
+                        }
+                        thrownImpact = resolveEarliestThrownMineImpact(
+                            thrownImpact,
+                            resolveThrownMineMovementImpact({
+                                startX: previousX,
+                                startY: previousY,
+                                startZ: previousZ,
+                                endX: nextX,
+                                endY: nextY,
+                                endZ: nextZ,
+                                movement: target.movement,
+                                triggerPlayerId: mine.ownerId,
+                                targetPlayerId: target.playerId,
+                                localHit: false,
+                                emitNetworkEvent: Boolean(localOwnMine),
+                                otherTarget: {
+                                    id: target.id,
+                                    type: target.type,
+                                    label: target.label,
+                                    ownerId: target.ownerId,
+                                },
+                            })
+                        );
+                    }
+                }
+
+                if (thrownImpact) {
+                    mine.mesh.position.set(thrownImpact.x, thrownImpact.y, thrownImpact.z);
+                    detonateMine(mineId, {
+                        emitNetworkEvent:
+                            typeof thrownImpact.emitNetworkEvent === 'boolean'
+                                ? thrownImpact.emitNetworkEvent
+                                : Boolean(localOwnMine),
+                        triggerPlayerId: thrownImpact.triggerPlayerId || mine.ownerId,
+                        targetPlayerId: thrownImpact.targetPlayerId || '',
+                        localHit: Boolean(thrownImpact.localHit),
+                        otherTarget: thrownImpact.otherTarget || null,
+                        detonationType: 'impact_throw',
+                    });
+                    continue;
+                }
+
+                mine.mesh.position.set(nextX, nextY, nextZ);
                 const groundY =
                     getGroundHeightAt(
                         mine.mesh.position.x,
@@ -529,9 +593,14 @@ export function createMineSystemController(options = {}) {
                     ) + MINE_SURFACE_OFFSET;
                 if (mine.mesh.position.y <= groundY) {
                     mine.mesh.position.y = groundY;
-                    mine.velocity.set(0, 0, 0);
-                    mine.landed = true;
-                    mine.landedAt = now;
+                    detonateMine(mineId, {
+                        emitNetworkEvent: Boolean(localOwnMine),
+                        triggerPlayerId: mine.ownerId,
+                        targetPlayerId: '',
+                        localHit: false,
+                        detonationType: 'impact_throw',
+                    });
+                    continue;
                 }
             } else {
                 const groundY =
@@ -541,25 +610,6 @@ export function createMineSystemController(options = {}) {
                         mine.mesh.position.y
                     ) + MINE_SURFACE_OFFSET;
                 mine.mesh.position.y = groundY;
-            }
-
-            const localOwnThrownMine =
-                Boolean(localPlayerId) && mine.ownerId && mine.ownerId === localPlayerId;
-            if (
-                mine.thrown &&
-                mine.landed &&
-                localOwnThrownMine &&
-                now >= mine.landedAt + MINE_THROW_AUTO_DETONATE_DELAY_MS
-            ) {
-                detonateMine(mineId, {
-                    emitNetworkEvent: true,
-                    triggerPlayerId: localPlayerId,
-                    targetPlayerId: '',
-                    localHit: false,
-                    detonationType: 'timed_throw',
-                    landedAt: mine.landedAt,
-                });
-                continue;
             }
 
             const armed = now >= mine.armedAt && mine.landed;
@@ -713,6 +763,8 @@ export function createMineSystemController(options = {}) {
         if (!mineId) {
             return;
         }
+        const localPlayerId = sanitizePlayerId(getLocalPlayerId());
+        const targetPlayerId = sanitizePlayerId(snapshot?.targetPlayerId);
         const fallbackPosition = {
             x: clampFinite(snapshot?.x, -5000, 5000, 0),
             y: clampFinite(snapshot?.y, -400, 2500, 0),
@@ -748,7 +800,7 @@ export function createMineSystemController(options = {}) {
                       }
                     : null,
             fallbackPosition,
-            localHit: false,
+            localHit: Boolean(localPlayerId && targetPlayerId && targetPlayerId === localPlayerId),
         });
     }
 
@@ -847,29 +899,6 @@ export function createMineSystemController(options = {}) {
             },
             now
         );
-    }
-
-    function applyThrownMineBounceResponse(velocity, normalX = 0, normalZ = 0) {
-        if (!velocity) {
-            return;
-        }
-        const normalLength = Math.hypot(normalX, normalZ);
-        if (!Number.isFinite(normalLength) || normalLength <= 1e-6) {
-            velocity.multiplyScalar(MINE_THROW_BOUNCE_DAMPING);
-            velocity.y = Math.max(velocity.y * MINE_THROW_BOUNCE_VERTICAL_DAMPING, 0);
-            return;
-        }
-
-        const nx = normalX / normalLength;
-        const nz = normalZ / normalLength;
-        const inwardSpeed = velocity.x * nx + velocity.z * nz;
-        if (inwardSpeed < 0) {
-            velocity.x -= 2 * inwardSpeed * nx;
-            velocity.z -= 2 * inwardSpeed * nz;
-        }
-        velocity.x *= MINE_THROW_BOUNCE_DAMPING;
-        velocity.z *= MINE_THROW_BOUNCE_DAMPING;
-        velocity.y = Math.max(velocity.y * MINE_THROW_BOUNCE_VERTICAL_DAMPING, 0);
     }
 
     function spawnGroundScorchMark(detonationPosition) {
@@ -2340,6 +2369,70 @@ function resolveEarliestThrownMineImpact(primaryImpact, secondaryImpact) {
     return primaryImpact.t <= secondaryImpact.t ? primaryImpact : secondaryImpact;
 }
 
+function resolveThrownMineMovementImpact({
+    startX = 0,
+    startY = 0,
+    startZ = 0,
+    endX = 0,
+    endY = 0,
+    endZ = 0,
+    movement = null,
+    targetCollisionRadius = null,
+    triggerPlayerId = '',
+    targetPlayerId = '',
+    emitNetworkEvent = false,
+    localHit = false,
+    otherTarget = null,
+} = {}) {
+    if (!movement) {
+        return null;
+    }
+
+    const combinedRadius = Math.max(
+        0.1,
+        MINE_THROW_COLLISION_RADIUS +
+            resolveCollisionRadius(targetCollisionRadius, movement.collisionRadius)
+    );
+    const distanceSq = segmentSegmentDistanceSq2D(
+        startX,
+        startZ,
+        endX,
+        endZ,
+        movement.fromX,
+        movement.fromZ,
+        movement.toX,
+        movement.toZ,
+        thrownMineClosestPointsScratch
+    );
+    if (!Number.isFinite(distanceSq) || distanceSq > combinedRadius * combinedRadius) {
+        return null;
+    }
+
+    const directionX = endX - startX;
+    const directionZ = endZ - startZ;
+    const directionLengthSq = directionX * directionX + directionZ * directionZ;
+    let t = 0;
+    if (directionLengthSq > 1e-8) {
+        t =
+            ((thrownMineClosestPointsScratch.ax - startX) * directionX +
+                (thrownMineClosestPointsScratch.az - startZ) * directionZ) /
+            directionLengthSq;
+    }
+    t = THREE.MathUtils.clamp(t, 0, 1);
+
+    return {
+        t,
+        x: thrownMineClosestPointsScratch.ax,
+        y: THREE.MathUtils.lerp(startY, endY, t),
+        z: thrownMineClosestPointsScratch.az,
+        triggerPlayerId,
+        targetPlayerId,
+        emitNetworkEvent,
+        localHit,
+        otherTarget,
+    };
+}
+
 function segmentImpactCircleExpandedXZ({
     startX = 0,
     startZ = 0,
@@ -2483,6 +2576,106 @@ function segmentImpactExpandedAabbXZ({
         normalX: hitNormalX,
         normalZ: hitNormalZ,
     };
+}
+
+function segmentSegmentDistanceSq2D(ax, az, bx, bz, cx, cz, dx, dz, outClosestPoints = null) {
+    const EPSILON = 1e-8;
+
+    const ux = bx - ax;
+    const uz = bz - az;
+    const vx = dx - cx;
+    const vz = dz - cz;
+    const wx = ax - cx;
+    const wz = az - cz;
+
+    const a = ux * ux + uz * uz;
+    const b = ux * vx + uz * vz;
+    const c = vx * vx + vz * vz;
+    const d = ux * wx + uz * wz;
+    const e = vx * wx + vz * wz;
+    const denominator = a * c - b * b;
+
+    let sN;
+    let sD = denominator;
+    let tN;
+    let tD = denominator;
+
+    if (a <= EPSILON && c <= EPSILON) {
+        sN = 0;
+        sD = 1;
+        tN = 0;
+        tD = 1;
+    } else if (a <= EPSILON) {
+        sN = 0;
+        sD = 1;
+        tN = e;
+        tD = c;
+    } else if (c <= EPSILON) {
+        tN = 0;
+        tD = 1;
+        sN = -d;
+        sD = a;
+    } else {
+        sN = b * e - c * d;
+        tN = a * e - b * d;
+        if (denominator < EPSILON) {
+            sN = 0;
+            sD = 1;
+            tN = e;
+            tD = c;
+        } else if (sN < 0) {
+            sN = 0;
+            tN = e;
+            tD = c;
+        } else if (sN > sD) {
+            sN = sD;
+            tN = e + b;
+            tD = c;
+        }
+    }
+
+    if (tN < 0) {
+        tN = 0;
+        if (-d < 0) {
+            sN = 0;
+            sD = 1;
+        } else if (-d > a) {
+            sN = sD;
+        } else {
+            sN = -d;
+            sD = a;
+        }
+    } else if (tN > tD) {
+        tN = tD;
+        if (-d + b < 0) {
+            sN = 0;
+            sD = 1;
+        } else if (-d + b > a) {
+            sN = sD;
+        } else {
+            sN = -d + b;
+            sD = a;
+        }
+    }
+
+    const sc = Math.abs(sN) <= EPSILON || Math.abs(sD) <= EPSILON ? 0 : sN / sD;
+    const tc = Math.abs(tN) <= EPSILON || Math.abs(tD) <= EPSILON ? 0 : tN / tD;
+
+    const closestAx = ax + sc * ux;
+    const closestAz = az + sc * uz;
+    const closestBx = cx + tc * vx;
+    const closestBz = cz + tc * vz;
+
+    if (outClosestPoints) {
+        outClosestPoints.ax = closestAx;
+        outClosestPoints.az = closestAz;
+        outClosestPoints.bx = closestBx;
+        outClosestPoints.bz = closestBz;
+    }
+
+    const deltaX = closestAx - closestBx;
+    const deltaZ = closestAz - closestBz;
+    return deltaX * deltaX + deltaZ * deltaZ;
 }
 
 function movementIntersectsMineRadius({

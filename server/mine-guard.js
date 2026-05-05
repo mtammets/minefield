@@ -9,6 +9,8 @@ function clampFinite(value, min, max, fallback = 0) {
 const TARGET_COLLISION_RADIUS_DEFAULT = 1.34;
 const DETONATION_VALIDATION_TOLERANCE = 0.3;
 const SEGMENT_STATE_MAX_AGE_MS = 480;
+const IMPACT_THROW_DETONATION_TYPE = 'impact_throw';
+const IMPACT_THROW_COLLISION_RADIUS = 0.4;
 const TIMED_THROW_DETONATION_TYPE = 'timed_throw';
 const TIMED_THROW_AUTO_DETONATE_DELAY_MS = 1000;
 const TIMED_THROW_MIN_FLIGHT_MS = 700;
@@ -28,6 +30,16 @@ function resolveAuthoritativeMineDetonation({
     const now = Number.isFinite(nowMs) ? nowMs : Date.now();
     if (mine.expiresAt <= now) {
         return { ok: false, reason: 'mine-expired' };
+    }
+
+    if (detonation?.detonationType === IMPACT_THROW_DETONATION_TYPE) {
+        return resolveImpactThrowDetonation({
+            room,
+            mine,
+            reportingPlayerId,
+            detonation,
+            now,
+        });
     }
 
     if (detonation?.detonationType === TIMED_THROW_DETONATION_TYPE) {
@@ -54,51 +66,17 @@ function resolveAuthoritativeMineDetonation({
         return { ok: false, reason: 'target-mismatch' };
     }
 
-    const targetPlayer = room.players.get(targetPlayerId);
-    const targetState = targetPlayer?.lastState || null;
-    if (!targetState) {
-        return { ok: false, reason: 'missing-target-state' };
-    }
-
-    const targetPosition = sanitizeStatePosition(targetState);
-    if (!targetPosition) {
-        return { ok: false, reason: 'missing-target-state' };
-    }
-    const previousTargetPosition = sanitizeStatePosition(targetPlayer?.previousState || null);
-    const targetCollisionRadius = Math.max(
-        0.6,
-        clampFinite(targetState?.collisionRadius, 0.6, 4, TARGET_COLLISION_RADIUS_DEFAULT)
-    );
     const triggerRadius = Math.max(0.8, clampFinite(mine.triggerRadius, 0.8, 4, 1.5));
-    const allowedRadius = triggerRadius + targetCollisionRadius + DETONATION_VALIDATION_TOLERANCE;
-    const allowedDistanceSq = allowedRadius * allowedRadius;
-    let minDistanceSq = distanceSq(targetPosition.x - mine.x, targetPosition.z - mine.z);
-
-    const targetStateAt = Number(targetPlayer?.lastStateAt);
-    const previousStateAt = Number(targetPlayer?.previousStateAt);
-    const canUseSegmentDistance =
-        previousTargetPosition &&
-        Number.isFinite(targetStateAt) &&
-        Number.isFinite(previousStateAt) &&
-        targetStateAt >= previousStateAt &&
-        now - targetStateAt <= SEGMENT_STATE_MAX_AGE_MS &&
-        now - previousStateAt <= SEGMENT_STATE_MAX_AGE_MS * 2;
-    if (canUseSegmentDistance) {
-        minDistanceSq = Math.min(
-            minDistanceSq,
-            distancePointToSegmentSq(
-                mine.x,
-                mine.z,
-                previousTargetPosition.x,
-                previousTargetPosition.z,
-                targetPosition.x,
-                targetPosition.z
-            )
-        );
-    }
-
-    if (minDistanceSq > allowedDistanceSq) {
-        return { ok: false, reason: 'target-too-far' };
+    const targetValidation = validateTargetDetonationProximity({
+        room,
+        targetPlayerId,
+        x: mine.x,
+        z: mine.z,
+        triggerRadius,
+        now,
+    });
+    if (!targetValidation.ok) {
+        return targetValidation;
     }
 
     const isOwnerTriggered = mine.ownerId === triggerPlayerId;
@@ -116,6 +94,69 @@ function resolveAuthoritativeMineDetonation({
             y: mine.y,
             z: mine.z,
             triggerPlayerId,
+            targetPlayerId,
+        },
+    };
+}
+
+function resolveImpactThrowDetonation({
+    room,
+    mine,
+    reportingPlayerId,
+    detonation,
+    now,
+}) {
+    if (!mine?.thrown) {
+        return { ok: false, reason: 'impact-throw-not-thrown' };
+    }
+    if (reportingPlayerId !== mine.ownerId) {
+        return { ok: false, reason: 'impact-throw-owner-mismatch' };
+    }
+
+    const detonationX = clampFinite(detonation?.x, -5000, 5000, Number.NaN);
+    const detonationY = clampFinite(detonation?.y, -500, 2500, mine.y);
+    const detonationZ = clampFinite(detonation?.z, -5000, 5000, Number.NaN);
+    if (!Number.isFinite(detonationX) || !Number.isFinite(detonationZ)) {
+        return { ok: false, reason: 'impact-throw-missing-position' };
+    }
+
+    const flightDurationSec = Math.max(0, (now - mine.createdAt) / 1000);
+    const horizontalSpeed = Math.hypot(
+        clampFinite(mine.velocityX, -140, 140, 0),
+        clampFinite(mine.velocityZ, -140, 140, 0)
+    );
+    const maxTravelDistance =
+        horizontalSpeed * flightDurationSec + mine.triggerRadius + TIMED_THROW_POSITION_TOLERANCE;
+    const travelDistance = Math.hypot(detonationX - mine.x, detonationZ - mine.z);
+    if (travelDistance > maxTravelDistance) {
+        return { ok: false, reason: 'impact-throw-position-too-far' };
+    }
+
+    const targetPlayerId = sanitizeRoomPlayerId(detonation?.targetPlayerId, room, '');
+    if (targetPlayerId) {
+        const targetValidation = validateTargetDetonationProximity({
+            room,
+            targetPlayerId,
+            x: detonationX,
+            z: detonationZ,
+            triggerRadius: IMPACT_THROW_COLLISION_RADIUS,
+            now,
+        });
+        if (!targetValidation.ok) {
+            return targetValidation;
+        }
+    }
+
+    return {
+        ok: true,
+        detonation: {
+            mineId: mine.id,
+            ownerId: mine.ownerId,
+            ownerName: mine.ownerName,
+            x: detonationX,
+            y: detonationY,
+            z: detonationZ,
+            triggerPlayerId: mine.ownerId,
             targetPlayerId,
         },
     };
@@ -184,6 +225,65 @@ function resolveTimedThrowDetonation({
             targetPlayerId: '',
         },
     };
+}
+
+function validateTargetDetonationProximity({
+    room,
+    targetPlayerId,
+    x = 0,
+    z = 0,
+    triggerRadius = 1.5,
+    now = Date.now(),
+}) {
+    const targetPlayer = room.players.get(targetPlayerId);
+    const targetState = targetPlayer?.lastState || null;
+    if (!targetState) {
+        return { ok: false, reason: 'missing-target-state' };
+    }
+
+    const targetPosition = sanitizeStatePosition(targetState);
+    if (!targetPosition) {
+        return { ok: false, reason: 'missing-target-state' };
+    }
+
+    const previousTargetPosition = sanitizeStatePosition(targetPlayer?.previousState || null);
+    const targetCollisionRadius = Math.max(
+        0.6,
+        clampFinite(targetState?.collisionRadius, 0.6, 4, TARGET_COLLISION_RADIUS_DEFAULT)
+    );
+    const allowedRadius =
+        Math.max(0.1, triggerRadius) + targetCollisionRadius + DETONATION_VALIDATION_TOLERANCE;
+    const allowedDistanceSq = allowedRadius * allowedRadius;
+    let minDistanceSq = distanceSq(targetPosition.x - x, targetPosition.z - z);
+
+    const targetStateAt = Number(targetPlayer?.lastStateAt);
+    const previousStateAt = Number(targetPlayer?.previousStateAt);
+    const canUseSegmentDistance =
+        previousTargetPosition &&
+        Number.isFinite(targetStateAt) &&
+        Number.isFinite(previousStateAt) &&
+        targetStateAt >= previousStateAt &&
+        now - targetStateAt <= SEGMENT_STATE_MAX_AGE_MS &&
+        now - previousStateAt <= SEGMENT_STATE_MAX_AGE_MS * 2;
+    if (canUseSegmentDistance) {
+        minDistanceSq = Math.min(
+            minDistanceSq,
+            distancePointToSegmentSq(
+                x,
+                z,
+                previousTargetPosition.x,
+                previousTargetPosition.z,
+                targetPosition.x,
+                targetPosition.z
+            )
+        );
+    }
+
+    if (minDistanceSq > allowedDistanceSq) {
+        return { ok: false, reason: 'target-too-far' };
+    }
+
+    return { ok: true };
 }
 
 function sanitizeStatePosition(state) {

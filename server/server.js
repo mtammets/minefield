@@ -1816,7 +1816,7 @@ function sanitizeMineDetonationType(value) {
         return '';
     }
     const normalized = value.trim().toLowerCase();
-    return normalized === 'timed_throw' ? normalized : '';
+    return normalized === 'timed_throw' || normalized === 'impact_throw' ? normalized : '';
 }
 
 function sanitizeMineId(value) {
