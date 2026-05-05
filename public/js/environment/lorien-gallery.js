@@ -9,6 +9,7 @@ const LORIEN_ROOF_LIFT_MOVE_SPEED = 6.8;
 const LORIEN_ROOF_LIFT_ROOF_CAPTURE_MARGIN = 1.9;
 const LORIEN_ROOF_LIFT_PLATFORM_CAPTURE_MARGIN = 1.15;
 const LORIEN_ROOF_LIFT_BOARDING_HOLD_TIME = 0.42;
+const LORIEN_ROOF_LIFT_AUTO_RETURN_DELAY = 0.6;
 const LORIEN_ROOF_DECK_DRIVE_SIDE_MARGIN = 1.72;
 const LORIEN_ROOF_DECK_DRIVE_FRONT_MARGIN = 1.54;
 const LORIEN_ROOF_DECK_DRIVE_REAR_MARGIN = 1.72;
@@ -28,6 +29,7 @@ const lorienRoofLiftRuntime = {
     isMoving: false,
     platformHoldTime: 0,
     awaitingPlatformExit: false,
+    upperLevelVacancyTime: 0,
 };
 
 function getDefaultLorienGalleryBuilding() {
@@ -159,6 +161,7 @@ export function resetLorienVelmoreRoofLiftState(building) {
     lorienRoofLiftRuntime.isMoving = false;
     lorienRoofLiftRuntime.platformHoldTime = 0;
     lorienRoofLiftRuntime.awaitingPlatformExit = false;
+    lorienRoofLiftRuntime.upperLevelVacancyTime = 0;
     return getLorienVelmoreRoofLiftState(building);
 }
 
@@ -177,9 +180,19 @@ export function getLorienVelmoreRoofLiftState(building) {
     };
 }
 
-export function updateLorienVelmoreRoofLiftState(playerPosition, deltaTime = 1 / 60, building) {
+export function updateLorienVelmoreRoofLiftState(
+    playerPosition,
+    deltaTime = 1 / 60,
+    building,
+    options = {}
+) {
     const layout = getLorienVelmoreRoofLiftLayout(building);
     ensureRoofLiftRuntimeInitialized(layout);
+    const playerActive = options?.playerActive !== false;
+    const activePlayerPosition = playerActive ? playerPosition : null;
+    const otherOccupantPositions = Array.isArray(options?.roofLiftOccupantPositions)
+        ? options.roofLiftOccupantPositions
+        : null;
 
     const resolvedDelta = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.1);
     const step = layout.moveSpeed * resolvedDelta;
@@ -192,7 +205,14 @@ export function updateLorienVelmoreRoofLiftState(playerPosition, deltaTime = 1 /
         Math.abs(lorienRoofLiftRuntime.currentSurfaceY - lorienRoofLiftRuntime.targetSurfaceY) >
         0.001;
 
-    const playerOnPlatform = isPlayerOnRoofLiftPlatform(playerPosition, layout);
+    const playerOnPlatform = isPlayerOnRoofLiftPlatform(activePlayerPosition, layout);
+    const playerOccupiesUpperLevel = isPlayerOccupyingRoofLiftUpperLevel(
+        activePlayerPosition,
+        layout
+    );
+    const anyOccupantOnUpperLevel =
+        playerOccupiesUpperLevel ||
+        doesAnyPositionOccupyRoofLiftUpperLevel(otherOccupantPositions, layout);
     if (!playerOnPlatform) {
         lorienRoofLiftRuntime.awaitingPlatformExit = false;
     }
@@ -225,6 +245,29 @@ export function updateLorienVelmoreRoofLiftState(playerPosition, deltaTime = 1 /
         lorienRoofLiftRuntime.platformHoldTime = 0;
         lorienRoofLiftRuntime.awaitingPlatformExit = true;
     }
+
+    if (anyOccupantOnUpperLevel) {
+        lorienRoofLiftRuntime.upperLevelVacancyTime = 0;
+    } else if (
+        !lorienRoofLiftRuntime.isMoving &&
+        lorienRoofLiftRuntime.currentSurfaceY > layout.bottomSurfaceY + 0.05 &&
+        lorienRoofLiftRuntime.targetSurfaceY > layout.bottomSurfaceY + 0.05
+    ) {
+        lorienRoofLiftRuntime.upperLevelVacancyTime = Math.min(
+            LORIEN_ROOF_LIFT_AUTO_RETURN_DELAY,
+            lorienRoofLiftRuntime.upperLevelVacancyTime + resolvedDelta
+        );
+        if (lorienRoofLiftRuntime.upperLevelVacancyTime >= LORIEN_ROOF_LIFT_AUTO_RETURN_DELAY) {
+            lorienRoofLiftRuntime.targetSurfaceY = layout.bottomSurfaceY;
+            lorienRoofLiftRuntime.isMoving = true;
+            lorienRoofLiftRuntime.platformHoldTime = 0;
+            lorienRoofLiftRuntime.awaitingPlatformExit = false;
+            lorienRoofLiftRuntime.upperLevelVacancyTime = 0;
+        }
+    } else {
+        lorienRoofLiftRuntime.upperLevelVacancyTime = 0;
+    }
+
     lorienRoofLiftRuntime.wasPlayerOnPlatform = playerOnPlatform;
 
     return getLorienVelmoreRoofLiftState(building);
@@ -271,17 +314,11 @@ export function shouldUseLorienVelmoreRoofLiftHeight(
     const layout = getLorienVelmoreRoofLiftLayout(building);
     const localX = x - layout.centerX;
     const localZ = z - layout.centerZ;
-    if (
-        isInsideLocalRect(
-            localX,
-            localZ,
-            layout.shaftCenterX,
-            layout.shaftCenterZ,
-            layout.liftPlatformHalfWidth,
-            layout.liftPlatformHalfDepth
-        )
-    ) {
-        return true;
+    if (isInsideRoofLiftShaft(localX, localZ, layout)) {
+        if (!Number.isFinite(preferredY)) {
+            return roofLiftHeight <= layout.bottomSurfaceY + layout.platformCaptureMargin;
+        }
+        return Math.abs(preferredY - roofLiftHeight) <= layout.platformCaptureMargin;
     }
     if (!Number.isFinite(preferredY)) {
         return false;
@@ -453,8 +490,7 @@ export function getLorienVelmoreGallerySilenceFactorWorld(x, y, z, building) {
         y <= layout.lowerLevelCeilingY + 0.9
     ) {
         const lateralFactor =
-            1 -
-            normalizedRange(Math.abs(localX), layout.hallHalfWidth - 0.9, layout.hallHalfWidth);
+            1 - normalizedRange(Math.abs(localX), layout.hallHalfWidth - 0.9, layout.hallHalfWidth);
         const depthFactor = normalizedRange(
             localZ,
             layout.hallStartZ + 0.65,
@@ -473,7 +509,8 @@ export function getLorienVelmoreGallerySilenceFactorWorld(x, y, z, building) {
     const roofLayout = getLorienVelmoreRoofLiftLayout(building);
     ensureRoofLiftRuntimeInitialized(roofLayout);
     let roofSilence = 0;
-    const nearRoofDeckSurface = y >= roofLayout.roofSurfaceY - 1 && y <= roofLayout.roofSurfaceY + 3.6;
+    const nearRoofDeckSurface =
+        y >= roofLayout.roofSurfaceY - 1 && y <= roofLayout.roofSurfaceY + 3.6;
     if (
         nearRoofDeckSurface &&
         (isInsideRoofDeckDriveArea(localX, localZ, roofLayout) ||
@@ -532,6 +569,7 @@ function ensureRoofLiftRuntimeInitialized(layout) {
     lorienRoofLiftRuntime.isMoving = false;
     lorienRoofLiftRuntime.platformHoldTime = 0;
     lorienRoofLiftRuntime.awaitingPlatformExit = false;
+    lorienRoofLiftRuntime.upperLevelVacancyTime = 0;
 }
 
 function isPlayerOnRoofLiftPlatform(playerPosition, layout) {
@@ -564,6 +602,53 @@ function isPlayerOnRoofLiftPlatform(playerPosition, layout) {
         ) &&
         playerY >= currentSurfaceY - 0.8 &&
         playerY <= currentSurfaceY + 2.4
+    );
+}
+
+function isPlayerOccupyingRoofLiftUpperLevel(playerPosition, layout) {
+    const playerX = Number(playerPosition?.x);
+    const playerY = Number(playerPosition?.y);
+    const playerZ = Number(playerPosition?.z);
+    if (!Number.isFinite(playerX) || !Number.isFinite(playerY) || !Number.isFinite(playerZ)) {
+        return false;
+    }
+
+    const localX = playerX - layout.centerX;
+    const localZ = playerZ - layout.centerZ;
+    const nearRoofHeight =
+        playerY >= layout.roofSurfaceY - layout.roofCaptureMargin &&
+        playerY <= layout.roofSurfaceY + 3.6;
+    if (!nearRoofHeight) {
+        return false;
+    }
+
+    return (
+        isInsideRoofDeckDriveArea(localX, localZ, layout) ||
+        isInsideRoofBridgeArea(localX, localZ, layout) ||
+        isInsideRoofLiftShaft(localX, localZ, layout)
+    );
+}
+
+function doesAnyPositionOccupyRoofLiftUpperLevel(positions, layout) {
+    if (!Array.isArray(positions) || positions.length === 0) {
+        return false;
+    }
+    for (let i = 0; i < positions.length; i += 1) {
+        if (isPlayerOccupyingRoofLiftUpperLevel(positions[i], layout)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function isInsideRoofLiftShaft(localX, localZ, layout) {
+    return isInsideLocalRect(
+        localX,
+        localZ,
+        layout.shaftCenterX,
+        layout.shaftCenterZ,
+        layout.liftPlatformHalfWidth,
+        layout.liftPlatformHalfDepth
     );
 }
 

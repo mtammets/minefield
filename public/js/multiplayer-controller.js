@@ -63,6 +63,7 @@ export function createMultiplayerController(options = {}) {
     const remotePlayers = new Map();
     const lastCollisionRelaySentAtByTarget = new Map();
     const collisionSnapshotBuffer = [];
+    const remoteVehiclePositionBuffer = [];
 
     let socket = null;
     let room = null;
@@ -101,6 +102,7 @@ export function createMultiplayerController(options = {}) {
         getRoundStateSnapshot,
         getScoreboardEntries,
         getPlayerWorldPosition,
+        getRemoteVehiclePositions,
     };
 
     function initialize() {
@@ -1243,6 +1245,27 @@ export function createMultiplayerController(options = {}) {
         return remote?.car?.position || null;
     }
 
+    function getRemoteVehiclePositions() {
+        if (!isPanelVisible) {
+            remoteVehiclePositionBuffer.length = 0;
+            return EMPTY_ARRAY;
+        }
+        const now = performance.now();
+        let positionCount = 0;
+        for (const remote of remotePlayers.values()) {
+            if (!remote?.hasState || remote.isDestroyed) {
+                continue;
+            }
+            if (now - remote.lastStateAt > REMOTE_STATE_TIMEOUT_MS) {
+                continue;
+            }
+            remoteVehiclePositionBuffer[positionCount] = remote.car.position;
+            positionCount += 1;
+        }
+        remoteVehiclePositionBuffer.length = positionCount;
+        return remoteVehiclePositionBuffer;
+    }
+
     function renderPlayerList(players = [], localPlayerId = selfId) {
         if (!players.length) {
             dom.playerList.innerHTML = '<div class="mpPlayerEmpty">No online players yet.</div>';
@@ -1477,6 +1500,9 @@ function createNoopController() {
         },
         getPlayerWorldPosition() {
             return null;
+        },
+        getRemoteVehiclePositions() {
+            return [];
         },
     };
 }

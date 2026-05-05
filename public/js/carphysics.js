@@ -20,9 +20,10 @@ export const keys = {
 };
 
 const TUNING = {
+    // Mechanical powerband ceiling; the player-configured top-speed cap clamps actual speed separately.
     maxForwardSpeed: 65,
     maxReverseSpeed: 26,
-    engineAcceleration: 90,
+    engineAcceleration: 100,
     launchBoost: 34,
     reverseAcceleration: 56,
     brakeDeceleration: 98,
@@ -121,8 +122,8 @@ const TUNING = {
     launchSlipFall: 9.6,
     launchAccelNorm: 52,
     // Small assist near the configured speed cap so full throttle can actually reach it.
-    topSpeedAssistStartRatio: 0.82,
-    topSpeedAssistMpsPerSec: 9.2,
+    topSpeedAssistStartRatio: 0.6,
+    topSpeedAssistMpsPerSec: 18,
     launchWobbleSpeedLow: 7.4,
     launchWobbleSpeedHigh: 12.8,
     burnoutMaxSpeed: 8,
@@ -1807,7 +1808,8 @@ function calculateLongitudinalForce(longitudinalSpeed, damageDynamics) {
             easedThrottleForward,
             lowSpeedLaunchWeight
         );
-        const speedNorm = THREE.MathUtils.clamp(longitudinalSpeed / maxForwardSpeed, 0, 1);
+        const engineSpeedCeiling = Math.max(maxForwardSpeed, TUNING.maxForwardSpeed);
+        const speedNorm = THREE.MathUtils.clamp(longitudinalSpeed / engineSpeedCeiling, 0, 1);
         const thrustCurve = 1 - Math.pow(speedNorm, 1.35);
         const launchBoostScale = THREE.MathUtils.lerp(
             1,

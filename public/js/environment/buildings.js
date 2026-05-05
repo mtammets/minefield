@@ -223,7 +223,12 @@ export function createBuildingLayer() {
     return layer;
 }
 
-export function updateBuildingRuntime(buildingLayer, playerPosition, frameDelta = 1 / 60) {
+export function updateBuildingRuntime(
+    buildingLayer,
+    playerPosition,
+    frameDelta = 1 / 60,
+    options = {}
+) {
     const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
     const accentMaterials = buildingLayer?.userData?.lorienVelmoreAccentMaterials;
     const videoDisplays = buildingLayer?.userData?.lorienVelmoreVideoDisplays;
@@ -236,7 +241,7 @@ export function updateBuildingRuntime(buildingLayer, playerPosition, frameDelta 
     }
     const resolvedDelta = Math.max(1 / 240, Number(frameDelta) || 1 / 60);
     if (Array.isArray(roofLiftSystems) && roofLiftSystems.length > 0) {
-        updateLorienVelmoreRoofLiftSystems(roofLiftSystems, playerPosition, resolvedDelta);
+        updateLorienVelmoreRoofLiftSystems(roofLiftSystems, playerPosition, resolvedDelta, options);
     }
 
     if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
@@ -1165,12 +1170,17 @@ function updateLorienVelmoreAccentMaterials(accentMaterials) {
     });
 }
 
-function updateLorienVelmoreRoofLiftSystems(roofLiftSystems, playerPosition, frameDelta = 1 / 60) {
+function updateLorienVelmoreRoofLiftSystems(
+    roofLiftSystems,
+    playerPosition,
+    frameDelta = 1 / 60,
+    options = {}
+) {
     if (!Array.isArray(roofLiftSystems) || roofLiftSystems.length === 0) {
         return;
     }
 
-    const state = updateLorienVelmoreRoofLiftState(playerPosition, frameDelta);
+    const state = updateLorienVelmoreRoofLiftState(playerPosition, frameDelta, null, options);
     const normalizedTravel = clamp01(state?.normalizedTravel || 0);
     const movingPulse = state?.isMoving ? 0.72 + Math.sin(performance.now() * 0.012) * 0.2 : 0;
 
@@ -4794,19 +4804,6 @@ function addLorienVelmoreRoofLiftObstacles(building) {
         'building',
         roofRange
     );
-    addObstacleAabb(
-        layout.centerX,
-        layout.centerZ + layout.shaftCenterZ - layout.liftPlatformHalfDepth - 0.16,
-        layout.liftPlatformWidth - 0.18,
-        0.22,
-        0.02,
-        'building',
-        {
-            minY: -0.3,
-            maxY: 2.4,
-        }
-    );
-
     addObstacleAabb(
         layout.centerX + layout.roofDeckMinX - 0.12,
         layout.centerZ + (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,

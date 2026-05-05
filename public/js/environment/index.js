@@ -67,7 +67,8 @@ function updateGroundMotion(
     playerPosition,
     playerSpeed = 0,
     monumentRhythmState = null,
-    frameDelta = 1 / 60
+    frameDelta = 1 / 60,
+    options = {}
 ) {
     if (!environmentBuilt) {
         return;
@@ -86,7 +87,8 @@ function updateGroundMotion(
         updateBuildingRuntime(
             runtimeCityScenery.userData?.buildingLayer,
             playerPosition,
-            frameDelta
+            frameDelta,
+            options
         );
         updateMonumentRuntime(runtimeCityScenery, monumentRhythmState);
     }
