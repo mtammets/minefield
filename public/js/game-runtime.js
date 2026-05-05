@@ -118,6 +118,14 @@ import {
 } from './graphics-quality-controller.js';
 import { preloadBillboardMedia } from './environment/billboards.js';
 import {
+    getBillboardContentExtraImageUrls,
+    getBillboardContentExtraVideoUrls,
+    getBillboardContentGroups,
+    initializeBillboardContentManager,
+    resetBillboardGroupContent,
+    uploadBillboardGroupFiles,
+} from './environment/billboard-content-manager.js';
+import {
     applyLorienVelmoreMineDetonation,
     appendLorienVelmoreDoorCollisionObstacles,
     resolveLorienVelmoreMineBarrierImpact,
@@ -304,6 +312,7 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
         progress: 0,
         completeNoFailures: false,
     });
+    const billboardContentReadyPromise = initializeBillboardContentManager();
     const preparationTasks = [waitForAnimationFrames(2)];
 
     preparationTasks.push(
@@ -313,6 +322,7 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
                 progress: 0,
             });
             await waitForAnimationFrames(1);
+            await billboardContentReadyPromise;
             ensureWorldBuilt();
             groundLayerDebugController?.refresh?.();
             await waitForAnimationFrames(1);
@@ -335,8 +345,13 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
                 stage: 'media',
                 progress: 0,
             });
+            await billboardContentReadyPromise;
             const preloadState = await preloadBillboardMedia({
-                extraVideoUrls: MONUMENT_SCREEN_VIDEO_URLS,
+                extraImageUrls: getBillboardContentExtraImageUrls(),
+                extraVideoUrls: [
+                    ...MONUMENT_SCREEN_VIDEO_URLS,
+                    ...getBillboardContentExtraVideoUrls(),
+                ],
                 onProgress(preloadSnapshot) {
                     reportMediaProgress(preloadSnapshot);
                 },
@@ -850,6 +865,9 @@ const carEditModeController = createCarEditModeController({
         objectiveUi.showInfo('Crash tuning reset to defaults.', 1400);
         return defaults;
     },
+    getBillboardContentGroups,
+    onUploadBillboardGroupMedia: uploadBillboardGroupFiles,
+    onResetBillboardGroupMedia: resetBillboardGroupContent,
 });
 const raceIntroController = createRaceIntroController({
     camera,

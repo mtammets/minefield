@@ -1,5 +1,9 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { ROAD_WIDTH, SIDEWALK_WIDTH } from './config.js';
+import {
+    BILLBOARD_CONTENT_GROUP_IDS,
+    registerBillboardContentEntry,
+} from './billboard-content-manager.js';
 import { getBuildingPlacements } from './buildings.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
@@ -108,6 +112,7 @@ export function createBillboardLayer(screenEntries = []) {
 
     addWallMountedBillboard(layer, screenEntries, buildingPlacements.get('-1:-3'), {
         face: 'north',
+        contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.widePosters,
         playlistKeys: WIDE_PLAYLIST,
         width: 13.6,
         height: 7.65,
@@ -121,6 +126,7 @@ export function createBillboardLayer(screenEntries = []) {
     });
     addWallMountedBillboard(layer, screenEntries, buildingPlacements.get('1:3'), {
         face: 'south',
+        contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.tallPosters,
         playlistKeys: TALL_PLAYLIST,
         width: 5.4,
         height: 8.9,
@@ -134,6 +140,7 @@ export function createBillboardLayer(screenEntries = []) {
     });
     addWallMountedVideoBillboard(layer, screenEntries, buildingPlacements.get('1:-3'), {
         face: 'north',
+        contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.cityVideoWall,
         width: 6.4,
         height: 20.8,
         verticalRatio: 0.34,
@@ -198,6 +205,7 @@ export function createBillboardLayer(screenEntries = []) {
             x: placement.x,
             z: placement.z,
             rotationY: placement.rotationY,
+            contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.kioskTotems,
             width: 3.7,
             height: 6.9,
             screenCenterY: 3.75,
@@ -211,6 +219,7 @@ export function createBillboardLayer(screenEntries = []) {
     addPoleMountedBillboard(layer, screenEntries, {
         x: roadSideX(0, 'east', 4.2),
         z: -82,
+        contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.widePosters,
         playlistKeys: WIDE_PLAYLIST,
         width: 9.6,
         height: 5.4,
@@ -225,6 +234,7 @@ export function createBillboardLayer(screenEntries = []) {
     addPoleMountedBillboard(layer, screenEntries, {
         x: roadSideX(32, 'west', 0),
         z: -10,
+        contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.tallPosters,
         playlistKeys: TALL_PLAYLIST,
         width: 5,
         height: 7.6,
@@ -239,6 +249,7 @@ export function createBillboardLayer(screenEntries = []) {
     addPoleMountedBillboard(layer, screenEntries, {
         x: roadSideX(-32, 'east', 0),
         z: 14,
+        contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.tallPosters,
         playlistKeys: TALL_PLAYLIST,
         width: 5,
         height: 7.6,
@@ -293,12 +304,14 @@ export function updateBillboardRuntime(cityScenery) {
 
 export async function preloadBillboardMedia(options = {}) {
     const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
+    const extraImageUrls = Array.isArray(options?.extraImageUrls) ? options.extraImageUrls : [];
     const extraVideoUrls = Array.isArray(options?.extraVideoUrls) ? options.extraVideoUrls : [];
-    const imageUrls = dedupeMediaUrls(
-        Object.values(BILLBOARD_ASSETS)
+    const imageUrls = dedupeMediaUrls([
+        ...Object.values(BILLBOARD_ASSETS)
             .map((asset) => asset?.url)
-            .filter((url) => typeof url === 'string' && url.length > 0)
-    );
+            .filter((url) => typeof url === 'string' && url.length > 0),
+        ...extraImageUrls,
+    ]);
     const videoUrls = dedupeMediaUrls([...BILLBOARD_VIDEO_SOURCE_URLS, ...extraVideoUrls]);
     const assetsTotal = imageUrls.length + videoUrls.length;
     let assetsReady = 0;
@@ -388,6 +401,7 @@ function addWallMountedBillboard(layer, screenEntries, placement, options) {
     const billboard = createWallMountedBillboardMesh({
         width,
         height,
+        contentGroupId: options.contentGroupId,
         mountArmLength: options.mountArmLength,
         displayYawOffset: options.displayYawOffset,
         flushToWall: options.flushToWall,
@@ -423,6 +437,7 @@ function addWallMountedVideoBillboard(layer, screenEntries, placement, options) 
     const billboard = createWallMountedVideoBillboardMesh({
         width,
         height,
+        contentGroupId: options.contentGroupId,
         mountArmLength: options.mountArmLength,
         displayYawOffset: options.displayYawOffset,
         flushToWall: options.flushToWall,
@@ -522,6 +537,7 @@ function addPoleMountedBillboard(layer, screenEntries, options) {
         width: options.width,
         height: options.height,
         screenCenterY: options.screenCenterY,
+        contentGroupId: options.contentGroupId,
         poleCount: options.poleCount,
         poleSpacing: options.poleSpacing,
         playlistKeys: options.playlistKeys,
@@ -545,6 +561,7 @@ function addStreetKiosk(layer, screenEntries, options) {
         width: options.width,
         height: options.height,
         screenCenterY: options.screenCenterY,
+        contentGroupId: options.contentGroupId,
         playlistKeys: options.playlistKeys,
         screenEntries,
         cycleIntervalMs: options.cycleIntervalMs,
@@ -563,6 +580,7 @@ function addStreetKiosk(layer, screenEntries, options) {
 function createWallMountedBillboardMesh({
     width,
     height,
+    contentGroupId,
     mountArmLength = 0.52,
     displayYawOffset = 0,
     flushToWall = false,
@@ -574,6 +592,7 @@ function createWallMountedBillboardMesh({
     const panel = createDisplayPanel({
         width,
         height,
+        contentGroupId,
         playlistKeys,
         doubleSided: !flushToWall,
         screenEntries,
@@ -593,6 +612,7 @@ function createWallMountedBillboardMesh({
 function createWallMountedVideoBillboardMesh({
     width,
     height,
+    contentGroupId,
     mountArmLength = 0.52,
     displayYawOffset = 0,
     flushToWall = false,
@@ -607,6 +627,7 @@ function createWallMountedVideoBillboardMesh({
     const panel = createVideoDisplayPanel({
         width,
         height,
+        contentGroupId,
         doubleSided: !flushToWall,
         screenEntries,
         videoUrl,
@@ -665,6 +686,7 @@ function createPoleMountedBillboardMesh({
     width,
     height,
     screenCenterY = 5,
+    contentGroupId,
     poleCount = 1,
     poleSpacing = 0,
     playlistKeys,
@@ -682,6 +704,7 @@ function createPoleMountedBillboardMesh({
     const panel = createDisplayPanel({
         width,
         height,
+        contentGroupId,
         playlistKeys,
         doubleSided: true,
         screenEntries,
@@ -725,6 +748,7 @@ function createStreetKioskMesh({
     width,
     height,
     screenCenterY = 3.6,
+    contentGroupId,
     playlistKeys,
     screenEntries,
     cycleIntervalMs,
@@ -752,6 +776,7 @@ function createStreetKioskMesh({
     const panel = createDisplayPanel({
         width,
         height,
+        contentGroupId,
         playlistKeys,
         doubleSided: true,
         screenEntries,
@@ -842,6 +867,7 @@ export function createLedDisplayPanel(options) {
 export function createVideoDisplayPanel({
     width,
     height,
+    contentGroupId,
     doubleSided = true,
     screenEntries,
     videoUrl,
@@ -875,7 +901,9 @@ export function createVideoDisplayPanel({
     });
 
     if (screenEntries) {
-        screenEntries.push({
+        const screenEntry = {
+            contentGroupId,
+            contentType: 'video',
             playlistKeys: [safeAccentAssetKey],
             currentIndex: 0,
             cycleIntervalMs: Number.POSITIVE_INFINITY,
@@ -886,10 +914,40 @@ export function createVideoDisplayPanel({
             glowMaterials: panel.glowMaterials,
             trimMaterials: panel.trimMaterials,
             aspect: width / height,
+            defaultVideoUrls: resolvedVideoUrls.slice(),
+            videoCropFocusX,
+            videoCropFocusY,
+            videoTargetFps,
+            accentAssetKey: safeAccentAssetKey,
+            videoSurface,
             customUpdate(now) {
-                videoSurface.update(now);
+                screenEntry.videoSurface?.update?.(now);
             },
-        });
+            applyManagedContent(manifestGroup = null) {
+                const nextVideoUrls =
+                    manifestGroup?.mediaKind === 'video' && Array.isArray(manifestGroup.items)
+                        ? manifestGroup.items
+                              .map((item) => (typeof item?.url === 'string' ? item.url : ''))
+                              .filter(Boolean)
+                        : screenEntry.defaultVideoUrls.slice();
+
+                const nextVideoSurface = getBillboardVideoSurface({
+                    videoUrls: nextVideoUrls,
+                    targetAspect: screenEntry.aspect,
+                    focusX: screenEntry.videoCropFocusX,
+                    focusY: screenEntry.videoCropFocusY,
+                    targetFps: screenEntry.videoTargetFps,
+                    accentAssetKey: screenEntry.accentAssetKey,
+                });
+                screenEntry.videoSurface = nextVideoSurface;
+                screenEntry.screenMaterials.forEach((material) => {
+                    material.map = nextVideoSurface.texture;
+                    material.needsUpdate = true;
+                });
+            },
+        };
+        screenEntries.push(screenEntry);
+        registerBillboardContentEntry(screenEntry);
     }
 
     return panel;
@@ -1139,6 +1197,7 @@ function waitForMediaPreloadFrame() {
 function createDisplayPanel({
     width,
     height,
+    contentGroupId = '',
     playlistKeys = [],
     doubleSided = true,
     screenEntries,
@@ -1222,7 +1281,11 @@ function createDisplayPanel({
     }
 
     const screenEntry = {
-        playlistKeys,
+        contentGroupId,
+        contentType: 'image',
+        playlistKeys: playlistKeys.slice(),
+        defaultPlaylistKeys: playlistKeys.slice(),
+        defaultAssetKey: resolvedInitialAssetKey,
         currentIndex: -1,
         cycleIntervalMs: Math.max(2800, cycleIntervalMs),
         phaseOffsetMs,
@@ -1232,15 +1295,69 @@ function createDisplayPanel({
         glowMaterials,
         trimMaterials,
         aspect: width / height,
+        applyManagedContent(manifestGroup = null) {
+            const overridePlaylistKeys = resolveManagedImageAssetKeys(
+                manifestGroup,
+                screenEntry.defaultAssetKey
+            );
+            screenEntry.playlistKeys =
+                overridePlaylistKeys.length > 0
+                    ? overridePlaylistKeys
+                    : screenEntry.defaultPlaylistKeys.slice();
+            applyScreenAsset(screenEntry, 0);
+        },
     };
     if (registerRuntimeEntry && screenEntries) {
         screenEntries.push(screenEntry);
         applyScreenAsset(screenEntry, 0);
+        registerBillboardContentEntry(screenEntry);
     } else {
         screenEntry.currentIndex = 0;
     }
 
     return { group, depth, screenMaterials, glowMaterials, trimMaterials, aspect: width / height };
+}
+
+function resolveManagedImageAssetKeys(manifestGroup, fallbackAssetKey) {
+    if (manifestGroup?.mediaKind !== 'image' || !Array.isArray(manifestGroup.items)) {
+        return [];
+    }
+
+    const fallbackAsset = BILLBOARD_ASSETS[fallbackAssetKey] || BILLBOARD_ASSETS.poster;
+    const revisionKey = sanitizeManagedAssetToken(manifestGroup.updatedAt || 'current');
+    const groupId = sanitizeManagedAssetToken(manifestGroup.groupId || 'group');
+    const assetKeys = [];
+
+    for (let index = 0; index < manifestGroup.items.length; index += 1) {
+        const item = manifestGroup.items[index];
+        const url = typeof item?.url === 'string' ? item.url.trim() : '';
+        if (!url) {
+            continue;
+        }
+
+        const itemId = sanitizeManagedAssetToken(item.id || `item-${index + 1}`);
+        const assetKey = `managed:${groupId}:${revisionKey}:${itemId}:${index}`;
+        BILLBOARD_ASSETS[assetKey] = {
+            url,
+            glowColor: fallbackAsset.glowColor,
+            accentColor: fallbackAsset.accentColor,
+            focusX: fallbackAsset.focusX,
+            focusY: fallbackAsset.focusY,
+        };
+        assetKeys.push(assetKey);
+    }
+
+    return assetKeys;
+}
+
+function sanitizeManagedAssetToken(value) {
+    return (
+        String(value || 'asset')
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '') || 'asset'
+    );
 }
 
 function addScreenTrim(group, width, height, depth, trimMaterial, styleConfig = {}) {

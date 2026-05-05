@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const Stripe = require('stripe');
 const { Server } = require('socket.io');
+const { createBillboardContentStore } = require('./billboard-content-store');
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
 const {
@@ -86,6 +87,9 @@ const STRIPE_SECRET_KEY = sanitizeStripeSecretKey(process.env.STRIPE_SECRET_KEY 
 const STRIPE_WEBHOOK_SECRET = sanitizeStripeWebhookSecret(process.env.STRIPE_WEBHOOK_SECRET || '');
 const stripeClient = createStripeClient(STRIPE_SECRET_KEY);
 const donateSessionStore = createDonationSessionStore();
+const BILLBOARD_CONTENT_ADMIN_TOKEN = sanitizeAdminToken(
+    process.env.BILLBOARD_CONTENT_ADMIN_TOKEN || ''
+);
 const GA_MEASUREMENT_ID = sanitizeGaMeasurementId(
     process.env.GA_MEASUREMENT_ID || process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID || ''
 );
@@ -133,6 +137,10 @@ const EVENT_RATE_LIMITS = {
 
 const app = express();
 const server = http.createServer(app);
+const billboardContentStore = createBillboardContentStore({
+    manifestFilePath: path.join(__dirname, 'data/billboard-content.json'),
+    uploadsDirectoryPath: path.join(__dirname, '../public/uploads/billboards'),
+});
 const io = new Server(server, {
     cors: {
         origin: resolveSocketCorsOrigin,
@@ -157,6 +165,78 @@ app.use((req, res, next) => {
 });
 app.post('/api/donate/stripe-webhook', express.raw({ type: 'application/json' }), (req, res) => {
     handleStripeDonateWebhook(req, res);
+});
+app.get('/api/billboard-content', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+        const manifest = await billboardContentStore.readManifest();
+        res.json({
+            ok: true,
+            manifest,
+        });
+    } catch (error) {
+        console.error('Billboard content manifest read failed:', error);
+        res.status(500).json({
+            ok: false,
+            error: 'Could not read billboard content manifest.',
+        });
+    }
+});
+app.post('/api/billboard-content/:groupId', express.json({ limit: '512mb' }), async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isBillboardContentAdminAuthorized(req)) {
+        res.status(403).json({
+            ok: false,
+            error: 'Billboard content admin access denied.',
+        });
+        return;
+    }
+
+    try {
+        const result = await billboardContentStore.writeGroupMedia(req.params?.groupId, req.body);
+        res.json({
+            ok: true,
+            manifest: result.manifest,
+            group: result.group,
+        });
+    } catch (error) {
+        const statusCode = resolveHttpStatusCode(error?.statusCode);
+        if (statusCode >= 500) {
+            console.error('Billboard content upload failed:', error);
+        }
+        res.status(statusCode).json({
+            ok: false,
+            error: error?.message || 'Billboard content upload failed.',
+        });
+    }
+});
+app.delete('/api/billboard-content/:groupId', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isBillboardContentAdminAuthorized(req)) {
+        res.status(403).json({
+            ok: false,
+            error: 'Billboard content admin access denied.',
+        });
+        return;
+    }
+
+    try {
+        const result = await billboardContentStore.resetGroup(req.params?.groupId);
+        res.json({
+            ok: true,
+            removed: Boolean(result.removed),
+            manifest: result.manifest,
+        });
+    } catch (error) {
+        const statusCode = resolveHttpStatusCode(error?.statusCode);
+        if (statusCode >= 500) {
+            console.error('Billboard content reset failed:', error);
+        }
+        res.status(statusCode).json({
+            ok: false,
+            error: error?.message || 'Billboard content reset failed.',
+        });
+    }
 });
 app.use(express.json({ limit: '16kb' }));
 app.use(express.static(path.join(__dirname, '../public')));
@@ -1113,6 +1193,13 @@ function sanitizeGaMeasurementId(value) {
     return /^G-[A-Z0-9]{6,20}$/.test(normalized) ? normalized : '';
 }
 
+function sanitizeAdminToken(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim().slice(0, 256);
+}
+
 function sanitizeCurrencyCode(value, fallback = 'eur') {
     if (typeof value !== 'string') {
         return fallback;
@@ -1140,6 +1227,50 @@ function resolveDonateBaseUrl(req) {
     }
     const protocol = resolveRequestProtocol(req);
     return `${protocol}://${host}`;
+}
+
+function isBillboardContentAdminAuthorized(req) {
+    if (isLoopbackRequest(req)) {
+        return true;
+    }
+    if (!BILLBOARD_CONTENT_ADMIN_TOKEN) {
+        return false;
+    }
+
+    const requestToken = sanitizeAdminToken(
+        req?.headers?.['x-billboard-admin-token'] || req?.headers?.['x-admin-token'] || ''
+    );
+    if (!requestToken) {
+        return false;
+    }
+
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(requestToken, 'utf8'),
+            Buffer.from(BILLBOARD_CONTENT_ADMIN_TOKEN, 'utf8')
+        );
+    } catch {
+        return false;
+    }
+}
+
+function isLoopbackRequest(req) {
+    const remoteAddress = String(req?.socket?.remoteAddress || '')
+        .trim()
+        .toLowerCase();
+    return (
+        remoteAddress === '127.0.0.1' ||
+        remoteAddress === '::1' ||
+        remoteAddress === '::ffff:127.0.0.1'
+    );
+}
+
+function resolveHttpStatusCode(value, fallback = 500) {
+    const numeric = Math.round(Number(value) || 0);
+    if (numeric >= 400 && numeric <= 599) {
+        return numeric;
+    }
+    return fallback;
 }
 
 function createDonateReturnUrl(baseUrl, state, options = {}) {
@@ -1804,9 +1935,7 @@ function sanitizeMineDetonation(payload, now = Date.now()) {
         triggerPlayerId: sanitizeSocketLikeId(payload.triggerPlayerId),
         targetPlayerId: sanitizeSocketLikeId(payload.targetPlayerId),
         detonationType: sanitizeMineDetonationType(payload.detonationType),
-        landedAt: Math.round(
-            clampFinite(payload.landedAt, 0, Number.MAX_SAFE_INTEGER, 0)
-        ),
+        landedAt: Math.round(clampFinite(payload.landedAt, 0, Number.MAX_SAFE_INTEGER, 0)),
         serverTime: now,
     };
 }

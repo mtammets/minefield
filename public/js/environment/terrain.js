@@ -17,6 +17,8 @@ import {
 import {
     LORIEN_VELMORE_GALLERY_SURFACE_OFFSET,
     sampleLorienVelmoreGalleryFloorHeightWorld,
+    sampleLorienVelmoreRoofLiftHeightWorld,
+    shouldUseLorienVelmoreRoofLiftHeight,
 } from './lorien-gallery.js';
 import {
     UNDERGROUND_PARKING_LAYOUT,
@@ -38,6 +40,8 @@ const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_FRONT = 0.55;
 const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_BACK = 0.25;
 const UNDERGROUND_ENTRANCE_TERRAIN_CUTOUT_SIDE = 1.1;
 const CURB_WIDTH_WORLD = 0.22;
+const UNDERGROUND_SURFACE_HIDE_DEPTH_OFFSET = 0.32;
+const UNDERGROUND_SURFACE_HIDE_LANDING_MARGIN = 0.35;
 const UNDERGROUND_SCENERY_VISIBILITY_MODES = Object.freeze({
     surface: 'surface',
     entrance: 'entrance',
@@ -91,14 +95,20 @@ let cachedPatternSources = null;
 
 export function getGroundHeightAt(x, z, preferredY = null) {
     const lowerGroundHeight = getLowerGroundHeightAt(x, z, preferredY);
+    const lorienRoofLiftHeight = sampleLorienVelmoreRoofLiftHeightWorld(x, z);
+    const raisedGroundHeight =
+        Number.isFinite(lorienRoofLiftHeight) &&
+        shouldUseLorienVelmoreRoofLiftHeight(preferredY, x, z, lorienRoofLiftHeight)
+            ? lorienRoofLiftHeight
+            : lowerGroundHeight;
     const upperDeckHeight = sampleUpperDeckHeight(x, z);
     if (!Number.isFinite(upperDeckHeight)) {
-        return lowerGroundHeight;
+        return raisedGroundHeight;
     }
-    if (shouldUseUpperDeckHeight(x, z, upperDeckHeight, lowerGroundHeight, preferredY)) {
+    if (shouldUseUpperDeckHeight(x, z, upperDeckHeight, raisedGroundHeight, preferredY)) {
         return upperDeckHeight;
     }
-    return lowerGroundHeight;
+    return raisedGroundHeight;
 }
 
 function getLowerGroundHeightAt(x, z, preferredY = null) {
@@ -223,12 +233,20 @@ function resolveUndergroundParkingSceneryVisibilityMode(playerPosition) {
     }
 
     const layout = UNDERGROUND_PARKING_LAYOUT;
+    const entrance = layout.entrance;
+    const isDeepEnoughForUndergroundMode =
+        Number.isFinite(playerY) &&
+        playerY <= layout.ceilingBottomY - UNDERGROUND_SURFACE_HIDE_DEPTH_OFFSET;
+    // Keep the surface skyline visible while the player is still descending the entry ramp.
+    const hasClearedEntranceRamp =
+        Number.isFinite(playerZ) &&
+        playerZ >= entrance.landingEndZ - UNDERGROUND_SURFACE_HIDE_LANDING_MARGIN;
     const insideInteriorBounds =
         playerX >= layout.floorMinX - 1.4 &&
         playerX <= layout.floorMaxX + 1.4 &&
         playerZ >= layout.floorMinZ - 1.4 &&
         playerZ <= layout.floorMaxZ + 1.4;
-    if (insideInteriorBounds && Number.isFinite(playerY) && playerY <= layout.surfaceY - 0.45) {
+    if (insideInteriorBounds && isDeepEnoughForUndergroundMode && hasClearedEntranceRamp) {
         return UNDERGROUND_SCENERY_VISIBILITY_MODES.underground;
     }
 
@@ -237,7 +255,7 @@ function resolveUndergroundParkingSceneryVisibilityMode(playerPosition) {
         return UNDERGROUND_SCENERY_VISIBILITY_MODES.surface;
     }
 
-    if (Number.isFinite(playerY) && playerY <= layout.surfaceY - 0.45) {
+    if (isDeepEnoughForUndergroundMode && hasClearedEntranceRamp) {
         return UNDERGROUND_SCENERY_VISIBILITY_MODES.underground;
     }
 

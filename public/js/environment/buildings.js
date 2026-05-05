@@ -10,9 +10,12 @@ import {
 } from './textures.js';
 import {
     getLorienVelmoreGalleryLayout as resolveLorienVelmoreGalleryLayout,
+    getLorienVelmoreRoofLiftLayout,
     isInsideLorienVelmoreGalleryRoomWorld,
+    resetLorienVelmoreRoofLiftState,
     sampleLorienVelmoreGalleryFloorHeightLocal as resolveLorienVelmoreGalleryFloorHeightLocal,
     setLorienVelmoreGalleryDoorOpenAmount,
+    updateLorienVelmoreRoofLiftState,
 } from './lorien-gallery.js';
 
 const SPECIAL_BUILDING_VARIANTS = new Map([
@@ -114,8 +117,10 @@ export function createBuildingLayer() {
     layer.userData.lorienVelmoreDoorSystems = [];
     layer.userData.lorienVelmoreAccentMaterials = [];
     layer.userData.lorienVelmoreVideoDisplays = [];
+    layer.userData.lorienVelmoreRoofLiftSystems = [];
     lorienVelmoreGalleryVideoDisplayState = null;
     ufoDiskoDoorOpenAmount = 0;
+    resetLorienVelmoreRoofLiftState();
     const buildingGeometry = new THREE.BoxGeometry(1, 1, 1);
     const buildingWindowTexture = createBuildingWindowTexture();
     const buildingMaterial = new THREE.MeshStandardMaterial({
@@ -160,6 +165,8 @@ export function createBuildingLayer() {
                 driveThroughMesh.userData?.lorienVelmoreAccentMaterials || null;
             const lorienVideoDisplays =
                 driveThroughMesh.userData?.lorienVelmoreVideoDisplays || null;
+            const lorienRoofLiftSystems =
+                driveThroughMesh.userData?.lorienVelmoreRoofLiftSystems || null;
             if (Array.isArray(lorienDoorSystems) && lorienDoorSystems.length > 0) {
                 layer.userData.lorienVelmoreDoorSystems.push(...lorienDoorSystems);
             }
@@ -168,6 +175,9 @@ export function createBuildingLayer() {
             }
             if (Array.isArray(lorienVideoDisplays) && lorienVideoDisplays.length > 0) {
                 layer.userData.lorienVelmoreVideoDisplays.push(...lorienVideoDisplays);
+            }
+            if (Array.isArray(lorienRoofLiftSystems) && lorienRoofLiftSystems.length > 0) {
+                layer.userData.lorienVelmoreRoofLiftSystems.push(...lorienRoofLiftSystems);
             }
             layer.add(driveThroughMesh);
             addDriveThroughBuildingObstacles(building, specialVariant);
@@ -217,6 +227,7 @@ export function updateBuildingRuntime(buildingLayer, playerPosition, frameDelta 
     const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
     const accentMaterials = buildingLayer?.userData?.lorienVelmoreAccentMaterials;
     const videoDisplays = buildingLayer?.userData?.lorienVelmoreVideoDisplays;
+    const roofLiftSystems = buildingLayer?.userData?.lorienVelmoreRoofLiftSystems;
     if (Array.isArray(accentMaterials) && accentMaterials.length > 0) {
         updateLorienVelmoreAccentMaterials(accentMaterials);
     }
@@ -224,6 +235,9 @@ export function updateBuildingRuntime(buildingLayer, playerPosition, frameDelta 
         updateLorienVelmoreGalleryVideoDisplays(videoDisplays, playerPosition);
     }
     const resolvedDelta = Math.max(1 / 240, Number(frameDelta) || 1 / 60);
+    if (Array.isArray(roofLiftSystems) && roofLiftSystems.length > 0) {
+        updateLorienVelmoreRoofLiftSystems(roofLiftSystems, playerPosition, resolvedDelta);
+    }
 
     if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
         setLorienVelmoreGalleryDoorOpenAmount(0);
@@ -1151,6 +1165,38 @@ function updateLorienVelmoreAccentMaterials(accentMaterials) {
     });
 }
 
+function updateLorienVelmoreRoofLiftSystems(roofLiftSystems, playerPosition, frameDelta = 1 / 60) {
+    if (!Array.isArray(roofLiftSystems) || roofLiftSystems.length === 0) {
+        return;
+    }
+
+    const state = updateLorienVelmoreRoofLiftState(playerPosition, frameDelta);
+    const normalizedTravel = clamp01(state?.normalizedTravel || 0);
+    const movingPulse = state?.isMoving ? 0.72 + Math.sin(performance.now() * 0.012) * 0.2 : 0;
+
+    roofLiftSystems.forEach((system) => {
+        if (!system) {
+            return;
+        }
+
+        if (system.platformGroup) {
+            system.platformGroup.position.y = Number(state?.currentSurfaceY) || 0;
+        }
+        if (system.statusLightMaterial) {
+            const color = state?.isMoving
+                ? new THREE.Color(0xffd6a0)
+                : normalizedTravel >= 0.98
+                  ? new THREE.Color(0xc8f2ff)
+                  : new THREE.Color(0xffefcf);
+            system.statusLightMaterial.color.copy(color);
+            system.statusLightMaterial.opacity = state?.isMoving ? 0.7 + movingPulse * 0.22 : 0.56;
+        }
+        if (system.roofViewLightMaterial) {
+            system.roofViewLightMaterial.opacity = 0.54 + normalizedTravel * 0.22;
+        }
+    });
+}
+
 function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     const variant = resolveSpecialBuildingVariant(building);
     if (!variant) {
@@ -1454,6 +1500,12 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
             shellMaterial,
             trimMaterial: lorienTrimMaterial,
         });
+        addLorienVelmoreRoofCarLift(group, baseGeometry, {
+            building,
+            shellMaterial,
+            trimMaterial: lorienTrimMaterial,
+            lightMaterial: lorienLightMaterial,
+        });
     }
 
     if (lorienDoorSystem) {
@@ -1462,6 +1514,10 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     }
     if (lorienDoorSystems.length > 0) {
         group.userData.lorienVelmoreDoorSystems = lorienDoorSystems;
+    }
+    if (Array.isArray(group.userData.lorienVelmoreRoofLiftSystems)) {
+        group.userData.lorienVelmoreRoofLiftSystems =
+            group.userData.lorienVelmoreRoofLiftSystems.filter(Boolean);
     }
 
     return group;
@@ -1662,10 +1718,7 @@ function addUfoDiskoMixedUseFacade(
         }
     };
 
-    const rowCount = Math.max(
-        3,
-        Math.min(10, Math.floor((residentialFacadeHeight - 1.2) / 3.02))
-    );
+    const rowCount = Math.max(3, Math.min(10, Math.floor((residentialFacadeHeight - 1.2) / 3.02)));
     const rowSpacing = residentialFacadeHeight / rowCount;
     const windowHeight = THREE.MathUtils.clamp(rowSpacing - 0.9, 1.56, 2.12);
     const residentialWindowFloat = facadeDepth * 0.38;
@@ -1909,6 +1962,7 @@ function addDriveThroughBuildingObstacles(building, variant) {
     const axis = variant.passageAxis === 'z' ? 'z' : 'x';
     if (variant.groundLayout === 'galleryHall') {
         addGalleryHallObstacles(building, variant, axis);
+        addLorienVelmoreRoofLiftObstacles(building);
         return;
     }
     const transverseSpan = axis === 'x' ? building.depth : building.width;
@@ -2153,10 +2207,7 @@ function addUfoDiskoRetailPassageDecor(
         Math.max(1, Math.round(passageHeight / 3.6))
     );
     const wallCoveTexture = createLuxuryMarbleTexture();
-    wallCoveTexture.repeat.set(
-        Math.max(1, Math.round(passageLength / 5.2)),
-        1
-    );
+    wallCoveTexture.repeat.set(Math.max(1, Math.round(passageLength / 5.2)), 1);
     const wallPanelMaterial = new THREE.MeshStandardMaterial({
         color: 0x0d131b,
         emissive: 0x060b12,
@@ -2516,8 +2567,7 @@ function addUfoDiskoWallTreatments(
                     haloOpacity: 0.2,
                     coreOpacity: 0.62,
                     sweepSpeed: 0.00105,
-                    sweepPhase:
-                        (sideDirection < 0 ? 0.08 : 0.44) + index * 0.14 + edgeIndex * 0.09,
+                    sweepPhase: (sideDirection < 0 ? 0.08 : 0.44) + index * 0.14 + edgeIndex * 0.09,
                     sweepBand: 0.22,
                     reverseSweep: (index + edgeIndex) % 2 === 1,
                 });
@@ -3453,10 +3503,7 @@ function drawUfoDiskoMerchCard(ctx, canvas, image = null, merchSource = null) {
     ctx.restore();
 }
 
-function createProcessedUfoDiskoMerchCanvas(
-    image,
-    { removeWhiteBackground = true } = {}
-) {
+function createProcessedUfoDiskoMerchCanvas(image, { removeWhiteBackground = true } = {}) {
     const canvas = document.createElement('canvas');
     canvas.width = image.naturalWidth || image.width || 1;
     canvas.height = image.naturalHeight || image.height || 1;
@@ -4621,6 +4668,11 @@ function addGalleryHallObstacles(building, variant, axis) {
     }
     const transverseSpan = building.width;
     const passageWidth = THREE.MathUtils.clamp(variant.passageWidth, 4.8, transverseSpan - 3.6);
+    const passageHeight = THREE.MathUtils.clamp(variant.passageHeight, 4.4, building.height - 4.8);
+    const hallVerticalRange = {
+        minY: -0.3,
+        maxY: passageHeight + 0.4,
+    };
 
     const columnSize = 0.62;
     const columnPositions = getLorienVelmoreGalleryColumnPositions(layout);
@@ -4631,7 +4683,8 @@ function addGalleryHallObstacles(building, variant, axis) {
             columnSize,
             columnSize,
             0.12,
-            'building'
+            'building',
+            hallVerticalRange
         );
     });
 
@@ -4649,7 +4702,8 @@ function addGalleryHallObstacles(building, variant, axis) {
             collisionBandThickness,
             hallDepth + wallThickness + collisionInset * 2,
             0.04,
-            'building'
+            'building',
+            hallVerticalRange
         );
     });
 
@@ -4659,7 +4713,8 @@ function addGalleryHallObstacles(building, variant, axis) {
         layout.hallHalfWidth * 2 + collisionBandThickness * 2 - collisionInset * 2,
         collisionBandThickness,
         0.04,
-        'building'
+        'building',
+        hallVerticalRange
     );
 
     const frontOpeningHalfWidth = passageWidth * 0.5;
@@ -4675,7 +4730,8 @@ function addGalleryHallObstacles(building, variant, axis) {
                 frontSegmentWidth,
                 collisionBandThickness,
                 0.04,
-                'building'
+                'building',
+                hallVerticalRange
             );
         });
     }
@@ -4689,8 +4745,405 @@ function addGalleryHallObstacles(building, variant, axis) {
             jambWidth,
             jambDepth,
             0.04,
-            'building'
+            'building',
+            hallVerticalRange
         );
+    });
+}
+
+function addLorienVelmoreRoofLiftObstacles(building) {
+    const layout = getLorienVelmoreRoofLiftLayout(building);
+    const shaftRange = {
+        minY: layout.bottomSurfaceY - 0.3,
+        maxY: layout.roofSurfaceY + 2.6,
+    };
+    const roofRange = {
+        minY: layout.roofSurfaceY - 0.4,
+        maxY: layout.roofSurfaceY + 2.2,
+    };
+    const roofDeckWidth = layout.roofDeckMaxX - layout.roofDeckMinX;
+    const roofDeckDepth = layout.roofDeckMaxZ - layout.roofDeckMinZ;
+    const bridgeDepth = Math.max(0.24, layout.bridgeMaxZ - layout.bridgeMinZ);
+    const bridgeRailInset = 0.82;
+    const bridgeRailDepth = Math.max(0.18, bridgeDepth - bridgeRailInset * 2);
+
+    addObstacleAabb(
+        layout.centerX - layout.shaftHalfWidth - 0.12,
+        layout.centerZ + layout.shaftCenterZ,
+        0.24,
+        layout.shaftDepth + 0.14,
+        0.02,
+        'building',
+        shaftRange
+    );
+    addObstacleAabb(
+        layout.centerX + layout.shaftHalfWidth + 0.12,
+        layout.centerZ + layout.shaftCenterZ,
+        0.24,
+        layout.shaftDepth + 0.14,
+        0.02,
+        'building',
+        shaftRange
+    );
+    addObstacleAabb(
+        layout.centerX,
+        layout.centerZ + layout.shaftCenterZ + layout.liftPlatformHalfDepth + 0.14,
+        layout.liftPlatformWidth - 0.34,
+        0.18,
+        0.02,
+        'building',
+        roofRange
+    );
+    addObstacleAabb(
+        layout.centerX,
+        layout.centerZ + layout.shaftCenterZ - layout.liftPlatformHalfDepth - 0.16,
+        layout.liftPlatformWidth - 0.18,
+        0.22,
+        0.02,
+        'building',
+        {
+            minY: -0.3,
+            maxY: 2.4,
+        }
+    );
+
+    addObstacleAabb(
+        layout.centerX + layout.roofDeckMinX - 0.12,
+        layout.centerZ + (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
+        0.24,
+        roofDeckDepth,
+        0.02,
+        'building',
+        roofRange
+    );
+    addObstacleAabb(
+        layout.centerX + layout.roofDeckMaxX + 0.12,
+        layout.centerZ + (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
+        0.24,
+        roofDeckDepth,
+        0.02,
+        'building',
+        roofRange
+    );
+    addObstacleAabb(
+        layout.centerX,
+        layout.centerZ + layout.roofDeckMinZ - 0.12,
+        roofDeckWidth,
+        0.24,
+        0.02,
+        'building',
+        roofRange
+    );
+
+    const rearGapHalfWidth = layout.bridgeHalfWidth + 0.22;
+    const rearBarrierWidth = Math.max(0.54, (roofDeckWidth - rearGapHalfWidth * 2) * 0.5);
+    if (rearBarrierWidth > 0.28) {
+        [-1, 1].forEach((direction) => {
+            addObstacleAabb(
+                layout.centerX + direction * (rearGapHalfWidth + rearBarrierWidth * 0.5),
+                layout.centerZ + layout.roofDeckMaxZ + 0.12,
+                rearBarrierWidth,
+                0.24,
+                0.02,
+                'building',
+                roofRange
+            );
+        });
+    }
+
+    if (bridgeRailDepth > 0.18) {
+        [-1, 1].forEach((direction) => {
+            addObstacleAabb(
+                layout.centerX + direction * (layout.bridgeHalfWidth + 0.12),
+                layout.centerZ + (layout.bridgeMinZ + layout.bridgeMaxZ) * 0.5,
+                0.24,
+                bridgeRailDepth,
+                0.02,
+                'building',
+                roofRange
+            );
+        });
+    }
+}
+
+function addLorienVelmoreRoofCarLift(
+    group,
+    baseGeometry,
+    { building, shellMaterial, trimMaterial, lightMaterial }
+) {
+    const layout = getLorienVelmoreRoofLiftLayout(building);
+    const deckMaterial = shellMaterial.clone();
+    deckMaterial.color.setHex(0xefe7da);
+    deckMaterial.emissive.setHex(0x1f1a16);
+    deckMaterial.emissiveIntensity = 0.04;
+    deckMaterial.roughness = 0.36;
+    deckMaterial.metalness = 0.08;
+
+    const liftFrameMaterial = trimMaterial.clone();
+    liftFrameMaterial.color.setHex(0xd7bb91);
+    liftFrameMaterial.emissive.setHex(0x46321f);
+    liftFrameMaterial.emissiveIntensity = 0.14;
+    liftFrameMaterial.roughness = 0.24;
+    liftFrameMaterial.metalness = 0.84;
+
+    const liftCoreMaterial = shellMaterial.clone();
+    liftCoreMaterial.color.setHex(0x243242);
+    liftCoreMaterial.emissive.setHex(0x0d1721);
+    liftCoreMaterial.emissiveIntensity = 0.18;
+    liftCoreMaterial.roughness = 0.48;
+    liftCoreMaterial.metalness = 0.34;
+
+    const glassMaterial = new THREE.MeshStandardMaterial({
+        color: 0xe8f6ff,
+        emissive: 0x264558,
+        emissiveIntensity: 0.16,
+        transparent: true,
+        opacity: 0.2,
+        roughness: 0.12,
+        metalness: 0.08,
+    });
+    glassMaterial.depthWrite = false;
+
+    const guideLightMaterial = new THREE.MeshBasicMaterial({
+        color: 0xfff1d3,
+        transparent: true,
+        opacity: 0.88,
+        toneMapped: false,
+    });
+    const statusLightMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffd99e,
+        transparent: true,
+        opacity: 0.72,
+        toneMapped: false,
+    });
+
+    const roofDeckWidth = layout.roofDeckMaxX - layout.roofDeckMinX;
+    const roofDeckDepth = layout.roofDeckMaxZ - layout.roofDeckMinZ;
+    const bridgeDepth = Math.max(0.18, layout.bridgeMaxZ - layout.bridgeMinZ);
+    const bridgeRailInset = 1.02;
+    const bridgeRailDepth = Math.max(0.18, bridgeDepth - bridgeRailInset * 2);
+    const shaftHeight = layout.roofSurfaceY + 1.3;
+    const shaftCenterY = shaftHeight * 0.5;
+    const postSize = 0.22;
+    const slabThickness = 0.22;
+    const parapetThickness = 0.16;
+    const parapetHeight = 0.86;
+    const walkwayY = layout.roofSurfaceY - slabThickness * 0.5;
+    const shaftSideGlassDepth = Math.max(1.2, layout.shaftDepth * 0.42);
+    const shaftSideGlassCenterZ =
+        layout.shaftCenterZ + layout.shaftHalfDepth - shaftSideGlassDepth * 0.5 - 0.18;
+    addDecorBox(group, baseGeometry, deckMaterial, {
+        x: 0,
+        y: walkwayY,
+        z: (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
+        width: roofDeckWidth,
+        height: slabThickness,
+        depth: roofDeckDepth,
+    });
+    addDecorBox(group, baseGeometry, liftFrameMaterial, {
+        x: 0,
+        y: layout.roofSurfaceY + 0.022,
+        z: (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
+        width: roofDeckWidth - 0.22,
+        height: 0.025,
+        depth: roofDeckDepth - 0.22,
+    });
+
+    if (bridgeDepth > 0.22) {
+        addDecorBox(group, baseGeometry, deckMaterial, {
+            x: 0,
+            y: walkwayY,
+            z: (layout.bridgeMinZ + layout.bridgeMaxZ) * 0.5,
+            width: layout.bridgeHalfWidth * 2,
+            height: slabThickness,
+            depth: bridgeDepth,
+        });
+        addDecorBox(group, baseGeometry, liftFrameMaterial, {
+            x: 0,
+            y: layout.roofSurfaceY + 0.02,
+            z: (layout.bridgeMinZ + layout.bridgeMaxZ) * 0.5,
+            width: layout.bridgeHalfWidth * 2 - 0.16,
+            height: 0.024,
+            depth: Math.max(0.18, bridgeDepth - 0.16),
+        });
+    }
+
+    [
+        {
+            x: layout.roofDeckMinX - 0.08,
+            z: (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
+            width: parapetThickness,
+            depth: roofDeckDepth,
+        },
+        {
+            x: layout.roofDeckMaxX + 0.08,
+            z: (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
+            width: parapetThickness,
+            depth: roofDeckDepth,
+        },
+        { x: 0, z: layout.roofDeckMinZ - 0.08, width: roofDeckWidth, depth: parapetThickness },
+    ].forEach((rail) => {
+        addDecorBox(group, baseGeometry, glassMaterial, {
+            x: rail.x,
+            y: layout.roofSurfaceY + parapetHeight * 0.5,
+            z: rail.z,
+            width: rail.width,
+            height: parapetHeight,
+            depth: rail.depth,
+        });
+    });
+
+    const backGapHalfWidth = layout.bridgeHalfWidth + 0.22;
+    const rearParapetWidth = Math.max(0.54, (roofDeckWidth - backGapHalfWidth * 2) * 0.5);
+    if (rearParapetWidth > 0.34) {
+        [-1, 1].forEach((direction) => {
+            addDecorBox(group, baseGeometry, glassMaterial, {
+                x: direction * (backGapHalfWidth + rearParapetWidth * 0.5),
+                y: layout.roofSurfaceY + parapetHeight * 0.5,
+                z: layout.roofDeckMaxZ + 0.08,
+                width: rearParapetWidth,
+                height: parapetHeight,
+                depth: parapetThickness,
+            });
+        });
+    }
+
+    if (bridgeDepth > 0.22) {
+        [-1, 1].forEach((direction) => {
+            addDecorBox(group, baseGeometry, glassMaterial, {
+                x: direction * (layout.bridgeHalfWidth + 0.08),
+                y: layout.roofSurfaceY + parapetHeight * 0.5,
+                z: (layout.bridgeMinZ + layout.bridgeMaxZ) * 0.5,
+                width: parapetThickness,
+                height: parapetHeight,
+                depth: bridgeRailDepth,
+            });
+        });
+    }
+
+    [
+        { x: -layout.shaftHalfWidth, z: -layout.shaftHalfDepth },
+        { x: layout.shaftHalfWidth, z: -layout.shaftHalfDepth },
+        { x: -layout.shaftHalfWidth, z: layout.shaftHalfDepth },
+        { x: layout.shaftHalfWidth, z: layout.shaftHalfDepth },
+    ].forEach((corner) => {
+        addDecorBox(group, baseGeometry, liftFrameMaterial, {
+            x: layout.shaftCenterX + corner.x,
+            y: shaftCenterY,
+            z: layout.shaftCenterZ + corner.z,
+            width: postSize,
+            height: shaftHeight,
+            depth: postSize,
+        });
+    });
+
+    [-1, 1].forEach((direction) => {
+        addDecorBox(group, baseGeometry, glassMaterial, {
+            x: layout.shaftCenterX + direction * layout.shaftHalfWidth,
+            y: shaftCenterY,
+            z: shaftSideGlassCenterZ,
+            width: 0.08,
+            height: shaftHeight - 0.26,
+            depth: shaftSideGlassDepth,
+        });
+    });
+
+    addDecorBox(group, baseGeometry, deckMaterial, {
+        x: 0,
+        y: 0.07,
+        z: (layout.serviceLaneMinZ + layout.serviceLaneMaxZ) * 0.5,
+        width: layout.serviceLaneHalfWidth * 2,
+        height: 0.08,
+        depth: layout.serviceLaneMaxZ - layout.serviceLaneMinZ,
+    });
+    addDecorBox(group, baseGeometry, liftFrameMaterial, {
+        x: 0,
+        y: 0.115,
+        z: (layout.serviceLaneMinZ + layout.serviceLaneMaxZ) * 0.5,
+        width: layout.serviceLaneHalfWidth * 2 - 0.28,
+        height: 0.012,
+        depth: layout.serviceLaneMaxZ - layout.serviceLaneMinZ - 0.24,
+    });
+
+    const platformGroup = new THREE.Group();
+    platformGroup.position.set(layout.shaftCenterX, layout.bottomSurfaceY, layout.shaftCenterZ);
+
+    addDecorBox(platformGroup, baseGeometry, liftCoreMaterial, {
+        x: 0,
+        y: -0.2,
+        z: 0,
+        width: layout.liftPlatformWidth,
+        height: 0.26,
+        depth: layout.liftPlatformDepth,
+    });
+    addDecorBox(platformGroup, baseGeometry, deckMaterial, {
+        x: 0,
+        y: -0.045,
+        z: 0,
+        width: layout.liftPlatformWidth - 0.18,
+        height: 0.05,
+        depth: layout.liftPlatformDepth - 0.18,
+    });
+    addDecorBox(platformGroup, baseGeometry, guideLightMaterial, {
+        x: 0,
+        y: 0.01,
+        z: -layout.liftPlatformHalfDepth + 0.18,
+        width: layout.liftPlatformWidth - 0.74,
+        height: 0.012,
+        depth: 0.08,
+    });
+    [-1, 1].forEach((direction) => {
+        addDecorBox(platformGroup, baseGeometry, guideLightMaterial, {
+            x: direction * (layout.liftPlatformHalfWidth - 0.14),
+            y: 0.01,
+            z: 0,
+            width: 0.04,
+            height: 0.012,
+            depth: layout.liftPlatformDepth - 0.7,
+        });
+    });
+    group.add(platformGroup);
+
+    const indicatorGroup = new THREE.Group();
+    indicatorGroup.position.set(
+        layout.shaftCenterX,
+        1.2,
+        layout.shaftCenterZ - layout.shaftHalfDepth - 0.18
+    );
+    addDecorBox(indicatorGroup, baseGeometry, liftFrameMaterial, {
+        x: 0,
+        y: 0,
+        z: 0,
+        width: 0.16,
+        height: 0.42,
+        depth: 0.28,
+    });
+    const statusLight = addDecorBox(indicatorGroup, baseGeometry, statusLightMaterial, {
+        x: 0,
+        y: 0,
+        z: -0.08,
+        width: 0.04,
+        height: 0.18,
+        depth: 0.08,
+    });
+    group.add(indicatorGroup);
+
+    const roofViewLight = addDecorBox(group, baseGeometry, guideLightMaterial, {
+        x: 0,
+        y: layout.roofSurfaceY + 0.04,
+        z: layout.roofDeckMinZ + 0.72,
+        width: Math.min(4.8, roofDeckWidth * 0.42),
+        height: 0.014,
+        depth: 0.08,
+    });
+
+    if (!Array.isArray(group.userData.lorienVelmoreRoofLiftSystems)) {
+        group.userData.lorienVelmoreRoofLiftSystems = [];
+    }
+    group.userData.lorienVelmoreRoofLiftSystems.push({
+        platformGroup,
+        statusLightMaterial,
+        roofViewLightMaterial: roofViewLight.material,
     });
 }
 
@@ -5402,6 +5855,7 @@ function addLorienVelmoreGroundLandscape(
     baseGeometry,
     { building, frontOpeningHalfWidth, frontFacadeZ, exteriorApronZ, trimMaterial }
 ) {
+    const roofLiftLayout = getLorienVelmoreRoofLiftLayout(building);
     const curbMaterial = new THREE.MeshStandardMaterial({
         color: 0xe7ded1,
         emissive: 0x241d17,
@@ -5454,12 +5908,26 @@ function addLorienVelmoreGroundLandscape(
         });
     });
 
-    bedConfigs.push({
-        x: 0,
-        z: backBedZ,
-        width: building.width - 1.76,
-        depth: backBedDepth,
-    });
+    const rearLandscapeWidth = building.width - 1.76;
+    const rearLiftClearWidth = roofLiftLayout.serviceLaneHalfWidth * 2 + 0.92;
+    const rearBedSideWidth = Math.max(0, (rearLandscapeWidth - rearLiftClearWidth) * 0.5 - 0.14);
+    if (rearBedSideWidth > 0.52) {
+        [-1, 1].forEach((direction) => {
+            bedConfigs.push({
+                x: direction * (rearLiftClearWidth * 0.5 + rearBedSideWidth * 0.5 + 0.14),
+                z: backBedZ,
+                width: rearBedSideWidth,
+                depth: backBedDepth,
+            });
+        });
+    } else {
+        bedConfigs.push({
+            x: 0,
+            z: backBedZ,
+            width: rearLandscapeWidth,
+            depth: backBedDepth,
+        });
+    }
 
     bedConfigs.forEach((bed, index) => {
         addDecorBox(group, baseGeometry, curbMaterial, {

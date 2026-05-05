@@ -70,6 +70,15 @@ const MINE_CHAIN_REACTION_STEP_DELAY_MS = 48;
 const MINE_CHAIN_REACTION_DELAY_JITTER_MS = 24;
 const POSITION_HISTORY_MAX_AGE_MS = 260;
 const POSITION_HISTORY_RETENTION_MS = 4000;
+const MINE_THROW_FACADE_FALL_CLEARANCE = 1.25;
+const MINE_THROW_FACADE_FREEFALL_SPEED = 3.6;
+const MINE_THROW_ELEVATED_SURFACE_THRESHOLD = 4.2;
+const MINE_THROW_SPAWN_CLEARANCE_STEP = 0.72;
+const MINE_THROW_SPAWN_CLEARANCE_ATTEMPTS = 4;
+const MINE_THROW_NEAR_BARRIER_MAX_HEIGHT = 3.2;
+const MINE_THROW_NEAR_BARRIER_MAX_DISTANCE = 2.6;
+const MINE_THROW_NEAR_BARRIER_MAX_DROP = 0.6;
+const MINE_THROW_NEAR_BARRIER_MIN_VERTICAL_SPEED = -1.2;
 
 const mineForward = new THREE.Vector3();
 const mineThrowVelocity = new THREE.Vector3();
@@ -328,7 +337,7 @@ export function createMineSystemController(options = {}) {
                     : MINE_DEPLOY_COOLDOWN_MS,
             message: includePlayerMessages
                 ? useThrowMode
-                    ? 'Mine thrown ahead. It detonates on impact.'
+                    ? 'Mine thrown ahead. It detonates when it reaches the ground or a target.'
                     : 'Mine dropped behind your car.'
                 : '',
         };
@@ -374,6 +383,21 @@ export function createMineSystemController(options = {}) {
             ? resolvedSourceY + MINE_THROW_UP_OFFSET
             : groundHeight + MINE_SURFACE_OFFSET;
         mineGroundPosition.y = spawnY;
+        if (useThrowMode) {
+            const baseGroundHeight = getGroundHeightAt(sourceX, sourceZ);
+            const elevatedSurfaceHeight =
+                Number.isFinite(baseGroundHeight) && Number.isFinite(resolvedSourceY)
+                    ? resolvedSourceY - baseGroundHeight
+                    : 0;
+            if (elevatedSurfaceHeight >= MINE_THROW_ELEVATED_SURFACE_THRESHOLD) {
+                applyElevatedThrowSpawnClearance({
+                    spawnPosition: mineGroundPosition,
+                    forward: mineForward,
+                    collisionRadius: MINE_THROW_COLLISION_RADIUS,
+                    obstacles: staticObstacles,
+                });
+            }
+        }
 
         const carryX = Number(sourceVelocityX) || 0;
         const carryZ = Number(sourceVelocityZ) || 0;
@@ -508,7 +532,9 @@ export function createMineSystemController(options = {}) {
                 });
                 const resolvedImpact = resolveEarliestThrownMineImpact(
                     specialImpact,
-                    obstacleImpact
+                    shouldIgnoreThrownMineObstacleImpact(mine, obstacleImpact)
+                        ? null
+                        : obstacleImpact
                 );
                 let thrownImpact = resolvedImpact;
                 if (enableLocalCollision && localMovement && localPlayerId && !localOwnMine) {
@@ -1157,6 +1183,18 @@ export function createMineSystemController(options = {}) {
         existingMine.landedAt =
             existingMine.landedAt ??
             (existingMine.landed ? existingMine.createdAt : Number.POSITIVE_INFINITY);
+        if (!Number.isFinite(existingMine.launchY)) {
+            existingMine.launchY = snapshot.y;
+        }
+        if (!Number.isFinite(existingMine.launchX)) {
+            existingMine.launchX = snapshot.x;
+        }
+        if (!Number.isFinite(existingMine.launchZ)) {
+            existingMine.launchZ = snapshot.z;
+        }
+        if (!Number.isFinite(existingMine.launchSurfaceElevation)) {
+            existingMine.launchSurfaceElevation = resolveMineLaunchSurfaceElevation(snapshot);
+        }
         if (preferIncomingPosition || !existingMine.landed) {
             existingMine.mesh.position.set(snapshot.x, snapshot.y, snapshot.z);
         }
@@ -1179,12 +1217,29 @@ export function createMineSystemController(options = {}) {
             thrown: snapshot.thrown,
             landed: !snapshot.thrown,
             landedAt: snapshot.thrown ? Number.POSITIVE_INFINITY : snapshot.createdAt,
+            launchX: snapshot.x,
+            launchY: snapshot.y,
+            launchZ: snapshot.z,
+            launchSurfaceElevation: resolveMineLaunchSurfaceElevation(snapshot),
             velocity: new THREE.Vector3(snapshot.velocityX, snapshot.velocityY, snapshot.velocityZ),
             mesh: meshBundle.group,
             meshBundle,
             ledMaterial: meshBundle.ledMaterial,
             pulsePhase: Math.random() * Math.PI * 2,
         };
+    }
+
+    function resolveMineLaunchSurfaceElevation(snapshot) {
+        if (!snapshot?.thrown) {
+            return 0;
+        }
+
+        const launchSurfaceY = (Number(snapshot.y) || 0) - MINE_THROW_UP_OFFSET;
+        const baseGroundHeight = getGroundHeightAt(Number(snapshot.x) || 0, Number(snapshot.z) || 0);
+        if (!Number.isFinite(baseGroundHeight)) {
+            return 0;
+        }
+        return Math.max(0, launchSurfaceY - baseGroundHeight);
     }
 
     function removeMine(mineId) {
@@ -2327,7 +2382,10 @@ function resolveThrownMineObstacleImpact({
             continue;
         }
         if (!bestImpact || impact.t < bestImpact.t) {
-            bestImpact = impact;
+            bestImpact = {
+                ...impact,
+                obstacle,
+            };
         }
     }
 
@@ -2339,6 +2397,147 @@ function resolveThrownMineObstacleImpact({
         ...bestImpact,
         y: THREE.MathUtils.lerp(startY, endY, bestImpact.t),
     };
+}
+
+function applyElevatedThrowSpawnClearance({
+    spawnPosition = null,
+    forward = null,
+    collisionRadius = MINE_THROW_COLLISION_RADIUS,
+    obstacles = [],
+} = {}) {
+    if (!spawnPosition || !forward || !Array.isArray(obstacles) || obstacles.length === 0) {
+        return;
+    }
+
+    for (let attempt = 0; attempt < MINE_THROW_SPAWN_CLEARANCE_ATTEMPTS; attempt += 1) {
+        if (
+            !isThrownMinePointInsideObstacle({
+                x: spawnPosition.x,
+                y: spawnPosition.y,
+                z: spawnPosition.z,
+                collisionRadius,
+                obstacles,
+            })
+        ) {
+            return;
+        }
+        spawnPosition.addScaledVector(forward, MINE_THROW_SPAWN_CLEARANCE_STEP);
+    }
+}
+
+function isThrownMinePointInsideObstacle({
+    x = 0,
+    y = 0,
+    z = 0,
+    collisionRadius = MINE_THROW_COLLISION_RADIUS,
+    obstacles = [],
+} = {}) {
+    if (!Array.isArray(obstacles) || obstacles.length === 0) {
+        return false;
+    }
+
+    for (let index = 0; index < obstacles.length; index += 1) {
+        const obstacle = obstacles[index];
+        if (
+            !isThrownMineObstacleActiveAtHeight(
+                obstacle,
+                y,
+                y,
+                Math.max(0, Number(collisionRadius) || 0)
+            )
+        ) {
+            continue;
+        }
+
+        if (obstacle?.type === 'circle') {
+            const dx = x - (Number(obstacle.x) || 0);
+            const dz = z - (Number(obstacle.z) || 0);
+            const expandedRadius = Math.max(0, Number(obstacle.radius) || 0) + collisionRadius;
+            if (dx * dx + dz * dz <= expandedRadius * expandedRadius) {
+                return true;
+            }
+            continue;
+        }
+
+        if (
+            obstacle?.type === 'aabb' &&
+            x >= Number(obstacle.minX) - collisionRadius &&
+            x <= Number(obstacle.maxX) + collisionRadius &&
+            z >= Number(obstacle.minZ) - collisionRadius &&
+            z <= Number(obstacle.maxZ) + collisionRadius
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function shouldIgnoreThrownMineObstacleImpact(mine, impact) {
+    if (!mine || !impact) {
+        return false;
+    }
+
+    const launchY = Number.isFinite(mine.launchY) ? mine.launchY : mine.mesh?.position?.y;
+    if (
+        Number.isFinite(launchY) &&
+        (Number(mine?.velocity?.y) || 0) < -MINE_THROW_FACADE_FREEFALL_SPEED &&
+        (Number(impact.y) || launchY) < launchY - MINE_THROW_FACADE_FALL_CLEARANCE
+    ) {
+        return true;
+    }
+
+    return isNearLaunchLowBarrierImpact(mine, impact);
+}
+
+function isNearLaunchLowBarrierImpact(mine, impact) {
+    const obstacle = impact?.obstacle;
+    if (!obstacle) {
+        return false;
+    }
+
+    const launchSurfaceElevation = Number(mine?.launchSurfaceElevation) || 0;
+    if (launchSurfaceElevation < MINE_THROW_ELEVATED_SURFACE_THRESHOLD) {
+        return false;
+    }
+
+    const obstacleMinY = Number.isFinite(obstacle.minY) ? obstacle.minY : Number.NEGATIVE_INFINITY;
+    const obstacleMaxY = Number.isFinite(obstacle.maxY) ? obstacle.maxY : Number.POSITIVE_INFINITY;
+    const obstacleHeight = obstacleMaxY - obstacleMinY;
+    if (
+        !Number.isFinite(obstacleHeight) ||
+        obstacleHeight <= 0 ||
+        obstacleHeight > MINE_THROW_NEAR_BARRIER_MAX_HEIGHT
+    ) {
+        return false;
+    }
+
+    const launchX = Number.isFinite(mine?.launchX) ? mine.launchX : mine?.mesh?.position?.x;
+    const resolvedLaunchY = Number.isFinite(mine?.launchY) ? mine.launchY : mine?.mesh?.position?.y;
+    const launchZ = Number.isFinite(mine?.launchZ) ? mine.launchZ : mine?.mesh?.position?.z;
+    if (!Number.isFinite(launchX) || !Number.isFinite(resolvedLaunchY) || !Number.isFinite(launchZ)) {
+        return false;
+    }
+
+    const impactDistance = Math.hypot(
+        (Number(impact.x) || launchX) - launchX,
+        (Number(impact.z) || launchZ) - launchZ
+    );
+    if (impactDistance > MINE_THROW_NEAR_BARRIER_MAX_DISTANCE) {
+        return false;
+    }
+
+    const impactY = Number(impact.y) || resolvedLaunchY;
+    if (resolvedLaunchY - impactY > MINE_THROW_NEAR_BARRIER_MAX_DROP) {
+        return false;
+    }
+
+    const verticalVelocity = Number(mine?.velocity?.y) || 0;
+    if (verticalVelocity < MINE_THROW_NEAR_BARRIER_MIN_VERTICAL_SPEED) {
+        return false;
+    }
+
+    return resolvedLaunchY >= obstacleMinY + 0.45;
 }
 
 function isThrownMineObstacleActiveAtHeight(

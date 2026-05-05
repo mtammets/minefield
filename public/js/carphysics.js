@@ -7,6 +7,7 @@ import {
     PLAYER_TOP_SPEED_LIMIT_MAX_KPH,
 } from './constants.js';
 import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
+import { constrainPositionToLorienVelmoreRoofLiftDriveBounds } from './environment/lorien-gallery.js';
 import { constrainPositionToUndergroundParkingDriveBounds } from './environment/underground-parking.js';
 import { constrainPositionToUpperDeckDriveBounds } from './environment/upper-deck.js';
 
@@ -231,6 +232,7 @@ const right = new THREE.Vector2();
 const movement = new THREE.Vector3();
 const collisionNormal = new THREE.Vector2();
 const mergedObstacleCandidates = [];
+const obstacleCollisionSamples = [{ x: 0, z: 0 }, { x: 0, z: 0 }, { x: 0, z: 0 }];
 const physicsPosition = new THREE.Vector3();
 const previousPhysicsPosition = new THREE.Vector3();
 const interpolatedPosition = new THREE.Vector3();
@@ -724,6 +726,12 @@ export function updatePlayerPhysics(
     applyUpperDeckConstraintResponse(
         constrainPositionToUpperDeckDriveBounds(physicsPosition, previousPhysicsPosition)
     );
+    applyLorienRoofLiftConstraintResponse(
+        constrainPositionToLorienVelmoreRoofLiftDriveBounds(
+            physicsPosition,
+            previousPhysicsPosition
+        )
+    );
     applyUndergroundParkingConstraintResponse(
         constrainPositionToUndergroundParkingDriveBounds(physicsPosition, previousPhysicsPosition)
     );
@@ -731,6 +739,12 @@ export function updatePlayerPhysics(
         applyTerrainSupport(sampleGroundHeight, dt);
         applyUpperDeckConstraintResponse(
             constrainPositionToUpperDeckDriveBounds(physicsPosition, previousPhysicsPosition)
+        );
+        applyLorienRoofLiftConstraintResponse(
+            constrainPositionToLorienVelmoreRoofLiftDriveBounds(
+                physicsPosition,
+                previousPhysicsPosition
+            )
         );
         applyUndergroundParkingConstraintResponse(
             constrainPositionToUndergroundParkingDriveBounds(
@@ -979,32 +993,15 @@ function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
                 continue;
             }
             if (obstacle.type === 'circle') {
-                const nx = position.x - obstacle.x;
-                const nz = position.z - obstacle.z;
-                const combinedRadius = obstacle.radius + VEHICLE_COLLISION_RADIUS;
-                const distanceSq = nx * nx + nz * nz;
-                if (distanceSq >= combinedRadius * combinedRadius) {
+                const collision = resolveVehicleCircleObstacleCollision(position, obstacle);
+                if (!collision) {
                     continue;
                 }
 
-                let normalX = nx;
-                let normalZ = nz;
-                let distance = Math.sqrt(distanceSq);
-
-                if (distance < 0.0001) {
-                    normalX = -Math.sin(physicsRotationY);
-                    normalZ = -Math.cos(physicsRotationY);
-                    distance = 1;
-                } else {
-                    normalX /= distance;
-                    normalZ /= distance;
-                }
-
-                const penetration = combinedRadius - distance;
-                position.x += normalX * penetration;
-                position.z += normalZ * penetration;
-                collisionNormal.x += normalX;
-                collisionNormal.y += normalZ;
+                position.x += collision.normalX * collision.penetration;
+                position.z += collision.normalZ * collision.penetration;
+                collisionNormal.x += collision.normalX;
+                collisionNormal.y += collision.normalZ;
                 collided = true;
                 collidedThisPass = true;
 
@@ -1022,50 +1019,15 @@ function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
                 continue;
             }
 
-            const closestX = THREE.MathUtils.clamp(position.x, obstacle.minX, obstacle.maxX);
-            const closestZ = THREE.MathUtils.clamp(position.z, obstacle.minZ, obstacle.maxZ);
-            let dx = position.x - closestX;
-            let dz = position.z - closestZ;
-            let distanceSq = dx * dx + dz * dz;
-            if (distanceSq >= VEHICLE_COLLISION_RADIUS * VEHICLE_COLLISION_RADIUS) {
+            const collision = resolveVehicleAabbObstacleCollision(position, obstacle);
+            if (!collision) {
                 continue;
             }
 
-            let normalX = dx;
-            let normalZ = dz;
-            let distance = Math.sqrt(distanceSq);
-
-            if (distance < 0.0001) {
-                const toLeft = Math.abs(position.x - obstacle.minX);
-                const toRight = Math.abs(obstacle.maxX - position.x);
-                const toBottom = Math.abs(position.z - obstacle.minZ);
-                const toTop = Math.abs(obstacle.maxZ - position.z);
-                const minDistance = Math.min(toLeft, toRight, toBottom, toTop);
-
-                if (minDistance === toLeft) {
-                    normalX = -1;
-                    normalZ = 0;
-                } else if (minDistance === toRight) {
-                    normalX = 1;
-                    normalZ = 0;
-                } else if (minDistance === toBottom) {
-                    normalX = 0;
-                    normalZ = -1;
-                } else {
-                    normalX = 0;
-                    normalZ = 1;
-                }
-                distance = 0;
-            } else {
-                normalX /= distance;
-                normalZ /= distance;
-            }
-
-            const penetration = VEHICLE_COLLISION_RADIUS - distance;
-            position.x += normalX * penetration;
-            position.z += normalZ * penetration;
-            collisionNormal.x += normalX;
-            collisionNormal.y += normalZ;
+            position.x += collision.normalX * collision.penetration;
+            position.z += collision.normalZ * collision.penetration;
+            collisionNormal.x += collision.normalX;
+            collisionNormal.y += collision.normalZ;
             collided = true;
             collidedThisPass = true;
 
@@ -1122,6 +1084,121 @@ function constrainToObstacles(position, obstacleCandidates, impactSpeed = 0) {
             };
         }
     }
+}
+
+function resolveVehicleCircleObstacleCollision(position, obstacle) {
+    const collisionRadius = populateVehicleCollisionSamples(position, obstacleCollisionSamples);
+    let bestCollision = null;
+
+    for (let sampleIndex = 0; sampleIndex < obstacleCollisionSamples.length; sampleIndex += 1) {
+        const sample = obstacleCollisionSamples[sampleIndex];
+        const nx = sample.x - obstacle.x;
+        const nz = sample.z - obstacle.z;
+        const combinedRadius = obstacle.radius + collisionRadius;
+        const distanceSq = nx * nx + nz * nz;
+        if (distanceSq >= combinedRadius * combinedRadius) {
+            continue;
+        }
+
+        let normalX = nx;
+        let normalZ = nz;
+        let distance = Math.sqrt(distanceSq);
+
+        if (distance < 0.0001) {
+            normalX = -Math.sin(physicsRotationY);
+            normalZ = -Math.cos(physicsRotationY);
+            distance = 1;
+        } else {
+            normalX /= distance;
+            normalZ /= distance;
+        }
+
+        const penetration = combinedRadius - distance;
+        if (!bestCollision || penetration > bestCollision.penetration) {
+            bestCollision = {
+                normalX,
+                normalZ,
+                penetration,
+            };
+        }
+    }
+
+    return bestCollision;
+}
+
+function resolveVehicleAabbObstacleCollision(position, obstacle) {
+    const collisionRadius = populateVehicleCollisionSamples(position, obstacleCollisionSamples);
+    let bestCollision = null;
+
+    for (let sampleIndex = 0; sampleIndex < obstacleCollisionSamples.length; sampleIndex += 1) {
+        const sample = obstacleCollisionSamples[sampleIndex];
+        const closestX = THREE.MathUtils.clamp(sample.x, obstacle.minX, obstacle.maxX);
+        const closestZ = THREE.MathUtils.clamp(sample.z, obstacle.minZ, obstacle.maxZ);
+        let dx = sample.x - closestX;
+        let dz = sample.z - closestZ;
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq >= collisionRadius * collisionRadius) {
+            continue;
+        }
+
+        let normalX = dx;
+        let normalZ = dz;
+        let distance = Math.sqrt(distanceSq);
+
+        if (distance < 0.0001) {
+            const toLeft = Math.abs(sample.x - obstacle.minX);
+            const toRight = Math.abs(obstacle.maxX - sample.x);
+            const toBottom = Math.abs(sample.z - obstacle.minZ);
+            const toTop = Math.abs(obstacle.maxZ - sample.z);
+            const minDistance = Math.min(toLeft, toRight, toBottom, toTop);
+
+            if (minDistance === toLeft) {
+                normalX = -1;
+                normalZ = 0;
+            } else if (minDistance === toRight) {
+                normalX = 1;
+                normalZ = 0;
+            } else if (minDistance === toBottom) {
+                normalX = 0;
+                normalZ = -1;
+            } else {
+                normalX = 0;
+                normalZ = 1;
+            }
+            distance = 0;
+        } else {
+            normalX /= distance;
+            normalZ /= distance;
+        }
+
+        const penetration = collisionRadius - distance;
+        if (!bestCollision || penetration > bestCollision.penetration) {
+            bestCollision = {
+                normalX,
+                normalZ,
+                penetration,
+            };
+        }
+    }
+
+    return bestCollision;
+}
+
+function populateVehicleCollisionSamples(position, outSamples = obstacleCollisionSamples) {
+    const capsule = buildCapsule2D(
+        position.x,
+        position.z,
+        physicsRotationY,
+        VEHICLE_COLLISION_HALF_WIDTH,
+        VEHICLE_COLLISION_HALF_LENGTH
+    );
+    outSamples[0].x = capsule.ax;
+    outSamples[0].z = capsule.az;
+    outSamples[1].x = position.x;
+    outSamples[1].z = position.z;
+    outSamples[2].x = capsule.bx;
+    outSamples[2].z = capsule.bz;
+    return capsule.radius;
 }
 
 function isObstacleActiveAtHeight(obstacle, sampleY = 0) {
@@ -1566,6 +1643,20 @@ function applyUpperDeckConstraintResponse(constraintResult) {
     vehicleState.speed = 0;
     vehicleState.acceleration = 0;
     vehicleState.yawRate *= 0.4;
+}
+
+function applyLorienRoofLiftConstraintResponse(constraintResult) {
+    if (
+        !constraintResult ||
+        (constraintResult.mode !== 'lorien_roof_lift_block' &&
+            constraintResult.mode !== 'lorien_roof_lift_platform')
+    ) {
+        return;
+    }
+    vehicleState.velocity.multiplyScalar(0.45);
+    vehicleState.speed *= 0.45;
+    vehicleState.acceleration = 0;
+    vehicleState.yawRate *= 0.55;
 }
 
 function applyUndergroundParkingConstraintResponse(constraintResult) {

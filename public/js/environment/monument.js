@@ -2,6 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import { centralParkingLot } from './layout.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
+import { BILLBOARD_CONTENT_GROUP_IDS } from './billboard-content-manager.js';
 import { createVideoDisplayPanel } from './billboards.js';
 
 export const MONUMENT_SCREEN_VIDEO_URLS = [
@@ -143,6 +144,7 @@ export function createMonumentLayer(screenEntries = [], effectEntries = []) {
         const panel = createVideoDisplayPanel({
             width: ledFaceWidth,
             height: ledFaceHeight,
+            contentGroupId: BILLBOARD_CONTENT_GROUP_IDS.monumentVideoRing,
             doubleSided: false,
             screenEntries,
             videoUrls: MONUMENT_SCREEN_VIDEO_URLS,

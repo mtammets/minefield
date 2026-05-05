@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "updatedAt": "2026-05-05T20:58:23.363Z",
+  "groups": {
+    "kiosk-totems": {
+      "groupId": "kiosk-totems",
+      "mediaKind": "image",
+      "updatedAt": "2026-05-05T20:58:23.363Z",
+      "items": [
+        {
+          "id": "2e7e48c5c9c6",
+          "displayName": "Screenshot 2026-05-05 at 23.56.15.webp",
+          "fileName": "01-screenshot-2026-05-05-at-23-56-15.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 46282,
+          "url": "/uploads/billboards/kiosk-totems/01-screenshot-2026-05-05-at-23-56-15.webp?v=20260505205823363"
+        },
+        {
+          "id": "69aa16ef9d3f",
+          "displayName": "7f6c112f-27ec-42f8-a157-bc79cfcd6493.webp",
+          "fileName": "02-7f6c112f-27ec-42f8-a157-bc79cfcd6493.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 68632,
+          "url": "/uploads/billboards/kiosk-totems/02-7f6c112f-27ec-42f8-a157-bc79cfcd6493.webp?v=20260505205823363"
+        },
+        {
+          "id": "51d243f6427d",
+          "displayName": "4640e54b-f571-4e7b-a01f-767f337e505f.webp",
+          "fileName": "03-4640e54b-f571-4e7b-a01f-767f337e505f.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 109570,
+          "url": "/uploads/billboards/kiosk-totems/03-4640e54b-f571-4e7b-a01f-767f337e505f.webp?v=20260505205823363"
+        }
+      ]
+    },
+    "wide-posters": {
+      "groupId": "wide-posters",
+      "mediaKind": "image",
+      "updatedAt": "2026-05-05T18:47:27.876Z",
+      "items": [
+        {
+          "id": "49b6b76096af",
+          "displayName": "Screenshot 2026-05-05 at 21.47.13.webp",
+          "fileName": "01-screenshot-2026-05-05-at-21-47-13.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 34210,
+          "url": "/uploads/billboards/wide-posters/01-screenshot-2026-05-05-at-21-47-13.webp?v=20260505184727876"
+        },
+        {
+          "id": "9deb1b0c8241",
+          "displayName": "Screenshot 2026-05-05 at 21.47.04.webp",
+          "fileName": "02-screenshot-2026-05-05-at-21-47-04.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 37328,
+          "url": "/uploads/billboards/wide-posters/02-screenshot-2026-05-05-at-21-47-04.webp?v=20260505184727876"
+        },
+        {
+          "id": "8863e66d938e",
+          "displayName": "Screenshot 2026-05-05 at 21.46.54.webp",
+          "fileName": "03-screenshot-2026-05-05-at-21-46-54.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 46540,
+          "url": "/uploads/billboards/wide-posters/03-screenshot-2026-05-05-at-21-46-54.webp?v=20260505184727876"
+        }
+      ]
+    },
+    "tall-posters": {
+      "groupId": "tall-posters",
+      "mediaKind": "image",
+      "updatedAt": "2026-05-05T19:35:39.639Z",
+      "items": [
+        {
+          "id": "c06a9d6e4fcf",
+          "displayName": "7f6c112f-27ec-42f8-a157-bc79cfcd6493.webp",
+          "fileName": "01-7f6c112f-27ec-42f8-a157-bc79cfcd6493.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 68632,
+          "url": "/uploads/billboards/tall-posters/01-7f6c112f-27ec-42f8-a157-bc79cfcd6493.webp?v=20260505193539639"
+        },
+        {
+          "id": "b77e1349bf63",
+          "displayName": "4640e54b-f571-4e7b-a01f-767f337e505f.webp",
+          "fileName": "02-4640e54b-f571-4e7b-a01f-767f337e505f.webp",
+          "mimeType": "image/webp",
+          "sizeBytes": 109570,
+          "url": "/uploads/billboards/tall-posters/02-4640e54b-f571-4e7b-a01f-767f337e505f.webp?v=20260505193539639"
+        }
+      ]
+    }
+  }
+}

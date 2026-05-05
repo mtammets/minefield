@@ -395,6 +395,10 @@ const LORIEN_GALLERY_AUDIO_CONFIG = Object.freeze({
     reverbSendNear: 0.34,
     reverbSendFar: 0.52,
 });
+const LORIEN_GALLERY_OCCLUSION_MIN_GAIN = 0.22;
+const LORIEN_GALLERY_OCCLUSION_MIN_WET_GAIN = 0.54;
+const LORIEN_GALLERY_OCCLUSION_MIN_CUTOFF_HZ = 1050;
+const LORIEN_GALLERY_OCCLUSION_MIN_WET_CUTOFF_HZ = 920;
 const UFO_DISKO_STORE_AUDIO_CONFIG = Object.freeze({
     refDistance: 3.8,
     maxDistance: 30,
@@ -1308,7 +1312,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const isNear = localHit || distanceMeters <= 18;
         const normalizedDistance = clampNumber(distanceMeters, 0, 120, 18);
         const distanceFade = 1 - clampNumber(normalizedDistance / 120, 0, 1, 0);
-        const occlusion = resolveMineDetonationOcclusion(position);
+        const occlusion = resolveWorldAudioOcclusion(position);
         const occlusionGain = lerpNumber(1, MINE_DETONATION_OCCLUSION_MIN_GAIN, occlusion);
         const occlusionRate = lerpNumber(1, MINE_DETONATION_OCCLUSION_MIN_RATE, occlusion);
         playOneShot(isNear ? 'mineDetonateNear01' : 'mineDetonateFar01', {
@@ -1339,7 +1343,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
     }
 
-    function resolveMineDetonationOcclusion(position) {
+    function resolveWorldAudioOcclusion(position) {
         const listenerPosition = runtime.playerPosition;
         if (!listenerPosition || !position) {
             return 0;
@@ -1581,11 +1585,35 @@ export function createAudioSystem({ camera = null } = {}) {
         const wideAreaMix = 1 - clampNumber(distance / MONUMENT_AUDIO_CONFIG.maxDistance, 0, 1, 0);
         const activeMix = shouldBeAudible ? 1 : 0;
         const definitionGain = SOUND_DEFINITIONS[MONUMENT_MUSIC_SOUND_ID]?.gain || 1;
-        const occlusionMix = 1 - clampNumber(frameState.lowerLevelSilenceFactor, 0, 1, 0);
+        const lowerLevelMix = clampNumber(frameState.lowerLevelSilenceFactor, 0, 1, 0);
+        const sourceOcclusionMix = lerpNumber(1, 0.34, lowerLevelMix);
+        const dryOcclusionMix = lerpNumber(1, 0.12, lowerLevelMix);
+        const wetOcclusionMix = lerpNumber(1, 0.74, lowerLevelMix);
+        const echoBoost = lerpNumber(1, 1.42, lowerLevelMix);
+        const baseToneCutoffHz = lerpNumber(
+            MONUMENT_AUDIO_CONFIG.farCutoffHz,
+            MONUMENT_AUDIO_CONFIG.nearCutoffHz,
+            nearMix
+        );
+        const baseWetCutoffHz = lerpNumber(
+            MONUMENT_AUDIO_CONFIG.farWetLowpassHz,
+            MONUMENT_AUDIO_CONFIG.nearWetLowpassHz,
+            nearMix
+        );
+        const baseDelaySec = lerpNumber(
+            MONUMENT_AUDIO_CONFIG.farDelaySec,
+            MONUMENT_AUDIO_CONFIG.nearDelaySec,
+            nearMix
+        );
+        const baseFeedback = lerpNumber(
+            MONUMENT_AUDIO_CONFIG.farFeedback,
+            MONUMENT_AUDIO_CONFIG.nearFeedback,
+            nearMix
+        );
 
         instance.sourceGain.gain.setTargetAtTime(
             activeMix *
-                occlusionMix *
+                sourceOcclusionMix *
                 definitionGain *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.farSourceGain,
@@ -1598,7 +1626,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.dryGain.gain.setTargetAtTime(
             activeMix *
-                occlusionMix *
+                dryOcclusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.farDryGain,
                     MONUMENT_AUDIO_CONFIG.nearDryGain,
@@ -1609,73 +1637,60 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.wetGain.gain.setTargetAtTime(
             activeMix *
-                occlusionMix *
+                wetOcclusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.farWetGain,
                     MONUMENT_AUDIO_CONFIG.nearWetGain,
                     nearMix
-                ),
+                ) *
+                echoBoost,
             now,
             0.28
         );
         instance.delaySend.gain.setTargetAtTime(
             activeMix *
-                occlusionMix *
+                wetOcclusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.delaySendFar,
                     MONUMENT_AUDIO_CONFIG.delaySendNear,
                     nearMix
                 ) *
-                (0.64 + wideAreaMix * 0.36),
+                (0.64 + wideAreaMix * 0.36) *
+                echoBoost,
             now,
             0.26
         );
         instance.reverbSend.gain.setTargetAtTime(
             activeMix *
-                occlusionMix *
+                wetOcclusionMix *
                 lerpNumber(
                     MONUMENT_AUDIO_CONFIG.reverbSendFar,
                     MONUMENT_AUDIO_CONFIG.reverbSendNear,
                     nearMix
                 ) *
-                (0.72 + wideAreaMix * 0.28),
+                (0.72 + wideAreaMix * 0.28) *
+                lerpNumber(1, 1.54, lowerLevelMix),
             now,
             0.3
         );
         instance.toneFilter.frequency.setTargetAtTime(
-            lerpNumber(
-                MONUMENT_AUDIO_CONFIG.farCutoffHz,
-                MONUMENT_AUDIO_CONFIG.nearCutoffHz,
-                nearMix
-            ),
+            baseToneCutoffHz * lerpNumber(1, 0.74, lowerLevelMix),
             now,
             0.24
         );
         instance.toneFilter.Q.setTargetAtTime(lerpNumber(0.24, 0.7, nearMix), now, 0.28);
         instance.wetFilter.frequency.setTargetAtTime(
-            lerpNumber(
-                MONUMENT_AUDIO_CONFIG.farWetLowpassHz,
-                MONUMENT_AUDIO_CONFIG.nearWetLowpassHz,
-                nearMix
-            ),
+            baseWetCutoffHz * lerpNumber(1, 0.86, lowerLevelMix),
             now,
             0.3
         );
         instance.delay.delayTime.setTargetAtTime(
-            lerpNumber(
-                MONUMENT_AUDIO_CONFIG.farDelaySec,
-                MONUMENT_AUDIO_CONFIG.nearDelaySec,
-                nearMix
-            ),
+            Math.min(0.42, baseDelaySec + lowerLevelMix * 0.05),
             now,
             0.22
         );
         instance.delayFeedback.gain.setTargetAtTime(
-            lerpNumber(
-                MONUMENT_AUDIO_CONFIG.farFeedback,
-                MONUMENT_AUDIO_CONFIG.nearFeedback,
-                nearMix
-            ),
+            Math.min(0.58, baseFeedback + lowerLevelMix * 0.08),
             now,
             0.28
         );
@@ -1720,6 +1735,9 @@ export function createAudioSystem({ camera = null } = {}) {
             );
         const wideAreaMix =
             1 - clampNumber(distance / LORIEN_GALLERY_AUDIO_CONFIG.maxDistance, 0, 1, 0);
+        const occlusion = resolveWorldAudioOcclusion({ x, y, z });
+        const occlusionGain = lerpNumber(1, LORIEN_GALLERY_OCCLUSION_MIN_GAIN, occlusion);
+        const occlusionWetGain = lerpNumber(1, LORIEN_GALLERY_OCCLUSION_MIN_WET_GAIN, occlusion);
         const activeMix =
             Boolean(videoDisplayState.isPlaybackActive) &&
             !Boolean(frameState.isPaused) &&
@@ -1731,6 +1749,7 @@ export function createAudioSystem({ camera = null } = {}) {
 
         instance.sourceGain.gain.setTargetAtTime(
             activeMix *
+                occlusionGain *
                 lerpNumber(
                     LORIEN_GALLERY_AUDIO_CONFIG.farSourceGain,
                     LORIEN_GALLERY_AUDIO_CONFIG.nearSourceGain,
@@ -1742,6 +1761,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.dryGain.gain.setTargetAtTime(
             activeMix *
+                occlusionGain *
                 lerpNumber(
                     LORIEN_GALLERY_AUDIO_CONFIG.farDryGain,
                     LORIEN_GALLERY_AUDIO_CONFIG.nearDryGain,
@@ -1752,6 +1772,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.wetGain.gain.setTargetAtTime(
             activeMix *
+                occlusionWetGain *
                 lerpNumber(
                     LORIEN_GALLERY_AUDIO_CONFIG.farWetGain,
                     LORIEN_GALLERY_AUDIO_CONFIG.nearWetGain,
@@ -1762,6 +1783,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.delaySend.gain.setTargetAtTime(
             activeMix *
+                occlusionWetGain *
                 lerpNumber(
                     LORIEN_GALLERY_AUDIO_CONFIG.delaySendFar,
                     LORIEN_GALLERY_AUDIO_CONFIG.delaySendNear,
@@ -1772,6 +1794,7 @@ export function createAudioSystem({ camera = null } = {}) {
         );
         instance.reverbSend.gain.setTargetAtTime(
             activeMix *
+                occlusionWetGain *
                 lerpNumber(
                     LORIEN_GALLERY_AUDIO_CONFIG.reverbSendFar,
                     LORIEN_GALLERY_AUDIO_CONFIG.reverbSendNear,
@@ -1783,7 +1806,11 @@ export function createAudioSystem({ camera = null } = {}) {
         instance.toneFilter.frequency.setTargetAtTime(
             lerpNumber(
                 LORIEN_GALLERY_AUDIO_CONFIG.farCutoffHz,
-                LORIEN_GALLERY_AUDIO_CONFIG.nearCutoffHz,
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.nearCutoffHz,
+                    LORIEN_GALLERY_OCCLUSION_MIN_CUTOFF_HZ,
+                    occlusion
+                ),
                 nearMix
             ),
             now,
@@ -1792,7 +1819,11 @@ export function createAudioSystem({ camera = null } = {}) {
         instance.wetFilter.frequency.setTargetAtTime(
             lerpNumber(
                 LORIEN_GALLERY_AUDIO_CONFIG.farWetLowpassHz,
-                LORIEN_GALLERY_AUDIO_CONFIG.nearWetLowpassHz,
+                lerpNumber(
+                    LORIEN_GALLERY_AUDIO_CONFIG.nearWetLowpassHz,
+                    LORIEN_GALLERY_OCCLUSION_MIN_WET_CUTOFF_HZ,
+                    occlusion
+                ),
                 nearMix
             ),
             now,

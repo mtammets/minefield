@@ -41,6 +41,9 @@ export function createCarEditModeController({
     getCrashDamageTuning,
     onSetCrashDamageTuningValue,
     onResetCrashDamageTuning,
+    getBillboardContentGroups,
+    onUploadBillboardGroupMedia,
+    onResetBillboardGroupMedia,
 } = {}) {
     if (!camera || !car || !canvas) {
         return createNoopController();
@@ -65,6 +68,12 @@ export function createCarEditModeController({
         typeof onSetCrashDamageTuningValue === 'function' ? onSetCrashDamageTuningValue : null;
     const resetCrashDamageTuning =
         typeof onResetCrashDamageTuning === 'function' ? onResetCrashDamageTuning : null;
+    const readBillboardContentGroups =
+        typeof getBillboardContentGroups === 'function' ? getBillboardContentGroups : () => [];
+    const uploadBillboardGroupMedia =
+        typeof onUploadBillboardGroupMedia === 'function' ? onUploadBillboardGroupMedia : null;
+    const resetBillboardGroupMedia =
+        typeof onResetBillboardGroupMedia === 'function' ? onResetBillboardGroupMedia : null;
     const pointerState = {
         active: false,
         id: null,
@@ -102,6 +111,44 @@ export function createCarEditModeController({
             }
             const resolved = resetCrashDamageTuning();
             refreshCrashDamageTuning(resolved);
+        },
+        onUploadBillboardGroup: async (groupId, files) => {
+            if (!uploadBillboardGroupMedia) {
+                return;
+            }
+            ui.setBillboardGroupBusy(groupId, true, 'Uploading files...');
+            try {
+                const summary = await uploadBillboardGroupMedia(groupId, files);
+                renderBillboardGroupList();
+                onStatus?.(
+                    `${summary?.label || 'LED group'} updated for ${summary?.screenCount || 0} screens.`
+                );
+            } catch (error) {
+                const message = error?.message || 'LED upload failed.';
+                ui.setBillboardGroupBusy(groupId, false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setBillboardGroupBusy(groupId, false);
+        },
+        onResetBillboardGroup: async (groupId) => {
+            if (!resetBillboardGroupMedia) {
+                return;
+            }
+            ui.setBillboardGroupBusy(groupId, true, 'Restoring defaults...');
+            try {
+                const summary = await resetBillboardGroupMedia(groupId);
+                renderBillboardGroupList();
+                onStatus?.(
+                    `${summary?.label || 'LED group'} restored to defaults for ${summary?.screenCount || 0} screens.`
+                );
+            } catch (error) {
+                const message = error?.message || 'LED reset failed.';
+                ui.setBillboardGroupBusy(groupId, false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setBillboardGroupBusy(groupId, false);
         },
     });
 
@@ -193,6 +240,7 @@ export function createCarEditModeController({
             targetFov = DEFAULT_CAMERA_FOV;
             renderPartList();
             refreshCrashDamageTuning();
+            renderBillboardGroupList();
             onStatus?.('Edit mode active. Mouse: left rotate, right pan, wheel zoom.');
         } else {
             restoreEditablePartVisibility?.(savedPartVisibility);
@@ -226,6 +274,13 @@ export function createCarEditModeController({
                 : readCrashDamageTuning();
         currentCrashDamageTuning = sanitizeCrashDamageTuning(source, currentCrashDamageTuning);
         ui.renderCrashDamageTuning(CRASH_DAMAGE_TUNING_FIELDS, currentCrashDamageTuning);
+    }
+
+    function renderBillboardGroupList() {
+        const groups = Array.isArray(readBillboardContentGroups?.())
+            ? readBillboardContentGroups()
+            : [];
+        ui.renderBillboardGroups(groups);
     }
 
     function focusOnCar(resetPan = false) {
@@ -388,6 +443,8 @@ function createEditModeUi({
     onTogglePart,
     onSetCrashDamageTuningValue,
     onResetCrashDamageTuning,
+    onUploadBillboardGroup,
+    onResetBillboardGroup,
 } = {}) {
     const root = document.createElement('section');
     root.id = 'editModePanel';
@@ -420,6 +477,13 @@ function createEditModeUi({
             <div class="editModePartList" data-role="part-list"></div>
         </div>
         <div class="editModeBlock">
+            <div class="editModeBlockTitle">LED SCREENS</div>
+            <div class="editModeBillboardIntro">
+                Upload once per screen type. The update applies to every live screen in that group.
+            </div>
+            <div class="editModeBillboardList" data-role="billboard-list"></div>
+        </div>
+        <div class="editModeBlock">
             <div class="editModeBlockTitle">CRASH & DAMAGE</div>
             <div class="editModeTuneTools">
                 <button type="button" data-action="reset-crash-tuning">RESET DEFAULTS</button>
@@ -434,12 +498,15 @@ function createEditModeUi({
     const hideAllBtn = root.querySelector('[data-action="hide-all"]');
     const searchInput = root.querySelector('[data-role="search"]');
     const partList = root.querySelector('[data-role="part-list"]');
+    const billboardList = root.querySelector('[data-role="billboard-list"]');
     const viewGrid = root.querySelector('[data-role="view-grid"]');
     const crashTuningList = root.querySelector('[data-role="crash-tuning-list"]');
     const crashTuningResetBtn = root.querySelector('[data-action="reset-crash-tuning"]');
     const presetButtons = new Map();
     const tuningControlsByKey = new Map();
+    const billboardStateByGroup = new Map();
     let tuningFieldSignature = '';
+    let lastBillboardGroups = [];
 
     closeBtn?.addEventListener('click', () => onClose?.());
     showAllBtn?.addEventListener('click', () => onShowAll?.());
@@ -473,6 +540,135 @@ function createEditModeUi({
         setSearchValue(nextValue) {
             if (searchInput) {
                 searchInput.value = String(nextValue ?? '');
+            }
+        },
+        setBillboardGroupBusy(groupId, isBusy, message = '') {
+            const normalizedGroupId = String(groupId || '').trim();
+            if (!normalizedGroupId) {
+                return;
+            }
+
+            const nextState = billboardStateByGroup.get(normalizedGroupId) || {
+                busy: false,
+                message: '',
+            };
+            nextState.busy = Boolean(isBusy);
+            nextState.message = String(message || '');
+            billboardStateByGroup.set(normalizedGroupId, nextState);
+            this.renderBillboardGroups(lastBillboardGroups);
+        },
+        renderBillboardGroups(groups = []) {
+            if (!billboardList) {
+                return;
+            }
+
+            lastBillboardGroups = Array.isArray(groups) ? groups.slice() : [];
+            billboardList.innerHTML = '';
+
+            if (!lastBillboardGroups.length) {
+                const empty = document.createElement('div');
+                empty.className = 'editModeEmpty';
+                empty.textContent = 'No managed LED groups are available.';
+                billboardList.appendChild(empty);
+                return;
+            }
+
+            for (let i = 0; i < lastBillboardGroups.length; i += 1) {
+                const group = lastBillboardGroups[i];
+                const groupId = String(group?.id || '');
+                const uiState = billboardStateByGroup.get(groupId) || {
+                    busy: false,
+                    message: '',
+                };
+                const section = document.createElement('section');
+                section.className = 'editModeBillboardCard';
+
+                const head = document.createElement('div');
+                head.className = 'editModeBillboardHead';
+
+                const titleWrap = document.createElement('div');
+
+                const title = document.createElement('div');
+                title.className = 'editModeBillboardTitle';
+                title.textContent = group.label || groupId;
+
+                const meta = document.createElement('div');
+                meta.className = 'editModeBillboardMeta';
+                meta.textContent = `${Math.max(0, Number(group.screenCount) || 0)} screen${Number(group.screenCount) === 1 ? '' : 's'} • ${group.mediaKind === 'video' ? 'videos' : 'images'} • max ${Math.max(1, Number(group.maxItems) || 1)}`;
+
+                titleWrap.append(title, meta);
+
+                const badge = document.createElement('span');
+                badge.className = 'editModeBillboardBadge';
+                badge.dataset.tone = group.isCustom ? 'custom' : 'default';
+                badge.textContent = group.isCustom ? 'CUSTOM' : 'DEFAULT';
+
+                head.append(titleWrap, badge);
+
+                const description = document.createElement('div');
+                description.className = 'editModeBillboardDescription';
+                description.textContent = group.description || '';
+
+                const status = document.createElement('div');
+                status.className = 'editModeBillboardStatus';
+                status.textContent =
+                    uiState.message || group.statusText || 'Using built-in default playlist';
+
+                const actions = document.createElement('div');
+                actions.className = 'editModeBillboardActions';
+
+                const uploadButton = document.createElement('button');
+                uploadButton.type = 'button';
+                uploadButton.textContent = uiState.busy ? 'WORKING...' : 'UPLOAD FILES';
+                uploadButton.disabled = uiState.busy;
+
+                const resetButton = document.createElement('button');
+                resetButton.type = 'button';
+                resetButton.textContent = 'RESET DEFAULTS';
+                resetButton.disabled = uiState.busy || !group.isCustom;
+
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.hidden = true;
+                fileInput.multiple = true;
+                fileInput.accept = group.accept || '';
+
+                uploadButton.addEventListener('click', () => {
+                    if (uiState.busy) {
+                        return;
+                    }
+                    fileInput.click();
+                });
+                fileInput.addEventListener('change', () => {
+                    if (!fileInput.files?.length) {
+                        return;
+                    }
+                    void onUploadBillboardGroup?.(groupId, fileInput.files);
+                    fileInput.value = '';
+                });
+                resetButton.addEventListener('click', () => {
+                    if (uiState.busy) {
+                        return;
+                    }
+                    void onResetBillboardGroup?.(groupId);
+                });
+
+                actions.append(uploadButton, resetButton, fileInput);
+
+                const mediaList = document.createElement('div');
+                mediaList.className = 'editModeBillboardMediaList';
+
+                const items = Array.isArray(group.items) ? group.items : [];
+                for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+                    const item = items[itemIndex];
+                    const itemRow = document.createElement('div');
+                    itemRow.className = 'editModeBillboardMediaRow';
+                    itemRow.textContent = `${itemIndex + 1}. ${item?.label || 'Media item'}`;
+                    mediaList.appendChild(itemRow);
+                }
+
+                section.append(head, description, status, actions, mediaList);
+                billboardList.appendChild(section);
             }
         },
         renderParts(parts = []) {

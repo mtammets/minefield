@@ -514,7 +514,8 @@ export function createInputController(options = {}) {
         if (typeof window === 'undefined') {
             return false;
         }
-        return String(window.location?.hostname || '').toLowerCase() === 'localhost';
+        const hostname = String(window.location?.hostname || '').toLowerCase();
+        return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
     }
 
     function onWindowResize() {
