@@ -32,6 +32,7 @@ export function createInputController(options = {}) {
         onShowWelcomeModal = () => {},
         onRecoverVehicle = () => null,
         onDeployMine = () => null,
+        onGrantRoofWeapon = () => false,
         getHasRoofWeapon = () => false,
         onSetRoofWeaponTrigger = () => {},
         toggleWorldMap = () => ({ open: false, message: null }),
@@ -123,6 +124,7 @@ export function createInputController(options = {}) {
     function handleKey(event, isKeyDown) {
         const key = normalizeKeyboardKey(event?.key || '');
         const matchesAction = (actionId) => actionMatchesEvent(actionId, event, keyBindings, key);
+        const roofWeaponGrantShortcut = key === '+' || event?.code === 'NumpadAdd';
         const reportAction = (actionId) => {
             if (!isKeyDown || event.repeat) {
                 return;
@@ -158,6 +160,7 @@ export function createInputController(options = {}) {
                 matchesAction(ACTION_IDS.roofModeBattery) ||
                 matchesAction(ACTION_IDS.roofModeNavigation) ||
                 matchesAction(ACTION_IDS.roofModeChassis) ||
+                roofWeaponGrantShortcut ||
                 matchesAction(ACTION_IDS.mineDrop) ||
                 matchesAction(ACTION_IDS.mineThrow) ||
                 matchesAction(ACTION_IDS.graphicsCycle))
@@ -285,6 +288,15 @@ export function createInputController(options = {}) {
                 onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
             }
             reportAction(ACTION_IDS.recoverVehicle);
+            return;
+        }
+
+        if (roofWeaponGrantShortcut) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            event.preventDefault();
+            onGrantRoofWeapon();
             return;
         }
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-05T20:58:23.363Z",
+  "updatedAt": "2026-05-06T15:59:17.642Z",
   "groups": {
     "kiosk-totems": {
       "groupId": "kiosk-totems",
@@ -84,6 +84,21 @@
           "mimeType": "image/webp",
           "sizeBytes": 109570,
           "url": "/uploads/billboards/tall-posters/02-4640e54b-f571-4e7b-a01f-767f337e505f.webp?v=20260505193539639"
+        }
+      ]
+    },
+    "monument-video-ring": {
+      "groupId": "monument-video-ring",
+      "mediaKind": "video",
+      "updatedAt": "2026-05-06T15:59:17.642Z",
+      "items": [
+        {
+          "id": "748884d1de41",
+          "displayName": "RBOP5386.MP4",
+          "fileName": "01-rbop5386.mp4",
+          "mimeType": "video/mp4",
+          "sizeBytes": 12604536,
+          "url": "/uploads/billboards/monument-video-ring/01-rbop5386.mp4?v=20260506155917642"
         }
       ]
     }

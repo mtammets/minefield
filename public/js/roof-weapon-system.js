@@ -1,5 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { appendLorienVelmoreDoorTraceObstacles } from './environment/buildings.js';
 import { getLorienVelmoreRoofLiftLayout } from './environment/lorien-gallery.js';
+import { UNDERGROUND_PARKING_LAYOUT } from './environment/underground-parking.js';
 
 const PICKUP_RADIUS = 3.25;
 const PICKUP_RADIUS_SQ = PICKUP_RADIUS * PICKUP_RADIUS;
@@ -39,12 +41,33 @@ const BOT_DEBRIS_BUDGET_MID = 3;
 const BOT_DEBRIS_BUDGET_FAR = 1;
 const BOT_DEBRIS_NEAR_DISTANCE_SQ = 46 * 46;
 const BOT_DEBRIS_MID_DISTANCE_SQ = 86 * 86;
+const BOT_HUNTER_SIGHT_RANGE = 132;
+const BOT_HUNTER_FIRE_RANGE = 112;
+const BOT_HUNTER_MIN_FIRE_RANGE = 12;
+const BOT_HUNTER_SIGHT_FORWARD_DOT = 0.38;
+const BOT_HUNTER_MIN_FORWARD_DOT = 0.58;
+const BOT_HUNTER_SIGHT_CONFIRM_SEC = 0.36;
+const BOT_HUNTER_EYE_HEIGHT = 1.18;
+const BOT_HUNTER_EYE_FORWARD_OFFSET = 0.78;
+const BOT_HUNTER_OBSTACLE_IGNORE_RADIUS = 0.06;
+const BOT_HUNTER_TARGET_LATERAL_OFFSET = 0.94;
+const BOT_HUNTER_TARGET_TOP_Y = 1.08;
+const BOT_HUNTER_TARGET_LOW_Y = 0.38;
+const BOT_HUNTER_MIN_VISIBLE_SAMPLE_COUNT = 2;
+const BOT_HUNTER_PLAYER_HIT_CHANCE = 0.16;
+const BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS = 2200;
+const BOT_HUNTER_PLAYER_HIT_WINDOW_MAX_MS = 3600;
+const BOT_HUNTER_PLAYER_MISS_LATERAL_OFFSET = 2.15;
+const BOT_HUNTER_PLAYER_MISS_DEPTH_JITTER = 0.72;
+const BOT_HUNTER_PLAYER_MISS_VERTICAL_JITTER = 0.34;
+const PLAYER_TARGET_CENTER_Y = 0.72;
 const RETICLE_DEFAULT_COLOR = new THREE.Color(0x6fe6ff);
 const RETICLE_HOT_COLOR = new THREE.Color(0xffc88a);
 const RETICLE_LOCK_COLOR = new THREE.Color(0xff856f);
 const WEAPON_METAL_COLOR = new THREE.Color(0x101923);
 const WEAPON_EDGE_COLOR = new THREE.Color(0x7be9ff);
 const WEAPON_HOT_COLOR = new THREE.Color(0xff9259);
+const hunterReticleColor = new THREE.Color();
 const weaponAimOrigin = new THREE.Vector3();
 const weaponAimDirection = new THREE.Vector3();
 const weaponAimPoint = new THREE.Vector3();
@@ -53,11 +76,39 @@ const weaponMuzzleWorldPosition = new THREE.Vector3();
 const weaponTempVectorA = new THREE.Vector3();
 const weaponTempVectorB = new THREE.Vector3();
 const weaponTempVectorC = new THREE.Vector3();
+const weaponTempVectorD = new THREE.Vector3();
+const weaponTempVectorE = new THREE.Vector3();
+const hunterVisionForwardVector = new THREE.Vector3();
+const hunterVisionUpVector = new THREE.Vector3();
+const hunterTargetRightVector = new THREE.Vector3();
+const hunterVisibilityDirectionVector = new THREE.Vector3();
+const hunterVisibleTargetState = {
+    point: new THREE.Vector3(),
+    visibleCount: 0,
+    centerVisible: false,
+    distance: Number.POSITIVE_INFINITY,
+    visibilityDot: -1,
+};
+const hunterTargetSamplePoints = [
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+];
+const weaponSceneRaycaster = new THREE.Raycaster();
+const weaponSceneIntersections = [];
+const weaponSceneRayDirection = new THREE.Vector3();
+const weaponSceneImpactNormal = new THREE.Vector3();
+const weaponSceneImpactFallbackNormal = new THREE.Vector3();
+const weaponSceneImpactNormalMatrix = new THREE.Matrix3();
 const weaponTempColor = new THREE.Color();
 const weaponHudProjection = new THREE.Vector3();
 const weaponLocalOrigin = new THREE.Vector3();
 const weaponLocalTargetPoint = new THREE.Vector3();
 const weaponLocalAimVector = new THREE.Vector3();
+const weaponTraceObstacleBuffer = [];
+const lorienDoorTraceObstacleBuffer = [];
 
 const projectileCoreGeometry = new THREE.CylinderGeometry(0.022, 0.03, PROJECTILE_LENGTH, 12, 1);
 const projectileGlowGeometry = new THREE.CylinderGeometry(
@@ -105,23 +156,45 @@ export function createRoofWeaponSystem({
     getAudioController = () => null,
     onStatus = () => {},
     onBotDestroyed = () => {},
+    onPlayerHit = () => ({ destroyed: false }),
 } = {}) {
     if (!scene || !camera || !car) {
         return createNoopWeaponSystem();
     }
 
-    const layout = getLorienVelmoreRoofLiftLayout();
-    const pickupAnchor = new THREE.Vector3(
-        layout.centerX,
-        layout.roofSurfaceY + 0.92,
-        layout.centerZ + layout.roofDeckMinZ + (layout.roofDeckMaxZ - layout.roofDeckMinZ) * 0.32
-    );
+    const roofLayout = getLorienVelmoreRoofLiftLayout();
+    const parkingLayout = UNDERGROUND_PARKING_LAYOUT;
     const effectRoot = new THREE.Group();
     effectRoot.name = 'lorienRoofWeaponEffects';
     scene.add(effectRoot);
 
-    const pickup = createRoofPickup(pickupAnchor);
-    scene.add(pickup.root);
+    const pickupEntries = [
+        createPickupEntry({
+            id: 'roof',
+            surfaceY: roofLayout.roofSurfaceY,
+            rootName: 'lorien_roof_weapon_pickup',
+            anchor: new THREE.Vector3(
+                roofLayout.centerX,
+                roofLayout.roofSurfaceY + 0.92,
+                roofLayout.centerZ +
+                    roofLayout.roofDeckMinZ +
+                    (roofLayout.roofDeckMaxZ - roofLayout.roofDeckMinZ) * 0.32
+            ),
+        }),
+        createPickupEntry({
+            id: 'parking',
+            surfaceY: parkingLayout.floorY,
+            rootName: 'underground_parking_vx9_pickup',
+            anchor: new THREE.Vector3(
+                parkingLayout.centerX,
+                parkingLayout.floorY + 0.92,
+                parkingLayout.floorMinZ + 18
+            ),
+        }),
+    ];
+    pickupEntries.forEach((entry) => {
+        scene.add(entry.pickup.root);
+    });
 
     const mountParent = car.getObjectByName('body_shell_group') || car;
     const mount = createWeaponMount();
@@ -135,11 +208,30 @@ export function createRoofWeaponSystem({
     const activeImpacts = [];
     const activeMuzzleFlashes = [];
     const activeBulletMarks = [];
+    const hunterState = {
+        collectorId: '',
+        name: 'Hunter',
+        mount: null,
+        mountParent: null,
+        fireCooldown: 0,
+        recoil: 0,
+        heat: 0,
+        triggerHeld: false,
+        motionPhase: Math.random() * Math.PI * 2,
+        missSideSign: Math.random() < 0.5 ? 1 : -1,
+        nextPlayerHitWindowAtMs:
+            Date.now() +
+            BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS +
+            Math.random() *
+                Math.max(
+                    0,
+                    BOT_HUNTER_PLAYER_HIT_WINDOW_MAX_MS - BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS
+                ),
+        sightHoldSec: 0,
+    };
 
     const state = {
         hasWeapon: false,
-        pickupAvailable: true,
-        pickupRespawnTimer: 0,
         triggerHeld: false,
         recoil: 0,
         heat: 0,
@@ -152,10 +244,127 @@ export function createRoofWeaponSystem({
         hudY: window.innerHeight * 0.5,
     };
 
+    function getWeaponTraceObstacles() {
+        const baseObstacles = getStaticObstacles?.();
+        const staticObstacles = Array.isArray(baseObstacles) ? baseObstacles : [];
+        const cityScenery = scene?.getObjectByName?.('cityScenery') || null;
+        const buildingLayer = cityScenery?.userData?.buildingLayer || null;
+        const dynamicBarriers = appendLorienVelmoreDoorTraceObstacles(
+            buildingLayer,
+            lorienDoorTraceObstacleBuffer
+        );
+        if (!Array.isArray(dynamicBarriers) || dynamicBarriers.length === 0) {
+            return staticObstacles;
+        }
+
+        weaponTraceObstacleBuffer.length = 0;
+        if (staticObstacles.length > 0) {
+            weaponTraceObstacleBuffer.push(...staticObstacles);
+        }
+        weaponTraceObstacleBuffer.push(...dynamicBarriers);
+        return weaponTraceObstacleBuffer;
+    }
+
+    function traceSceneGeometryImpact({ start = null, end = null, ignoreOriginRadius = 0 } = {}) {
+        const cityScenery = scene?.getObjectByName?.('cityScenery') || null;
+        if (!cityScenery || !start || !end) {
+            return null;
+        }
+
+        weaponSceneRayDirection.subVectors(end, start);
+        const rayDistance = weaponSceneRayDirection.length();
+        if (!Number.isFinite(rayDistance) || rayDistance <= 0.0001) {
+            return null;
+        }
+
+        weaponSceneRayDirection.multiplyScalar(1 / rayDistance);
+        cityScenery.updateWorldMatrix(true, true);
+        weaponSceneRaycaster.camera = camera || null;
+        weaponSceneRaycaster.near = Math.max(0, Number(ignoreOriginRadius) || 0);
+        weaponSceneRaycaster.far = rayDistance;
+        weaponSceneRaycaster.set(start, weaponSceneRayDirection);
+        weaponSceneIntersections.length = 0;
+        weaponSceneRaycaster.intersectObject(cityScenery, true, weaponSceneIntersections);
+
+        for (let index = 0; index < weaponSceneIntersections.length; index += 1) {
+            const intersection = weaponSceneIntersections[index];
+            const hitObject = intersection?.object;
+            if (!hitObject || hitObject.visible === false || hitObject.isSprite) {
+                continue;
+            }
+
+            if (intersection.face?.normal) {
+                weaponSceneImpactNormalMatrix.getNormalMatrix(hitObject.matrixWorld);
+                weaponSceneImpactNormal
+                    .copy(intersection.face.normal)
+                    .applyMatrix3(weaponSceneImpactNormalMatrix)
+                    .normalize();
+            } else {
+                weaponSceneImpactNormal
+                    .copy(
+                        weaponSceneImpactFallbackNormal
+                            .copy(weaponSceneRayDirection)
+                            .multiplyScalar(-1)
+                    )
+                    .normalize();
+            }
+
+            return {
+                t: intersection.distance / rayDistance,
+                point: intersection.point.clone(),
+                normal: weaponSceneImpactNormal.clone(),
+                object: hitObject,
+                distance: intersection.distance,
+            };
+        }
+
+        return null;
+    }
+
+    function traceWeaponEnvironmentImpact({
+        start = null,
+        end = null,
+        obstacles = [],
+        ignoreOriginRadius = 0,
+    } = {}) {
+        const obstacleImpact = traceStaticObstacleImpact({
+            start,
+            end,
+            obstacles,
+            ignoreOriginRadius,
+        });
+        const sceneImpact = traceSceneGeometryImpact({
+            start,
+            end,
+            ignoreOriginRadius,
+        });
+        if (!obstacleImpact) {
+            return sceneImpact;
+        }
+        if (!sceneImpact) {
+            return obstacleImpact;
+        }
+
+        const obstacleDistance =
+            Number(obstacleImpact.distance) ||
+            Number(start?.distanceTo?.(obstacleImpact.point)) ||
+            Number.POSITIVE_INFINITY;
+        const sceneDistance = Number(sceneImpact.distance) || Number.POSITIVE_INFINITY;
+        return sceneDistance < obstacleDistance ? sceneImpact : obstacleImpact;
+    }
+
     return {
         update,
         setTriggerHeld(nextHeld) {
             state.triggerHeld = Boolean(nextHeld) && state.hasWeapon;
+        },
+        grantWeapon() {
+            if (state.hasWeapon) {
+                onStatus('VX-9 already online.', 1400);
+                return false;
+            }
+            activateWeapon();
+            return true;
         },
         resetRound() {
             state.triggerHeld = false;
@@ -165,9 +374,9 @@ export function createRoofWeaponSystem({
             state.currentLock = null;
             state.hudX = window.innerWidth * 0.5;
             state.hudY = window.innerHeight * 0.5;
-            despawnPickup(false);
-            activatePickup();
+            resetPickupEntries();
             hideWeapon();
+            resetHunterWeaponState();
             clearEffects();
             syncHud({
                 visible: false,
@@ -189,9 +398,8 @@ export function createRoofWeaponSystem({
             state.hudY = window.innerHeight * 0.5;
             if (state.hasWeapon) {
                 hideWeapon();
-                despawnPickup(false);
-                state.pickupRespawnTimer = PICKUP_RESPAWN_DELAY_SEC;
             }
+            resetHunterWeaponState();
             syncHud({
                 visible: false,
                 hasWeapon: false,
@@ -211,6 +419,7 @@ export function createRoofWeaponSystem({
         const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.05);
         state.hoverPhase += dt * 2.2;
         state.lockPulse += dt * 6.8;
+        hunterState.motionPhase += dt * 2.4;
 
         const controlsEnabled = frameState.controlsEnabled !== false;
         const vehicleState =
@@ -233,18 +442,12 @@ export function createRoofWeaponSystem({
             state.triggerHeld = false;
         }
 
-        if (state.pickupRespawnTimer > 0) {
-            state.pickupRespawnTimer = Math.max(0, state.pickupRespawnTimer - dt);
-            if (state.pickupRespawnTimer <= 0 && !state.pickupAvailable && !state.hasWeapon) {
-                activatePickup();
-            }
-        }
-
-        updatePickup(dt);
+        updatePickupRespawns(dt);
+        updatePickups(dt);
         maybeCollectPickup(frameState);
 
         const weaponMotionState = resolveWeaponMotionState(vehicleState);
-        applyWeaponBasePose(weaponMotionState);
+        applyWeaponBasePoseToMount(mount, weaponMotionState);
         const aimState = resolveAimState(gameMode, weaponMotionState);
         state.currentLock = aimState.lockedTarget;
         updateHudTracking(dt, aimState, roofWeaponActive);
@@ -277,6 +480,7 @@ export function createRoofWeaponSystem({
             1 - Math.exp(-(state.triggerHeld ? WEAPON_RECOIL_RISE : WEAPON_RECOIL_FALL) * dt)
         );
 
+        updateHunterWeapon(dt, frameState);
         updateEffects(dt);
         syncHud({
             visible: roofWeaponActive,
@@ -289,60 +493,116 @@ export function createRoofWeaponSystem({
         });
     }
 
-    function updatePickup(dt) {
-        pickup.root.visible = state.pickupAvailable && !state.hasWeapon;
-        if (!pickup.root.visible) {
-            return;
-        }
+    function createPickupEntry({ id = 'pickup', anchor, surfaceY = 0, rootName = 'vx9_pickup' }) {
+        return {
+            id,
+            anchor,
+            surfaceY,
+            available: true,
+            respawnTimer: 0,
+            phaseOffset: Math.random() * Math.PI * 2,
+            pickup: createRoofPickup(anchor, rootName),
+        };
+    }
 
-        const pulse = 0.5 + 0.5 * Math.sin(state.hoverPhase * 1.4);
-        const pulseFast = 0.5 + 0.5 * Math.sin(state.hoverPhase * 3.1 + 0.5);
-        pickup.root.position.y = pickupAnchor.y + Math.sin(state.hoverPhase * 1.2) * 0.09;
-        pickup.core.rotation.y += dt * 2.4;
-        pickup.shell.rotation.y -= dt * 1.4;
-        pickup.ringA.rotation.z += dt * 0.9;
-        pickup.ringB.rotation.x += dt * 1.05;
-        pickup.ringC.rotation.y -= dt * 1.32;
-        pickup.halo.rotation.z += dt * 0.22;
-        pickup.wordmark.rotation.y = Math.sin(state.hoverPhase * 0.22) * 0.08;
-        pickup.beam.material.opacity = 0.14 + pulse * 0.2;
-        pickup.pulse.material.opacity = 0.14 + pulseFast * 0.24;
-        pickup.pulse.scale.setScalar(0.84 + pulseFast * 0.22);
-        pickup.core.material.emissiveIntensity = 0.95 + pulse * 0.95;
-        pickup.shell.material.opacity = 0.18 + pulse * 0.12;
-        pickup.halo.material.opacity = 0.32 + pulse * 0.24;
-        pickup.wordmark.material.opacity = 0.72 + pulse * 0.18;
+    function resetPickupEntries() {
+        for (let index = 0; index < pickupEntries.length; index += 1) {
+            const entry = pickupEntries[index];
+            entry.available = true;
+            entry.respawnTimer = 0;
+            entry.pickup.root.visible = true;
+            entry.pickup.root.position.copy(entry.anchor);
+        }
+    }
+
+    function updatePickupRespawns(dt) {
+        for (let index = 0; index < pickupEntries.length; index += 1) {
+            const entry = pickupEntries[index];
+            if (entry.respawnTimer <= 0) {
+                continue;
+            }
+            entry.respawnTimer = Math.max(0, entry.respawnTimer - dt);
+            if (entry.respawnTimer <= 0) {
+                entry.available = true;
+            }
+        }
+    }
+
+    function updatePickups(dt) {
+        for (let index = 0; index < pickupEntries.length; index += 1) {
+            const entry = pickupEntries[index];
+            const pickup = entry.pickup;
+            pickup.root.visible = entry.available && !state.hasWeapon;
+            if (!pickup.root.visible) {
+                continue;
+            }
+
+            const hoverPhase = state.hoverPhase + entry.phaseOffset;
+            const pulse = 0.5 + 0.5 * Math.sin(hoverPhase * 1.4);
+            const pulseFast = 0.5 + 0.5 * Math.sin(hoverPhase * 3.1 + 0.5);
+            pickup.root.position.y = entry.anchor.y + Math.sin(hoverPhase * 1.2) * 0.09;
+            pickup.core.rotation.y += dt * 2.4;
+            pickup.shell.rotation.y -= dt * 1.4;
+            pickup.ringA.rotation.z += dt * 0.9;
+            pickup.ringB.rotation.x += dt * 1.05;
+            pickup.ringC.rotation.y -= dt * 1.32;
+            pickup.halo.rotation.z += dt * 0.22;
+            pickup.wordmark.rotation.y = Math.sin(hoverPhase * 0.22) * 0.08;
+            pickup.beam.material.opacity = 0.14 + pulse * 0.2;
+            pickup.pulse.material.opacity = 0.14 + pulseFast * 0.24;
+            pickup.pulse.scale.setScalar(0.84 + pulseFast * 0.22);
+            pickup.core.material.emissiveIntensity = 0.95 + pulse * 0.95;
+            pickup.shell.material.opacity = 0.18 + pulse * 0.12;
+            pickup.halo.material.opacity = 0.32 + pulse * 0.24;
+            pickup.wordmark.material.opacity = 0.72 + pulse * 0.18;
+        }
     }
 
     function maybeCollectPickup(frameState) {
-        if (!state.pickupAvailable || state.hasWeapon) {
+        if (state.hasWeapon) {
             return;
         }
         if (frameState.carDestroyed || frameState.pickupRoundFinished) {
             return;
         }
 
-        const deltaX = car.position.x - pickupAnchor.x;
-        const deltaZ = car.position.z - pickupAnchor.z;
-        const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
-        if (distanceSq > PICKUP_RADIUS_SQ) {
+        for (let index = 0; index < pickupEntries.length; index += 1) {
+            const entry = pickupEntries[index];
+            if (!entry.available) {
+                continue;
+            }
+            const deltaX = car.position.x - entry.anchor.x;
+            const deltaZ = car.position.z - entry.anchor.z;
+            const distanceSq = deltaX * deltaX + deltaZ * deltaZ;
+            if (distanceSq > PICKUP_RADIUS_SQ) {
+                continue;
+            }
+
+            const heightDelta = Math.abs((car.position.y || 0) - entry.surfaceY);
+            if (heightDelta > PICKUP_HEIGHT_TOLERANCE) {
+                continue;
+            }
+
+            collectPickup(entry);
             return;
         }
+    }
 
-        const heightDelta = Math.abs((car.position.y || 0) - layout.roofSurfaceY);
-        if (heightDelta > PICKUP_HEIGHT_TOLERANCE) {
-            return;
-        }
+    function collectPickup(entry) {
+        entry.available = false;
+        entry.respawnTimer = PICKUP_RESPAWN_DELAY_SEC;
+        activateWeapon();
+        entry.pickup.root.visible = false;
+    }
 
-        state.pickupAvailable = false;
+    function activateWeapon() {
         state.hasWeapon = true;
         state.triggerHeld = false;
         state.fireCooldown = 0;
         mount.root.visible = true;
-        pickup.root.visible = false;
         state.hudX = window.innerWidth * 0.5;
         state.hudY = window.innerHeight * 0.5;
-        onStatus('Lorien roof weapon online. Auto-lock engaged. Hold T to fire.', 2600);
+        onStatus('VX-9 online. Auto-lock engaged. Hold T to fire.', 2600);
         getAudioController()?.onRoofWeaponPickup?.();
     }
 
@@ -362,18 +622,22 @@ export function createRoofWeaponSystem({
         };
     }
 
-    function applyWeaponBasePose(motionState) {
-        if (!state.hasWeapon) {
+    function applyWeaponBasePoseToMount(targetMount, motionState) {
+        if (!targetMount || !motionState) {
             return;
         }
-        mount.root.position.set(
+        targetMount.root.position.set(
             0,
             WEAPON_MOUNT_BASE_Y + motionState.idleSway * 0.3,
             WEAPON_MOUNT_BASE_Z + motionState.recoilShift
         );
-        mount.weaponGroup.position.set(0, motionState.speedSway * 0.5, motionState.recoilShift);
-        mount.weaponGroup.rotation.z = motionState.speedSway * 1.2;
-        mount.weaponGroup.rotation.x =
+        targetMount.weaponGroup.position.set(
+            0,
+            motionState.speedSway * 0.5,
+            motionState.recoilShift
+        );
+        targetMount.weaponGroup.rotation.z = motionState.speedSway * 1.2;
+        targetMount.weaponGroup.rotation.x =
             motionState.idleSway * 0.9 + motionState.throttleRatio * 0.02;
     }
 
@@ -487,7 +751,7 @@ export function createRoofWeaponSystem({
     }
 
     function resolveAutoLockTarget(botTrafficSystem, motionState) {
-        const staticObstacles = getStaticObstacles();
+        const staticObstacles = getWeaponTraceObstacles();
         const descriptors = botTrafficSystem?.getCollectorDescriptors?.();
         if (!Array.isArray(descriptors) || descriptors.length <= 0) {
             return null;
@@ -571,7 +835,7 @@ export function createRoofWeaponSystem({
             ) {
                 continue;
             }
-            const obstacleImpact = traceStaticObstacleImpact({
+            const obstacleImpact = traceWeaponEnvironmentImpact({
                 start: weaponAimOrigin,
                 end: targetPoint,
                 obstacles: staticObstacles,
@@ -580,7 +844,7 @@ export function createRoofWeaponSystem({
             if (obstacleImpact) {
                 continue;
             }
-            const muzzleObstacleImpact = traceStaticObstacleImpact({
+            const muzzleObstacleImpact = traceWeaponEnvironmentImpact({
                 start: weaponLockOrigin,
                 end: targetPoint,
                 obstacles: staticObstacles,
@@ -630,7 +894,7 @@ export function createRoofWeaponSystem({
             return;
         }
 
-        applyWeaponBasePose(motionState);
+        applyWeaponBasePoseToMount(mount, motionState);
         mount.pitchPivot.lookAt(aimState.targetPoint);
 
         targetReticleColor.copy(RETICLE_DEFAULT_COLOR);
@@ -711,10 +975,10 @@ export function createRoofWeaponSystem({
             shotEndPoint.copy(hitTarget.point);
         }
 
-        const obstacleImpact = traceStaticObstacleImpact({
+        const obstacleImpact = traceWeaponEnvironmentImpact({
             start: weaponMuzzleWorldPosition,
             end: shotEndPoint,
-            obstacles: getStaticObstacles(),
+            obstacles: getWeaponTraceObstacles(),
             ignoreOriginRadius: BULLET_MARK_MIN_DISTANCE,
         });
         let resolvedHitTarget = hitTarget;
@@ -738,6 +1002,496 @@ export function createRoofWeaponSystem({
             locked: Boolean(aimState.lockedTarget),
             heat: state.heat,
         });
+    }
+
+    function updateHunterWeapon(dt, frameState = {}) {
+        const botTrafficSystem = getBotTrafficSystem();
+        const hunterBot = botTrafficSystem?.getRoofWeaponHunter?.() || null;
+        if (!hunterBot?.car) {
+            if (hunterState.mount?.root) {
+                hunterState.mount.root.visible = false;
+            }
+            resetHunterWeaponState();
+            return;
+        }
+
+        const hunterMount = ensureHunterMount(hunterBot);
+        if (!hunterMount) {
+            return;
+        }
+
+        hunterState.name =
+            typeof hunterBot.name === 'string' && hunterBot.name.trim()
+                ? hunterBot.name.trim()
+                : 'Hunter';
+        hunterMount.root.visible = !hunterBot.destroyed;
+
+        const hunterActive =
+            frameState.gameMode === 'bots' &&
+            frameState.controlsEnabled !== false &&
+            !frameState.welcomeVisible &&
+            !frameState.paused &&
+            !frameState.editModeActive &&
+            !frameState.raceIntroActive &&
+            !frameState.carDestroyed &&
+            !frameState.pickupRoundFinished &&
+            !frameState.worldMapOpen &&
+            !hunterBot.destroyed;
+
+        const motionState = resolveHunterMotionState(hunterBot);
+        applyWeaponBasePoseToMount(hunterMount, motionState);
+
+        if (!hunterActive) {
+            hunterState.triggerHeld = false;
+            updateHunterMountVisuals(hunterMount, null);
+            updateHunterWeaponThermals(dt);
+            return;
+        }
+
+        const aimState = resolveHunterAimState(hunterBot, hunterMount, dt);
+        hunterMount.pitchPivot.lookAt(aimState.targetPoint);
+        updateHunterMountVisuals(hunterMount, aimState);
+
+        if (aimState.canFire) {
+            hunterState.fireCooldown -= dt;
+            hunterState.triggerHeld = true;
+            let firedThisFrame = 0;
+            while (hunterState.fireCooldown <= 0 && firedThisFrame < 2) {
+                fireHunterShot(aimState);
+                hunterState.fireCooldown += SHOT_INTERVAL_SEC;
+                firedThisFrame += 1;
+            }
+        } else {
+            hunterState.triggerHeld = false;
+            hunterState.fireCooldown = Math.max(0, hunterState.fireCooldown - dt * 0.6);
+        }
+
+        updateHunterWeaponThermals(dt);
+    }
+
+    function ensureHunterMount(hunterBot) {
+        if (!hunterBot?.car) {
+            return null;
+        }
+        if (hunterState.mount && hunterState.collectorId === hunterBot.collectorId) {
+            return hunterState.mount;
+        }
+
+        if (hunterState.mount?.root?.parent) {
+            hunterState.mount.root.parent.remove(hunterState.mount.root);
+        }
+
+        const nextMountParent = hunterBot.car.getObjectByName('body_shell_group') || hunterBot.car;
+        const nextMount = createWeaponMount();
+        nextMount.root.visible = !hunterBot.destroyed;
+        nextMountParent.add(nextMount.root);
+        hunterState.mount = nextMount;
+        hunterState.mountParent = nextMountParent;
+        hunterState.collectorId = hunterBot.collectorId || '';
+        return nextMount;
+    }
+
+    function resolveHunterMotionState(hunterBot) {
+        const speedRatio = THREE.MathUtils.clamp(
+            Math.abs(hunterBot?.state?.speed || 0) / 42,
+            0,
+            1.25
+        );
+        const throttleRatio = THREE.MathUtils.clamp(
+            Math.abs(hunterBot?.state?.throttle || 0),
+            0,
+            1
+        );
+        const idleSway = Math.sin(hunterState.motionPhase * WEAPON_IDLE_SWAY_SPEED) * 0.01;
+        const speedSway =
+            Math.sin(hunterState.motionPhase * (WEAPON_SPEED_SWAY_SPEED + speedRatio * 2.2)) *
+            0.012 *
+            speedRatio;
+        return {
+            throttleRatio,
+            idleSway,
+            speedSway,
+            recoilShift: hunterState.recoil * 0.16,
+        };
+    }
+
+    function resolveHunterVisionOrigin(hunterBot, out) {
+        const hunterForward = hunterVisionForwardVector
+            .set(0, 0, -1)
+            .applyQuaternion(hunterBot.car.quaternion)
+            .normalize();
+        const hunterUp = hunterVisionUpVector
+            .set(0, 1, 0)
+            .applyQuaternion(hunterBot.car.quaternion)
+            .normalize();
+        return out
+            .copy(hunterBot.car.position)
+            .addScaledVector(hunterUp, BOT_HUNTER_EYE_HEIGHT)
+            .addScaledVector(hunterForward, BOT_HUNTER_EYE_FORWARD_OFFSET);
+    }
+
+    function resolveHunterIdleTargetPoint(hunterBot, hunterForward, out) {
+        return out
+            .copy(hunterBot.car.position)
+            .addScaledVector(hunterForward, 24)
+            .setY((Number(hunterBot.car.position?.y) || 0) + PLAYER_TARGET_CENTER_Y);
+    }
+
+    function populateHunterTargetSamplePoints() {
+        const baseX = Number(car.position?.x) || 0;
+        const baseY = Number(car.position?.y) || 0;
+        const baseZ = Number(car.position?.z) || 0;
+        hunterTargetRightVector.set(1, 0, 0).applyQuaternion(car.quaternion).normalize();
+
+        hunterTargetSamplePoints[0].set(baseX, baseY + PLAYER_TARGET_CENTER_Y, baseZ);
+        hunterTargetSamplePoints[1]
+            .copy(hunterTargetSamplePoints[0])
+            .addScaledVector(hunterTargetRightVector, BOT_HUNTER_TARGET_LATERAL_OFFSET);
+        hunterTargetSamplePoints[2]
+            .copy(hunterTargetSamplePoints[0])
+            .addScaledVector(hunterTargetRightVector, -BOT_HUNTER_TARGET_LATERAL_OFFSET);
+        hunterTargetSamplePoints[3].set(baseX, baseY + BOT_HUNTER_TARGET_TOP_Y, baseZ);
+        hunterTargetSamplePoints[4].set(baseX, baseY + BOT_HUNTER_TARGET_LOW_Y, baseZ);
+        return hunterTargetSamplePoints;
+    }
+
+    function resolveHunterVisibleTargetPoint(visionOrigin, hunterForward, obstacles) {
+        const result = hunterVisibleTargetState;
+        result.visibleCount = 0;
+        result.centerVisible = false;
+        result.distance = Number.POSITIVE_INFINITY;
+        result.visibilityDot = -1;
+
+        const samplePoints = populateHunterTargetSamplePoints();
+        let bestPriority = Number.POSITIVE_INFINITY;
+        for (let index = 0; index < samplePoints.length; index += 1) {
+            const samplePoint = samplePoints[index];
+            const sightDirection = hunterVisibilityDirectionVector.subVectors(
+                samplePoint,
+                visionOrigin
+            );
+            const sightDistance = sightDirection.length();
+            if (!Number.isFinite(sightDistance) || sightDistance <= 0.0001) {
+                continue;
+            }
+
+            sightDirection.multiplyScalar(1 / sightDistance);
+            const visibilityDot = sightDirection.dot(hunterForward);
+            if (
+                sightDistance > BOT_HUNTER_SIGHT_RANGE ||
+                visibilityDot < BOT_HUNTER_SIGHT_FORWARD_DOT
+            ) {
+                continue;
+            }
+
+            const obstacleImpact = traceWeaponEnvironmentImpact({
+                start: visionOrigin,
+                end: samplePoint,
+                obstacles,
+                ignoreOriginRadius: BOT_HUNTER_OBSTACLE_IGNORE_RADIUS,
+            });
+            if (obstacleImpact) {
+                continue;
+            }
+
+            result.visibleCount += 1;
+            if (index === 0) {
+                result.centerVisible = true;
+            }
+
+            const priority = index === 0 ? 0 : index === 3 ? 1 : index === 4 ? 3 : 2;
+            if (
+                priority < bestPriority ||
+                (priority === bestPriority && sightDistance < result.distance)
+            ) {
+                bestPriority = priority;
+                result.point.copy(samplePoint);
+                result.distance = sightDistance;
+                result.visibilityDot = visibilityDot;
+            }
+        }
+
+        return result;
+    }
+
+    function resolveHunterAimState(hunterBot, hunterMount, dt = 0) {
+        hunterMount.muzzleAnchor.getWorldPosition(weaponMuzzleWorldPosition);
+        const traceObstacles = getWeaponTraceObstacles();
+        const visionOrigin = resolveHunterVisionOrigin(hunterBot, weaponTempVectorD);
+
+        const hunterForward = weaponTempVectorC
+            .set(0, 0, -1)
+            .applyQuaternion(hunterBot.car.quaternion)
+            .normalize();
+        const visibleTarget = resolveHunterVisibleTargetPoint(
+            visionOrigin,
+            hunterForward,
+            traceObstacles
+        );
+        const hasDirectSight =
+            visibleTarget.centerVisible ||
+            visibleTarget.visibleCount >= BOT_HUNTER_MIN_VISIBLE_SAMPLE_COUNT;
+        if (hasDirectSight) {
+            hunterState.sightHoldSec = Math.min(
+                BOT_HUNTER_SIGHT_CONFIRM_SEC + 1,
+                hunterState.sightHoldSec + Math.max(0, Number(dt) || 0)
+            );
+        } else {
+            hunterState.sightHoldSec = Math.max(
+                0,
+                hunterState.sightHoldSec - Math.max(0, Number(dt) || 0) * 2.4
+            );
+        }
+        const sightConfirmed = hunterState.sightHoldSec >= BOT_HUNTER_SIGHT_CONFIRM_SEC;
+        const chosenTargetPoint = hasDirectSight
+            ? visibleTarget.point
+            : resolveHunterIdleTargetPoint(hunterBot, hunterForward, weaponTempVectorD);
+
+        const shotDirection = weaponTempVectorB.subVectors(
+            chosenTargetPoint,
+            weaponMuzzleWorldPosition
+        );
+        const distance = shotDirection.length();
+        if (!Number.isFinite(distance) || distance <= 0.0001) {
+            return {
+                targetPoint: resolveHunterIdleTargetPoint(hunterBot, hunterForward, weaponTempVectorD).clone(),
+                canFire: false,
+                locked: false,
+            };
+        }
+
+        shotDirection.multiplyScalar(1 / distance);
+        const forwardDot = shotDirection.dot(hunterForward);
+        const shotObstacleImpact =
+            hasDirectSight && sightConfirmed
+                ? traceWeaponEnvironmentImpact({
+                      start: weaponMuzzleWorldPosition,
+                      end: chosenTargetPoint,
+                      obstacles: traceObstacles,
+                      ignoreOriginRadius: BOT_HUNTER_OBSTACLE_IGNORE_RADIUS,
+                  })
+                : null;
+        const withinFireEnvelope =
+            distance >= BOT_HUNTER_MIN_FIRE_RANGE &&
+            distance <= BOT_HUNTER_FIRE_RANGE &&
+            forwardDot >= BOT_HUNTER_MIN_FORWARD_DOT;
+        const canFire =
+            hasDirectSight && sightConfirmed && withinFireEnvelope && !shotObstacleImpact;
+
+        return {
+            targetPoint: chosenTargetPoint.clone(),
+            locked: hasDirectSight && sightConfirmed,
+            canFire,
+            muzzlePosition: weaponMuzzleWorldPosition.clone(),
+            shotDirection: shotDirection.clone(),
+        };
+    }
+
+    function updateHunterMountVisuals(hunterMount, aimState) {
+        if (!hunterMount) {
+            return;
+        }
+
+        const locked = Boolean(aimState?.locked);
+        if (locked) {
+            hunterReticleColor.copy(hunterState.triggerHeld ? RETICLE_LOCK_COLOR : RETICLE_HOT_COLOR);
+        } else if (hunterState.triggerHeld) {
+            hunterReticleColor.copy(RETICLE_HOT_COLOR);
+        } else {
+            hunterReticleColor.copy(RETICLE_DEFAULT_COLOR);
+        }
+
+        const pulse = 0.5 + 0.5 * Math.sin(state.lockPulse + hunterState.motionPhase * 0.7);
+        const hotBlend = THREE.MathUtils.clamp(hunterState.heat * 0.8, 0, 1);
+        for (let i = 0; i < hunterMount.glowMaterials.length; i += 1) {
+            const material = hunterMount.glowMaterials[i];
+            material.color.copy(hunterReticleColor);
+            if (material.emissive?.isColor) {
+                material.emissive.copy(hunterReticleColor);
+            }
+            if ('emissiveIntensity' in material) {
+                material.emissiveIntensity = 0.62 + hunterState.heat * 0.48 + pulse * 0.22;
+            }
+        }
+        for (let i = 0; i < hunterMount.holoMaterials.length; i += 1) {
+            const material = hunterMount.holoMaterials[i];
+            material.color.copy(hunterReticleColor);
+            material.opacity = 0.28 + pulse * 0.16 + hunterState.heat * 0.1 + (locked ? 0.12 : 0);
+        }
+        for (let i = 0; i < hunterMount.metalMaterials.length; i += 1) {
+            const material = hunterMount.metalMaterials[i];
+            weaponTempColor.copy(WEAPON_METAL_COLOR).lerp(WEAPON_HOT_COLOR, hotBlend * 0.24);
+            material.color.copy(weaponTempColor);
+            material.emissive.copy(WEAPON_EDGE_COLOR).lerp(WEAPON_HOT_COLOR, hotBlend * 0.72);
+            material.emissiveIntensity = 0.14 + hunterState.heat * 0.4;
+        }
+
+        hunterMount.holoReticle.scale.setScalar(locked ? 1.06 : 0.96);
+        hunterMount.holoHalo.scale.setScalar(0.92 + pulse * 0.12 + hunterState.heat * 0.08);
+    }
+
+    function resolveHunterMissShotState(aimState) {
+        if (!aimState?.muzzlePosition || !aimState?.targetPoint || !aimState?.shotDirection) {
+            return null;
+        }
+
+        const missTargetPoint = weaponTempVectorD.copy(aimState.targetPoint);
+        const horizontalLateral = weaponTempVectorE.set(
+            aimState.shotDirection.z,
+            0,
+            -aimState.shotDirection.x
+        );
+        if (horizontalLateral.lengthSq() <= 0.0001) {
+            horizontalLateral.set(1, 0, 0);
+        } else {
+            horizontalLateral.normalize();
+        }
+
+        const sideSign = hunterState.missSideSign >= 0 ? 1 : -1;
+        hunterState.missSideSign = -sideSign;
+        const depthJitter =
+            Math.sin(state.shotSequence * 0.73 + hunterState.motionPhase * 0.85) *
+            BOT_HUNTER_PLAYER_MISS_DEPTH_JITTER;
+        const verticalJitter =
+            Math.cos(state.shotSequence * 0.57 + hunterState.motionPhase * 0.48) *
+            BOT_HUNTER_PLAYER_MISS_VERTICAL_JITTER;
+        missTargetPoint.addScaledVector(horizontalLateral, BOT_HUNTER_PLAYER_MISS_LATERAL_OFFSET * sideSign);
+        missTargetPoint.addScaledVector(aimState.shotDirection, depthJitter);
+        missTargetPoint.y += verticalJitter;
+
+        const missShotDirection = weaponTempVectorB.subVectors(missTargetPoint, aimState.muzzlePosition);
+        const missDistance = missShotDirection.length();
+        if (!Number.isFinite(missDistance) || missDistance <= 0.0001) {
+            return null;
+        }
+        missShotDirection.multiplyScalar(1 / missDistance);
+
+        return {
+            targetPoint: missTargetPoint.clone(),
+            shotDirection: missShotDirection.clone(),
+            distance: missDistance,
+        };
+    }
+
+    function shouldHunterShotHitPlayer(aimState) {
+        if (!aimState?.targetPoint || !aimState?.shotDirection) {
+            return false;
+        }
+
+        const nowMs = Date.now();
+        if (nowMs < hunterState.nextPlayerHitWindowAtMs) {
+            return false;
+        }
+
+        hunterState.nextPlayerHitWindowAtMs =
+            nowMs +
+            BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS +
+            Math.random() *
+                Math.max(
+                    0,
+                    BOT_HUNTER_PLAYER_HIT_WINDOW_MAX_MS - BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS
+                );
+        return Math.random() < BOT_HUNTER_PLAYER_HIT_CHANCE;
+    }
+
+    function updateHunterWeaponThermals(dt) {
+        const targetHeat = hunterState.triggerHeld ? 1 : 0;
+        const heatRate =
+            targetHeat > hunterState.heat ? WEAPON_HEAT_RISE * 60 * dt : WEAPON_HEAT_FALL * dt;
+        hunterState.heat = THREE.MathUtils.lerp(
+            hunterState.heat,
+            targetHeat,
+            THREE.MathUtils.clamp(heatRate, 0, 1)
+        );
+        hunterState.recoil = THREE.MathUtils.lerp(
+            hunterState.recoil,
+            0,
+            1 -
+                Math.exp(
+                    -(hunterState.triggerHeld ? WEAPON_RECOIL_RISE : WEAPON_RECOIL_FALL) * dt
+                )
+        );
+    }
+
+    function fireHunterShot(aimState) {
+        if (!aimState?.muzzlePosition || !aimState?.shotDirection) {
+            return;
+        }
+
+        state.shotSequence += 1;
+        hunterState.recoil = 1;
+        const hitPlayer = shouldHunterShotHitPlayer(aimState);
+        const missShotState = hitPlayer ? null : resolveHunterMissShotState(aimState);
+        const resolvedShotDirection = hitPlayer
+            ? aimState.shotDirection
+            : missShotState?.shotDirection || aimState.shotDirection;
+        const resolvedTargetPoint = hitPlayer
+            ? aimState.targetPoint || car.position
+            : missShotState?.targetPoint || aimState.targetPoint || car.position;
+        const resolvedShotDistance = hitPlayer
+            ? Number(aimState.muzzlePosition.distanceTo?.(resolvedTargetPoint)) || BOT_HUNTER_FIRE_RANGE
+            : Number.isFinite(missShotState?.distance)
+              ? missShotState.distance
+              : Math.min(SHOT_RANGE, BOT_HUNTER_FIRE_RANGE);
+        const shotEndPoint = weaponTempVectorA
+            .copy(aimState.muzzlePosition)
+            .addScaledVector(
+                resolvedShotDirection,
+                Math.min(SHOT_RANGE, BOT_HUNTER_FIRE_RANGE, resolvedShotDistance)
+            );
+        if (shotEndPoint.distanceToSquared(resolvedTargetPoint) > 0) {
+            shotEndPoint.copy(resolvedTargetPoint);
+        }
+
+        const obstacleImpact = traceWeaponEnvironmentImpact({
+            start: aimState.muzzlePosition,
+            end: shotEndPoint,
+            obstacles: getWeaponTraceObstacles(),
+            ignoreOriginRadius: BOT_HUNTER_OBSTACLE_IGNORE_RADIUS,
+        });
+
+        let resolvedHitTarget = null;
+        let obstacleNormal = null;
+        if (obstacleImpact) {
+            shotEndPoint.copy(obstacleImpact.point);
+            obstacleNormal = obstacleImpact.normal.clone();
+        } else if (hitPlayer) {
+            resolvedHitTarget = {
+                targetKind: 'player',
+                collectorId: 'player',
+                name: 'Driver',
+            };
+        }
+
+        spawnMuzzleFlash(aimState.muzzlePosition, resolvedShotDirection);
+        spawnProjectile({
+            start: aimState.muzzlePosition,
+            end: shotEndPoint,
+            direction: resolvedShotDirection,
+            hitTarget: resolvedHitTarget,
+            obstacleNormal,
+            gameMode: 'bots',
+        });
+        getAudioController()?.onRoofWeaponShot?.({
+            locked: Boolean(aimState.locked),
+            heat: hunterState.heat,
+        });
+    }
+
+    function resetHunterWeaponState() {
+        hunterState.fireCooldown = 0;
+        hunterState.recoil = 0;
+        hunterState.heat = 0;
+        hunterState.triggerHeld = false;
+        hunterState.sightHoldSec = 0;
+        hunterState.nextPlayerHitWindowAtMs =
+            Date.now() +
+            BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS +
+            Math.random() *
+                Math.max(
+                    0,
+                    BOT_HUNTER_PLAYER_HIT_WINDOW_MAX_MS - BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS
+                );
     }
 
     function spawnProjectile({
@@ -799,6 +1553,12 @@ export function createRoofWeaponSystem({
             speed: PROJECTILE_SPEED,
             targetCollectorId:
                 typeof hitTarget?.collectorId === 'string' ? hitTarget.collectorId : '',
+            targetKind:
+                hitTarget?.targetKind === 'player'
+                    ? 'player'
+                    : typeof hitTarget?.collectorId === 'string' && hitTarget.collectorId
+                      ? 'bot'
+                      : '',
             targetName: typeof hitTarget?.name === 'string' ? hitTarget.name : 'Target',
             obstacleNormal: obstacleNormal?.clone?.() || null,
             gameMode,
@@ -1019,20 +1779,36 @@ export function createRoofWeaponSystem({
         spawnImpact(
             projectile.impactPoint,
             projectile.direction,
-            Boolean(projectile.targetCollectorId)
+            Boolean(projectile.targetKind)
         );
         if (projectile.obstacleNormal) {
             spawnBulletMark(
                 projectile.impactPoint,
                 projectile.obstacleNormal,
-                Boolean(projectile.targetCollectorId)
+                Boolean(projectile.targetKind)
             );
         }
         const impactDistanceMeters = Number(projectile.impactPoint.distanceTo?.(car.position)) || 0;
 
-        if (projectile.gameMode !== 'bots' || !projectile.targetCollectorId) {
+        if (projectile.targetKind === 'player') {
+            const hitResult = onPlayerHit({
+                shooterCollectorId: hunterState.collectorId,
+                shooterName: hunterState.name,
+                position: projectile.impactPoint.clone(),
+                shotDirection: projectile.direction.clone(),
+            });
             getAudioController()?.onRoofWeaponImpact?.({
-                hit: Boolean(projectile.targetCollectorId),
+                hit: true,
+                destroyed: Boolean(hitResult?.destroyed),
+                position: projectile.impactPoint,
+                distanceMeters: impactDistanceMeters,
+            });
+            return;
+        }
+
+        if (projectile.gameMode !== 'bots' || projectile.targetKind !== 'bot' || !projectile.targetCollectorId) {
+            getAudioController()?.onRoofWeaponImpact?.({
+                hit: Boolean(projectile.targetKind),
                 destroyed: false,
                 position: projectile.impactPoint,
                 distanceMeters: impactDistanceMeters,
@@ -1106,8 +1882,7 @@ export function createRoofWeaponSystem({
     }
 
     function activatePickup() {
-        state.pickupAvailable = true;
-        pickup.root.visible = true;
+        resetPickupEntries();
     }
 
     function hideWeapon() {
@@ -1116,10 +1891,13 @@ export function createRoofWeaponSystem({
     }
 
     function despawnPickup(respawn = true) {
-        state.pickupAvailable = false;
-        pickup.root.visible = false;
-        if (respawn) {
-            state.pickupRespawnTimer = PICKUP_RESPAWN_DELAY_SEC;
+        for (let index = 0; index < pickupEntries.length; index += 1) {
+            const entry = pickupEntries[index];
+            entry.available = false;
+            entry.pickup.root.visible = false;
+            if (respawn) {
+                entry.respawnTimer = PICKUP_RESPAWN_DELAY_SEC;
+            }
         }
     }
 
@@ -1139,9 +1917,9 @@ export function createRoofWeaponSystem({
     }
 }
 
-function createRoofPickup(anchor) {
+function createRoofPickup(anchor, rootName = 'vx9_pickup') {
     const root = new THREE.Group();
-    root.name = 'lorien_roof_weapon_pickup';
+    root.name = rootName;
     root.position.copy(anchor);
 
     const standMaterial = new THREE.MeshStandardMaterial({
@@ -1693,7 +2471,7 @@ function ensureWeaponHud() {
                 <div class="roofWeaponHudCross roofWeaponHudCross--v"></div>
             </div>
             <div class="roofWeaponHudMeta">
-                <div class="roofWeaponHudLabel">LORIEN VX-9</div>
+                <div class="roofWeaponHudLabel">VX-9</div>
                 <div class="roofWeaponHudHint">AUTO LOCK / HOLD T</div>
             </div>
         `;
@@ -1814,7 +2592,7 @@ function createPickupWordmarkTexture() {
     ctx.shadowColor = 'rgba(91, 224, 255, 0.9)';
     ctx.shadowBlur = 22;
     ctx.fillStyle = gradient;
-    ctx.fillText('LORIEN VX-9', canvas.width * 0.5, canvas.height * 0.42);
+    ctx.fillText('VX-9', canvas.width * 0.5, canvas.height * 0.42);
 
     ctx.shadowBlur = 0;
     ctx.font = "700 30px 'Sora', 'Segoe UI', sans-serif";

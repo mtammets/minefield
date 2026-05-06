@@ -252,6 +252,7 @@ const SOUND_DEFINITIONS = Object.freeze({
         bus: 'ambience',
         gain: 0.45,
         loop: true,
+        stream: true,
     },
     raceCrowdFarLoop01: {
         src: '/audio/ambience/race_crowd_far_loop_01.mp3',
@@ -264,11 +265,13 @@ const SOUND_DEFINITIONS = Object.freeze({
         bus: 'music',
         gain: 0.76,
         loop: true,
+        stream: true,
     },
     ufoDiskoNebulaStore01: {
         src: '/audio/ufodisko/Nebula_pood.mp3',
         bus: 'ambience',
         gain: 0.42,
+        stream: true,
     },
 });
 const SOUND_DEFINITION_IDS = Object.freeze(Object.keys(SOUND_DEFINITIONS));
@@ -440,6 +443,9 @@ export function createAudioSystem({ camera = null } = {}) {
     const failedBuffers = new Set();
     const loopInstances = new Map();
     const pendingLoads = new Map();
+    const readyStreamSounds = new Set();
+    const failedStreamSounds = new Set();
+    const streamMediaElements = new Map();
     const eventCooldowns = new Map();
     const unlockListeners = [];
     const preloadProgressSubscribers = new Set();
@@ -557,14 +563,13 @@ export function createAudioSystem({ camera = null } = {}) {
         ui = null;
 
         for (const instance of loopInstances.values()) {
-            safeStopSource(instance.source);
-            safeDisconnect(instance.source);
-            safeDisconnect(instance.gain);
+            disposeLoopInstance(instance);
         }
         loopInstances.clear();
         disposeLorienGalleryVideoInstance();
         disposeMonumentMusicInstance();
         disposeUfoDiskoMusicInstance();
+        disposeStreamingMediaElements();
 
         if (context) {
             void context.close().catch(() => {});
@@ -796,9 +801,9 @@ export function createAudioSystem({ camera = null } = {}) {
         let filesFailed = 0;
         for (let i = 0; i < ids.length; i += 1) {
             const soundId = ids[i];
-            if (buffers.has(soundId)) {
+            if (isSoundReady(soundId)) {
                 filesReady += 1;
-            } else if (failedBuffers.has(soundId)) {
+            } else if (isSoundFailed(soundId)) {
                 filesFailed += 1;
             }
         }
@@ -822,7 +827,7 @@ export function createAudioSystem({ camera = null } = {}) {
     async function preloadBuffersByIds(soundIds = SOUND_DEFINITION_IDS) {
         const ids = resolveSoundIdList(soundIds);
         for (let i = 0; i < ids.length; i += 1) {
-            await loadBuffer(ids[i]);
+            await loadSoundAsset(ids[i]);
             notifyPreloadProgress();
             if ((i + 1) % AUDIO_PRELOAD_BATCH_SIZE === 0) {
                 refreshUi();
@@ -832,6 +837,34 @@ export function createAudioSystem({ camera = null } = {}) {
         refreshUi();
         notifyPreloadProgress();
         return createSoundSetState(ids);
+    }
+
+    function isStreamingSound(soundId) {
+        return Boolean(SOUND_DEFINITIONS[soundId]?.stream);
+    }
+
+    function isSoundReady(soundId) {
+        if (isStreamingSound(soundId)) {
+            const mediaElement = streamMediaElements.get(soundId);
+            return (
+                readyStreamSounds.has(soundId) ||
+                mediaElement?.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+            );
+        }
+        return buffers.has(soundId);
+    }
+
+    function isSoundFailed(soundId) {
+        return isStreamingSound(soundId)
+            ? failedStreamSounds.has(soundId)
+            : failedBuffers.has(soundId);
+    }
+
+    async function loadSoundAsset(soundId) {
+        if (isStreamingSound(soundId)) {
+            return preloadStreamingSound(soundId);
+        }
+        return loadBuffer(soundId);
     }
 
     async function loadBuffer(soundId) {
@@ -886,6 +919,156 @@ export function createAudioSystem({ camera = null } = {}) {
         } finally {
             pendingLoads.delete(soundId);
         }
+    }
+
+    async function preloadStreamingSound(soundId) {
+        if (isSoundReady(soundId) || isSoundFailed(soundId)) {
+            return streamMediaElements.get(soundId) || null;
+        }
+
+        if (pendingLoads.has(soundId)) {
+            return pendingLoads.get(soundId);
+        }
+
+        const definition = SOUND_DEFINITIONS[soundId];
+        if (!definition?.src) {
+            failedStreamSounds.add(soundId);
+            notifyPreloadProgress();
+            return null;
+        }
+
+        const loadPromise = new Promise((resolve) => {
+            const mediaElement = getOrCreateStreamingMediaElement(soundId);
+            if (!mediaElement) {
+                failedStreamSounds.add(soundId);
+                notifyPreloadProgress();
+                resolve(null);
+                return;
+            }
+
+            if (mediaElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                readyStreamSounds.add(soundId);
+                failedStreamSounds.delete(soundId);
+                notifyPreloadProgress();
+                resolve(mediaElement);
+                return;
+            }
+
+            let settled = false;
+            let timeoutId = null;
+
+            const cleanup = () => {
+                if (timeoutId != null) {
+                    window.clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                mediaElement.removeEventListener('loadeddata', handleReady);
+                mediaElement.removeEventListener('canplay', handleReady);
+                mediaElement.removeEventListener('error', handleFailure);
+            };
+
+            const settle = (loaded) => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                cleanup();
+                if (loaded) {
+                    readyStreamSounds.add(soundId);
+                    failedStreamSounds.delete(soundId);
+                } else {
+                    failedStreamSounds.add(soundId);
+                }
+                notifyPreloadProgress();
+                resolve(loaded ? mediaElement : null);
+            };
+
+            const handleReady = () => {
+                settle(true);
+            };
+            const handleFailure = () => {
+                settle(false);
+            };
+
+            mediaElement.addEventListener('loadeddata', handleReady, { once: true });
+            mediaElement.addEventListener('canplay', handleReady, { once: true });
+            mediaElement.addEventListener('error', handleFailure, { once: true });
+            timeoutId = window.setTimeout(() => {
+                settle(mediaElement.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
+            }, 15000);
+        });
+
+        pendingLoads.set(soundId, loadPromise);
+        try {
+            return await loadPromise;
+        } finally {
+            pendingLoads.delete(soundId);
+        }
+    }
+
+    function getOrCreateStreamingMediaElement(soundId, options = {}) {
+        const definition = SOUND_DEFINITIONS[soundId];
+        if (!definition?.src) {
+            return null;
+        }
+
+        const shouldLoop = options.loop ?? Boolean(definition.loop);
+        let mediaElement = streamMediaElements.get(soundId);
+        if (!mediaElement) {
+            mediaElement = document.createElement('audio');
+            mediaElement.preload = 'auto';
+            mediaElement.crossOrigin = 'anonymous';
+            mediaElement.playsInline = true;
+            mediaElement.autoplay = false;
+            mediaElement.setAttribute('playsinline', '');
+            mediaElement.setAttribute('webkit-playsinline', '');
+            mediaElement.src = definition.src;
+            mediaElement.load();
+            streamMediaElements.set(soundId, mediaElement);
+        }
+
+        mediaElement.loop = Boolean(shouldLoop);
+        mediaElement.muted = false;
+        mediaElement.defaultMuted = false;
+        mediaElement.volume = 1;
+        return mediaElement;
+    }
+
+    function ensureStreamingMediaPlayback(instance, nowMs = performance.now()) {
+        const mediaElement = instance?.mediaElement;
+        if (!mediaElement) {
+            return;
+        }
+        if (!mediaElement.paused && !mediaElement.ended) {
+            return;
+        }
+        if (nowMs - (instance.lastPlayAttemptTime || -Infinity) < 1200) {
+            return;
+        }
+        instance.lastPlayAttemptTime = nowMs;
+        const playPromise = mediaElement.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {});
+        }
+    }
+
+    function disposeStreamingMediaElements() {
+        for (const mediaElement of streamMediaElements.values()) {
+            try {
+                mediaElement.pause();
+            } catch {
+                // Ignore pause failures during teardown.
+            }
+            mediaElement.removeAttribute('src');
+            try {
+                mediaElement.load();
+            } catch {
+                // Ignore release failures during teardown.
+            }
+        }
+        streamMediaElements.clear();
+        readyStreamSounds.clear();
+        failedStreamSounds.clear();
     }
 
     function applyBusVolumes() {
@@ -1781,6 +1964,12 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         instance.gain.gain.setTargetAtTime(safeGain * definition.gain, context.currentTime, 0.07);
+        if (instance.kind === 'stream') {
+            instance.mediaElement.playbackRate = safeRate;
+            ensureStreamingMediaPlayback(instance);
+            return;
+        }
+
         instance.source.playbackRate.setTargetAtTime(safeRate, context.currentTime, 0.08);
     }
 
@@ -1797,6 +1986,10 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!definition || !definition.loop) {
             return null;
         }
+        if (definition.stream) {
+            return ensureStreamingLoopInstance(soundId, definition);
+        }
+
         const buffer = buffers.get(soundId);
         if (!buffer) {
             void loadBuffer(soundId);
@@ -1827,6 +2020,36 @@ export function createAudioSystem({ camera = null } = {}) {
         return instance;
     }
 
+    function ensureStreamingLoopInstance(soundId, definition) {
+        const busNode = mixer.buses[definition.bus];
+        if (!busNode) {
+            return null;
+        }
+
+        const mediaElement = getOrCreateStreamingMediaElement(soundId, { loop: true });
+        if (!mediaElement) {
+            return null;
+        }
+
+        const mediaSource = context.createMediaElementSource(mediaElement);
+        const gainNode = context.createGain();
+        gainNode.gain.setValueAtTime(0, context.currentTime);
+
+        mediaSource.connect(gainNode);
+        gainNode.connect(busNode);
+
+        const instance = {
+            kind: 'stream',
+            mediaElement,
+            mediaSource,
+            gain: gainNode,
+            lastPlayAttemptTime: -Infinity,
+        };
+        loopInstances.set(soundId, instance);
+        ensureStreamingMediaPlayback(instance);
+        return instance;
+    }
+
     function primeLoopInstances() {
         if (!isRealtimeAudioReady() || !context) {
             return 0;
@@ -1844,6 +2067,25 @@ export function createAudioSystem({ camera = null } = {}) {
         return primed;
     }
 
+    function disposeLoopInstance(instance) {
+        if (!instance) {
+            return;
+        }
+        if (instance.kind === 'stream') {
+            try {
+                instance.mediaElement?.pause?.();
+            } catch {
+                // Ignore pause failures during teardown.
+            }
+            safeDisconnect(instance.mediaSource);
+            safeDisconnect(instance.gain);
+            return;
+        }
+        safeStopSource(instance.source);
+        safeDisconnect(instance.source);
+        safeDisconnect(instance.gain);
+    }
+
     function updateMonumentMusic(frameState = {}) {
         const shouldBeAudible =
             !Boolean(frameState.isPaused) &&
@@ -1859,6 +2101,7 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!instance || !context || !camera?.position) {
             return;
         }
+        ensureStreamingMediaPlayback(instance);
 
         const now = context.currentTime;
         const dx = (Number(camera.position.x) || 0) - MONUMENT_AUDIO_CONFIG.x;
@@ -2148,8 +2391,13 @@ export function createAudioSystem({ camera = null } = {}) {
     function updateUfoDiskoStoreMusic(frameState = {}) {
         const storeAudioState = getUfoDiskoStoreAudioState();
         if (!storeAudioState) {
-            if (ufoDiskoMusicInstance) {
-                disposeUfoDiskoMusicInstance();
+            if (ufoDiskoMusicInstance && context) {
+                const now = context.currentTime;
+                ufoDiskoMusicInstance.sourceGain.gain.setTargetAtTime(0, now, 0.08);
+                ufoDiskoMusicInstance.dryGain.gain.setTargetAtTime(0, now, 0.08);
+                ufoDiskoMusicInstance.delaySend.gain.setTargetAtTime(0, now, 0.08);
+                ufoDiskoMusicInstance.reverbSend.gain.setTargetAtTime(0, now, 0.08);
+                ufoDiskoMusicInstance.wetGain.gain.setTargetAtTime(0, now, 0.08);
             }
             return;
         }
@@ -2179,6 +2427,7 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!instance || !context || !camera?.position) {
             return;
         }
+        ensureStreamingMediaPlayback(instance);
 
         const now = context.currentTime;
         const x = Number(storeAudioState.worldX) || 0;
@@ -2449,9 +2698,11 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         const definition = SOUND_DEFINITIONS[UFO_DISKO_STORE_MUSIC_SOUND_ID];
-        const buffer = buffers.get(UFO_DISKO_STORE_MUSIC_SOUND_ID);
-        if (!definition || !buffer) {
-            void loadBuffer(UFO_DISKO_STORE_MUSIC_SOUND_ID);
+        const mediaElement = getOrCreateStreamingMediaElement(UFO_DISKO_STORE_MUSIC_SOUND_ID, {
+            loop: true,
+        });
+        if (!definition || !mediaElement) {
+            void preloadStreamingSound(UFO_DISKO_STORE_MUSIC_SOUND_ID);
             return null;
         }
 
@@ -2461,9 +2712,7 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         const storeAudioState = getUfoDiskoStoreAudioState();
-        const source = context.createBufferSource();
-        source.buffer = buffer;
-        source.loop = true;
+        const mediaSource = context.createMediaElementSource(mediaElement);
 
         const sourceGain = context.createGain();
         sourceGain.gain.setValueAtTime(0, context.currentTime);
@@ -2526,7 +2775,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const wetGain = context.createGain();
         wetGain.gain.setValueAtTime(0, context.currentTime);
 
-        source.connect(sourceGain);
+        mediaSource.connect(sourceGain);
         sourceGain.connect(toneFilter);
         toneFilter.connect(panner);
         panner.connect(dryGain);
@@ -2542,12 +2791,27 @@ export function createAudioSystem({ camera = null } = {}) {
         wetFilter.connect(wetGain);
         wetGain.connect(busNode);
 
-        const randomStartOffsetSec =
-            buffer.duration > 1.25 ? randomRange(0, Math.max(0.01, buffer.duration - 0.65)) : 0;
-        source.start(context.currentTime, randomStartOffsetSec);
+        const applyRandomStartOffset = once(() => {
+            const duration = Number(mediaElement.duration);
+            if (!Number.isFinite(duration) || duration <= 1.25) {
+                return;
+            }
+            try {
+                mediaElement.currentTime = randomRange(0, Math.max(0.01, duration - 0.65));
+            } catch {
+                // Ignore seek failures until metadata becomes seekable.
+            }
+        });
+        if (mediaElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+            applyRandomStartOffset();
+        } else {
+            mediaElement.addEventListener('loadedmetadata', applyRandomStartOffset, { once: true });
+        }
 
         ufoDiskoMusicInstance = {
-            source,
+            kind: 'stream',
+            mediaElement,
+            mediaSource,
             sourceGain,
             toneFilter,
             panner,
@@ -2559,7 +2823,9 @@ export function createAudioSystem({ camera = null } = {}) {
             convolver,
             wetFilter,
             wetGain,
+            lastPlayAttemptTime: -Infinity,
         };
+        ensureStreamingMediaPlayback(ufoDiskoMusicInstance);
 
         return ufoDiskoMusicInstance;
     }
@@ -2592,8 +2858,12 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!ufoDiskoMusicInstance) {
             return;
         }
-        safeStopSource(ufoDiskoMusicInstance.source);
-        safeDisconnect(ufoDiskoMusicInstance.source);
+        try {
+            ufoDiskoMusicInstance.mediaElement?.pause?.();
+        } catch {
+            // Ignore pause failures during teardown.
+        }
+        safeDisconnect(ufoDiskoMusicInstance.mediaSource);
         safeDisconnect(ufoDiskoMusicInstance.sourceGain);
         safeDisconnect(ufoDiskoMusicInstance.toneFilter);
         safeDisconnect(ufoDiskoMusicInstance.panner);
@@ -2617,9 +2887,11 @@ export function createAudioSystem({ camera = null } = {}) {
         }
 
         const definition = SOUND_DEFINITIONS[MONUMENT_MUSIC_SOUND_ID];
-        const buffer = buffers.get(MONUMENT_MUSIC_SOUND_ID);
-        if (!definition || !buffer) {
-            void loadBuffer(MONUMENT_MUSIC_SOUND_ID);
+        const mediaElement = getOrCreateStreamingMediaElement(MONUMENT_MUSIC_SOUND_ID, {
+            loop: true,
+        });
+        if (!definition || !mediaElement) {
+            void preloadStreamingSound(MONUMENT_MUSIC_SOUND_ID);
             return null;
         }
 
@@ -2628,9 +2900,7 @@ export function createAudioSystem({ camera = null } = {}) {
             return null;
         }
 
-        const source = context.createBufferSource();
-        source.buffer = buffer;
-        source.loop = true;
+        const mediaSource = context.createMediaElementSource(mediaElement);
 
         const sourceGain = context.createGain();
         sourceGain.gain.setValueAtTime(0, context.currentTime);
@@ -2689,7 +2959,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const wetGain = context.createGain();
         wetGain.gain.setValueAtTime(0, context.currentTime);
 
-        source.connect(sourceGain);
+        mediaSource.connect(sourceGain);
         sourceGain.connect(analyser);
         analyser.connect(toneFilter);
         toneFilter.connect(panner);
@@ -2706,10 +2976,10 @@ export function createAudioSystem({ camera = null } = {}) {
         wetFilter.connect(wetGain);
         wetGain.connect(busNode);
 
-        source.start();
-
         monumentMusicInstance = {
-            source,
+            kind: 'stream',
+            mediaElement,
+            mediaSource,
             sourceGain,
             analyser,
             frequencyData,
@@ -2723,7 +2993,9 @@ export function createAudioSystem({ camera = null } = {}) {
             convolver,
             wetFilter,
             wetGain,
+            lastPlayAttemptTime: -Infinity,
         };
+        ensureStreamingMediaPlayback(monumentMusicInstance);
 
         return monumentMusicInstance;
     }
@@ -2732,8 +3004,12 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!monumentMusicInstance) {
             return;
         }
-        safeStopSource(monumentMusicInstance.source);
-        safeDisconnect(monumentMusicInstance.source);
+        try {
+            monumentMusicInstance.mediaElement?.pause?.();
+        } catch {
+            // Ignore pause failures during teardown.
+        }
+        safeDisconnect(monumentMusicInstance.mediaSource);
         safeDisconnect(monumentMusicInstance.sourceGain);
         safeDisconnect(monumentMusicInstance.analyser);
         safeDisconnect(monumentMusicInstance.toneFilter);

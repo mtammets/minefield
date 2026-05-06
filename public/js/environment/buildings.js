@@ -4,6 +4,7 @@ import { worldBounds, doesRectOverlapCentralParkingLot } from './layout.js';
 import { randomFromGrid } from './grid-noise.js';
 import { addObstacleAabb } from './obstacles.js';
 import {
+    createBudgetFacadeTexture,
     createBuildingWindowTexture,
     createLuxuryGlassWindowTexture,
     createLuxuryMarbleTexture,
@@ -378,7 +379,11 @@ export function applyLorienVelmoreMineDetonation(buildingLayer, detonationPositi
     return affectedAnyDoor;
 }
 
-export function appendLorienVelmoreDoorCollisionObstacles(buildingLayer, outputBuffer = []) {
+function appendLorienVelmoreDoorObstacles(
+    buildingLayer,
+    outputBuffer = [],
+    includeVerticalRange = false
+) {
     const result = Array.isArray(outputBuffer) ? outputBuffer : [];
     result.length = 0;
 
@@ -415,6 +420,12 @@ export function appendLorienVelmoreDoorCollisionObstacles(buildingLayer, outputB
                     maxZ: panelCenterZ + panelDepth,
                     category: 'building',
                 });
+                if (includeVerticalRange) {
+                    result[result.length - 1].minY = Number(doorSystem.doorBaseY) || 0;
+                    result[result.length - 1].maxY =
+                        (Number(doorSystem.doorBaseY) || 0) +
+                        Math.max(0.2, Number(doorSystem.doorHeight) || 0);
+                }
             }
         }
     }
@@ -445,10 +456,26 @@ export function appendLorienVelmoreDoorCollisionObstacles(buildingLayer, outputB
                 maxZ: panelCenterZ + panelDepth * 0.5,
                 category: 'building',
             });
+            if (includeVerticalRange) {
+                result[result.length - 1].minY =
+                    (panelGroup.position.y || 0) -
+                    Math.max(0.2, Number(entryDoor?.height) || 0) * 0.5;
+                result[result.length - 1].maxY =
+                    (panelGroup.position.y || 0) +
+                    Math.max(0.2, Number(entryDoor?.height) || 0) * 0.5;
+            }
         }
     }
 
     return result;
+}
+
+export function appendLorienVelmoreDoorCollisionObstacles(buildingLayer, outputBuffer = []) {
+    return appendLorienVelmoreDoorObstacles(buildingLayer, outputBuffer, false);
+}
+
+export function appendLorienVelmoreDoorTraceObstacles(buildingLayer, outputBuffer = []) {
+    return appendLorienVelmoreDoorObstacles(buildingLayer, outputBuffer, true);
 }
 
 export function getBuildingPlacements() {
@@ -1302,14 +1329,14 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     const bridgeHeight = Math.max(2.4, building.height - passageHeight);
     const wingOffset = passageWidth * 0.5 + sideWingSpan * 0.5;
     const tintColor = resolveBuildingTintColor(building.tint);
-    const ufoInteriorWallTexture = isUfoDiskoRetail ? createLuxuryMarbleTexture() : null;
+    const ufoInteriorWallTexture = isUfoDiskoRetail ? createBudgetFacadeTexture() : null;
     if (ufoInteriorWallTexture) {
         ufoInteriorWallTexture.repeat.set(
             Math.max(1, Math.round((axis === 'x' ? building.width : building.depth) / 4.8)),
             Math.max(1, Math.round(passageHeight / 3.2))
         );
     }
-    const ufoInteriorCeilingTexture = isUfoDiskoRetail ? createLuxuryMarbleTexture() : null;
+    const ufoInteriorCeilingTexture = isUfoDiskoRetail ? createBudgetFacadeTexture() : null;
     if (ufoInteriorCeilingTexture) {
         ufoInteriorCeilingTexture.repeat.set(
             Math.max(1, Math.round((axis === 'x' ? passageWidth : building.depth) / 4.6)),
@@ -1401,11 +1428,11 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
         map: isUfoDiskoRetail ? ufoInteriorCeilingTexture : null,
     });
     const innerWallMaterial = new THREE.MeshStandardMaterial({
-        color: isUfoDiskoRetail ? 0x0b1119 : isLuxuryLorien ? 0x1c1816 : 0x172333,
-        emissive: isUfoDiskoRetail ? 0x050912 : isLuxuryLorien ? 0x14100d : 0x111a24,
-        emissiveIntensity: isUfoDiskoRetail ? 0.1 : isLuxuryLorien ? 0.16 : 0.12,
-        roughness: isUfoDiskoRetail ? 0.24 : isLuxuryLorien ? 0.58 : 0.92,
-        metalness: isUfoDiskoRetail ? 0.42 : isLuxuryLorien ? 0.1 : 0.03,
+        color: isUfoDiskoRetail ? 0x2a3139 : isLuxuryLorien ? 0x1c1816 : 0x172333,
+        emissive: isUfoDiskoRetail ? 0x0c1117 : isLuxuryLorien ? 0x14100d : 0x111a24,
+        emissiveIntensity: isUfoDiskoRetail ? 0.06 : isLuxuryLorien ? 0.16 : 0.12,
+        roughness: isUfoDiskoRetail ? 0.82 : isLuxuryLorien ? 0.58 : 0.92,
+        metalness: isUfoDiskoRetail ? 0.06 : isLuxuryLorien ? 0.1 : 0.03,
         map: isUfoDiskoRetail ? ufoInteriorWallTexture : null,
     });
     const lorienTrimMaterial = new THREE.MeshStandardMaterial({
@@ -1634,115 +1661,115 @@ function addUfoDiskoMixedUseFacade(
     const roofCapHeight = THREE.MathUtils.clamp(upperHeight * 0.045, 0.86, 1.28);
     const residentialFacadeHeight = Math.max(4.2, upperHeight - roofCapHeight);
     const residentialFacadeCenterY = podiumHeight + residentialFacadeHeight * 0.5;
-    const podiumFrontTexture = createLuxuryMarbleTexture();
+    const podiumFrontTexture = createBudgetFacadeTexture();
     podiumFrontTexture.repeat.set(
-        Math.max(1, Math.round(crossSpan / 3.8)),
-        Math.max(2, Math.round(podiumHeight / 3.2))
+        Math.max(1, Math.round(crossSpan / 2.6)),
+        Math.max(2, Math.round(podiumHeight / 2.3))
     );
-    const podiumSideTexture = createLuxuryMarbleTexture();
+    const podiumSideTexture = createBudgetFacadeTexture();
     podiumSideTexture.repeat.set(
-        Math.max(2, Math.round(travelSpan / 4.2)),
-        Math.max(2, Math.round(podiumHeight / 3.2))
+        Math.max(2, Math.round(travelSpan / 2.8)),
+        Math.max(2, Math.round(podiumHeight / 2.3))
     );
-    const residentialFrontTexture = createLuxuryMarbleTexture();
+    const residentialFrontTexture = createBudgetFacadeTexture();
     residentialFrontTexture.repeat.set(
-        Math.max(1, Math.round(crossSpan / 5.2)),
-        Math.max(2, Math.round(residentialFacadeHeight / 3.1))
+        Math.max(1, Math.round(crossSpan / 3.4)),
+        Math.max(2, Math.round(residentialFacadeHeight / 2.5))
     );
-    const residentialSideTexture = createLuxuryMarbleTexture();
+    const residentialSideTexture = createBudgetFacadeTexture();
     residentialSideTexture.repeat.set(
-        Math.max(2, Math.round(travelSpan / 5.2)),
-        Math.max(2, Math.round(residentialFacadeHeight / 3.1))
+        Math.max(2, Math.round(travelSpan / 3.6)),
+        Math.max(2, Math.round(residentialFacadeHeight / 2.5))
     );
 
     const podiumFrontMaterial = new THREE.MeshStandardMaterial({
-        color: 0x172231,
+        color: 0x55606c,
         map: podiumFrontTexture,
-        emissive: 0x08111d,
-        emissiveIntensity: 0.12,
-        roughness: 0.22,
-        metalness: 0.22,
+        emissive: 0x12181f,
+        emissiveIntensity: 0.04,
+        roughness: 0.9,
+        metalness: 0.05,
     });
     const podiumSideMaterial = new THREE.MeshStandardMaterial({
-        color: 0x13202d,
+        color: 0x505b66,
         map: podiumSideTexture,
-        emissive: 0x08111b,
-        emissiveIntensity: 0.12,
-        roughness: 0.24,
-        metalness: 0.2,
+        emissive: 0x11171d,
+        emissiveIntensity: 0.04,
+        roughness: 0.92,
+        metalness: 0.04,
     });
     const podiumRibMaterial = trimMaterial.clone();
-    podiumRibMaterial.color.setHex(0x2f7082);
-    podiumRibMaterial.emissive.setHex(0x0d2231);
-    podiumRibMaterial.emissiveIntensity = 0.16;
-    podiumRibMaterial.roughness = 0.28;
-    podiumRibMaterial.metalness = 0.84;
+    podiumRibMaterial.color.setHex(0x66727e);
+    podiumRibMaterial.emissive.setHex(0x11171c);
+    podiumRibMaterial.emissiveIntensity = 0.05;
+    podiumRibMaterial.roughness = 0.72;
+    podiumRibMaterial.metalness = 0.24;
     const podiumPlinthMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0b1018,
-        emissive: 0x050a11,
-        emissiveIntensity: 0.06,
-        roughness: 0.34,
-        metalness: 0.32,
+        color: 0x242b34,
+        emissive: 0x090d11,
+        emissiveIntensity: 0.03,
+        roughness: 0.94,
+        metalness: 0.03,
     });
     const residentialFrontMaterial = new THREE.MeshStandardMaterial({
-        color: 0x5b6474,
+        color: 0x7f8790,
         map: residentialFrontTexture,
-        emissive: 0x141922,
-        emissiveIntensity: 0.05,
-        roughness: 0.62,
-        metalness: 0.1,
+        emissive: 0x171c22,
+        emissiveIntensity: 0.03,
+        roughness: 0.88,
+        metalness: 0.05,
     });
     const residentialSideMaterial = new THREE.MeshStandardMaterial({
-        color: 0x56606f,
+        color: 0x79818a,
         map: residentialSideTexture,
-        emissive: 0x141922,
-        emissiveIntensity: 0.05,
-        roughness: 0.64,
-        metalness: 0.09,
+        emissive: 0x171c22,
+        emissiveIntensity: 0.03,
+        roughness: 0.9,
+        metalness: 0.04,
     });
     const residentialBandMaterial = new THREE.MeshStandardMaterial({
-        color: 0x2b3341,
-        emissive: 0x0f141d,
-        emissiveIntensity: 0.08,
-        roughness: 0.42,
-        metalness: 0.28,
+        color: 0x5e6771,
+        emissive: 0x12161b,
+        emissiveIntensity: 0.04,
+        roughness: 0.82,
+        metalness: 0.12,
     });
     const residentialRevealMaterial = new THREE.MeshStandardMaterial({
-        color: 0x202935,
-        emissive: 0x0e141d,
-        emissiveIntensity: 0.08,
-        roughness: 0.3,
-        metalness: 0.14,
+        color: 0x4b535c,
+        emissive: 0x101419,
+        emissiveIntensity: 0.04,
+        roughness: 0.84,
+        metalness: 0.08,
     });
     const residentialFrameMaterial = new THREE.MeshStandardMaterial({
-        color: 0xaeb8c4,
-        emissive: 0x1a2634,
-        emissiveIntensity: 0.08,
-        roughness: 0.2,
-        metalness: 0.78,
+        color: 0x929aa3,
+        emissive: 0x141a21,
+        emissiveIntensity: 0.04,
+        roughness: 0.76,
+        metalness: 0.2,
     });
     const residentialGlassTexture = createLuxuryGlassWindowTexture();
     residentialGlassTexture.repeat.set(1, Math.max(1, Math.round(residentialFacadeHeight / 2.6)));
     const residentialGlassMaterial = createLorienTowerGlassMaterial(residentialGlassTexture);
-    residentialGlassMaterial.color.setHex(0xaec2d4);
-    residentialGlassMaterial.emissive.setHex(0x31404d);
-    residentialGlassMaterial.emissiveIntensity = 0.12;
-    residentialGlassMaterial.opacity = 0.84;
+    residentialGlassMaterial.color.setHex(0x96a6b5);
+    residentialGlassMaterial.emissive.setHex(0x212a33);
+    residentialGlassMaterial.emissiveIntensity = 0.06;
+    residentialGlassMaterial.opacity = 0.76;
     const residentialGlowMaterial = new THREE.MeshBasicMaterial({
         color: 0xfff1dc,
         transparent: true,
-        opacity: 0.22,
+        opacity: 0.14,
         toneMapped: false,
     });
     const residentialCoolGlowMaterial = new THREE.MeshBasicMaterial({
         color: 0xa7f4ff,
         transparent: true,
-        opacity: 0.18,
+        opacity: 0.1,
         toneMapped: false,
     });
     const crownLightMaterial = lightMaterial.clone();
-    crownLightMaterial.color.setHex(0x8df5ff);
-    crownLightMaterial.opacity = 0.18;
+    crownLightMaterial.color.setHex(0x75c7d1);
+    crownLightMaterial.opacity = 0.08;
 
     const addFacadeFace = (faceAxis, faceCoordinate, y, span, height, material, along = 0) => {
         if (faceAxis === 'z') {
@@ -1814,7 +1841,7 @@ function addUfoDiskoMixedUseFacade(
     const rowCount = Math.max(3, Math.min(10, Math.floor((residentialFacadeHeight - 1.2) / 3.02)));
     const rowSpacing = residentialFacadeHeight / rowCount;
     const windowHeight = THREE.MathUtils.clamp(rowSpacing - 0.9, 1.56, 2.12);
-    const residentialWindowFloat = facadeDepth * 0.38;
+    const residentialWindowFloat = facadeDepth * 0.18;
     const addResidentialWindows = ({ faceAxis, faceCoordinate, span, edgeInset = 1.34 }) => {
         const faceDirection = Math.sign(faceCoordinate) || 1;
         const floatedFaceCoordinate = faceCoordinate + faceDirection * residentialWindowFloat;
@@ -2289,40 +2316,40 @@ function addUfoDiskoRetailPassageDecor(
         toneMapped: false,
         depthWrite: false,
     });
-    const wallPanelTexture = createLuxuryMarbleTexture();
+    const wallPanelTexture = createBudgetFacadeTexture();
     wallPanelTexture.repeat.set(
         Math.max(1, Math.round(passageLength / 4.4)),
         Math.max(1, Math.round(passageHeight / 3.1))
     );
-    const wallInsetTexture = createLuxuryMarbleTexture();
+    const wallInsetTexture = createBudgetFacadeTexture();
     wallInsetTexture.repeat.set(
         Math.max(1, Math.round(passageLength / 4.8)),
         Math.max(1, Math.round(passageHeight / 3.6))
     );
-    const wallCoveTexture = createLuxuryMarbleTexture();
+    const wallCoveTexture = createBudgetFacadeTexture();
     wallCoveTexture.repeat.set(Math.max(1, Math.round(passageLength / 5.2)), 1);
     const wallPanelMaterial = new THREE.MeshStandardMaterial({
-        color: 0x0d131b,
-        emissive: 0x060b12,
-        emissiveIntensity: 0.09,
-        roughness: 0.18,
-        metalness: 0.54,
+        color: 0x353d46,
+        emissive: 0x0e1319,
+        emissiveIntensity: 0.05,
+        roughness: 0.78,
+        metalness: 0.08,
         map: wallPanelTexture,
     });
     const wallInsetMaterial = new THREE.MeshStandardMaterial({
-        color: 0x05080f,
-        emissive: 0x03060c,
-        emissiveIntensity: 0.05,
-        roughness: 0.16,
-        metalness: 0.42,
+        color: 0x252c34,
+        emissive: 0x0a0f15,
+        emissiveIntensity: 0.04,
+        roughness: 0.84,
+        metalness: 0.05,
         map: wallInsetTexture,
     });
     const wallCoveMaterial = new THREE.MeshStandardMaterial({
-        color: 0x101722,
-        emissive: 0x08111b,
-        emissiveIntensity: 0.08,
-        roughness: 0.16,
-        metalness: 0.5,
+        color: 0x2f3842,
+        emissive: 0x0d1218,
+        emissiveIntensity: 0.05,
+        roughness: 0.74,
+        metalness: 0.1,
         map: wallCoveTexture,
     });
 
@@ -5700,6 +5727,7 @@ function addLorienVelmoreRoofCarLift(
             centerX: building.x,
             centerZ: building.z,
             width: entryDoorWidth,
+            height: entryDoorHeight,
             collisionDepth: 0.18,
             closedY: entryDoorClosedY,
             openY: entryDoorOpenY,

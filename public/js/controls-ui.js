@@ -47,9 +47,9 @@ const CONTROL_LAYOUTS = Object.freeze({
             title: 'Roof Weapon',
             rows: Object.freeze([
                 {
-                    label: 'Throw Mine / Roof Gun',
+                    label: 'Throw Mine / VX-9',
                     actionId: ACTION_IDS.mineThrow,
-                    hint: 'Lorien pickup turns T into auto-fire',
+                    hint: 'VX-9 pickup turns T into auto-fire',
                 },
             ]),
         },
@@ -115,9 +115,9 @@ const CONTROL_LAYOUTS = Object.freeze({
             title: 'Roof Weapon',
             rows: Object.freeze([
                 {
-                    label: 'Throw Mine / Roof Gun',
+                    label: 'Throw Mine / VX-9',
                     actionId: ACTION_IDS.mineThrow,
-                    hint: 'Lorien pickup turns T into auto-fire',
+                    hint: 'VX-9 pickup turns T into auto-fire',
                 },
             ]),
         },

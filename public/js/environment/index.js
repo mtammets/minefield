@@ -83,7 +83,7 @@ function updateGroundMotion(
         runtimeCityScenery.userData?.undergroundSurfaceSceneryHidden
     );
     if (!surfaceSceneryHidden) {
-        updateBillboardRuntime(runtimeCityScenery);
+        updateBillboardRuntime(runtimeCityScenery, playerPosition);
         updateBuildingRuntime(
             runtimeCityScenery.userData?.buildingLayer,
             playerPosition,

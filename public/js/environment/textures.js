@@ -930,6 +930,86 @@ export function createLuxuryMarbleTexture() {
     return texture;
 }
 
+export function createBudgetFacadeTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+
+    const baseGradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    baseGradient.addColorStop(0, '#7b848d');
+    baseGradient.addColorStop(0.34, '#6e7882');
+    baseGradient.addColorStop(0.68, '#66707a');
+    baseGradient.addColorStop(1, '#59626c');
+    ctx.fillStyle = baseGradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let i = 0; i < 8800; i += 1) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const value = 110 + Math.random() * 38;
+        const alpha = 0.04 + Math.random() * 0.08;
+        ctx.fillStyle = `rgba(${value}, ${value + 4}, ${value + 8}, ${alpha})`;
+        ctx.fillRect(x, y, 2, 2);
+    }
+
+    const panelHeight = 72;
+    const verticalPanelWidth = 104;
+    ctx.strokeStyle = 'rgba(42, 48, 55, 0.22)';
+    ctx.lineWidth = 2;
+    for (let y = panelHeight; y < canvas.height; y += panelHeight) {
+        ctx.beginPath();
+        ctx.moveTo(0, y + 0.5);
+        ctx.lineTo(canvas.width, y + 0.5);
+        ctx.stroke();
+    }
+    for (let x = verticalPanelWidth; x < canvas.width; x += verticalPanelWidth) {
+        ctx.beginPath();
+        ctx.moveTo(x + 0.5, 0);
+        ctx.lineTo(x + 0.5, canvas.height);
+        ctx.stroke();
+    }
+
+    for (let i = 0; i < 18; i += 1) {
+        const patchWidth = 42 + Math.random() * 96;
+        const patchHeight = 18 + Math.random() * 34;
+        const patchX = Math.random() * (canvas.width - patchWidth);
+        const patchY = Math.random() * (canvas.height - patchHeight);
+        ctx.fillStyle = i % 2 === 0 ? 'rgba(218, 224, 230, 0.1)' : 'rgba(74, 82, 90, 0.08)';
+        ctx.fillRect(patchX, patchY, patchWidth, patchHeight);
+    }
+
+    ctx.strokeStyle = 'rgba(36, 41, 48, 0.14)';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 34; i += 1) {
+        const startX = Math.random() * canvas.width;
+        const startY = Math.random() * canvas.height;
+        const length = 18 + Math.random() * 90;
+        const drift = (Math.random() - 0.5) * 26;
+        ctx.lineWidth = 1 + Math.random() * 2.2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(startX + drift, startY + length);
+        ctx.stroke();
+    }
+
+    const dirtFade = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    dirtFade.addColorStop(0, 'rgba(28, 33, 39, 0.22)');
+    dirtFade.addColorStop(0.16, 'rgba(28, 33, 39, 0.06)');
+    dirtFade.addColorStop(0.84, 'rgba(255, 255, 255, 0)');
+    dirtFade.addColorStop(1, 'rgba(22, 25, 30, 0.18)');
+    ctx.fillStyle = dirtFade;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1, 1);
+    texture.anisotropy = 2;
+    return texture;
+}
+
 export function createLuxuryGlassWindowTexture() {
     const canvas = document.createElement('canvas');
     canvas.width = 256;

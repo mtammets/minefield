@@ -165,6 +165,14 @@ const STARTUP_SECTOR_PREWARM_DIRECTIONS = Object.freeze([0, 45, 90, 135, 180, 22
 const RUNTIME_GRAPHICS_RECOVERY_REQUEST_COOLDOWN_MS = 900;
 const RUNTIME_GRAPHICS_RECOVERY_STATUS_COOLDOWN_MS = 2400;
 const RUNTIME_SCENE_REPAIR_STATUS_COOLDOWN_MS = 2400;
+const PLAYER_SPAWN_CLEARANCE = 3.4;
+const PLAYER_SPAWN_BOT_CLEARANCE = 14;
+const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([
+    0,
+    Math.PI * 0.5,
+    Math.PI,
+    -Math.PI * 0.5,
+]);
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
@@ -754,23 +762,181 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
 
 let mapUiController = null;
 let groundLayerDebugController = null;
-
-const initialSpawnX = Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x;
-const initialSpawnZ = Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z;
-const initialSpawnRotationY = Number.isFinite(playerSpawnPoint?.rotationY)
-    ? playerSpawnPoint.rotationY
-    : car.rotation.y;
-car.position.set(
-    initialSpawnX,
-    getGroundHeightAt(initialSpawnX, initialSpawnZ) + PLAYER_RIDE_HEIGHT,
-    initialSpawnZ
-);
-car.rotation.set(0, initialSpawnRotationY, 0);
-const playerSpawnState = {
-    position: new THREE.Vector3(initialSpawnX, car.position.y, initialSpawnZ),
-    rotationY: initialSpawnRotationY,
-};
 const builtWorld = ensureWorldBuilt();
+const playerSpawnCandidates = buildPlayerSpawnCandidates();
+let lastPlayerSpawnCandidateIndex = -1;
+const initialPlayerSpawn = resolveRandomPlayerSpawnState({ allowRepeat: true });
+car.position.copy(initialPlayerSpawn.position);
+car.rotation.set(0, initialPlayerSpawn.rotationY, 0);
+const playerSpawnState = {
+    position: initialPlayerSpawn.position.clone(),
+    rotationY: initialPlayerSpawn.rotationY,
+};
+
+function buildPlayerSpawnCandidates() {
+    const candidates = [];
+    const xLines = Array.isArray(cityMapLayout?.roadAxisLinesX) ? cityMapLayout.roadAxisLinesX : [];
+    const zLines = Array.isArray(cityMapLayout?.roadAxisLinesZ) ? cityMapLayout.roadAxisLinesZ : [];
+    const centralParkingLot = cityMapLayout?.centralParkingLot || null;
+
+    for (let xIndex = 0; xIndex < xLines.length; xIndex += 1) {
+        const x = Number(xLines[xIndex]?.coord);
+        if (!Number.isFinite(x)) {
+            continue;
+        }
+        for (let zIndex = 0; zIndex < zLines.length; zIndex += 1) {
+            const z = Number(zLines[zIndex]?.coord);
+            if (!Number.isFinite(z)) {
+                continue;
+            }
+            if (isInsideCentralParkingLotCandidate(x, z, centralParkingLot, 10)) {
+                continue;
+            }
+            if (isInsidePlayerSpawnObstacle(x, z, staticObstacles, PLAYER_SPAWN_CLEARANCE)) {
+                continue;
+            }
+            candidates.push({
+                x,
+                z,
+                rotations: PLAYER_SPAWN_CARDINAL_ROTATIONS,
+            });
+        }
+    }
+
+    if (candidates.length > 0) {
+        return candidates;
+    }
+
+    return [
+        {
+            x: Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x,
+            z: Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z,
+            rotations: [
+                Number.isFinite(playerSpawnPoint?.rotationY) ? playerSpawnPoint.rotationY : car.rotation.y,
+            ],
+        },
+    ];
+}
+
+function isInsideCentralParkingLotCandidate(x, z, centralParkingLot = null, padding = 0) {
+    if (!centralParkingLot) {
+        return false;
+    }
+    const extraPadding = Math.max(0, Number(padding) || 0);
+    return (
+        x >= Number(centralParkingLot.minX) - extraPadding &&
+        x <= Number(centralParkingLot.maxX) + extraPadding &&
+        z >= Number(centralParkingLot.minZ) - extraPadding &&
+        z <= Number(centralParkingLot.maxZ) + extraPadding
+    );
+}
+
+function isInsidePlayerSpawnObstacle(x, z, obstacles = [], padding = 0) {
+    for (let index = 0; index < obstacles.length; index += 1) {
+        const obstacle = obstacles[index];
+        if (obstacle?.type === 'circle') {
+            const radius = Math.max(0, Number(obstacle.radius) || 0) + padding;
+            const dx = x - Number(obstacle.x);
+            const dz = z - Number(obstacle.z);
+            if (dx * dx + dz * dz <= radius * radius) {
+                return true;
+            }
+            continue;
+        }
+        if (obstacle?.type !== 'aabb') {
+            continue;
+        }
+        if (
+            x >= Number(obstacle.minX) - padding &&
+            x <= Number(obstacle.maxX) + padding &&
+            z >= Number(obstacle.minZ) - padding &&
+            z <= Number(obstacle.maxZ) + padding
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function isPlayerSpawnClearOfBots(candidate, clearance = PLAYER_SPAWN_BOT_CLEARANCE) {
+    const descriptors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || [];
+    const clearanceSq = clearance * clearance;
+    for (let index = 0; index < descriptors.length; index += 1) {
+        const descriptor = descriptors[index];
+        const position = descriptor?.position;
+        if (!position) {
+            continue;
+        }
+        const dx = candidate.x - Number(position.x);
+        const dz = candidate.z - Number(position.z);
+        if (dx * dx + dz * dz < clearanceSq) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function resolveRandomPlayerSpawnState({ allowRepeat = false } = {}) {
+    const indexedCandidates = [];
+    for (let index = 0; index < playerSpawnCandidates.length; index += 1) {
+        const candidate = playerSpawnCandidates[index];
+        if (!candidate) {
+            continue;
+        }
+        if (!isPlayerSpawnClearOfBots(candidate)) {
+            continue;
+        }
+        indexedCandidates.push({ candidate, index });
+    }
+
+    const availableCandidates =
+        indexedCandidates.length > 0
+            ? indexedCandidates
+            : playerSpawnCandidates.map((candidate, index) => ({ candidate, index }));
+    let selectedEntry =
+        availableCandidates[Math.floor(Math.random() * Math.max(1, availableCandidates.length))] ||
+        null;
+
+    if (
+        !allowRepeat &&
+        availableCandidates.length > 1 &&
+        selectedEntry?.index === lastPlayerSpawnCandidateIndex
+    ) {
+        const alternativeCandidates = availableCandidates.filter(
+            (entry) => entry.index !== lastPlayerSpawnCandidateIndex
+        );
+        selectedEntry =
+            alternativeCandidates[
+                Math.floor(Math.random() * Math.max(1, alternativeCandidates.length))
+            ] || selectedEntry;
+    }
+
+    const resolvedCandidate =
+        selectedEntry?.candidate ||
+        playerSpawnCandidates[0] || {
+            x: Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x,
+            z: Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z,
+            rotations: [
+                Number.isFinite(playerSpawnPoint?.rotationY) ? playerSpawnPoint.rotationY : car.rotation.y,
+            ],
+        };
+    lastPlayerSpawnCandidateIndex = Number.isInteger(selectedEntry?.index)
+        ? selectedEntry.index
+        : lastPlayerSpawnCandidateIndex;
+
+    const rotations =
+        Array.isArray(resolvedCandidate.rotations) && resolvedCandidate.rotations.length > 0
+            ? resolvedCandidate.rotations
+            : PLAYER_SPAWN_CARDINAL_ROTATIONS;
+    const rotationY =
+        rotations[Math.floor(Math.random() * rotations.length)] ||
+        (Number.isFinite(playerSpawnPoint?.rotationY) ? playerSpawnPoint.rotationY : car.rotation.y);
+    const groundY = getGroundHeightAt(resolvedCandidate.x, resolvedCandidate.z) + PLAYER_RIDE_HEIGHT;
+    return {
+        position: new THREE.Vector3(resolvedCandidate.x, groundY, resolvedCandidate.z),
+        rotationY,
+    };
+}
 
 const scene = initializeScene({
     sceneBackgroundColor,
@@ -1992,6 +2158,36 @@ runtimeState.weaponSystem = createRoofWeaponSystem({
     onBotDestroyed(event = null) {
         handleRoofWeaponBotDestroyed(event || null);
     },
+    onPlayerHit(event = null) {
+        if (runtimeState.gameMode !== 'bots') {
+            return { destroyed: false };
+        }
+        const shooterName =
+            typeof event?.shooterName === 'string' && event.shooterName.trim()
+                ? event.shooterName.trim()
+                : 'VX-9 hunter';
+        const shotDirection = event?.shotDirection || null;
+        const impactNormal =
+            shotDirection && Number.isFinite(shotDirection.x) && Number.isFinite(shotDirection.z)
+                ? new THREE.Vector3(-shotDirection.x, 0, -shotDirection.z).normalize()
+                : null;
+        runtimeState.gameSessionController?.triggerCarExplosion?.(
+            event?.position || car.position,
+            0xff8d66,
+            0xff4f4f,
+            {
+                statusText: `${shooterName} destroyed you with VX-9 fire.`,
+                collision: {
+                    obstacleCategory: 'vx9_hunter',
+                    impactSpeed: 52,
+                    impactNormal,
+                },
+            }
+        );
+        return {
+            destroyed: Boolean(runtimeState.isCarDestroyed),
+        };
+    },
 });
 runtimeState.crashDebrisController = createCrashDebrisController({
     scene,
@@ -2431,6 +2627,7 @@ runtimeState.gameSessionController = createGameSessionController({
     keys,
     car,
     playerSpawnState,
+    resolvePlayerSpawnState: () => resolveRandomPlayerSpawnState(),
     getGroundHeightAt,
     setCameraKeyboardControlsEnabled,
     resetCameraTrackingState,
@@ -3027,6 +3224,9 @@ runtimeState.inputController = createInputController({
     },
     onDeployMine(mode) {
         return runtimeState.mineController?.deployMine?.(mode);
+    },
+    onGrantRoofWeapon() {
+        return runtimeState.weaponSystem?.grantWeapon?.() || false;
     },
     getHasRoofWeapon() {
         return Boolean(runtimeState.weaponSystem?.hasWeapon?.());

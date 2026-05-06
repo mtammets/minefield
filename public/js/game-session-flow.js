@@ -25,6 +25,7 @@ export function createGameSessionController({
     keys,
     car,
     playerSpawnState,
+    resolvePlayerSpawnState = null,
     getGroundHeightAt,
     setCameraKeyboardControlsEnabled,
     resetCameraTrackingState,
@@ -289,6 +290,27 @@ export function createGameSessionController({
         pendingRoundPresentationToken += 1;
     }
 
+    function refreshPlayerSpawnState() {
+        if (typeof resolvePlayerSpawnState !== 'function') {
+            return playerSpawnState;
+        }
+        const nextSpawnState = resolvePlayerSpawnState();
+        if (!nextSpawnState?.position) {
+            return playerSpawnState;
+        }
+        const nextX = Number(nextSpawnState.position.x);
+        const nextY = Number(nextSpawnState.position.y);
+        const nextZ = Number(nextSpawnState.position.z);
+        if (![nextX, nextY, nextZ].every(Number.isFinite)) {
+            return playerSpawnState;
+        }
+        playerSpawnState.position.set(nextX, nextY, nextZ);
+        if (Number.isFinite(nextSpawnState.rotationY)) {
+            playerSpawnState.rotationY = nextSpawnState.rotationY;
+        }
+        return playerSpawnState;
+    }
+
     function snapCarToGround() {
         car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
     }
@@ -364,6 +386,7 @@ export function createGameSessionController({
             return;
         }
 
+        refreshPlayerSpawnState();
         setIsCarDestroyed(false);
         car.visible = true;
         car.position.copy(playerSpawnState.position);
@@ -848,6 +871,7 @@ export function createGameSessionController({
         skidMarkController.reset();
         roofWeaponSystem?.resetRound?.();
 
+        refreshPlayerSpawnState();
         car.visible = true;
         car.position.copy(playerSpawnState.position);
         snapCarToGround();
