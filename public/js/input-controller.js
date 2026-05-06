@@ -32,6 +32,8 @@ export function createInputController(options = {}) {
         onShowWelcomeModal = () => {},
         onRecoverVehicle = () => null,
         onDeployMine = () => null,
+        getHasRoofWeapon = () => false,
+        onSetRoofWeaponTrigger = () => {},
         toggleWorldMap = () => ({ open: false, message: null }),
         isWorldMapVisible = () => false,
         getInputContext = () => INPUT_CONTEXTS.gameplay,
@@ -75,6 +77,8 @@ export function createInputController(options = {}) {
     const onKeyUp = (event) => handleKey(event, false);
     const onFullscreenPointerMove = (event) => handleFullscreenCursorPointerMove(event);
     const onFullscreenCursorActivity = (event) => handleFullscreenCursorActivity(event);
+    const onWindowPointerUp = (event) => handleWindowPointerUp(event);
+    const onWindowBlur = () => releaseRoofWeaponTrigger();
 
     return {
         initialize,
@@ -91,6 +95,9 @@ export function createInputController(options = {}) {
         document.addEventListener('wheel', onFullscreenCursorActivity, { passive: true });
         document.addEventListener('keydown', onFullscreenCursorActivity);
         window.addEventListener('resize', onWindowResize);
+        window.addEventListener('pointerup', onWindowPointerUp);
+        window.addEventListener('pointercancel', onWindowPointerUp);
+        window.addEventListener('blur', onWindowBlur);
         renderer.domElement.addEventListener('pointerdown', handleGameCanvasPointerDown);
         onFullscreenChange();
     }
@@ -104,7 +111,11 @@ export function createInputController(options = {}) {
         document.removeEventListener('wheel', onFullscreenCursorActivity);
         document.removeEventListener('keydown', onFullscreenCursorActivity);
         window.removeEventListener('resize', onWindowResize);
+        window.removeEventListener('pointerup', onWindowPointerUp);
+        window.removeEventListener('pointercancel', onWindowPointerUp);
+        window.removeEventListener('blur', onWindowBlur);
         renderer.domElement.removeEventListener('pointerdown', handleGameCanvasPointerDown);
+        releaseRoofWeaponTrigger();
         clearFullscreenCursorHideTimeout();
         showFullscreenCursor();
     }
@@ -118,6 +129,13 @@ export function createInputController(options = {}) {
             }
             onRegisterControlAction(actionId);
         };
+        const roofWeaponBoundThrowAction =
+            matchesAction(ACTION_IDS.mineThrow) && Boolean(getHasRoofWeapon());
+
+        if (roofWeaponBoundThrowAction && !isKeyDown) {
+            onSetRoofWeaponTrigger(false);
+            return;
+        }
 
         // While welcome modal is visible, disable gameplay/editor shortcuts so text inputs work naturally.
         if (getIsWelcomeModalVisible()) {
@@ -283,6 +301,15 @@ export function createInputController(options = {}) {
         }
 
         if (matchesAction(ACTION_IDS.mineThrow)) {
+            if (roofWeaponBoundThrowAction) {
+                if (isRaceIntroDriveLocked) {
+                    onSetRoofWeaponTrigger(false);
+                    return;
+                }
+                onSetRoofWeaponTrigger(isKeyDown);
+                reportAction(ACTION_IDS.mineThrow);
+                return;
+            }
             if (!isKeyDown || isRaceIntroDriveLocked) {
                 return;
             }
@@ -450,7 +477,20 @@ export function createInputController(options = {}) {
         if (clickUrl) {
             openSceneClickUrl(clickUrl);
             event.preventDefault();
+            releaseRoofWeaponTrigger();
+            return;
         }
+    }
+
+    function handleWindowPointerUp(event) {
+        if (event?.button != null && event.button !== 0) {
+            return;
+        }
+        releaseRoofWeaponTrigger();
+    }
+
+    function releaseRoofWeaponTrigger() {
+        onSetRoofWeaponTrigger(false);
     }
 
     function resolveSceneClickUrl(pointerNdc) {

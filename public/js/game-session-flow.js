@@ -47,6 +47,7 @@ export function createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
+    roofWeaponSystem = null,
     getBotTrafficSystem,
     getCollectorScore = () => 0,
     getCollectorRoundStats = () => null,
@@ -373,6 +374,7 @@ export function createGameSessionController({
         chargingZoneController.reset();
         chargingProgressHudController.reset();
         crashDebrisController.resetPlayerDamageState();
+        roofWeaponSystem?.setTriggerHeld?.(false);
         setPlayerBattery(BATTERY_MAX);
         setPlayerBatteryLevel(getPlayerBattery() / BATTERY_MAX);
         setBatteryDepletedState(false, { showStatus: false });
@@ -742,6 +744,7 @@ export function createGameSessionController({
         chargingZoneController.reset();
         chargingProgressHudController.reset();
         collectibleSystem.setEnabled(false);
+        roofWeaponSystem?.onPlayerDestroyed?.();
         car.visible = false;
         clearDriveKeys();
 
@@ -843,6 +846,7 @@ export function createGameSessionController({
         chargingZoneController.reset();
         chargingProgressHudController.reset();
         skidMarkController.reset();
+        roofWeaponSystem?.resetRound?.();
 
         car.visible = true;
         car.position.copy(playerSpawnState.position);

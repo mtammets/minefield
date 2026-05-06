@@ -112,6 +112,7 @@ import { createAudioSystem } from './audio-system.js';
 import { createPickupScoringSystem } from './scoring-system.js';
 import { createScorePopupController } from './score-popup-ui.js';
 import { createGroundLayerDebugController } from './ground-layer-debug-ui.js';
+import { createRoofWeaponSystem } from './roof-weapon-system.js';
 import {
     createGraphicsQualityController,
     GRAPHICS_QUALITY_MODES,
@@ -1632,6 +1633,45 @@ function awardLocalPickupScore({ collectorId = 'player', speedKph = 0, roundProg
     return scoreEvent;
 }
 
+function handleRoofWeaponBotDestroyed({
+    targetCollectorId = '',
+    targetName = '',
+    position = null,
+} = {}) {
+    if (runtimeState.gameMode !== 'bots') {
+        return;
+    }
+
+    const mineScoreEvent = awardLocalMineKillScore({
+        ownerCollectorId: 'player',
+        targetCollectorId,
+    });
+    const pointsAwarded = Math.max(0, Math.round(Number(mineScoreEvent?.pointsAwarded) || 0));
+    const resolvedTargetName =
+        typeof targetName === 'string' && targetName.trim() ? targetName.trim() : 'Target';
+
+    recordPerformanceDiagnosticEvent('bot_weapon_destroyed', {
+        targetCollectorId: typeof targetCollectorId === 'string' ? targetCollectorId.trim() : '',
+        targetName: resolvedTargetName,
+        pointsAwarded,
+        position: serializeEventPosition(position),
+        totalScore: runtimeState.totalScore,
+    });
+
+    if (pointsAwarded > 0) {
+        spawnScorePopup({
+            collectorId: 'player',
+            pointsAwarded,
+            scoring: buildMinePopupScoring(mineScoreEvent?.scoring || null),
+            sourceLabel: 'precision fire',
+        });
+        objectiveUi.showInfo(`${resolvedTargetName} neutralized: +${pointsAwarded} pts.`, 1450);
+        return;
+    }
+
+    objectiveUi.showInfo(`${resolvedTargetName} neutralized.`, 1200);
+}
+
 const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     onTargetColorChanged: ({ targetColorHex }) => {
         objectiveUi.setTargetColor(targetColorHex);
@@ -1842,6 +1882,23 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
             ),
             position: serializeEventPosition(botEvent?.position),
         });
+    },
+});
+runtimeState.weaponSystem = createRoofWeaponSystem({
+    scene,
+    camera,
+    car,
+    getGroundHeightAt,
+    getBotTrafficSystem: () => runtimeState.botTrafficSystem,
+    getGameMode: () => runtimeState.gameMode,
+    getVehicleState,
+    getStaticObstacles: () => staticObstacles,
+    getAudioController: () => runtimeState.audioController,
+    onStatus(messageText, timeoutMs = 2000) {
+        objectiveUi.showInfo(messageText, timeoutMs);
+    },
+    onBotDestroyed(event = null) {
+        handleRoofWeaponBotDestroyed(event || null);
     },
 });
 runtimeState.crashDebrisController = createCrashDebrisController({
@@ -2304,6 +2361,7 @@ runtimeState.gameSessionController = createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
+    roofWeaponSystem: runtimeState.weaponSystem,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getCollectorScore(collectorId) {
         return runtimeState.scoringSystem?.getCollectorScore?.(collectorId) || 0;
@@ -2878,6 +2936,12 @@ runtimeState.inputController = createInputController({
     onDeployMine(mode) {
         return runtimeState.mineController?.deployMine?.(mode);
     },
+    getHasRoofWeapon() {
+        return Boolean(runtimeState.weaponSystem?.hasWeapon?.());
+    },
+    onSetRoofWeaponTrigger(nextHeld) {
+        runtimeState.weaponSystem?.setTriggerHeld?.(nextHeld);
+    },
     toggleWorldMap(forceOpen) {
         return toggleWorldMapWithPolicy(forceOpen);
     },
@@ -2930,6 +2994,7 @@ runtimeState.gameLoopController = createGameLoopController({
     objectiveUi,
     botStatusUi,
     collectibleSystem,
+    roofWeaponSystem: runtimeState.weaponSystem,
     multiplayerController: runtimeState.multiplayerController,
     mineSystemController: runtimeState.mineController,
     scorePopupController: runtimeState.scorePopupController,

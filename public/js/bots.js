@@ -112,6 +112,13 @@ const BOT_LIVES_PER_ROUND = 2;
 const BOT_RESPAWN_DELAY_MIN_MS = 3000;
 const BOT_RESPAWN_DELAY_MAX_MS = 4000;
 const BOT_RESPAWN_PROTECTION_MS = 1000;
+const BOT_WEAPON_TARGET_CENTER_Y = 0.72;
+const BOT_WEAPON_TARGET_RADIUS = 1.42;
+const BOT_WEAPON_MAX_HEALTH = 100;
+const BOT_WEAPON_DAMAGE_PER_HIT = 12;
+const BOT_WEAPON_STAGE_WARNING = 0.78;
+const BOT_WEAPON_STAGE_HEAVY = 0.52;
+const BOT_WEAPON_STAGE_CRITICAL = 0.24;
 
 const BOT_BODY_COLORS = [0x6cb3ff, 0xff8f7d, 0x9cf89c, 0xe9a3ff, 0xffd86b];
 const BOT_NAMES = ['NOVA-1', 'AXIS-2', 'RIFT-3', 'PULSE-4', 'ORBIT-5'];
@@ -125,6 +132,8 @@ const botDebrisForwardScratch = new THREE.Vector3();
 const botDebrisRightScratch = new THREE.Vector3();
 const botDebrisTravelScratch = new THREE.Vector3();
 const botDebrisVelocityScratch = new THREE.Vector3();
+const botWeaponTargetCenterScratch = new THREE.Vector3();
+const weaponHitInfoScratch = new THREE.Vector3();
 const navSqrt2 = Math.sqrt(2);
 const NAV_NEIGHBOR_OFFSETS = [
     { x: -1, z: 0, cost: 1 },
@@ -174,6 +183,13 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     let droppedPendingMineDebris = 0;
     let droppedDetachedDebrisPoolMisses = 0;
     let visibleDetachedDebrisCount = 0;
+    const weaponTargetTraceResult = {
+        collectorId: '',
+        name: '',
+        distance: 0,
+        point: new THREE.Vector3(),
+        position: new THREE.Vector3(),
+    };
 
     const bots = [];
     const botsByCollectorId = new Map();
@@ -436,6 +452,98 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             queueBotMineDebris(bot, mineCrashContext);
             destroyBot(bot);
             return true;
+        },
+        triggerWeaponHit(collectorId, context = {}) {
+            if (!enabled) {
+                return { ok: false, destroyed: false, reason: 'disabled' };
+            }
+            const bot = botsByCollectorId.get(collectorId);
+            if (!bot) {
+                return { ok: false, destroyed: false, reason: 'missing' };
+            }
+            if (bot.destroyed) {
+                return { ok: false, destroyed: false, reason: 'destroyed' };
+            }
+            if (isBotSpawnProtected(bot)) {
+                return { ok: false, destroyed: false, reason: 'spawn-protected' };
+            }
+            const weaponHitResult = applyBotWeaponHit(bot, context);
+            if (!weaponHitResult.ok) {
+                return weaponHitResult;
+            }
+            if (!weaponHitResult.destroyed) {
+                return weaponHitResult;
+            }
+            const crashContext = createMineCrashContext(context?.crashContext);
+            queueBotMineDebris(bot, crashContext);
+            destroyBot(bot);
+            return {
+                ok: true,
+                destroyed: true,
+                collectorId: bot.collectorId,
+                name: bot.name,
+                position: bot.car.position,
+                health: 0,
+                maxHealth: BOT_WEAPON_MAX_HEALTH,
+                healthNormalized: 0,
+                damageStage: bot.weaponDamageStage,
+            };
+        },
+        traceWeaponTarget(origin, direction, maxDistance = Infinity) {
+            if (
+                !enabled ||
+                !origin ||
+                !direction ||
+                !Number.isFinite(origin.x) ||
+                !Number.isFinite(origin.y) ||
+                !Number.isFinite(origin.z) ||
+                !Number.isFinite(direction.x) ||
+                !Number.isFinite(direction.y) ||
+                !Number.isFinite(direction.z)
+            ) {
+                return null;
+            }
+
+            const maximumDistance = Number.isFinite(maxDistance)
+                ? Math.max(0.1, Number(maxDistance) || 0)
+                : Number.POSITIVE_INFINITY;
+            let closestDistance = maximumDistance;
+            let hitBot = null;
+
+            for (let i = 0; i < bots.length; i += 1) {
+                const bot = bots[i];
+                if (!bot || bot.destroyed || isBotSpawnProtected(bot)) {
+                    continue;
+                }
+                botWeaponTargetCenterScratch.set(
+                    bot.car.position.x,
+                    bot.car.position.y + BOT_WEAPON_TARGET_CENTER_Y,
+                    bot.car.position.z
+                );
+                const hitDistance = intersectRaySphere(
+                    origin,
+                    direction,
+                    botWeaponTargetCenterScratch,
+                    BOT_WEAPON_TARGET_RADIUS,
+                    closestDistance
+                );
+                if (!Number.isFinite(hitDistance) || hitDistance < 0) {
+                    continue;
+                }
+                closestDistance = hitDistance;
+                hitBot = bot;
+            }
+
+            if (!hitBot) {
+                return null;
+            }
+
+            weaponTargetTraceResult.collectorId = hitBot.collectorId;
+            weaponTargetTraceResult.name = hitBot.name;
+            weaponTargetTraceResult.distance = closestDistance;
+            weaponTargetTraceResult.position.copy(hitBot.car.position);
+            weaponTargetTraceResult.point.copy(origin).addScaledVector(direction, closestDistance);
+            return weaponTargetTraceResult;
         },
     };
 
@@ -1128,6 +1236,36 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     }
 }
 
+function intersectRaySphere(origin, direction, center, radius, maxDistance = Infinity) {
+    if (!origin || !direction || !center || !Number.isFinite(radius) || radius <= 0) {
+        return null;
+    }
+    const resolvedMaxDistance = Number.isFinite(maxDistance)
+        ? Math.max(0.0001, Number(maxDistance) || 0)
+        : Number.POSITIVE_INFINITY;
+
+    const offsetX = origin.x - center.x;
+    const offsetY = origin.y - center.y;
+    const offsetZ = origin.z - center.z;
+    const projection = offsetX * direction.x + offsetY * direction.y + offsetZ * direction.z;
+    const centerDistanceSq = offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ;
+    const radiusSq = radius * radius;
+    const discriminant = projection * projection - (centerDistanceSq - radiusSq);
+    if (discriminant < 0) {
+        return null;
+    }
+
+    const sqrtDiscriminant = Math.sqrt(discriminant);
+    let hitDistance = -projection - sqrtDiscriminant;
+    if (hitDistance < 0) {
+        hitDistance = -projection + sqrtDiscriminant;
+    }
+    if (hitDistance < 0 || hitDistance > resolvedMaxDistance) {
+        return null;
+    }
+    return hitDistance;
+}
+
 function resolveBotGroundHeight(x, z, getGroundHeightAt) {
     if (typeof getGroundHeightAt !== 'function') {
         return BOT_RIDE_HEIGHT;
@@ -1221,6 +1359,9 @@ function resetBot(
     bot.bodyDamageVisual.right = 0;
     bot.bodyDamageVisual.front = 0;
     bot.bodyDamageVisual.rear = 0;
+    bot.weaponHealth = BOT_WEAPON_MAX_HEALTH;
+    bot.weaponDamageStage = 0;
+    bot.weaponHitCount = 0;
 
     for (let i = 0; i < bot.crashParts.length; i += 1) {
         const part = bot.crashParts[i];
@@ -1305,6 +1446,9 @@ function createBot(
         damageState: createEmptyBotDamageState(),
         bodyDamageVisual: { left: 0, right: 0, front: 0, rear: 0 },
         bodyPartBaselines: new Map(),
+        weaponHealth: BOT_WEAPON_MAX_HEALTH,
+        weaponDamageStage: 0,
+        weaponHitCount: 0,
         onPartDetached,
         onDestroyed,
         lastDamageAtMs: 0,
@@ -1823,6 +1967,204 @@ function applyBotCollisionDamage(bot, contact) {
     if (isBotTotaled(bot)) {
         destroyBot(bot);
     }
+}
+
+function applyBotWeaponHit(bot, context = {}) {
+    if (!bot) {
+        return { ok: false, destroyed: false, reason: 'missing' };
+    }
+
+    const hitInfo = resolveBotWeaponHitInfo(bot, context);
+    const nextHealth = Math.max(
+        0,
+        (Number.isFinite(bot.weaponHealth) ? bot.weaponHealth : BOT_WEAPON_MAX_HEALTH) -
+            BOT_WEAPON_DAMAGE_PER_HIT
+    );
+    bot.weaponHealth = nextHealth;
+    bot.weaponHitCount = Math.max(0, Math.round(Number(bot.weaponHitCount) || 0)) + 1;
+
+    applyBotWeaponPersistentDamage(bot, hitInfo);
+    addBotWeaponDent(bot, hitInfo);
+    advanceBotWeaponDamageStage(bot, hitInfo, context?.crashContext || null);
+
+    if (nextHealth > 0) {
+        return {
+            ok: true,
+            destroyed: false,
+            collectorId: bot.collectorId,
+            name: bot.name,
+            position: bot.car.position,
+            health: nextHealth,
+            maxHealth: BOT_WEAPON_MAX_HEALTH,
+            healthNormalized: nextHealth / BOT_WEAPON_MAX_HEALTH,
+            damageStage: bot.weaponDamageStage,
+            hitCount: bot.weaponHitCount,
+        };
+    }
+
+    return {
+        ok: true,
+        destroyed: true,
+        collectorId: bot.collectorId,
+        name: bot.name,
+        position: bot.car.position,
+        health: 0,
+        maxHealth: BOT_WEAPON_MAX_HEALTH,
+        healthNormalized: 0,
+        damageStage: bot.weaponDamageStage,
+        hitCount: bot.weaponHitCount,
+    };
+}
+
+function resolveBotWeaponHitInfo(bot, context = {}) {
+    const hitPoint = context?.hitPoint;
+    if (
+        hitPoint &&
+        Number.isFinite(hitPoint.x) &&
+        Number.isFinite(hitPoint.y) &&
+        Number.isFinite(hitPoint.z)
+    ) {
+        const localHit = weaponHitInfoScratch.copy(hitPoint);
+        bot.car.worldToLocal(localHit);
+        const hitSide = localHit.x < 0 ? 'left' : 'right';
+        const hitZone = localHit.z < 0 ? 'front' : 'rear';
+        return { hitSide, hitZone };
+    }
+
+    const direction = context?.shotDirection;
+    if (
+        direction &&
+        Number.isFinite(direction.x) &&
+        Number.isFinite(direction.z) &&
+        Math.abs(direction.x) + Math.abs(direction.z) > 0.0001
+    ) {
+        const sideDot =
+            direction.x * Math.cos(bot.car.rotation.y) +
+            direction.z * -Math.sin(bot.car.rotation.y);
+        const zoneDot =
+            direction.x * -Math.sin(bot.car.rotation.y) +
+            direction.z * -Math.cos(bot.car.rotation.y);
+        return {
+            hitSide: sideDot >= 0 ? 'right' : 'left',
+            hitZone: zoneDot >= 0 ? 'rear' : 'front',
+        };
+    }
+
+    return { hitSide: 'right', hitZone: 'front' };
+}
+
+function applyBotWeaponPersistentDamage(bot, hitInfo) {
+    const localGain = 0.11;
+    const zoneGain = 0.09;
+    const suspensionGain = 0.045;
+
+    if (hitInfo.hitSide === 'left') {
+        bot.damageState.leftLoss += localGain;
+    } else {
+        bot.damageState.rightLoss += localGain;
+    }
+
+    if (hitInfo.hitZone === 'front') {
+        bot.damageState.frontLoss += zoneGain;
+    } else {
+        bot.damageState.rearLoss += zoneGain;
+    }
+
+    bot.damageState.suspensionLoss += suspensionGain;
+    clampBotDamageState(bot.damageState);
+}
+
+function addBotWeaponDent(bot, hitInfo) {
+    const dentGain = 0.18;
+    if (hitInfo.hitSide === 'left') {
+        bot.bodyDamageVisual.left = THREE.MathUtils.clamp(
+            bot.bodyDamageVisual.left + dentGain,
+            0,
+            BOT_DENT_MAX
+        );
+    } else {
+        bot.bodyDamageVisual.right = THREE.MathUtils.clamp(
+            bot.bodyDamageVisual.right + dentGain,
+            0,
+            BOT_DENT_MAX
+        );
+    }
+
+    if (hitInfo.hitZone === 'front') {
+        bot.bodyDamageVisual.front = THREE.MathUtils.clamp(
+            bot.bodyDamageVisual.front + dentGain * 0.9,
+            0,
+            BOT_DENT_MAX
+        );
+    } else {
+        bot.bodyDamageVisual.rear = THREE.MathUtils.clamp(
+            bot.bodyDamageVisual.rear + dentGain * 0.9,
+            0,
+            BOT_DENT_MAX
+        );
+    }
+
+    applyBotDentVisuals(bot);
+}
+
+function advanceBotWeaponDamageStage(bot, hitInfo, crashContext = null) {
+    const healthNormalized = THREE.MathUtils.clamp(
+        (Number(bot.weaponHealth) || 0) / BOT_WEAPON_MAX_HEALTH,
+        0,
+        1
+    );
+    let nextStage = 0;
+    if (healthNormalized <= BOT_WEAPON_STAGE_CRITICAL) {
+        nextStage = 3;
+    } else if (healthNormalized <= BOT_WEAPON_STAGE_HEAVY) {
+        nextStage = 2;
+    } else if (healthNormalized <= BOT_WEAPON_STAGE_WARNING) {
+        nextStage = 1;
+    }
+
+    if (nextStage <= (Number(bot.weaponDamageStage) || 0)) {
+        return;
+    }
+
+    for (
+        let stage = Math.max(0, Number(bot.weaponDamageStage) || 0) + 1;
+        stage <= nextStage;
+        stage += 1
+    ) {
+        if (stage === 1) {
+            tryDetachBotPart(
+                bot,
+                (part) =>
+                    part.type === 'body_panel' &&
+                    part.side === hitInfo.hitSide &&
+                    part.zone === hitInfo.hitZone,
+                crashContext
+            );
+        } else if (stage === 2) {
+            tryDetachBotPart(
+                bot,
+                (part) =>
+                    part.type === 'body_panel' &&
+                    (part.side === hitInfo.hitSide || part.zone === hitInfo.hitZone),
+                crashContext
+            );
+            bot.damageState.suspensionLoss += 0.36;
+            clampBotDamageState(bot.damageState);
+        } else if (stage === 3) {
+            tryDetachBotPart(
+                bot,
+                (part) =>
+                    part.type === 'suspension_link' &&
+                    part.side === hitInfo.hitSide &&
+                    part.zone === hitInfo.hitZone,
+                crashContext
+            );
+            bot.damageState.suspensionLoss += 0.42;
+            clampBotDamageState(bot.damageState);
+        }
+    }
+
+    bot.weaponDamageStage = nextStage;
 }
 
 function resolveBotHitInfo(bot, contact) {

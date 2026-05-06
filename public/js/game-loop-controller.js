@@ -45,6 +45,7 @@ export function createGameLoopController(options = {}) {
         objectiveUi,
         botStatusUi,
         collectibleSystem,
+        roofWeaponSystem = null,
         multiplayerController,
         mineSystemController,
         mapUiController,
@@ -813,6 +814,28 @@ export function createGameLoopController(options = {}) {
         mapFrameState.editModeActive = isEditModeActive;
         measureStage('mapUi', () => {
             mapUiController?.update?.(frameDelta, mapFrameState);
+        });
+
+        measureStage('roofWeapon', () => {
+            roofWeaponSystem?.update?.(frameDelta, {
+                vehicleState: getVehicleState(),
+                controlsEnabled:
+                    !isWelcomeVisible &&
+                    !gamePaused &&
+                    !isEditModeActive &&
+                    !raceIntroController.isActive() &&
+                    !readCarDestroyed() &&
+                    !readPickupRoundFinished() &&
+                    !worldMapOpen,
+                welcomeVisible: isWelcomeVisible,
+                paused: gamePaused,
+                editModeActive: isEditModeActive,
+                raceIntroActive: raceIntroController.isActive(),
+                carDestroyed: readCarDestroyed(),
+                pickupRoundFinished: readPickupRoundFinished(),
+                worldMapOpen,
+                gameMode: readGameMode(),
+            });
         });
 
         audioFrameState.vehicleState = getVehicleState();

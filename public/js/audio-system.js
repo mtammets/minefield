@@ -458,6 +458,7 @@ export function createAudioSystem({ camera = null } = {}) {
     let lorienGalleryImpulseBuffer = null;
     let ufoDiskoMusicInstance = null;
     let ufoDiskoMusicImpulseBuffer = null;
+    let roofWeaponNoiseBuffer = null;
     const monumentRhythmState = {
         active: 0,
         bass: 0,
@@ -513,6 +514,9 @@ export function createAudioSystem({ camera = null } = {}) {
         onWorldMapVisibilityChanged,
         onRaceIntroStep,
         onRaceIntroGo,
+        onRoofWeaponPickup,
+        onRoofWeaponShot,
+        onRoofWeaponImpact,
     };
 
     function initialize(options = {}) {
@@ -1309,6 +1313,18 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
 
+        playMineDetonationBlast({
+            localHit,
+            distanceMeters,
+            position,
+        });
+    }
+
+    function playMineDetonationBlast({
+        localHit = false,
+        distanceMeters = 0,
+        position = null,
+    } = {}) {
         const isNear = localHit || distanceMeters <= 18;
         const normalizedDistance = clampNumber(distanceMeters, 0, 120, 18);
         const distanceFade = 1 - clampNumber(normalizedDistance / 120, 0, 1, 0);
@@ -1464,6 +1480,286 @@ export function createAudioSystem({ camera = null } = {}) {
             gain: 0.94,
             rateScale: 1,
         });
+    }
+
+    function onRoofWeaponPickup() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
+        playRoofWeaponPickupSynth();
+    }
+
+    function onRoofWeaponShot({ locked = false, heat = 0 } = {}) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
+        playRoofWeaponShotSynth({
+            locked,
+            heat,
+        });
+    }
+
+    function onRoofWeaponImpact({
+        hit = false,
+        destroyed = false,
+        position = null,
+        distanceMeters = 0,
+    } = {}) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
+        playRoofWeaponImpactSynth({
+            hit,
+            destroyed,
+        });
+        if (!destroyed) {
+            return;
+        }
+        playMineDetonationBlast({
+            localHit: Boolean(distanceMeters <= 18),
+            distanceMeters,
+            position,
+        });
+        playVariant('vehicleExplosion', {
+            gain: clampNumber(0.58 + (distanceMeters <= 22 ? 0.24 : 0), 0.52, 1.08, 0.72),
+            rateScale: randomRange(0.97, 1.03),
+        });
+        playOneShot('fireballTail01', {
+            gain: distanceMeters <= 18 ? 0.68 : 0.52,
+            whenOffsetSec: 0.018,
+            rateScale: randomRange(0.97, 1.03),
+        });
+    }
+
+    function playRoofWeaponPickupSynth() {
+        const busNode = mixer?.buses?.effects;
+        if (!context || !busNode) {
+            return false;
+        }
+
+        const now = context.currentTime;
+        const outputGain = context.createGain();
+        outputGain.gain.setValueAtTime(0.0001, now);
+        outputGain.gain.linearRampToValueAtTime(0.22, now + 0.02);
+        outputGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.46);
+        outputGain.connect(busNode);
+
+        const toneA = context.createOscillator();
+        const toneAGain = context.createGain();
+        toneA.type = 'triangle';
+        toneA.frequency.setValueAtTime(460, now);
+        toneA.frequency.exponentialRampToValueAtTime(920, now + 0.2);
+        toneAGain.gain.setValueAtTime(0.0001, now);
+        toneAGain.gain.linearRampToValueAtTime(0.16, now + 0.02);
+        toneAGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+
+        const toneB = context.createOscillator();
+        const toneBGain = context.createGain();
+        toneB.type = 'sine';
+        toneB.frequency.setValueAtTime(840, now + 0.04);
+        toneB.frequency.exponentialRampToValueAtTime(1560, now + 0.22);
+        toneBGain.gain.setValueAtTime(0.0001, now + 0.04);
+        toneBGain.gain.linearRampToValueAtTime(0.12, now + 0.08);
+        toneBGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+
+        toneA.connect(toneAGain);
+        toneAGain.connect(outputGain);
+        toneB.connect(toneBGain);
+        toneBGain.connect(outputGain);
+
+        const cleanup = once(() => {
+            safeDisconnect(toneA);
+            safeDisconnect(toneAGain);
+            safeDisconnect(toneB);
+            safeDisconnect(toneBGain);
+            safeDisconnect(outputGain);
+        });
+
+        toneA.onended = cleanup;
+        toneB.onended = cleanup;
+        toneA.start(now);
+        toneB.start(now + 0.04);
+        safeStopSource(toneA, now + 0.28);
+        safeStopSource(toneB, now + 0.34);
+        return true;
+    }
+
+    function playRoofWeaponShotSynth({ locked = false, heat = 0 } = {}) {
+        const busNode = mixer?.buses?.effects;
+        if (!context || !busNode) {
+            return false;
+        }
+
+        const noiseBuffer = getRoofWeaponNoiseBuffer();
+        if (!noiseBuffer) {
+            return false;
+        }
+
+        const now = context.currentTime;
+        const outputGain = context.createGain();
+        outputGain.gain.setValueAtTime(0.0001, now);
+        outputGain.gain.linearRampToValueAtTime(
+            0.34 + clampNumber(heat, 0, 1, 0) * 0.12,
+            now + 0.002
+        );
+        outputGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+
+        const airFilter = context.createBiquadFilter();
+        airFilter.type = 'highpass';
+        airFilter.frequency.setValueAtTime(240, now);
+        outputGain.connect(airFilter);
+        airFilter.connect(busNode);
+
+        const subTone = context.createOscillator();
+        const subToneGain = context.createGain();
+        subTone.type = 'square';
+        subTone.frequency.setValueAtTime(locked ? 128 : 116, now);
+        subTone.frequency.exponentialRampToValueAtTime(locked ? 66 : 60, now + 0.11);
+        subToneGain.gain.setValueAtTime(0.0001, now);
+        subToneGain.gain.linearRampToValueAtTime(0.12, now + 0.002);
+        subToneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.1);
+
+        const bodyTone = context.createOscillator();
+        const bodyToneGain = context.createGain();
+        bodyTone.type = 'sawtooth';
+        bodyTone.frequency.setValueAtTime(locked ? 760 : 700, now);
+        bodyTone.frequency.exponentialRampToValueAtTime(locked ? 150 : 132, now + 0.11);
+        bodyToneGain.gain.setValueAtTime(0.0001, now);
+        bodyToneGain.gain.linearRampToValueAtTime(0.14, now + 0.002);
+        bodyToneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
+
+        const snapTone = context.createOscillator();
+        const snapToneGain = context.createGain();
+        snapTone.type = 'triangle';
+        snapTone.frequency.setValueAtTime(locked ? 1980 : 1820, now);
+        snapTone.frequency.exponentialRampToValueAtTime(locked ? 540 : 460, now + 0.045);
+        snapToneGain.gain.setValueAtTime(0.0001, now);
+        snapToneGain.gain.linearRampToValueAtTime(0.11, now + 0.001);
+        snapToneGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
+
+        const crackSource = context.createBufferSource();
+        crackSource.buffer = noiseBuffer;
+        const crackFilter = context.createBiquadFilter();
+        crackFilter.type = 'bandpass';
+        crackFilter.frequency.setValueAtTime(locked ? 2100 : 1880, now);
+        crackFilter.Q.setValueAtTime(0.88, now);
+        const crackGain = context.createGain();
+        crackGain.gain.setValueAtTime(0.0001, now);
+        crackGain.gain.linearRampToValueAtTime(
+            0.26 + clampNumber(heat, 0, 1, 0) * 0.12,
+            now + 0.001
+        );
+        crackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+        subTone.connect(subToneGain);
+        subToneGain.connect(outputGain);
+        bodyTone.connect(bodyToneGain);
+        bodyToneGain.connect(outputGain);
+        snapTone.connect(snapToneGain);
+        snapToneGain.connect(outputGain);
+        crackSource.connect(crackFilter);
+        crackFilter.connect(crackGain);
+        crackGain.connect(outputGain);
+
+        const cleanup = once(() => {
+            safeDisconnect(subTone);
+            safeDisconnect(subToneGain);
+            safeDisconnect(bodyTone);
+            safeDisconnect(bodyToneGain);
+            safeDisconnect(snapTone);
+            safeDisconnect(snapToneGain);
+            safeDisconnect(crackSource);
+            safeDisconnect(crackFilter);
+            safeDisconnect(crackGain);
+            safeDisconnect(airFilter);
+            safeDisconnect(outputGain);
+        });
+
+        subTone.onended = cleanup;
+        bodyTone.onended = cleanup;
+        snapTone.onended = cleanup;
+        crackSource.onended = cleanup;
+        subTone.start(now);
+        bodyTone.start(now);
+        snapTone.start(now);
+        crackSource.start(now);
+        safeStopSource(subTone, now + 0.13);
+        safeStopSource(bodyTone, now + 0.12);
+        safeStopSource(snapTone, now + 0.07);
+        safeStopSource(crackSource, now + 0.08);
+        return true;
+    }
+
+    function playRoofWeaponImpactSynth({ hit = false, destroyed = false } = {}) {
+        const busNode = mixer?.buses?.effects;
+        if (!context || !busNode) {
+            return false;
+        }
+
+        const noiseBuffer = getRoofWeaponNoiseBuffer();
+        if (!noiseBuffer) {
+            return false;
+        }
+
+        const now = context.currentTime;
+        const outputGain = context.createGain();
+        outputGain.gain.setValueAtTime(0.0001, now);
+        outputGain.gain.linearRampToValueAtTime(destroyed ? 0.24 : hit ? 0.18 : 0.11, now + 0.002);
+        outputGain.gain.exponentialRampToValueAtTime(0.0001, now + (destroyed ? 0.16 : 0.11));
+        outputGain.connect(busNode);
+
+        const ping = context.createOscillator();
+        const pingGain = context.createGain();
+        ping.type = 'triangle';
+        ping.frequency.setValueAtTime(destroyed ? 420 : hit ? 310 : 240, now);
+        ping.frequency.exponentialRampToValueAtTime(destroyed ? 102 : hit ? 128 : 110, now + 0.08);
+        pingGain.gain.setValueAtTime(0.0001, now);
+        pingGain.gain.linearRampToValueAtTime(destroyed ? 0.12 : hit ? 0.08 : 0.05, now + 0.002);
+        pingGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+        const debrisSource = context.createBufferSource();
+        debrisSource.buffer = noiseBuffer;
+        const debrisFilter = context.createBiquadFilter();
+        debrisFilter.type = 'lowpass';
+        debrisFilter.frequency.setValueAtTime(destroyed ? 2600 : hit ? 2200 : 1500, now);
+        debrisFilter.Q.setValueAtTime(0.4, now);
+        const debrisGain = context.createGain();
+        debrisGain.gain.setValueAtTime(0.0001, now);
+        debrisGain.gain.linearRampToValueAtTime(destroyed ? 0.18 : hit ? 0.12 : 0.08, now + 0.001);
+        debrisGain.gain.exponentialRampToValueAtTime(0.0001, now + (destroyed ? 0.075 : 0.05));
+
+        ping.connect(pingGain);
+        pingGain.connect(outputGain);
+        debrisSource.connect(debrisFilter);
+        debrisFilter.connect(debrisGain);
+        debrisGain.connect(outputGain);
+
+        const cleanup = once(() => {
+            safeDisconnect(ping);
+            safeDisconnect(pingGain);
+            safeDisconnect(debrisSource);
+            safeDisconnect(debrisFilter);
+            safeDisconnect(debrisGain);
+            safeDisconnect(outputGain);
+        });
+
+        ping.onended = cleanup;
+        debrisSource.onended = cleanup;
+        ping.start(now);
+        debrisSource.start(now);
+        safeStopSource(ping, now + 0.1);
+        safeStopSource(debrisSource, now + 0.06);
+        return true;
+    }
+
+    function getRoofWeaponNoiseBuffer() {
+        if (!context) {
+            return null;
+        }
+        if (!roofWeaponNoiseBuffer || roofWeaponNoiseBuffer.sampleRate !== context.sampleRate) {
+            roofWeaponNoiseBuffer = createShortNoiseBuffer(context, 0.18);
+        }
+        return roofWeaponNoiseBuffer;
     }
 
     function updateLoopLayer(soundId, layerGain, layerRate = LOOP_RATE_DEFAULT) {
@@ -1917,7 +2213,12 @@ export function createAudioSystem({ camera = null } = {}) {
                     : clampNumber(doorLeakMix * (0.36 + wideAreaMix * 0.44), 0, 0.72, 0)
                 : 0;
         const definitionGain = SOUND_DEFINITIONS[UFO_DISKO_STORE_MUSIC_SOUND_ID]?.gain || 1;
-        const filterNearMix = clampNumber(nearMix * 0.72 + (listenerInside ? 0.28 : doorLeakMix * 0.14), 0, 1, 0);
+        const filterNearMix = clampNumber(
+            nearMix * 0.72 + (listenerInside ? 0.28 : doorLeakMix * 0.14),
+            0,
+            1,
+            0
+        );
         const dryOutsideScale = 0.28 + doorLeakMix * 0.24;
         const wetOutsideScale = 0.44 + doorLeakMix * 0.22;
 
@@ -2909,6 +3210,9 @@ function createNoopAudioSystem() {
         onWorldMapVisibilityChanged() {},
         onRaceIntroStep() {},
         onRaceIntroGo() {},
+        onRoofWeaponPickup() {},
+        onRoofWeaponShot() {},
+        onRoofWeaponImpact() {},
     };
 }
 
@@ -2966,6 +3270,34 @@ function lerpNumber(start, end, alpha) {
 function smoothstep(value) {
     const t = clampNumber(value, 0, 1, 0);
     return t * t * (3 - 2 * t);
+}
+
+function once(callback) {
+    let called = false;
+    return () => {
+        if (called) {
+            return;
+        }
+        called = true;
+        callback?.();
+    };
+}
+
+function createShortNoiseBuffer(audioContext, durationSec = 0.18) {
+    if (!audioContext?.createBuffer) {
+        return null;
+    }
+    const safeDuration = clampNumber(durationSec, 0.04, 0.5, 0.18);
+    const sampleRate = Math.max(22050, Math.round(audioContext.sampleRate || 44100));
+    const sampleCount = Math.max(1, Math.floor(sampleRate * safeDuration));
+    const buffer = audioContext.createBuffer(1, sampleCount, sampleRate);
+    const channelData = buffer.getChannelData(0);
+    for (let i = 0; i < sampleCount; i += 1) {
+        const t = i / Math.max(1, sampleCount - 1);
+        const envelope = Math.pow(1 - t, 2.4);
+        channelData[i] = (Math.random() * 2 - 1) * envelope * 0.7;
+    }
+    return buffer;
 }
 
 function createUrbanPlazaImpulseBuffer(audioContext, durationSec = 2.6, decay = 2.4) {
