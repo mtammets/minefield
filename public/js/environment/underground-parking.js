@@ -22,7 +22,7 @@ const ENTRANCE_WALL_HALF_WIDTH = 6.18;
 const ENTRANCE_CUTOUT_HALF_WIDTH = 6.84;
 const ENTRANCE_APRON_HALF_WIDTH = 8.45;
 const ENTRANCE_FLARE_LENGTH = 10.8;
-let portalSignTexture = null;
+let entranceHeaderTexture = null;
 let parkingRoundelTexture = null;
 const undergroundParkingRuntime = {
     barrierSystems: [],
@@ -699,7 +699,13 @@ function createEntranceLayer(
     group.add(createEntranceRetainingWalls(layout, concreteMaterial, trimMaterial, lightMaterial));
     group.add(createEntranceFrontShoulderGuards(layout, concreteMaterial, trimMaterial));
     group.add(
-        createEntrancePortalFrame(layout, portalAccentMaterial, trimMaterial, amberLineMaterial)
+        createEntrancePortalFrame(
+            layout,
+            portalAccentMaterial,
+            trimMaterial,
+            amberLineMaterial,
+            lightMaterial
+        )
     );
     group.add(
         createEntranceGlassCanopy(
@@ -940,21 +946,20 @@ function createEntranceGlassCanopy(
     );
 
     const endFrameDepth = 0.18;
-    [entrance.canopyStartZ + 0.18, entrance.canopyEndZ - 0.18].forEach((z) => {
-        const endFrame = new THREE.Mesh(
-            createEntranceCanopyGeometry(layout, {
-                width: entrance.canopyHalfWidth * 2 + 0.22,
-                minZ: z - endFrameDepth * 0.5,
-                maxZ: z + endFrameDepth * 0.5,
-                xSegments: 22,
-                zSegments: 1,
-                baseY: entrance.canopyBaseY + 0.02,
-                archRise: entrance.canopyArchRise + 0.06,
-            }),
-            trimMaterial
-        );
-        group.add(endFrame);
-    });
+    const rearFrameZ = entrance.canopyEndZ - 0.18;
+    const endFrame = new THREE.Mesh(
+        createEntranceCanopyGeometry(layout, {
+            width: entrance.canopyHalfWidth * 2 + 0.22,
+            minZ: rearFrameZ - endFrameDepth * 0.5,
+            maxZ: rearFrameZ + endFrameDepth * 0.5,
+            xSegments: 22,
+            zSegments: 1,
+            baseY: entrance.canopyBaseY + 0.02,
+            archRise: entrance.canopyArchRise + 0.06,
+        }),
+        trimMaterial
+    );
+    group.add(endFrame);
 
     group.add(
         createEntranceGlassAtriumWalls(layout, wallGlassMaterial, trimMaterial, lightMaterial)
@@ -1055,16 +1060,6 @@ function createEntranceGlassAtriumWalls(layout, glassMaterial, trimMaterial, lig
         );
         group.add(frontGlass);
 
-        const frontHead = new THREE.Mesh(
-            new THREE.BoxGeometry(frontShoulderWidth + 0.16, 0.12, 0.12),
-            trimMaterial
-        );
-        frontHead.position.set(
-            entrance.centerX + side * frontShoulderX,
-            wallTopY + 0.02,
-            entrance.canopyStartZ
-        );
-        group.add(frontHead);
     }
 
     return group;
@@ -1139,6 +1134,23 @@ function createEntranceAutoBarriers(layout, postMaterial, armMaterial) {
     rightStripe.position.set(-armLength * 0.5 - 0.02, 0.05, 0);
     rightPivot.add(rightStripe);
 
+    const indicatorGeometry = new THREE.BoxGeometry(0.18, 0.18, 0.14);
+    const openIndicator = new THREE.Group();
+    const closedIndicator = new THREE.Group();
+    [leftBaseX, rightBaseX].forEach((x) => {
+        const greenIndicator = new THREE.Mesh(indicatorGeometry, greenLightMaterial);
+        greenIndicator.position.set(x, 1.22, barrierZ + 0.18);
+        openIndicator.add(greenIndicator);
+
+        const redIndicator = new THREE.Mesh(indicatorGeometry, redLightMaterial);
+        redIndicator.position.set(x, 1.22, barrierZ + 0.18);
+        closedIndicator.add(redIndicator);
+    });
+
+    openIndicator.visible = false;
+    group.add(closedIndicator);
+    group.add(openIndicator);
+
     undergroundParkingRuntime.barrierSystems.push({
         leftPivot,
         rightPivot,
@@ -1147,65 +1159,100 @@ function createEntranceAutoBarriers(layout, postMaterial, armMaterial) {
         response: 8.4,
         triggerZ: barrierZ,
         triggerRadius: 14.5,
-        openIndicator: null,
-        closedIndicator: null,
+        openIndicator,
+        closedIndicator,
     });
 
     return group;
 }
 
-function createEntrancePortalFrame(layout, accentMaterial, trimMaterial, warningMaterial) {
+function createEntrancePortalFrame(
+    layout,
+    accentMaterial,
+    trimMaterial,
+    warningMaterial,
+    lightMaterial
+) {
     const entrance = layout.entrance;
     const group = new THREE.Group();
     group.name = 'undergroundParkingEntrancePortal';
 
-    const finHeight = entrance.portalClearHeight + 0.7;
+    const finHeight = entrance.portalClearHeight + 0.92;
     const finY = finHeight * 0.5 - 0.04;
-    const finHalfWidth = getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') - 0.62;
+    const finHalfWidth = getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') - 0.66;
 
-    const portalFin = new THREE.Mesh(
-        new THREE.BoxGeometry(entrance.portalWingThickness, finHeight, entrance.portalWingDepth),
-        accentMaterial
-    );
-    portalFin.position.set(entrance.centerX - finHalfWidth, finY, entrance.portalZ);
-    group.add(portalFin);
+    for (let side = -1; side <= 1; side += 2) {
+        const fin = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                entrance.portalWingThickness,
+                finHeight,
+                entrance.portalWingDepth
+            ),
+            accentMaterial
+        );
+        fin.position.set(entrance.centerX + side * finHalfWidth, finY, entrance.portalZ);
+        group.add(fin);
 
-    const mirroredPortalFin = portalFin.clone();
-    mirroredPortalFin.position.x = entrance.centerX + finHalfWidth;
-    group.add(mirroredPortalFin);
+        const finCap = new THREE.Mesh(
+            new THREE.BoxGeometry(
+                entrance.portalWingThickness + 0.28,
+                0.12,
+                entrance.portalWingDepth + 0.16
+            ),
+            trimMaterial
+        );
+        finCap.position.set(fin.position.x, finHeight + 0.02, entrance.portalZ);
+        group.add(finCap);
 
-    const topBeam = new THREE.Mesh(
-        new THREE.BoxGeometry(finHalfWidth * 2 - 0.24, 0.54, 1.26),
-        trimMaterial
-    );
+        const innerBlade = new THREE.Mesh(
+            new THREE.BoxGeometry(0.16, finHeight - 0.9, entrance.portalWingDepth - 0.8),
+            trimMaterial
+        );
+        innerBlade.position.set(fin.position.x - side * 0.18, finY, entrance.portalZ - 0.06);
+        group.add(innerBlade);
+
+        const sideGlow = new THREE.Mesh(
+            new THREE.BoxGeometry(0.05, finHeight - 1.26, entrance.portalWingDepth - 1.02),
+            lightMaterial
+        );
+        sideGlow.position.set(fin.position.x - side * 0.28, finY - 0.08, entrance.portalZ - 0.02);
+        group.add(sideGlow);
+
+        const finMarker = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.12, 0.18), warningMaterial);
+        finMarker.position.set(fin.position.x + side * 0.14, 1.22, entrance.portalZ + 1.02);
+        group.add(finMarker);
+    }
+
+    const topBeamWidth = finHalfWidth * 2 - 0.22;
+    const topBeam = new THREE.Mesh(new THREE.BoxGeometry(topBeamWidth, 0.62, 1.34), trimMaterial);
     topBeam.position.set(
         entrance.centerX,
         entrance.portalClearHeight + 0.3,
-        entrance.portalZ - 0.36
+        entrance.portalZ - 0.18
     );
     group.add(topBeam);
 
+    const headerBackplate = new THREE.Mesh(
+        new THREE.BoxGeometry(topBeamWidth - 1.18, 0.9, 0.18),
+        accentMaterial
+    );
+    headerBackplate.position.set(
+        entrance.centerX,
+        entrance.portalClearHeight + 0.28,
+        entrance.portalZ + 0.54
+    );
+    group.add(headerBackplate);
+
     const warningBand = new THREE.Mesh(
-        new THREE.BoxGeometry(finHalfWidth * 2 - 0.6, 0.16, 0.28),
+        new THREE.BoxGeometry(topBeamWidth - 0.76, 0.16, 0.28),
         warningMaterial
     );
     warningBand.position.set(
         entrance.centerX,
         entrance.portalClearHeight + 0.06,
-        entrance.portalZ + 0.92
+        entrance.portalZ + 0.9
     );
     group.add(warningBand);
-
-    const crownBar = new THREE.Mesh(
-        new THREE.BoxGeometry(finHalfWidth * 2 - 1.24, 0.12, 0.18),
-        warningMaterial
-    );
-    crownBar.position.set(
-        entrance.centerX,
-        entrance.portalClearHeight + 0.56,
-        entrance.portalZ - 0.94
-    );
-    group.add(crownBar);
 
     return group;
 }
@@ -1216,39 +1263,43 @@ function createEntranceSignage(layout) {
     group.name = 'undergroundParkingEntranceSignage';
 
     const portalSign = new THREE.Mesh(
-        new THREE.PlaneGeometry(7.2, 1.44),
+        new THREE.PlaneGeometry(7.4, 1.6),
         new THREE.MeshBasicMaterial({
-            map: getPortalSignTexture(),
+            map: getEntranceHeaderTexture(),
             transparent: true,
             toneMapped: false,
+            side: THREE.FrontSide,
+            alphaTest: 0.04,
         })
     );
     portalSign.position.set(
         entrance.centerX,
-        entrance.portalClearHeight + 0.3,
-        entrance.portalZ + 0.55
+        entrance.portalClearHeight + 0.34,
+        entrance.portalZ - 0.88
     );
     portalSign.rotation.y = Math.PI;
+    portalSign.renderOrder = 4;
     group.add(portalSign);
 
     const roundelMaterial = new THREE.MeshBasicMaterial({
         map: getParkingRoundelTexture(),
         transparent: true,
         toneMapped: false,
+        side: THREE.DoubleSide,
     });
-    const roundelGeometry = new THREE.PlaneGeometry(1.46, 1.46);
+    const roundelGeometry = new THREE.PlaneGeometry(1.5, 1.5);
     const leftRoundel = new THREE.Mesh(roundelGeometry, roundelMaterial);
     leftRoundel.position.set(
-        entrance.centerX - getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') + 0.86,
-        2.46,
-        entrance.portalZ - 1.26
+        entrance.centerX - getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') + 0.92,
+        2.48,
+        entrance.portalZ - 1.18
     );
     leftRoundel.rotation.y = -Math.PI * 0.5;
     group.add(leftRoundel);
 
     const rightRoundel = leftRoundel.clone();
     rightRoundel.position.x =
-        entrance.centerX + getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') - 0.86;
+        entrance.centerX + getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') - 0.92;
     rightRoundel.rotation.y = Math.PI * 0.5;
     group.add(rightRoundel);
 
@@ -1261,10 +1312,8 @@ function createEntranceLighting(layout, lightMaterial, trimMaterial) {
     group.name = 'undergroundParkingEntranceLights';
 
     const beaconGeometry = new THREE.BoxGeometry(0.24, 0.24, 0.24);
-    const finHalfWidth = getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') - 0.4;
-    const beaconHeights = [1.26, 4.72];
-
-    beaconHeights.forEach((y) => {
+    const finHalfWidth = getEntranceHalfWidthAtZ(entrance, entrance.portalZ, 'apron') - 0.48;
+    [1.28, entrance.portalClearHeight + 0.54].forEach((y) => {
         const leftBeacon = new THREE.Mesh(beaconGeometry, lightMaterial);
         leftBeacon.position.set(entrance.centerX - finHalfWidth, y, entrance.portalZ - 1.02);
         group.add(leftBeacon);
@@ -1273,6 +1322,22 @@ function createEntranceLighting(layout, lightMaterial, trimMaterial) {
         rightBeacon.position.x = entrance.centerX + finHalfWidth;
         group.add(rightBeacon);
     });
+
+    const approachPylonX = getEntranceHalfWidthAtZ(entrance, entrance.slopeStartZ, 'apron') - 0.82;
+    const approachPylonZ = entrance.slopeStartZ - 1.48;
+    for (let side = -1; side <= 1; side += 2) {
+        const pylon = new THREE.Mesh(new THREE.BoxGeometry(0.44, 1.86, 0.44), trimMaterial);
+        pylon.position.set(entrance.centerX + side * approachPylonX, 0.93, approachPylonZ);
+        group.add(pylon);
+
+        const pylonGlow = new THREE.Mesh(new THREE.BoxGeometry(0.06, 1.16, 0.08), lightMaterial);
+        pylonGlow.position.set(
+            entrance.centerX + side * (approachPylonX - 0.14),
+            0.96,
+            approachPylonZ + 0.18
+        );
+        group.add(pylonGlow);
+    }
 
     const tunnelLightGeometry = new THREE.BoxGeometry(7.4, 0.08, 0.28);
     for (let index = 0; index < entrance.tunnelLightCount; index += 1) {
@@ -1362,6 +1427,25 @@ function createEntranceMarkings(layout, lineMaterial, amberLineMaterial) {
         lineMaterial
     );
     group.add(thresholdBar);
+
+    const accentPadPositions = [1.1, 2.85, 4.6];
+    accentPadPositions.forEach((zOffset) => {
+        for (let side = -1; side <= 1; side += 2) {
+            const accentPad = new THREE.Mesh(
+                createEntranceSurfaceGeometry(layout, {
+                    width: 0.8,
+                    minZ: entrance.slopeStartZ + zOffset,
+                    maxZ: entrance.slopeStartZ + zOffset + 0.16,
+                    centerXOffset: side * (entrance.driveHalfWidth - 0.8),
+                    xSegments: 1,
+                    zSegments: 1,
+                    heightOffset: entrance.renderOffsetY + 0.02,
+                }),
+                amberLineMaterial
+            );
+            group.add(accentPad);
+        }
+    });
 
     return group;
 }
@@ -1709,58 +1793,78 @@ function getColumnPositions(layout) {
     ];
 }
 
-function getPortalSignTexture() {
-    if (portalSignTexture) {
-        return portalSignTexture;
+function getEntranceHeaderTexture() {
+    if (entranceHeaderTexture) {
+        return entranceHeaderTexture;
     }
 
     const canvas = document.createElement('canvas');
     canvas.width = 1024;
-    canvas.height = 220;
+    canvas.height = 280;
     const ctx = canvas.getContext('2d');
 
-    drawRoundedRectPath(ctx, 10, 10, canvas.width - 20, canvas.height - 20, 36);
+    if (!ctx) {
+        entranceHeaderTexture = new THREE.CanvasTexture(canvas);
+        entranceHeaderTexture.colorSpace = THREE.SRGBColorSpace;
+        return entranceHeaderTexture;
+    }
+
+    drawRoundedRectPath(ctx, 10, 18, canvas.width - 20, canvas.height - 36, 38);
     const bgGradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-    bgGradient.addColorStop(0, '#102334');
-    bgGradient.addColorStop(0.52, '#1f3f58');
-    bgGradient.addColorStop(1, '#13283a');
+    bgGradient.addColorStop(0, 'rgba(10, 25, 38, 0.98)');
+    bgGradient.addColorStop(0.52, 'rgba(30, 63, 89, 0.98)');
+    bgGradient.addColorStop(1, 'rgba(13, 30, 45, 0.98)');
     ctx.fillStyle = bgGradient;
     ctx.fill();
 
-    ctx.strokeStyle = 'rgba(203, 237, 255, 0.7)';
+    ctx.strokeStyle = 'rgba(201, 233, 255, 0.78)';
     ctx.lineWidth = 6;
     ctx.stroke();
 
-    ctx.fillStyle = 'rgba(255, 209, 128, 0.96)';
-    drawRoundedRectPath(ctx, 42, 42, 126, 136, 26);
+    for (let y = 40; y < canvas.height - 24; y += 18) {
+        ctx.fillStyle = y % 36 === 0 ? 'rgba(255, 255, 255, 0.035)' : 'rgba(255, 255, 255, 0.02)';
+        ctx.fillRect(24, y, canvas.width - 48, 5);
+    }
+
+    drawRoundedRectPath(ctx, 42, 54, 132, 132, 28);
+    const iconGradient = ctx.createLinearGradient(42, 54, 174, 186);
+    iconGradient.addColorStop(0, '#ffdca8');
+    iconGradient.addColorStop(1, '#ffb65c');
+    ctx.fillStyle = iconGradient;
     ctx.fill();
 
-    ctx.fillStyle = '#0e1b26';
-    ctx.font = '900 104px Arial';
+    ctx.fillStyle = '#0d1722';
+    ctx.font = '900 102px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('P', 105, 111);
+    ctx.fillText('P', 108, 120);
 
+    drawRoundedRectPath(ctx, 808, 52, 168, 50, 18);
+    ctx.fillStyle = 'rgba(11, 19, 28, 0.9)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 207, 131, 0.78)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#ffcf83';
+    ctx.font = '700 28px Arial';
+    ctx.fillText('24H ENTRY', 892, 77);
+
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#f6fbff';
-    ctx.font = '700 74px Arial';
-    ctx.fillText('PARKIMISMAJA', 482, 111);
+    ctx.font = '700 80px Arial';
+    ctx.fillText('PARKIMISMAJA', 216, 114);
 
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
-    ctx.lineWidth = 16;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(770, 74);
-    ctx.lineTo(920, 74);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(860, 54);
-    ctx.lineTo(920, 74);
-    ctx.lineTo(860, 94);
-    ctx.stroke();
+    ctx.fillStyle = 'rgba(193, 231, 255, 0.95)';
+    ctx.font = '600 34px Arial';
+    ctx.fillText('SISSEPÄÄS', 218, 164);
 
-    portalSignTexture = new THREE.CanvasTexture(canvas);
-    portalSignTexture.colorSpace = THREE.SRGBColorSpace;
-    return portalSignTexture;
+    ctx.fillStyle = 'rgba(160, 210, 240, 0.92)';
+    ctx.font = '600 24px Arial';
+    ctx.fillText('AUTOMAATVÄRAV // TASE P1', 218, 208);
+
+    entranceHeaderTexture = new THREE.CanvasTexture(canvas);
+    entranceHeaderTexture.colorSpace = THREE.SRGBColorSpace;
+    return entranceHeaderTexture;
 }
 
 function getParkingRoundelTexture() {
@@ -1772,8 +1876,14 @@ function getParkingRoundelTexture() {
     canvas.width = 512;
     canvas.height = 512;
     const ctx = canvas.getContext('2d');
-    const center = canvas.width * 0.5;
 
+    if (!ctx) {
+        parkingRoundelTexture = new THREE.CanvasTexture(canvas);
+        parkingRoundelTexture.colorSpace = THREE.SRGBColorSpace;
+        return parkingRoundelTexture;
+    }
+
+    const center = canvas.width * 0.5;
     const halo = ctx.createRadialGradient(center, center, 42, center, center, center);
     halo.addColorStop(0, 'rgba(130, 214, 255, 0.34)');
     halo.addColorStop(0.58, 'rgba(130, 214, 255, 0.08)');
@@ -1789,18 +1899,26 @@ function getParkingRoundelTexture() {
     ctx.fill();
 
     ctx.strokeStyle = '#bfe9ff';
-    ctx.lineWidth = 20;
+    ctx.lineWidth = 18;
     ctx.beginPath();
     ctx.arc(center, center, 176, 0, Math.PI * 2);
     ctx.stroke();
 
+    ctx.strokeStyle = 'rgba(255, 207, 131, 0.92)';
+    ctx.lineWidth = 12;
+    ctx.setLineDash([16, 18]);
+    ctx.beginPath();
+    ctx.arc(center, center, 144, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
     ctx.fillStyle = '#ffcf83';
     ctx.beginPath();
-    ctx.arc(center, center, 126, 0, Math.PI * 2);
+    ctx.arc(center, center, 118, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.fillStyle = '#102030';
-    ctx.font = '900 220px Arial';
+    ctx.font = '900 214px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('P', center, center + 8);
