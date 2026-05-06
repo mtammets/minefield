@@ -32,6 +32,7 @@ export function createCarEditModeController({
     car,
     canvas,
     getEditableParts,
+    prepareEditablePartsForEditMode,
     setEditablePartVisibility,
     setAllEditablePartsVisibility,
     captureEditablePartVisibility,
@@ -44,6 +45,7 @@ export function createCarEditModeController({
     getBillboardContentGroups,
     onUploadBillboardGroupMedia,
     onResetBillboardGroupMedia,
+    onSetBillboardGroupPlaybackEnabled,
 } = {}) {
     if (!camera || !car || !canvas) {
         return createNoopController();
@@ -74,6 +76,10 @@ export function createCarEditModeController({
         typeof onUploadBillboardGroupMedia === 'function' ? onUploadBillboardGroupMedia : null;
     const resetBillboardGroupMedia =
         typeof onResetBillboardGroupMedia === 'function' ? onResetBillboardGroupMedia : null;
+    const setBillboardGroupPlaybackEnabled =
+        typeof onSetBillboardGroupPlaybackEnabled === 'function'
+            ? onSetBillboardGroupPlaybackEnabled
+            : null;
     const pointerState = {
         active: false,
         id: null,
@@ -144,6 +150,30 @@ export function createCarEditModeController({
                 );
             } catch (error) {
                 const message = error?.message || 'LED reset failed.';
+                ui.setBillboardGroupBusy(groupId, false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setBillboardGroupBusy(groupId, false);
+        },
+        onToggleBillboardGroupPlayback: async (groupId, enabled) => {
+            if (!setBillboardGroupPlaybackEnabled) {
+                return;
+            }
+            const nextEnabled = enabled !== false;
+            ui.setBillboardGroupBusy(
+                groupId,
+                true,
+                nextEnabled ? 'Turning video playback on...' : 'Turning video playback off...'
+            );
+            try {
+                const summary = await setBillboardGroupPlaybackEnabled(groupId, nextEnabled);
+                renderBillboardGroupList();
+                onStatus?.(
+                    `${summary?.label || 'LED group'} video playback ${nextEnabled ? 'enabled' : 'disabled'}.`
+                );
+            } catch (error) {
+                const message = error?.message || 'Video playback toggle failed.';
                 ui.setBillboardGroupBusy(groupId, false, message);
                 onStatus?.(message);
                 return;
@@ -234,7 +264,11 @@ export function createCarEditModeController({
 
         if (active) {
             savedPartVisibility = captureEditablePartVisibility?.() || null;
-            setAllEditablePartsVisibility?.(true);
+            if (typeof prepareEditablePartsForEditMode === 'function') {
+                prepareEditablePartsForEditMode();
+            } else {
+                setAllEditablePartsVisibility?.(true);
+            }
             synchronizeOrbitFromCamera();
             applyViewPreset('iso', false);
             targetFov = DEFAULT_CAMERA_FOV;
@@ -445,6 +479,7 @@ function createEditModeUi({
     onResetCrashDamageTuning,
     onUploadBillboardGroup,
     onResetBillboardGroup,
+    onToggleBillboardGroupPlayback,
 } = {}) {
     const root = document.createElement('section');
     root.id = 'editModePanel';
@@ -611,8 +646,34 @@ function createEditModeUi({
 
                 const status = document.createElement('div');
                 status.className = 'editModeBillboardStatus';
-                status.textContent =
-                    uiState.message || group.statusText || 'Using built-in default playlist';
+                status.textContent = uiState.message
+                    ? uiState.message
+                    : group.mediaKind === 'video' && group.playbackEnabled === false
+                      ? 'Video playback is disabled for this screen group.'
+                      : group.statusText || 'Using built-in default playlist';
+
+                let playbackToggle = null;
+                if (
+                    group.mediaKind === 'video' &&
+                    typeof onToggleBillboardGroupPlayback === 'function'
+                ) {
+                    playbackToggle = document.createElement('label');
+                    playbackToggle.className = 'editModePartRow';
+
+                    const playbackCheckbox = document.createElement('input');
+                    playbackCheckbox.type = 'checkbox';
+                    playbackCheckbox.checked = group.playbackEnabled !== false;
+                    playbackCheckbox.disabled = uiState.busy;
+                    playbackCheckbox.addEventListener('change', () => {
+                        const nextEnabled = playbackCheckbox.checked;
+                        void onToggleBillboardGroupPlayback(groupId, nextEnabled);
+                    });
+
+                    const playbackText = document.createElement('span');
+                    playbackText.textContent = 'Video playback enabled';
+
+                    playbackToggle.append(playbackCheckbox, playbackText);
+                }
 
                 const actions = document.createElement('div');
                 actions.className = 'editModeBillboardActions';
@@ -667,7 +728,11 @@ function createEditModeUi({
                     mediaList.appendChild(itemRow);
                 }
 
-                section.append(head, description, status, actions, mediaList);
+                section.append(head, description, status);
+                if (playbackToggle) {
+                    section.append(playbackToggle);
+                }
+                section.append(actions, mediaList);
                 billboardList.appendChild(section);
             }
         },
@@ -684,7 +749,15 @@ function createEditModeUi({
                 return;
             }
 
-            const categoryOrder = ['Modules', 'Lights', 'Body', 'Wheels', 'Suspension', 'Details'];
+            const categoryOrder = [
+                'Scene',
+                'Modules',
+                'Lights',
+                'Body',
+                'Wheels',
+                'Suspension',
+                'Details',
+            ];
             const categoryGroups = new Map();
             for (let i = 0; i < parts.length; i += 1) {
                 const part = parts[i];

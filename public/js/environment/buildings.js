@@ -57,6 +57,7 @@ const SPECIAL_BUILDING_VARIANTS = new Map([
 const UFO_DISKO_STORE_VARIANT_KEY = '-1:-3';
 const LORIEN_VELMORE_GALLERY_VARIANT_KEY = '-1:3';
 const LORIEN_VELMORE_CONNECTED_TERRACE_KEY = '-3:3';
+export const LORIEN_VELMORE_EDIT_MODE_PART_ID = 'scene_lorien_velmore_building';
 const UFO_DISKO_MERCH_TEXTURE_SOURCES = Object.freeze([
     {
         url: '/assets/Ufodisko/MERCH-5-scaled-e1742462042479-1689x2048.jpg',
@@ -1289,6 +1290,7 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
         return new THREE.Group();
     }
 
+    const buildingKey = `${building.gridX}:${building.gridZ}`;
     const axis = variant.passageAxis === 'z' ? 'z' : 'x';
     const isLuxuryLorien = variant.decorStyle === 'lorienVelmoreLuxury';
     const isUfoDiskoRetail = variant.decorStyle === 'ufoDiskoRetail';
@@ -1423,6 +1425,11 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
     const group = new THREE.Group();
     group.name = `building_drive_through_${building.gridX}_${building.gridZ}`;
     group.position.set(building.x, 0, building.z);
+    if (buildingKey === LORIEN_VELMORE_GALLERY_VARIANT_KEY) {
+        group.userData.editModePartId = LORIEN_VELMORE_EDIT_MODE_PART_ID;
+        group.userData.editModePartLabel = 'Lorien Velmore maja';
+        group.userData.editModePartCategory = 'Scene';
+    }
 
     const pieces = isGalleryHall
         ? [
@@ -3827,17 +3834,44 @@ function positiveModulo(value, modulo) {
     return remainder < 0 ? remainder + modulo : remainder;
 }
 
+function createLorienArchitecturalGlassMaterial({
+    color = 0xa8b1b8,
+    map = null,
+    emissive = 0x4e5962,
+    emissiveMap = null,
+    emissiveIntensity = 0.18,
+    opacity = 0.88,
+    specular = 0xaec9dc,
+    shininess = 72,
+    depthWrite,
+} = {}) {
+    const material = new THREE.MeshPhongMaterial({
+        color,
+        map,
+        emissive,
+        emissiveMap,
+        emissiveIntensity,
+        specular,
+        shininess,
+        transparent: true,
+        opacity,
+    });
+    if (depthWrite !== undefined) {
+        material.depthWrite = depthWrite;
+    }
+    return material;
+}
+
 function createLorienTowerGlassMaterial(texture) {
-    return new THREE.MeshStandardMaterial({
+    return createLorienArchitecturalGlassMaterial({
         color: 0xa8b1b8,
         map: texture,
         emissive: 0x4e5962,
         emissiveMap: texture,
         emissiveIntensity: 0.18,
-        roughness: 0.14,
-        metalness: 0.76,
-        transparent: true,
         opacity: 0.88,
+        specular: 0xb4d1e3,
+        shininess: 82,
     });
 }
 
@@ -5104,16 +5138,15 @@ function addLorienVelmoreRoofCarLift(
     liftCoreMaterial.roughness = 0.48;
     liftCoreMaterial.metalness = 0.34;
 
-    const glassMaterial = new THREE.MeshStandardMaterial({
+    const glassMaterial = createLorienArchitecturalGlassMaterial({
         color: 0xe8f6ff,
         emissive: 0x264558,
         emissiveIntensity: 0.16,
-        transparent: true,
         opacity: 0.2,
-        roughness: 0.12,
-        metalness: 0.08,
+        specular: 0xe9fbff,
+        shininess: 96,
+        depthWrite: false,
     });
-    glassMaterial.depthWrite = false;
 
     const guideLightMaterial = new THREE.MeshBasicMaterial({
         color: 0xfff1d3,
@@ -6586,14 +6619,14 @@ function addLorienVelmoreGalleryElevator(
     baseGeometry,
     { layout, trimMaterial, shellMaterial, lightMaterial }
 ) {
-    const glassMaterial = new THREE.MeshStandardMaterial({
+    const glassMaterial = createLorienArchitecturalGlassMaterial({
         color: 0xf4f9fc,
         emissive: 0x364049,
         emissiveIntensity: 0.1,
-        transparent: true,
         opacity: 0.14,
-        roughness: 0.06,
-        metalness: 0.12,
+        specular: 0xe5f5ff,
+        shininess: 88,
+        depthWrite: false,
     });
     const frameMaterial = trimMaterial.clone();
     frameMaterial.color.setHex(0xdfcfb6);

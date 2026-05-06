@@ -4,14 +4,16 @@ import {
     BILLBOARD_CONTENT_GROUP_IDS,
     registerBillboardContentEntry,
 } from './billboard-content-manager.js';
-import { getBuildingPlacements } from './buildings.js';
+import { getBuildingPlacements, LORIEN_VELMORE_EDIT_MODE_PART_ID } from './buildings.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
 
 const billboardImageCache = new Map();
 const billboardTextureCache = new Map();
 const billboardVideoSurfaceCache = new Map();
+const billboardVideoDisabledTextureCache = new Map();
 const billboardVideoPreloadCache = new Map();
+export const LED_SCREENS_EDIT_MODE_PART_ID = 'scene_led_screens';
 
 const BILLBOARD_ASSETS = {
     poster: {
@@ -84,6 +86,53 @@ const BILLBOARD_VIDEO_SOURCE_URLS = Object.freeze([
     '/assets/billboards/model.mp4',
     '/assets/billboards/model2.mp4',
 ]);
+const BILLBOARD_FULL_DETAIL_DISTANCE_SQ = 46 * 46;
+const BILLBOARD_REDUCED_DETAIL_DISTANCE_SQ = 86 * 86;
+const BILLBOARD_DORMANT_DISTANCE_SQ = 132 * 132;
+const BILLBOARD_RUNTIME_PROFILES = Object.freeze({
+    near: Object.freeze({
+        key: 'near',
+        contentUpdateIntervalMs: 0,
+        visualUpdateIntervalMs: 0,
+        videoFrameIntervalScale: 1,
+        allowVideoPlayback: true,
+        pulseBase: 0.94,
+        pulseAmplitude: 0.06,
+        screenBoost: 0.12,
+        glowPulseMultiplier: 0.24,
+        trimPulseMultiplier: 0.16,
+        glowOpacityScale: 1,
+        trimOpacityScale: 1,
+    }),
+    mid: Object.freeze({
+        key: 'mid',
+        contentUpdateIntervalMs: 120,
+        visualUpdateIntervalMs: 120,
+        videoFrameIntervalScale: 1.8,
+        allowVideoPlayback: true,
+        pulseBase: 0.955,
+        pulseAmplitude: 0.028,
+        screenBoost: 0.1,
+        glowPulseMultiplier: 0.14,
+        trimPulseMultiplier: 0.08,
+        glowOpacityScale: 0.86,
+        trimOpacityScale: 0.92,
+    }),
+    far: Object.freeze({
+        key: 'far',
+        contentUpdateIntervalMs: 420,
+        visualUpdateIntervalMs: 260,
+        videoFrameIntervalScale: 4.2,
+        allowVideoPlayback: false,
+        pulseBase: 0.985,
+        pulseAmplitude: 0,
+        screenBoost: 0.06,
+        glowPulseMultiplier: 0,
+        trimPulseMultiplier: 0,
+        glowOpacityScale: 0.68,
+        trimOpacityScale: 0.82,
+    }),
+});
 
 let glowTexture = null;
 
@@ -265,40 +314,80 @@ export function createBillboardLayer(screenEntries = []) {
     return layer;
 }
 
-export function updateBillboardRuntime(cityScenery) {
+export function updateBillboardRuntime(cityScenery, playerPosition = null) {
     const billboardScreens = cityScenery?.userData?.billboardScreens || [];
     if (billboardScreens.length === 0) {
         return;
     }
 
     const now = performance.now();
+    const playerX = Number(playerPosition?.x);
+    const playerZ = Number(playerPosition?.z);
+    const hasPlayerPosition = Number.isFinite(playerX) && Number.isFinite(playerZ);
     billboardScreens.forEach((screenEntry) => {
+        const runtimeProfile = resolveBillboardRuntimeProfile(screenEntry, hasPlayerPosition, {
+            x: playerX,
+            z: playerZ,
+        });
+        const profileChanged = runtimeProfile.key !== screenEntry.lastRuntimeProfileKey;
+        screenEntry.lastRuntimeProfileKey = runtimeProfile.key;
+
+        const shouldUpdateContent =
+            profileChanged ||
+            runtimeProfile.contentUpdateIntervalMs <= 0 ||
+            now - (screenEntry.lastContentUpdateAt || -Infinity) >=
+                runtimeProfile.contentUpdateIntervalMs;
         if (typeof screenEntry.customUpdate === 'function') {
-            screenEntry.customUpdate(now);
+            if (shouldUpdateContent) {
+                screenEntry.customUpdate(now, runtimeProfile);
+                screenEntry.lastContentUpdateAt = now;
+            }
         } else {
             const playlistLength = screenEntry.playlistKeys.length;
             if (playlistLength === 0) {
                 return;
             }
 
-            const nextIndex =
-                Math.floor((now + screenEntry.phaseOffsetMs) / screenEntry.cycleIntervalMs) %
-                playlistLength;
-            if (nextIndex !== screenEntry.currentIndex) {
-                applyScreenAsset(screenEntry, nextIndex);
+            if (shouldUpdateContent) {
+                const nextIndex =
+                    Math.floor((now + screenEntry.phaseOffsetMs) / screenEntry.cycleIntervalMs) %
+                    playlistLength;
+                if (nextIndex !== screenEntry.currentIndex) {
+                    applyScreenAsset(screenEntry, nextIndex);
+                }
+                screenEntry.lastContentUpdateAt = now;
             }
         }
 
-        const pulse = 0.94 + Math.sin(now * screenEntry.pulseSpeed + screenEntry.pulsePhase) * 0.06;
+        const shouldUpdateVisuals =
+            profileChanged ||
+            runtimeProfile.visualUpdateIntervalMs <= 0 ||
+            now - (screenEntry.lastVisualUpdateAt || -Infinity) >=
+                runtimeProfile.visualUpdateIntervalMs;
+        if (!shouldUpdateVisuals) {
+            return;
+        }
+
+        const pulse =
+            runtimeProfile.pulseBase +
+            Math.sin(now * screenEntry.pulseSpeed + screenEntry.pulsePhase) *
+                runtimeProfile.pulseAmplitude;
         screenEntry.screenMaterials.forEach((material) => {
-            material.color.setScalar(pulse + 0.12);
+            material.color.setScalar(pulse + runtimeProfile.screenBoost);
         });
         screenEntry.glowMaterials.forEach((material) => {
-            material.opacity = material.userData.baseOpacity * (0.94 + pulse * 0.24);
+            material.opacity =
+                material.userData.baseOpacity *
+                runtimeProfile.glowOpacityScale *
+                (0.94 + pulse * runtimeProfile.glowPulseMultiplier);
         });
         screenEntry.trimMaterials.forEach((material) => {
-            material.opacity = material.userData.baseOpacity * (0.9 + pulse * 0.16);
+            material.opacity =
+                material.userData.baseOpacity *
+                runtimeProfile.trimOpacityScale *
+                (0.9 + pulse * runtimeProfile.trimPulseMultiplier);
         });
+        screenEntry.lastVisualUpdateAt = now;
     });
 }
 
@@ -413,6 +502,13 @@ function addWallMountedBillboard(layer, screenEntries, placement, options) {
     const anchor = resolveWallBillboardAnchor(mount, options.face, width, options.lateralOffset);
     billboard.position.set(anchor.x, centerY, anchor.z);
     billboard.rotation.y = mount.rotationY;
+    assignRuntimeWorldPosition(
+        billboard.userData?.runtimeEntries || [],
+        anchor.x,
+        centerY,
+        anchor.z
+    );
+    markAsLedScreenEditModePart(billboard);
     layer.add(billboard);
 }
 
@@ -452,6 +548,13 @@ function addWallMountedVideoBillboard(layer, screenEntries, placement, options) 
     const anchor = resolveWallBillboardAnchor(mount, options.face, width, options.lateralOffset);
     billboard.position.set(anchor.x, centerY, anchor.z);
     billboard.rotation.y = mount.rotationY;
+    assignRuntimeWorldPosition(
+        billboard.userData?.runtimeEntries || [],
+        anchor.x,
+        centerY,
+        anchor.z
+    );
+    markAsLedScreenEditModePart(billboard);
     layer.add(billboard);
 }
 
@@ -498,6 +601,11 @@ function addWallMountedLightbox(layer, placement, options) {
     lightbox.rotation.y = mount.rotationY;
     if (typeof options.clickUrl === 'string' && options.clickUrl) {
         lightbox.userData.clickUrl = options.clickUrl;
+    }
+    if (`${placement.gridX}:${placement.gridZ}` === '-1:3') {
+        lightbox.userData.editModePartId = LORIEN_VELMORE_EDIT_MODE_PART_ID;
+        lightbox.userData.editModePartLabel = 'Lorien Velmore maja';
+        lightbox.userData.editModePartCategory = 'Scene';
     }
     layer.add(lightbox);
 }
@@ -547,6 +655,13 @@ function addPoleMountedBillboard(layer, screenEntries, options) {
     });
     billboard.position.set(options.x, baseY, options.z);
     billboard.rotation.y = options.rotationY || 0;
+    assignRuntimeWorldPosition(
+        billboard.userData?.runtimeEntries || [],
+        options.x,
+        baseY + options.screenCenterY,
+        options.z
+    );
+    markAsLedScreenEditModePart(billboard);
     layer.add(billboard);
 
     addObstacleCircle(options.x, options.z, options.obstacleRadius || 0.85, 'billboard_support', {
@@ -569,6 +684,13 @@ function addStreetKiosk(layer, screenEntries, options) {
     });
     kiosk.position.set(options.x, baseY, options.z);
     kiosk.rotation.y = options.rotationY || 0;
+    assignRuntimeWorldPosition(
+        kiosk.userData?.runtimeEntries || [],
+        options.x,
+        baseY + options.screenCenterY,
+        options.z
+    );
+    markAsLedScreenEditModePart(kiosk);
     layer.add(kiosk);
 
     addObstacleCircle(options.x, options.z, options.obstacleRadius || 0.9, 'billboard_kiosk', {
@@ -679,6 +801,7 @@ function createWallMountedDisplayAssembly({
     panel.group.position.z = safeMountArmLength + panel.depth * 0.5;
     panel.group.rotation.y = flushToWall ? 0 : displayYawOffset;
     group.add(panel.group);
+    group.userData.runtimeEntries = Array.isArray(panel.runtimeEntries) ? panel.runtimeEntries : [];
     return group;
 }
 
@@ -741,6 +864,7 @@ function createPoleMountedBillboardMesh({
 
     panel.group.position.set(0, screenCenterY, 0);
     group.add(panel.group);
+    group.userData.runtimeEntries = Array.isArray(panel.runtimeEntries) ? panel.runtimeEntries : [];
     return group;
 }
 
@@ -811,6 +935,7 @@ function createStreetKioskMesh({
     roofLip.position.y = screenCenterY + height * 0.5 + 0.24;
     group.add(roofLip);
 
+    group.userData.runtimeEntries = Array.isArray(panel.runtimeEntries) ? panel.runtimeEntries : [];
     return group;
 }
 
@@ -864,6 +989,16 @@ export function createLedDisplayPanel(options) {
     return createDisplayPanel(options);
 }
 
+export function markAsLedScreenEditModePart(target) {
+    if (!target?.userData) {
+        return target;
+    }
+    target.userData.editModePartId = LED_SCREENS_EDIT_MODE_PART_ID;
+    target.userData.editModePartLabel = 'LED screens';
+    target.userData.editModePartCategory = 'Scene';
+    return target;
+}
+
 export function createVideoDisplayPanel({
     width,
     height,
@@ -914,14 +1049,37 @@ export function createVideoDisplayPanel({
             glowMaterials: panel.glowMaterials,
             trimMaterials: panel.trimMaterials,
             aspect: width / height,
+            worldX: Number.NaN,
+            worldY: Number.NaN,
+            worldZ: Number.NaN,
+            lastContentUpdateAt: -Infinity,
+            lastVisualUpdateAt: -Infinity,
+            lastRuntimeProfileKey: '',
             defaultVideoUrls: resolvedVideoUrls.slice(),
             videoCropFocusX,
             videoCropFocusY,
             videoTargetFps,
             accentAssetKey: safeAccentAssetKey,
             videoSurface,
-            customUpdate(now) {
-                screenEntry.videoSurface?.update?.(now);
+            playbackEnabled: true,
+            customUpdate(now, runtimeProfile = null) {
+                if (screenEntry.playbackEnabled === false) {
+                    screenEntry.videoSurface?.setPlaybackEnabled?.(false);
+                    return;
+                }
+                screenEntry.videoSurface?.setPlaybackEnabled?.(true);
+                screenEntry.videoSurface?.update?.(now, runtimeProfile);
+            },
+            setPlaybackEnabled(enabled) {
+                const nextEnabled = enabled !== false;
+                screenEntry.playbackEnabled = nextEnabled;
+                screenEntry.videoSurface?.setPlaybackEnabled?.(nextEnabled);
+                setScreenEntryTexture(
+                    screenEntry,
+                    nextEnabled
+                        ? screenEntry.videoSurface?.texture || null
+                        : getBillboardVideoDisabledTexture(screenEntry.aspect)
+                );
             },
             applyManagedContent(manifestGroup = null) {
                 const nextVideoUrls =
@@ -940,14 +1098,14 @@ export function createVideoDisplayPanel({
                     accentAssetKey: screenEntry.accentAssetKey,
                 });
                 screenEntry.videoSurface = nextVideoSurface;
-                screenEntry.screenMaterials.forEach((material) => {
-                    material.map = nextVideoSurface.texture;
-                    material.needsUpdate = true;
-                });
+                screenEntry.setPlaybackEnabled(screenEntry.playbackEnabled !== false);
             },
         };
         screenEntries.push(screenEntry);
+        panel.runtimeEntries = [screenEntry];
         registerBillboardContentEntry(screenEntry);
+    } else {
+        panel.runtimeEntries = [];
     }
 
     return panel;
@@ -1029,9 +1187,18 @@ function getBillboardVideoSurface({
     video.setAttribute('playsinline', '');
     video.setAttribute('webkit-playsinline', '');
 
+    let playbackEnabled = true;
     const surface = {
         texture,
         update,
+        setPlaybackEnabled(enabled) {
+            playbackEnabled = enabled !== false;
+            if (!playbackEnabled) {
+                video.pause();
+                return;
+            }
+            tryPlay();
+        },
     };
 
     let currentVideoIndex = 0;
@@ -1109,7 +1276,22 @@ function getBillboardVideoSurface({
         loadVideoAtIndex(currentVideoIndex + 1);
     }
 
-    function update(now) {
+    function update(now, runtimeProfile = null) {
+        if (!playbackEnabled) {
+            if (!video.paused) {
+                video.pause();
+            }
+            return;
+        }
+
+        const allowVideoPlayback = runtimeProfile?.allowVideoPlayback !== false;
+        if (!allowVideoPlayback) {
+            if (!video.paused) {
+                video.pause();
+            }
+            return;
+        }
+
         if (resolvedVideoUrls.length > 1 && video.ended) {
             advancePlaylist();
             return;
@@ -1130,9 +1312,12 @@ function getBillboardVideoSurface({
             return;
         }
 
+        const effectiveFrameIntervalMs =
+            frameIntervalMs *
+            THREE.MathUtils.clamp(Number(runtimeProfile?.videoFrameIntervalScale) || 1, 1, 8);
         const hasNewFrame = video.currentTime !== lastVideoTime;
         const elapsed = now - lastDrawTime;
-        if (lastDrawTime > 0 && (!hasNewFrame || elapsed < frameIntervalMs * 0.8)) {
+        if (lastDrawTime > 0 && (!hasNewFrame || elapsed < effectiveFrameIntervalMs * 0.8)) {
             return;
         }
 
@@ -1295,6 +1480,12 @@ function createDisplayPanel({
         glowMaterials,
         trimMaterials,
         aspect: width / height,
+        worldX: Number.NaN,
+        worldY: Number.NaN,
+        worldZ: Number.NaN,
+        lastContentUpdateAt: -Infinity,
+        lastVisualUpdateAt: -Infinity,
+        lastRuntimeProfileKey: '',
         applyManagedContent(manifestGroup = null) {
             const overridePlaylistKeys = resolveManagedImageAssetKeys(
                 manifestGroup,
@@ -1315,7 +1506,59 @@ function createDisplayPanel({
         screenEntry.currentIndex = 0;
     }
 
-    return { group, depth, screenMaterials, glowMaterials, trimMaterials, aspect: width / height };
+    return {
+        group,
+        depth,
+        screenMaterials,
+        glowMaterials,
+        trimMaterials,
+        aspect: width / height,
+        runtimeEntries: [screenEntry],
+    };
+}
+
+function assignRuntimeWorldPosition(runtimeEntries = [], x = 0, y = 0, z = 0) {
+    for (let index = 0; index < runtimeEntries.length; index += 1) {
+        const entry = runtimeEntries[index];
+        if (!entry || typeof entry !== 'object') {
+            continue;
+        }
+        entry.worldX = Number(x) || 0;
+        entry.worldY = Number(y) || 0;
+        entry.worldZ = Number(z) || 0;
+    }
+}
+
+function resolveBillboardRuntimeProfile(
+    screenEntry,
+    hasPlayerPosition = false,
+    playerPosition = null
+) {
+    if (!screenEntry || !hasPlayerPosition) {
+        return BILLBOARD_RUNTIME_PROFILES.near;
+    }
+
+    const screenX = Number(screenEntry.worldX);
+    const screenZ = Number(screenEntry.worldZ);
+    if (!Number.isFinite(screenX) || !Number.isFinite(screenZ)) {
+        return BILLBOARD_RUNTIME_PROFILES.near;
+    }
+
+    const dx = screenX - (Number(playerPosition?.x) || 0);
+    const dz = screenZ - (Number(playerPosition?.z) || 0);
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq <= BILLBOARD_FULL_DETAIL_DISTANCE_SQ) {
+        return BILLBOARD_RUNTIME_PROFILES.near;
+    }
+    if (distanceSq <= BILLBOARD_REDUCED_DETAIL_DISTANCE_SQ) {
+        return BILLBOARD_RUNTIME_PROFILES.mid;
+    }
+    if (distanceSq <= BILLBOARD_DORMANT_DISTANCE_SQ) {
+        return screenEntry.contentType === 'video'
+            ? BILLBOARD_RUNTIME_PROFILES.far
+            : BILLBOARD_RUNTIME_PROFILES.mid;
+    }
+    return BILLBOARD_RUNTIME_PROFILES.far;
 }
 
 function resolveManagedImageAssetKeys(manifestGroup, fallbackAssetKey) {
@@ -1383,6 +1626,16 @@ function addScreenTrim(group, width, height, depth, trimMaterial, styleConfig = 
     group.add(bottomTrim);
 }
 
+function setScreenEntryTexture(screenEntry, texture) {
+    if (!screenEntry || !Array.isArray(screenEntry.screenMaterials) || !texture) {
+        return;
+    }
+    screenEntry.screenMaterials.forEach((material) => {
+        material.map = texture;
+        material.needsUpdate = true;
+    });
+}
+
 function applyScreenAsset(screenEntry, assetIndex) {
     const assetKey = screenEntry.playlistKeys[assetIndex];
     const asset = BILLBOARD_ASSETS[assetKey];
@@ -1391,10 +1644,7 @@ function applyScreenAsset(screenEntry, assetIndex) {
     }
 
     const texture = getBillboardTexture(assetKey, screenEntry.aspect);
-    screenEntry.screenMaterials.forEach((material) => {
-        material.map = texture;
-        material.needsUpdate = true;
-    });
+    setScreenEntryTexture(screenEntry, texture);
     screenEntry.glowMaterials.forEach((material) => {
         material.color.setHex(asset.glowColor);
     });
@@ -1586,6 +1836,40 @@ function getBillboardTextureInternal(assetKey, targetAspect) {
         })
         .catch(() => {});
 
+    return texture;
+}
+
+function getBillboardVideoDisabledTexture(targetAspect = 1) {
+    const safeAspect = Math.max(0.05, Number(targetAspect) || 1);
+    const cacheKey = safeAspect.toFixed(3);
+    const cached = billboardVideoDisabledTextureCache.get(cacheKey);
+    if (cached) {
+        return cached;
+    }
+
+    const canvas = document.createElement('canvas');
+    const canvasSize = resolveBillboardCanvasSize(safeAspect);
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
+
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, '#060a10');
+    gradient.addColorStop(1, '#010204');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'rgba(120, 188, 255, 0.08)';
+    const lineHeight = Math.max(2, Math.round(canvas.height * 0.008));
+    const lineGap = Math.max(6, Math.round(canvas.height * 0.04));
+    for (let y = lineGap; y < canvas.height; y += lineGap) {
+        ctx.fillRect(0, y, canvas.width, lineHeight);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 2;
+    billboardVideoDisabledTextureCache.set(cacheKey, texture);
     return texture;
 }
 

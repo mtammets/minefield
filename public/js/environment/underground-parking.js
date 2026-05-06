@@ -72,15 +72,12 @@ export function createUndergroundParkingLayer() {
         side: THREE.DoubleSide,
     });
     glassWallMaterial.depthWrite = false;
-    const glassRoofMaterial = new THREE.MeshStandardMaterial({
-        color: 0xd7efff,
-        roughness: 0.12,
-        metalness: 0.1,
+    const glassRoofMaterial = new THREE.MeshBasicMaterial({
+        color: 0xd2ecff,
         transparent: true,
-        opacity: 0.34,
-        emissive: 0x1b4a6a,
-        emissiveIntensity: 0.22,
+        opacity: 0.28,
         side: THREE.DoubleSide,
+        toneMapped: false,
     });
     glassRoofMaterial.depthWrite = false;
     const trimMaterial = new THREE.MeshStandardMaterial({
@@ -849,20 +846,6 @@ function createEntranceGlassCanopy(
     );
     group.add(canopyShell);
 
-    const innerCanopyShell = new THREE.Mesh(
-        createEntranceCanopyGeometry(layout, {
-            width: entrance.canopyHalfWidth * 2 - 0.18,
-            minZ: entrance.canopyStartZ + 0.12,
-            maxZ: entrance.canopyEndZ - 0.12,
-            xSegments: 24,
-            zSegments: 28,
-            baseY: entrance.canopyBaseY - 0.08,
-            archRise: Math.max(0.24, entrance.canopyArchRise - 0.1),
-        }),
-        roofGlassMaterial
-    );
-    group.add(innerCanopyShell);
-
     for (let z = entrance.canopyStartZ + 0.8; z < entrance.canopyEndZ - 0.4; z += 3.4) {
         const rib = new THREE.Mesh(
             createEntranceCanopyGeometry(layout, {
@@ -980,6 +963,12 @@ function createEntranceGlassAtriumWalls(layout, glassMaterial, trimMaterial, lig
     const wallCenterZ = (entrance.canopyStartZ + entrance.canopyEndZ) * 0.5;
     const wallThickness = 0.08;
     const sideX = entrance.centerX + entrance.canopyHalfWidth - wallThickness * 0.5;
+    const rearBackdropMaterial = glassMaterial.clone();
+    rearBackdropMaterial.color.set(0x203246);
+    rearBackdropMaterial.opacity = 0.64;
+    rearBackdropMaterial.emissive.set(0x12283a);
+    rearBackdropMaterial.emissiveIntensity = 0.18;
+    rearBackdropMaterial.depthWrite = false;
 
     for (let side = -1; side <= 1; side += 2) {
         const glassWall = new THREE.Mesh(
@@ -1042,6 +1031,47 @@ function createEntranceGlassAtriumWalls(layout, glassMaterial, trimMaterial, lig
     rearGlow.position.set(entrance.centerX, wallTopY - 0.14, entrance.canopyEndZ - 0.03);
     group.add(rearGlow);
 
+    const rearBackdropBottomY = wallBaseY + 0.26;
+    const rearBackdropTopY = entrance.canopyBaseY + entrance.canopyArchRise * 0.64;
+    const rearBackdropHeight = Math.max(2.4, rearBackdropTopY - rearBackdropBottomY);
+    const rearBackdropZ = entrance.canopyEndZ - 0.22;
+    const rearBackdrop = new THREE.Mesh(
+        new THREE.BoxGeometry(portalWidth - 0.28, rearBackdropHeight, 0.12),
+        rearBackdropMaterial
+    );
+    rearBackdrop.position.set(
+        entrance.centerX,
+        rearBackdropBottomY + rearBackdropHeight * 0.5,
+        rearBackdropZ
+    );
+    group.add(rearBackdrop);
+
+    const rearBackdropInnerGlow = new THREE.Mesh(
+        new THREE.BoxGeometry(portalWidth - 1.18, 0.04, 0.04),
+        lightMaterial
+    );
+    rearBackdropInnerGlow.position.set(
+        entrance.centerX,
+        rearBackdropBottomY + rearBackdropHeight * 0.52,
+        rearBackdropZ - 0.05
+    );
+    group.add(rearBackdropInnerGlow);
+
+    const rearFinCount = 7;
+    const rearFinSpan = portalWidth - 1.16;
+    for (let index = 0; index < rearFinCount; index += 1) {
+        const finRatio = rearFinCount === 1 ? 0.5 : index / (rearFinCount - 1);
+        const finX = entrance.centerX - rearFinSpan * 0.5 + rearFinSpan * finRatio;
+        const finHeight = rearBackdropHeight - (index % 2 === 0 ? 0.08 : 0.34);
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(0.14, finHeight, 0.2), trimMaterial);
+        fin.position.set(
+            finX,
+            rearBackdropBottomY + finHeight * 0.5 + 0.04,
+            rearBackdropZ + 0.03
+        );
+        group.add(fin);
+    }
+
     const frontShoulderWidth = Math.max(
         1.24,
         entrance.canopyHalfWidth - entrance.driveHalfWidth - 0.12
@@ -1059,7 +1089,6 @@ function createEntranceGlassAtriumWalls(layout, glassMaterial, trimMaterial, lig
             frontClosureZ
         );
         group.add(frontGlass);
-
     }
 
     return group;

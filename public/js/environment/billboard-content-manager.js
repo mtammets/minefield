@@ -61,6 +61,7 @@ const BILLBOARD_CONTENT_GROUPS = Object.freeze([
 
 const groupDefinitionsById = new Map(BILLBOARD_CONTENT_GROUPS.map((group) => [group.id, group]));
 const registeredEntriesByGroup = new Map();
+const runtimePlaybackStateByGroup = new Map();
 const contentState = {
     initialized: false,
     initializationPromise: null,
@@ -69,6 +70,17 @@ const contentState = {
 
 export function getBillboardContentGroups() {
     return BILLBOARD_CONTENT_GROUPS.map((definition) => buildBillboardGroupSummary(definition));
+}
+
+export function setBillboardGroupPlaybackEnabled(groupId, enabled) {
+    const definition = getBillboardGroupDefinition(groupId);
+    if (!definition || definition.mediaKind !== 'video') {
+        return definition ? buildBillboardGroupSummary(definition) : null;
+    }
+
+    runtimePlaybackStateByGroup.set(definition.id, enabled !== false);
+    applyGroupRuntimeStateToEntries(definition.id);
+    return buildBillboardGroupSummary(definition);
 }
 
 export function registerBillboardContentEntry(entry) {
@@ -212,6 +224,14 @@ function applyGroupManifestToEntries(groupId) {
     entries.forEach((entry) => applyGroupManifestToEntry(groupId, entry));
 }
 
+function applyGroupRuntimeStateToEntries(groupId) {
+    const entries = registeredEntriesByGroup.get(groupId);
+    if (!entries || entries.size === 0) {
+        return;
+    }
+    entries.forEach((entry) => applyGroupRuntimeStateToEntry(groupId, entry));
+}
+
 function applyGroupManifestToEntry(groupId, entry) {
     if (!entry || typeof entry.applyManagedContent !== 'function') {
         return;
@@ -219,6 +239,22 @@ function applyGroupManifestToEntry(groupId, entry) {
     const manifestGroup = contentState.manifest.groups[groupId] || null;
     const hasCustomItems = Array.isArray(manifestGroup?.items) && manifestGroup.items.length > 0;
     entry.applyManagedContent(hasCustomItems ? manifestGroup : null);
+    applyGroupRuntimeStateToEntry(groupId, entry);
+}
+
+function applyGroupRuntimeStateToEntry(groupId, entry) {
+    if (!entry || typeof entry.setPlaybackEnabled !== 'function') {
+        return;
+    }
+    entry.setPlaybackEnabled(isBillboardGroupPlaybackEnabled(groupId));
+}
+
+function isBillboardGroupPlaybackEnabled(groupId) {
+    const definition = getBillboardGroupDefinition(groupId);
+    if (!definition || definition.mediaKind !== 'video') {
+        return true;
+    }
+    return runtimePlaybackStateByGroup.get(definition.id) !== false;
 }
 
 function buildBillboardGroupSummary(definition) {
@@ -242,6 +278,10 @@ function buildBillboardGroupSummary(definition) {
         ...definition,
         screenCount,
         isCustom,
+        playbackEnabled:
+            definition.mediaKind === 'video'
+                ? isBillboardGroupPlaybackEnabled(definition.id)
+                : true,
         updatedAt: manifestGroup?.updatedAt || null,
         items: activeItems,
         statusText: isCustom

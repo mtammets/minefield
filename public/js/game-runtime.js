@@ -124,6 +124,7 @@ import {
     getBillboardContentGroups,
     initializeBillboardContentManager,
     resetBillboardGroupContent,
+    setBillboardGroupPlaybackEnabled,
     uploadBillboardGroupFiles,
 } from './environment/billboard-content-manager.js';
 import {
@@ -769,6 +770,7 @@ const playerSpawnState = {
     position: new THREE.Vector3(initialSpawnX, car.position.y, initialSpawnZ),
     rotationY: initialSpawnRotationY,
 };
+const builtWorld = ensureWorldBuilt();
 
 const scene = initializeScene({
     sceneBackgroundColor,
@@ -816,15 +818,19 @@ const graphicsQualityController = createGraphicsQualityController({
     initialMode: initialGraphicsQualityMode,
     skidMarkController,
 });
+const sceneEditModePartDescriptors = collectSceneEditModePartDescriptors(builtWorld.cityScenery);
 const carEditModeController = createCarEditModeController({
     camera,
     car,
     canvas: renderer.domElement,
-    getEditableParts: getPlayerCarEditableParts,
-    setEditablePartVisibility: setPlayerCarPartVisibility,
-    setAllEditablePartsVisibility: setAllPlayerCarPartsVisibility,
-    captureEditablePartVisibility: capturePlayerCarPartVisibility,
-    restoreEditablePartVisibility: restorePlayerCarPartVisibility,
+    getEditableParts: getRuntimeEditableParts,
+    prepareEditablePartsForEditMode() {
+        setAllPlayerCarPartsVisibility?.(true);
+    },
+    setEditablePartVisibility: setRuntimeEditablePartVisibility,
+    setAllEditablePartsVisibility: setAllRuntimeEditablePartsVisibility,
+    captureEditablePartVisibility: captureRuntimeEditablePartVisibility,
+    restoreEditablePartVisibility: restoreRuntimeEditablePartVisibility,
     onEditModeChanged(isActive) {
         setCameraKeyboardControlsEnabled(!isActive);
         runtimeState.gameSessionController?.clearDriveKeys();
@@ -869,7 +875,93 @@ const carEditModeController = createCarEditModeController({
     getBillboardContentGroups,
     onUploadBillboardGroupMedia: uploadBillboardGroupFiles,
     onResetBillboardGroupMedia: resetBillboardGroupContent,
+    onSetBillboardGroupPlaybackEnabled(groupId, enabled) {
+        return setBillboardGroupPlaybackEnabled(groupId, enabled);
+    },
 });
+
+function getRuntimeEditableParts() {
+    const carParts = Array.isArray(getPlayerCarEditableParts?.()) ? getPlayerCarEditableParts() : [];
+    const sceneParts = Array.from(sceneEditModePartDescriptors.values()).map((descriptor) => ({
+        id: descriptor.id,
+        label: descriptor.label,
+        category: descriptor.category,
+        visible: isSceneEditModePartVisible(descriptor),
+    }));
+    return [...carParts, ...sceneParts];
+}
+
+function setRuntimeEditablePartVisibility(partId, isVisible) {
+    if (setPlayerCarPartVisibility?.(partId, isVisible)) {
+        return true;
+    }
+    const descriptor = sceneEditModePartDescriptors.get(partId);
+    if (!descriptor) {
+        return false;
+    }
+    setSceneEditModePartVisibility(descriptor, isVisible);
+    return true;
+}
+
+function setAllRuntimeEditablePartsVisibility(isVisible) {
+    setAllPlayerCarPartsVisibility?.(isVisible);
+    sceneEditModePartDescriptors.forEach((descriptor) => {
+        setSceneEditModePartVisibility(descriptor, isVisible);
+    });
+}
+
+function captureRuntimeEditablePartVisibility() {
+    return {
+        ...(capturePlayerCarPartVisibility?.() || {}),
+    };
+}
+
+function restoreRuntimeEditablePartVisibility(snapshot = null) {
+    restorePlayerCarPartVisibility?.(snapshot);
+}
+
+function collectSceneEditModePartDescriptors(root) {
+    const descriptors = new Map();
+    root?.traverse?.((object) => {
+        const partId = String(object?.userData?.editModePartId || '').trim();
+        if (!partId) {
+            return;
+        }
+        const label = String(object.userData.editModePartLabel || partId).trim() || partId;
+        const category =
+            String(object.userData.editModePartCategory || 'Scene').trim() || 'Scene';
+        const existing = descriptors.get(partId);
+        if (existing) {
+            existing.sources.push(object);
+            return;
+        }
+        descriptors.set(partId, {
+            id: partId,
+            label,
+            category,
+            sources: [object],
+        });
+    });
+    return descriptors;
+}
+
+function isSceneEditModePartVisible(descriptor) {
+    return Array.isArray(descriptor?.sources)
+        ? descriptor.sources.some((source) => source?.visible !== false)
+        : false;
+}
+
+function setSceneEditModePartVisibility(descriptor, isVisible) {
+    const nextVisible = Boolean(isVisible);
+    if (!Array.isArray(descriptor?.sources)) {
+        return;
+    }
+    descriptor.sources.forEach((source) => {
+        if (source) {
+            source.visible = nextVisible;
+        }
+    });
+}
 const raceIntroController = createRaceIntroController({
     camera,
     vehicle: car,

@@ -3,7 +3,7 @@ import { centralParkingLot } from './layout.js';
 import { getGroundHeightAt } from './terrain.js';
 import { addObstacleCircle } from './obstacles.js';
 import { BILLBOARD_CONTENT_GROUP_IDS } from './billboard-content-manager.js';
-import { createVideoDisplayPanel } from './billboards.js';
+import { createVideoDisplayPanel, markAsLedScreenEditModePart } from './billboards.js';
 
 export const MONUMENT_SCREEN_VIDEO_URLS = [
     '/assets/billboards/monument-dj-led.mp4',
@@ -22,6 +22,9 @@ const ZERO_RHYTHM_STATE = Object.freeze({
 export function createMonumentLayer(screenEntries = [], effectEntries = []) {
     const layer = new THREE.Group();
     layer.name = 'monumentLayer';
+    layer.userData.editModePartId = 'scene_monument';
+    layer.userData.editModePartLabel = 'Monument';
+    layer.userData.editModePartCategory = 'Scene';
 
     const centerX = centralParkingLot.centerX;
     const centerZ = centralParkingLot.centerZ;
@@ -156,6 +159,18 @@ export function createMonumentLayer(screenEntries = [], effectEntries = []) {
         });
         panel.group.position.set(screenMount.x, monolith.position.y, screenMount.z);
         panel.group.rotation.y = screenMount.rotationY;
+        if (Array.isArray(panel.runtimeEntries)) {
+            for (let index = 0; index < panel.runtimeEntries.length; index += 1) {
+                const runtimeEntry = panel.runtimeEntries[index];
+                if (!runtimeEntry || typeof runtimeEntry !== 'object') {
+                    continue;
+                }
+                runtimeEntry.worldX = screenMount.x;
+                runtimeEntry.worldY = monolith.position.y;
+                runtimeEntry.worldZ = screenMount.z;
+            }
+        }
+        markAsLedScreenEditModePart(panel.group);
         layer.add(panel.group);
     });
 
