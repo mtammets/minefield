@@ -56,6 +56,7 @@ const SPECIAL_BUILDING_VARIANTS = new Map([
 ]);
 const UFO_DISKO_STORE_VARIANT_KEY = '-1:-3';
 const LORIEN_VELMORE_GALLERY_VARIANT_KEY = '-1:3';
+const LORIEN_VELMORE_CONNECTED_TERRACE_KEY = '-3:3';
 const UFO_DISKO_MERCH_TEXTURE_SOURCES = Object.freeze([
     {
         url: '/assets/Ufodisko/MERCH-5-scaled-e1742462042479-1689x2048.jpg',
@@ -92,6 +93,9 @@ const LORIEN_DOOR_GLASS_BREAK_DISTANCE = 2.25;
 const LORIEN_DOOR_GLASS_BREAK_DISTANCE_SQ =
     LORIEN_DOOR_GLASS_BREAK_DISTANCE * LORIEN_DOOR_GLASS_BREAK_DISTANCE;
 const LORIEN_DOOR_PANEL_DEPTH = 0.08;
+const LORIEN_ROOF_LIFT_ENTRY_DOOR_OPEN_SPEED = 3.2;
+const LORIEN_ROOF_LIFT_ENTRY_DOOR_CLOSE_SPEED = 4.6;
+const LORIEN_ROOF_LIFT_ENTRY_DOOR_CLEARANCE_OPEN_AMOUNT = 0.72;
 const LORIEN_DOOR_SCORCH_MARK_LIMIT = 10;
 const LORIEN_DOOR_SHATTER_VARIANT_COUNT = 4;
 const LORIEN_DOOR_CRACK_MARK_LIMIT = 8;
@@ -206,13 +210,15 @@ export function createBuildingLayer() {
 
             color.copy(resolveBuildingTintColor(building.tint));
             buildings.setColorAt(index, color);
+            const obstacleVerticalRange = resolveRegularBuildingObstacleVerticalRange(building);
             addObstacleAabb(
                 building.x,
                 building.z,
                 building.width,
                 building.depth,
                 0.2,
-                'building'
+                'building',
+                obstacleVerticalRange
             );
         });
         buildings.instanceMatrix.needsUpdate = true;
@@ -376,37 +382,66 @@ export function appendLorienVelmoreDoorCollisionObstacles(buildingLayer, outputB
     result.length = 0;
 
     const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
-    if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
-        return result;
-    }
-
-    for (let index = 0; index < doorSystems.length; index += 1) {
-        const doorSystem = doorSystems[index];
-        const panels = doorSystem?.panels;
-        if (!Array.isArray(panels) || panels.length === 0) {
-            continue;
-        }
-
-        const panelDepth = Math.max(
-            0.12,
-            (Number(doorSystem.panelDepth) || LORIEN_DOOR_PANEL_DEPTH) * 0.5 + 0.05
-        );
-        for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
-            const panelState = panels[panelIndex];
-            const panelGroup = panelState?.group;
-            const panelWidth = Math.max(0.2, Number(panelState?.width) || 0);
-            if (!panelGroup || !Number.isFinite(panelWidth)) {
+    if (Array.isArray(doorSystems) && doorSystems.length > 0) {
+        for (let index = 0; index < doorSystems.length; index += 1) {
+            const doorSystem = doorSystems[index];
+            const panels = doorSystem?.panels;
+            if (!Array.isArray(panels) || panels.length === 0) {
                 continue;
             }
 
-            const panelCenterX = (Number(doorSystem.centerX) || 0) + (panelGroup.position.x || 0);
-            const panelCenterZ = (Number(doorSystem.centerZ) || 0) + (panelGroup.position.z || 0);
+            const panelDepth = Math.max(
+                0.12,
+                (Number(doorSystem.panelDepth) || LORIEN_DOOR_PANEL_DEPTH) * 0.5 + 0.05
+            );
+            for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
+                const panelState = panels[panelIndex];
+                const panelGroup = panelState?.group;
+                const panelWidth = Math.max(0.2, Number(panelState?.width) || 0);
+                if (!panelGroup || !Number.isFinite(panelWidth)) {
+                    continue;
+                }
+
+                const panelCenterX =
+                    (Number(doorSystem.centerX) || 0) + (panelGroup.position.x || 0);
+                const panelCenterZ =
+                    (Number(doorSystem.centerZ) || 0) + (panelGroup.position.z || 0);
+                result.push({
+                    type: 'aabb',
+                    minX: panelCenterX - panelWidth * 0.5,
+                    maxX: panelCenterX + panelWidth * 0.5,
+                    minZ: panelCenterZ - panelDepth,
+                    maxZ: panelCenterZ + panelDepth,
+                    category: 'building',
+                });
+            }
+        }
+    }
+
+    const roofLiftSystems = buildingLayer?.userData?.lorienVelmoreRoofLiftSystems;
+    if (Array.isArray(roofLiftSystems) && roofLiftSystems.length > 0) {
+        for (let index = 0; index < roofLiftSystems.length; index += 1) {
+            const entryDoor = roofLiftSystems[index]?.entryDoor;
+            const panelGroup = entryDoor?.panelGroup;
+            const panelWidth = Math.max(0.2, Number(entryDoor?.width) || 0);
+            if (
+                !panelGroup ||
+                !Number.isFinite(panelWidth) ||
+                (Number(entryDoor?.openAmount) || 0) >=
+                    LORIEN_ROOF_LIFT_ENTRY_DOOR_CLEARANCE_OPEN_AMOUNT
+            ) {
+                continue;
+            }
+
+            const panelDepth = Math.max(0.12, Number(entryDoor?.collisionDepth) || 0.16);
+            const panelCenterX = (Number(entryDoor?.centerX) || 0) + (panelGroup.position.x || 0);
+            const panelCenterZ = (Number(entryDoor?.centerZ) || 0) + (panelGroup.position.z || 0);
             result.push({
                 type: 'aabb',
                 minX: panelCenterX - panelWidth * 0.5,
                 maxX: panelCenterX + panelWidth * 0.5,
-                minZ: panelCenterZ - panelDepth,
-                maxZ: panelCenterZ + panelDepth,
+                minZ: panelCenterZ - panelDepth * 0.5,
+                maxZ: panelCenterZ + panelDepth * 0.5,
                 category: 'building',
             });
         }
@@ -551,6 +586,21 @@ function getUfoDiskoStoreFootprint() {
     };
 
     return ufoDiskoStoreFootprint;
+}
+
+function resolveRegularBuildingObstacleVerticalRange(building) {
+    if (!building) {
+        return null;
+    }
+
+    if (`${building.gridX}:${building.gridZ}` !== LORIEN_VELMORE_CONNECTED_TERRACE_KEY) {
+        return null;
+    }
+
+    const roofLiftLayout = getLorienVelmoreRoofLiftLayout();
+    return {
+        maxY: roofLiftLayout.connectedTerraceSurfaceY - 1.45,
+    };
 }
 
 function getLorienVelmoreGalleryBuilding() {
@@ -1183,6 +1233,7 @@ function updateLorienVelmoreRoofLiftSystems(
     const state = updateLorienVelmoreRoofLiftState(playerPosition, frameDelta, null, options);
     const normalizedTravel = clamp01(state?.normalizedTravel || 0);
     const movingPulse = state?.isMoving ? 0.72 + Math.sin(performance.now() * 0.012) * 0.2 : 0;
+    const entryDoorTargetOpen = !state?.isMoving && normalizedTravel <= 0.02 ? 1 : 0;
 
     roofLiftSystems.forEach((system) => {
         if (!system) {
@@ -1203,6 +1254,31 @@ function updateLorienVelmoreRoofLiftSystems(
         }
         if (system.roofViewLightMaterial) {
             system.roofViewLightMaterial.opacity = 0.54 + normalizedTravel * 0.22;
+        }
+        if (system.entryDoor?.panelGroup) {
+            const entryDoor = system.entryDoor;
+            const transitionSpeed =
+                entryDoorTargetOpen > (Number(entryDoor.openAmount) || 0)
+                    ? Number(entryDoor.openSpeed) || LORIEN_ROOF_LIFT_ENTRY_DOOR_OPEN_SPEED
+                    : Number(entryDoor.closeSpeed) || LORIEN_ROOF_LIFT_ENTRY_DOOR_CLOSE_SPEED;
+            entryDoor.openAmount = moveTowards(
+                Number(entryDoor.openAmount) || 0,
+                entryDoorTargetOpen,
+                transitionSpeed * frameDelta
+            );
+            entryDoor.panelGroup.position.y = THREE.MathUtils.lerp(
+                Number(entryDoor.closedY) || 0,
+                Number(entryDoor.openY) || 0,
+                entryDoor.openAmount
+            );
+            if (entryDoor.glassMaterial) {
+                entryDoor.glassMaterial.opacity = 0.2 + (1 - entryDoor.openAmount) * 0.08;
+                entryDoor.glassMaterial.emissiveIntensity =
+                    0.12 + (1 - entryDoor.openAmount) * 0.08;
+            }
+            if (entryDoor.glowMaterial) {
+                entryDoor.glowMaterial.opacity = 0.08 + (1 - entryDoor.openAmount) * 0.12;
+            }
         }
     });
 }
@@ -3221,6 +3297,22 @@ function addDecorBox(group, baseGeometry, material, { x, y, z, width, height, de
     return mesh;
 }
 
+function addRotatedDecorBox(
+    group,
+    baseGeometry,
+    material,
+    { x, y, z, width, height, depth, rotationX = 0, rotationY = 0, rotationZ = 0 }
+) {
+    const mesh = new THREE.Mesh(baseGeometry, material);
+    mesh.position.set(x, y, z);
+    mesh.scale.set(width, height, depth);
+    mesh.rotation.set(rotationX, rotationY, rotationZ);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    group.add(mesh);
+    return mesh;
+}
+
 function registerLorienVelmoreAccentMaterial(group, material) {
     if (!group?.userData) {
         return material;
@@ -4776,6 +4868,20 @@ function addLorienVelmoreRoofLiftObstacles(building) {
     const bridgeDepth = Math.max(0.24, layout.bridgeMaxZ - layout.bridgeMinZ);
     const bridgeRailInset = 0.82;
     const bridgeRailDepth = Math.max(0.18, bridgeDepth - bridgeRailInset * 2);
+    const connectedBridgeLength = Math.max(
+        0.24,
+        layout.connectedBridgeMaxX - layout.connectedBridgeMinX
+    );
+    const connectedTerraceWidth = layout.connectedTerraceHalfWidth * 2;
+    const connectedTerraceDepth = layout.connectedTerraceHalfDepth * 2;
+    const connectedBridgeRange = {
+        minY: Math.min(layout.roofSurfaceY, layout.connectedTerraceSurfaceY) - 0.4,
+        maxY: Math.max(layout.roofSurfaceY, layout.connectedTerraceSurfaceY) + 2.2,
+    };
+    const connectedTerraceRange = {
+        minY: layout.connectedTerraceSurfaceY - 0.4,
+        maxY: layout.connectedTerraceSurfaceY + 2.2,
+    };
 
     addObstacleAabb(
         layout.centerX - layout.shaftHalfWidth - 0.12,
@@ -4804,15 +4910,36 @@ function addLorienVelmoreRoofLiftObstacles(building) {
         'building',
         roofRange
     );
-    addObstacleAabb(
-        layout.centerX + layout.roofDeckMinX - 0.12,
-        layout.centerZ + (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
-        0.24,
-        roofDeckDepth,
-        0.02,
-        'building',
-        roofRange
+    const westRoofBarrierFrontDepth = Math.max(
+        0,
+        layout.connectedBridgeOpeningMinZ - layout.roofDeckMinZ
     );
+    const westRoofBarrierRearDepth = Math.max(
+        0,
+        layout.roofDeckMaxZ - layout.connectedBridgeOpeningMaxZ
+    );
+    if (westRoofBarrierFrontDepth > 0.24) {
+        addObstacleAabb(
+            layout.centerX + layout.roofDeckMinX - 0.12,
+            layout.centerZ + layout.roofDeckMinZ + westRoofBarrierFrontDepth * 0.5,
+            0.24,
+            westRoofBarrierFrontDepth,
+            0.02,
+            'building',
+            roofRange
+        );
+    }
+    if (westRoofBarrierRearDepth > 0.24) {
+        addObstacleAabb(
+            layout.centerX + layout.roofDeckMinX - 0.12,
+            layout.centerZ + layout.connectedBridgeOpeningMaxZ + westRoofBarrierRearDepth * 0.5,
+            0.24,
+            westRoofBarrierRearDepth,
+            0.02,
+            'building',
+            roofRange
+        );
+    }
     addObstacleAabb(
         layout.centerX + layout.roofDeckMaxX + 0.12,
         layout.centerZ + (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
@@ -4860,6 +4987,93 @@ function addLorienVelmoreRoofLiftObstacles(building) {
                 roofRange
             );
         });
+    }
+
+    if (connectedBridgeLength > 0.24) {
+        [-1, 1].forEach((direction) => {
+            addObstacleAabb(
+                layout.centerX + (layout.connectedBridgeMinX + layout.connectedBridgeMaxX) * 0.5,
+                layout.centerZ +
+                    layout.connectedBridgeCenterZ +
+                    direction * (layout.connectedBridgeHalfDepth + 0.12),
+                connectedBridgeLength,
+                0.24,
+                0.02,
+                'building',
+                connectedBridgeRange
+            );
+        });
+    }
+
+    addObstacleAabb(
+        layout.centerX + layout.connectedTerraceCenterX - layout.connectedTerraceHalfWidth - 0.12,
+        layout.centerZ + layout.connectedTerraceCenterZ,
+        0.24,
+        connectedTerraceDepth,
+        0.02,
+        'building',
+        connectedTerraceRange
+    );
+    addObstacleAabb(
+        layout.centerX + layout.connectedTerraceCenterX,
+        layout.centerZ + layout.connectedTerraceCenterZ - layout.connectedTerraceHalfDepth - 0.12,
+        connectedTerraceWidth,
+        0.24,
+        0.02,
+        'building',
+        connectedTerraceRange
+    );
+    addObstacleAabb(
+        layout.centerX + layout.connectedTerraceCenterX,
+        layout.centerZ + layout.connectedTerraceCenterZ + layout.connectedTerraceHalfDepth + 0.12,
+        connectedTerraceWidth,
+        0.24,
+        0.02,
+        'building',
+        connectedTerraceRange
+    );
+
+    const connectedTerraceFrontDepth = Math.max(
+        0,
+        layout.connectedBridgeOpeningMinZ -
+            (layout.connectedTerraceCenterZ - layout.connectedTerraceHalfDepth)
+    );
+    const connectedTerraceRearDepth = Math.max(
+        0,
+        layout.connectedTerraceCenterZ +
+            layout.connectedTerraceHalfDepth -
+            layout.connectedBridgeOpeningMaxZ
+    );
+    if (connectedTerraceFrontDepth > 0.24) {
+        addObstacleAabb(
+            layout.centerX +
+                layout.connectedTerraceCenterX +
+                layout.connectedTerraceHalfWidth +
+                0.12,
+            layout.centerZ +
+                layout.connectedTerraceCenterZ -
+                layout.connectedTerraceHalfDepth +
+                connectedTerraceFrontDepth * 0.5,
+            0.24,
+            connectedTerraceFrontDepth,
+            0.02,
+            'building',
+            connectedTerraceRange
+        );
+    }
+    if (connectedTerraceRearDepth > 0.24) {
+        addObstacleAabb(
+            layout.centerX +
+                layout.connectedTerraceCenterX +
+                layout.connectedTerraceHalfWidth +
+                0.12,
+            layout.centerZ + layout.connectedBridgeOpeningMaxZ + connectedTerraceRearDepth * 0.5,
+            0.24,
+            connectedTerraceRearDepth,
+            0.02,
+            'building',
+            connectedTerraceRange
+        );
     }
 }
 
@@ -4913,6 +5127,14 @@ function addLorienVelmoreRoofCarLift(
         opacity: 0.72,
         toneMapped: false,
     });
+    const bridgeGlassFloorMaterial = glassMaterial.clone();
+    bridgeGlassFloorMaterial.opacity = 0.34;
+    bridgeGlassFloorMaterial.emissiveIntensity = 0.24;
+    bridgeGlassFloorMaterial.depthWrite = false;
+    const terraceGlassInsetMaterial = glassMaterial.clone();
+    terraceGlassInsetMaterial.opacity = 0.26;
+    terraceGlassInsetMaterial.emissiveIntensity = 0.22;
+    terraceGlassInsetMaterial.depthWrite = false;
 
     const roofDeckWidth = layout.roofDeckMaxX - layout.roofDeckMinX;
     const roofDeckDepth = layout.roofDeckMaxZ - layout.roofDeckMinZ;
@@ -4926,9 +5148,74 @@ function addLorienVelmoreRoofCarLift(
     const parapetThickness = 0.16;
     const parapetHeight = 0.86;
     const walkwayY = layout.roofSurfaceY - slabThickness * 0.5;
-    const shaftSideGlassDepth = Math.max(1.2, layout.shaftDepth * 0.42);
-    const shaftSideGlassCenterZ =
-        layout.shaftCenterZ + layout.shaftHalfDepth - shaftSideGlassDepth * 0.5 - 0.18;
+    const connectedTerraceWidth = layout.connectedTerraceHalfWidth * 2;
+    const connectedTerraceDepth = layout.connectedTerraceHalfDepth * 2;
+    const connectedTerraceWalkwayY = layout.connectedTerraceSurfaceY - slabThickness * 0.5;
+    const connectedTerraceSupportedMinX = Math.max(
+        layout.connectedTerraceMinX,
+        layout.connectedTerraceBuildingMinX
+    );
+    const connectedTerraceSupportedMaxX = Math.min(
+        layout.connectedTerraceMaxX,
+        layout.connectedTerraceBuildingMaxX
+    );
+    const connectedTerraceSupportedWidth = Math.max(
+        0,
+        connectedTerraceSupportedMaxX - connectedTerraceSupportedMinX
+    );
+    const connectedTerraceSupportedCenterX =
+        (connectedTerraceSupportedMinX + connectedTerraceSupportedMaxX) * 0.5;
+    const connectedTerraceSupportedMinZ = Math.max(
+        layout.connectedTerraceMinZ,
+        layout.connectedTerraceBuildingMinZ
+    );
+    const connectedTerraceSupportedMaxZ = Math.min(
+        layout.connectedTerraceMaxZ,
+        layout.connectedTerraceBuildingMaxZ
+    );
+    const connectedTerraceSupportedDepth = Math.max(
+        0,
+        connectedTerraceSupportedMaxZ - connectedTerraceSupportedMinZ
+    );
+    const connectedTerraceSupportedCenterZ =
+        (connectedTerraceSupportedMinZ + connectedTerraceSupportedMaxZ) * 0.5;
+    const connectedBridgeLength = Math.max(
+        0.24,
+        layout.connectedBridgeMaxX - layout.connectedBridgeMinX
+    );
+    const connectedBridgeCenterX = (layout.connectedBridgeMinX + layout.connectedBridgeMaxX) * 0.5;
+    const connectedBridgeCenterY =
+        (layout.connectedBridgeMinSurfaceY + layout.connectedBridgeMaxSurfaceY) * 0.5;
+    const connectedBridgeAngle = Math.atan2(
+        layout.connectedBridgeMaxSurfaceY - layout.connectedBridgeMinSurfaceY,
+        connectedBridgeLength
+    );
+    const connectedBridgeTopOffsetY = Math.cos(connectedBridgeAngle) * slabThickness * 0.5;
+    const connectedBridgeWalkwayY = connectedBridgeCenterY - connectedBridgeTopOffsetY;
+    const connectedBridgeGlassThickness = 0.04;
+    const connectedBridgeGlassOffsetY =
+        Math.cos(connectedBridgeAngle) * connectedBridgeGlassThickness * 0.5;
+    const westRoofBridgeGapFrontDepth = Math.max(
+        0,
+        layout.connectedBridgeOpeningMinZ - layout.roofDeckMinZ
+    );
+    const westRoofBridgeGapRearDepth = Math.max(
+        0,
+        layout.roofDeckMaxZ - layout.connectedBridgeOpeningMaxZ
+    );
+    const connectedTerraceBridgeGapFrontDepth = Math.max(
+        0,
+        layout.connectedBridgeOpeningMinZ -
+            (layout.connectedTerraceCenterZ - layout.connectedTerraceHalfDepth)
+    );
+    const connectedTerraceBridgeGapRearDepth = Math.max(
+        0,
+        layout.connectedTerraceCenterZ +
+            layout.connectedTerraceHalfDepth -
+            layout.connectedBridgeOpeningMaxZ
+    );
+    const shaftSideGlassDepth = Math.max(1.8, layout.shaftDepth - 0.52);
+    const shaftSideGlassCenterZ = layout.shaftCenterZ;
     addDecorBox(group, baseGeometry, deckMaterial, {
         x: 0,
         y: walkwayY,
@@ -4965,13 +5252,102 @@ function addLorienVelmoreRoofCarLift(
         });
     }
 
-    [
-        {
-            x: layout.roofDeckMinX - 0.08,
-            z: (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
-            width: parapetThickness,
-            depth: roofDeckDepth,
-        },
+    addDecorBox(group, baseGeometry, bridgeGlassFloorMaterial, {
+        x: layout.connectedTerraceCenterX,
+        y: connectedTerraceWalkwayY - 0.01,
+        z: layout.connectedTerraceCenterZ,
+        width: connectedTerraceWidth,
+        height: Math.max(0.12, slabThickness - 0.04),
+        depth: connectedTerraceDepth,
+    });
+    addDecorBox(group, baseGeometry, terraceGlassInsetMaterial, {
+        x: layout.connectedTerraceCenterX,
+        y: layout.connectedTerraceSurfaceY + 0.014,
+        z: layout.connectedTerraceCenterZ,
+        width: Math.max(0.24, connectedTerraceWidth - 0.18),
+        height: 0.03,
+        depth: Math.max(0.24, connectedTerraceDepth - 0.18),
+    });
+
+    if (connectedTerraceSupportedWidth > 0.24 && connectedTerraceSupportedDepth > 0.24) {
+        addDecorBox(group, baseGeometry, deckMaterial, {
+            x: connectedTerraceSupportedCenterX,
+            y: connectedTerraceWalkwayY,
+            z: connectedTerraceSupportedCenterZ,
+            width: connectedTerraceSupportedWidth,
+            height: slabThickness,
+            depth: connectedTerraceSupportedDepth,
+        });
+        addDecorBox(group, baseGeometry, liftFrameMaterial, {
+            x: connectedTerraceSupportedCenterX,
+            y: layout.connectedTerraceSurfaceY + 0.022,
+            z: connectedTerraceSupportedCenterZ,
+            width: Math.max(0.18, connectedTerraceSupportedWidth - 0.22),
+            height: 0.025,
+            depth: Math.max(0.18, connectedTerraceSupportedDepth - 0.22),
+        });
+        addDecorBox(group, baseGeometry, terraceGlassInsetMaterial, {
+            x: connectedTerraceSupportedCenterX,
+            y: layout.connectedTerraceSurfaceY + 0.015,
+            z: connectedTerraceSupportedCenterZ,
+            width: Math.max(0.24, connectedTerraceSupportedWidth - 0.88),
+            height: 0.03,
+            depth: Math.max(0.24, connectedTerraceSupportedDepth - 0.88),
+        });
+    }
+    addDecorBox(group, baseGeometry, guideLightMaterial, {
+        x: layout.connectedTerraceCenterX + layout.connectedTerraceHalfWidth - 1.12,
+        y: layout.connectedTerraceSurfaceY + 0.03,
+        z: layout.connectedTerraceCenterZ,
+        width: 0.08,
+        height: 0.012,
+        depth: Math.max(0.24, layout.connectedBridgeHalfDepth * 2 - 0.36),
+    });
+
+    if (connectedBridgeLength > 0.24) {
+        addRotatedDecorBox(group, baseGeometry, deckMaterial, {
+            x: connectedBridgeCenterX,
+            y: connectedBridgeWalkwayY,
+            z: layout.connectedBridgeCenterZ,
+            width: connectedBridgeLength,
+            height: slabThickness,
+            depth: layout.connectedBridgeHalfDepth * 2,
+            rotationZ: connectedBridgeAngle,
+        });
+        addRotatedDecorBox(group, baseGeometry, bridgeGlassFloorMaterial, {
+            x: connectedBridgeCenterX,
+            y: connectedBridgeCenterY + 0.016 - connectedBridgeGlassOffsetY,
+            z: layout.connectedBridgeCenterZ,
+            width: Math.max(0.18, connectedBridgeLength - 0.28),
+            height: connectedBridgeGlassThickness,
+            depth: Math.max(0.18, layout.connectedBridgeHalfDepth * 2 - 0.42),
+            rotationZ: connectedBridgeAngle,
+        });
+        addRotatedDecorBox(group, baseGeometry, guideLightMaterial, {
+            x: connectedBridgeCenterX,
+            y: connectedBridgeCenterY + 0.03 - Math.cos(connectedBridgeAngle) * 0.006,
+            z: layout.connectedBridgeCenterZ,
+            width: Math.max(0.18, connectedBridgeLength - 0.8),
+            height: 0.012,
+            depth: 0.08,
+            rotationZ: connectedBridgeAngle,
+        });
+        [-1, 1].forEach((direction) => {
+            addRotatedDecorBox(group, baseGeometry, glassMaterial, {
+                x: connectedBridgeCenterX,
+                y: connectedBridgeCenterY + parapetHeight * 0.5 - 0.04,
+                z:
+                    layout.connectedBridgeCenterZ +
+                    direction * (layout.connectedBridgeHalfDepth + 0.08),
+                width: Math.max(0.18, connectedBridgeLength - 0.18),
+                height: parapetHeight,
+                depth: parapetThickness,
+                rotationZ: connectedBridgeAngle,
+            });
+        });
+    }
+
+    const roofDeckParapets = [
         {
             x: layout.roofDeckMaxX + 0.08,
             z: (layout.roofDeckMinZ + layout.roofDeckMaxZ) * 0.5,
@@ -4979,7 +5355,24 @@ function addLorienVelmoreRoofCarLift(
             depth: roofDeckDepth,
         },
         { x: 0, z: layout.roofDeckMinZ - 0.08, width: roofDeckWidth, depth: parapetThickness },
-    ].forEach((rail) => {
+    ];
+    if (westRoofBridgeGapFrontDepth > 0.18) {
+        roofDeckParapets.push({
+            x: layout.roofDeckMinX - 0.08,
+            z: layout.roofDeckMinZ + westRoofBridgeGapFrontDepth * 0.5,
+            width: parapetThickness,
+            depth: westRoofBridgeGapFrontDepth,
+        });
+    }
+    if (westRoofBridgeGapRearDepth > 0.18) {
+        roofDeckParapets.push({
+            x: layout.roofDeckMinX - 0.08,
+            z: layout.connectedBridgeOpeningMaxZ + westRoofBridgeGapRearDepth * 0.5,
+            width: parapetThickness,
+            depth: westRoofBridgeGapRearDepth,
+        });
+    }
+    roofDeckParapets.forEach((rail) => {
         addDecorBox(group, baseGeometry, glassMaterial, {
             x: rail.x,
             y: layout.roofSurfaceY + parapetHeight * 0.5,
@@ -5004,6 +5397,56 @@ function addLorienVelmoreRoofCarLift(
             });
         });
     }
+
+    const connectedTerraceParapets = [
+        {
+            x: layout.connectedTerraceCenterX - layout.connectedTerraceHalfWidth - 0.08,
+            z: layout.connectedTerraceCenterZ,
+            width: parapetThickness,
+            depth: connectedTerraceDepth,
+        },
+        {
+            x: layout.connectedTerraceCenterX,
+            z: layout.connectedTerraceCenterZ - layout.connectedTerraceHalfDepth - 0.08,
+            width: connectedTerraceWidth,
+            depth: parapetThickness,
+        },
+        {
+            x: layout.connectedTerraceCenterX,
+            z: layout.connectedTerraceCenterZ + layout.connectedTerraceHalfDepth + 0.08,
+            width: connectedTerraceWidth,
+            depth: parapetThickness,
+        },
+    ];
+    if (connectedTerraceBridgeGapFrontDepth > 0.18) {
+        connectedTerraceParapets.push({
+            x: layout.connectedTerraceCenterX + layout.connectedTerraceHalfWidth + 0.08,
+            z:
+                layout.connectedTerraceCenterZ -
+                layout.connectedTerraceHalfDepth +
+                connectedTerraceBridgeGapFrontDepth * 0.5,
+            width: parapetThickness,
+            depth: connectedTerraceBridgeGapFrontDepth,
+        });
+    }
+    if (connectedTerraceBridgeGapRearDepth > 0.18) {
+        connectedTerraceParapets.push({
+            x: layout.connectedTerraceCenterX + layout.connectedTerraceHalfWidth + 0.08,
+            z: layout.connectedBridgeOpeningMaxZ + connectedTerraceBridgeGapRearDepth * 0.5,
+            width: parapetThickness,
+            depth: connectedTerraceBridgeGapRearDepth,
+        });
+    }
+    connectedTerraceParapets.forEach((rail) => {
+        addDecorBox(group, baseGeometry, glassMaterial, {
+            x: rail.x,
+            y: layout.connectedTerraceSurfaceY + parapetHeight * 0.5,
+            z: rail.z,
+            width: rail.width,
+            height: parapetHeight,
+            depth: rail.depth,
+        });
+    });
 
     if (bridgeDepth > 0.22) {
         [-1, 1].forEach((direction) => {
@@ -5043,6 +5486,82 @@ function addLorienVelmoreRoofCarLift(
             height: shaftHeight - 0.26,
             depth: shaftSideGlassDepth,
         });
+    });
+
+    const entryDoorFrameMaterial = liftFrameMaterial.clone();
+    entryDoorFrameMaterial.color.setHex(0xdfc59a);
+    entryDoorFrameMaterial.emissive.setHex(0x483223);
+    entryDoorFrameMaterial.emissiveIntensity = 0.12;
+    const entryDoorGlassMaterial = glassMaterial.clone();
+    entryDoorGlassMaterial.opacity = 0.28;
+    entryDoorGlassMaterial.emissiveIntensity = 0.2;
+    entryDoorGlassMaterial.depthWrite = false;
+    const entryDoorGlowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xd8f3ff,
+        transparent: true,
+        opacity: 0.08,
+        toneMapped: false,
+    });
+    const entryDoorSide = 1;
+    const entryDoorWidth = Math.min(layout.shaftWidth - 0.5, layout.liftPlatformWidth + 0.64);
+    const entryDoorHeight = 2.64;
+    const entryDoorPlaneZ = layout.shaftCenterZ + entryDoorSide * (layout.shaftHalfDepth - 0.08);
+    const entryDoorClosedY = 0.12 + entryDoorHeight * 0.5;
+    const entryDoorOpenY = entryDoorClosedY + entryDoorHeight + 0.34;
+    const entryDoorPanel = new THREE.Group();
+    entryDoorPanel.position.set(layout.shaftCenterX, entryDoorOpenY, entryDoorPlaneZ);
+    addDecorBox(entryDoorPanel, baseGeometry, entryDoorFrameMaterial, {
+        x: 0,
+        y: 0,
+        z: 0,
+        width: entryDoorWidth,
+        height: entryDoorHeight,
+        depth: 0.08,
+    });
+    addDecorBox(entryDoorPanel, baseGeometry, entryDoorGlassMaterial, {
+        x: 0,
+        y: 0,
+        z: -0.01,
+        width: entryDoorWidth - 0.24,
+        height: entryDoorHeight - 0.24,
+        depth: 0.03,
+    });
+    addDecorBox(entryDoorPanel, baseGeometry, entryDoorGlowMaterial, {
+        x: 0,
+        y: 0,
+        z: -0.04,
+        width: entryDoorWidth - 0.44,
+        height: entryDoorHeight - 0.44,
+        depth: 0.02,
+    });
+    group.add(entryDoorPanel);
+
+    const entryDoorTrackHeight = entryDoorOpenY + entryDoorHeight * 0.5 - 0.18;
+    [-1, 1].forEach((direction) => {
+        addDecorBox(group, baseGeometry, entryDoorFrameMaterial, {
+            x: layout.shaftCenterX + direction * (entryDoorWidth * 0.5 + 0.1),
+            y: entryDoorTrackHeight * 0.5,
+            z: entryDoorPlaneZ - entryDoorSide * 0.02,
+            width: 0.1,
+            height: entryDoorTrackHeight,
+            depth: 0.14,
+        });
+    });
+    addDecorBox(group, baseGeometry, entryDoorFrameMaterial, {
+        x: layout.shaftCenterX,
+        y: entryDoorHeight + 0.34,
+        z: entryDoorPlaneZ - entryDoorSide * 0.04,
+        width: entryDoorWidth + 0.38,
+        height: 0.16,
+        depth: 0.18,
+    });
+    addDecorBox(group, baseGeometry, guideLightMaterial, {
+        x: layout.shaftCenterX,
+        y: 0.03,
+        z: entryDoorPlaneZ - entryDoorSide * 0.16,
+        width: entryDoorWidth - 0.72,
+        height: 0.012,
+        depth: 0.06,
     });
 
     addDecorBox(group, baseGeometry, deckMaterial, {
@@ -5141,6 +5660,20 @@ function addLorienVelmoreRoofCarLift(
         platformGroup,
         statusLightMaterial,
         roofViewLightMaterial: roofViewLight.material,
+        entryDoor: {
+            panelGroup: entryDoorPanel,
+            glassMaterial: entryDoorGlassMaterial,
+            glowMaterial: entryDoorGlowMaterial,
+            centerX: building.x,
+            centerZ: building.z,
+            width: entryDoorWidth,
+            collisionDepth: 0.18,
+            closedY: entryDoorClosedY,
+            openY: entryDoorOpenY,
+            openAmount: 1,
+            openSpeed: LORIEN_ROOF_LIFT_ENTRY_DOOR_OPEN_SPEED,
+            closeSpeed: LORIEN_ROOF_LIFT_ENTRY_DOOR_CLOSE_SPEED,
+        },
     });
 }
 

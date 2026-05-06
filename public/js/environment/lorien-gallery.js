@@ -3,6 +3,8 @@ import { randomFromGrid } from './grid-noise.js';
 
 const LORIEN_GALLERY_GRID_X = -1;
 const LORIEN_GALLERY_GRID_Z = 3;
+const LORIEN_CONNECTED_TERRACE_GRID_X = -3;
+const LORIEN_CONNECTED_TERRACE_GRID_Z = 3;
 export const LORIEN_VELMORE_GALLERY_SURFACE_OFFSET = 0;
 const LORIEN_ROOF_LIFT_BOTTOM_SURFACE_Y = 0.16;
 const LORIEN_ROOF_LIFT_MOVE_SPEED = 6.8;
@@ -14,10 +16,15 @@ const LORIEN_ROOF_DECK_DRIVE_SIDE_MARGIN = 1.72;
 const LORIEN_ROOF_DECK_DRIVE_FRONT_MARGIN = 1.54;
 const LORIEN_ROOF_DECK_DRIVE_REAR_MARGIN = 1.72;
 const LORIEN_ROOF_BRIDGE_DRIVE_SIDE_MARGIN = 1.42;
+const LORIEN_ROOF_SIDE_BRIDGE_DRIVE_SIDE_MARGIN = 0.54;
+const LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_WEST_MARGIN = 1.18;
+const LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_EAST_MARGIN = 0.04;
+const LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_DEPTH_MARGIN = 1.18;
 const LORIEN_ROOF_PLATFORM_DRIVE_SIDE_MARGIN = 1.34;
 const LORIEN_ROOF_PLATFORM_DRIVE_FRONT_MARGIN = 0.16;
 const LORIEN_ROOF_PLATFORM_DRIVE_REAR_MARGIN = 0.38;
 const LORIEN_ROOF_DECK_SILENCE_FACTOR = 0.58;
+const LORIEN_CONNECTED_TERRACE_SILENCE_FACTOR = 0.64;
 const LORIEN_ROOF_LIFT_BOTTOM_SILENCE_FACTOR = 0.2;
 const LORIEN_ROOF_LIFT_TOP_SILENCE_FACTOR = 0.72;
 let lorienVelmoreDoorOpenAmount = 0;
@@ -33,15 +40,26 @@ const lorienRoofLiftRuntime = {
 };
 
 function getDefaultLorienGalleryBuilding() {
-    const width = 12 + randomFromGrid(LORIEN_GALLERY_GRID_X, LORIEN_GALLERY_GRID_Z, 11) * 11;
-    const depth = 12 + randomFromGrid(LORIEN_GALLERY_GRID_X, LORIEN_GALLERY_GRID_Z, 12) * 11;
-    const height = 14 + randomFromGrid(LORIEN_GALLERY_GRID_X, LORIEN_GALLERY_GRID_Z, 13) * 58;
+    return getDefaultLorienBuildingForGrid(LORIEN_GALLERY_GRID_X, LORIEN_GALLERY_GRID_Z);
+}
+
+function getDefaultLorienConnectedTerraceBuilding() {
+    return getDefaultLorienBuildingForGrid(
+        LORIEN_CONNECTED_TERRACE_GRID_X,
+        LORIEN_CONNECTED_TERRACE_GRID_Z
+    );
+}
+
+function getDefaultLorienBuildingForGrid(gridX, gridZ) {
+    const width = 12 + randomFromGrid(gridX, gridZ, 11) * 11;
+    const depth = 12 + randomFromGrid(gridX, gridZ, 12) * 11;
+    const height = 14 + randomFromGrid(gridX, gridZ, 13) * 58;
 
     return {
-        gridX: LORIEN_GALLERY_GRID_X,
-        gridZ: LORIEN_GALLERY_GRID_Z,
-        x: LORIEN_GALLERY_GRID_X * CITY_GRID_SPACING,
-        z: LORIEN_GALLERY_GRID_Z * CITY_GRID_SPACING,
+        gridX,
+        gridZ,
+        x: gridX * CITY_GRID_SPACING,
+        z: gridZ * CITY_GRID_SPACING,
         width,
         depth,
         height,
@@ -94,6 +112,7 @@ export function getLorienVelmoreGalleryLayout(building) {
 
 export function getLorienVelmoreRoofLiftLayout(building) {
     const galleryLayout = getLorienVelmoreGalleryLayout(building);
+    const connectedTerraceBuilding = getDefaultLorienConnectedTerraceBuilding();
     const roofSurfaceY = galleryLayout.height + 0.26;
     const liftPlatformWidth = clamp(galleryLayout.width * 0.36, 4.8, 5.4);
     const liftPlatformDepth = clamp(galleryLayout.depth * 0.28, 6.4, 7.4);
@@ -120,7 +139,43 @@ export function getLorienVelmoreRoofLiftLayout(building) {
     const serviceLaneHalfWidth = Math.max(bridgeHalfWidth - 0.18, liftPlatformHalfWidth + 0.58);
     const serviceLaneMinZ = galleryLayout.safeDepth + 0.36;
     const serviceLaneMaxZ = shaftCenterZ + liftPlatformHalfDepth + 3.6;
-
+    const connectedTerraceBuildingCenterX = connectedTerraceBuilding.x - galleryLayout.centerX;
+    const connectedTerraceBuildingCenterZ = connectedTerraceBuilding.z - galleryLayout.centerZ;
+    const connectedTerraceBuildingHalfWidth = connectedTerraceBuilding.width * 0.5;
+    const connectedTerraceBuildingHalfDepth = connectedTerraceBuilding.depth * 0.5;
+    const connectedTerraceBuildingMinX =
+        connectedTerraceBuildingCenterX - connectedTerraceBuildingHalfWidth;
+    const connectedTerraceBuildingMaxX =
+        connectedTerraceBuildingCenterX + connectedTerraceBuildingHalfWidth;
+    const connectedTerraceBuildingMinZ =
+        connectedTerraceBuildingCenterZ - connectedTerraceBuildingHalfDepth;
+    const connectedTerraceBuildingMaxZ =
+        connectedTerraceBuildingCenterZ + connectedTerraceBuildingHalfDepth;
+    const connectedTerraceSurfaceY = connectedTerraceBuilding.height + 0.26;
+    const connectedTerraceWestOverhang = clamp(connectedTerraceBuilding.width * 0.06, 0.72, 0.98);
+    const connectedTerraceEastOverhang = clamp(connectedTerraceBuilding.width * 0.15, 2.1, 2.8);
+    const connectedTerraceDepthOverhang = clamp(connectedTerraceBuilding.depth * 0.08, 0.92, 1.38);
+    const connectedTerraceMinX = connectedTerraceBuildingMinX - connectedTerraceWestOverhang;
+    const connectedTerraceMaxX = connectedTerraceBuildingMaxX + connectedTerraceEastOverhang;
+    const connectedTerraceMinZ = connectedTerraceBuildingMinZ - connectedTerraceDepthOverhang;
+    const connectedTerraceMaxZ = connectedTerraceBuildingMaxZ + connectedTerraceDepthOverhang;
+    const connectedTerraceHalfWidth = (connectedTerraceMaxX - connectedTerraceMinX) * 0.5;
+    const connectedTerraceHalfDepth = (connectedTerraceMaxZ - connectedTerraceMinZ) * 0.5;
+    const connectedTerraceCenterX = (connectedTerraceMinX + connectedTerraceMaxX) * 0.5;
+    const connectedTerraceCenterZ = (connectedTerraceMinZ + connectedTerraceMaxZ) * 0.5;
+    const connectedBridgeCenterZ = connectedTerraceCenterZ;
+    const connectedBridgeHalfDepth = clamp(
+        Math.min(galleryLayout.safeDepth * 0.32, connectedTerraceHalfDepth - 0.48),
+        1.9,
+        2.4
+    );
+    const connectedBridgeTerraceEdgeX = connectedTerraceCenterX + connectedTerraceHalfWidth - 0.28;
+    const connectedBridgeRoofEdgeX = roofDeckMinX + 0.28;
+    const connectedBridgeMinX = Math.min(connectedBridgeTerraceEdgeX, connectedBridgeRoofEdgeX);
+    const connectedBridgeMaxX = Math.max(connectedBridgeTerraceEdgeX, connectedBridgeRoofEdgeX);
+    const connectedBridgeMinSurfaceY = connectedTerraceSurfaceY;
+    const connectedBridgeMaxSurfaceY = roofSurfaceY;
+    const connectedBridgeOpeningHalfDepth = connectedBridgeHalfDepth + 0.24;
     return {
         ...galleryLayout,
         roofSurfaceY,
@@ -149,6 +204,27 @@ export function getLorienVelmoreRoofLiftLayout(building) {
         serviceLaneHalfWidth,
         serviceLaneMinZ,
         serviceLaneMaxZ,
+        connectedTerraceSurfaceY,
+        connectedTerraceCenterX,
+        connectedTerraceCenterZ,
+        connectedTerraceHalfWidth,
+        connectedTerraceHalfDepth,
+        connectedTerraceMinX,
+        connectedTerraceMaxX,
+        connectedTerraceMinZ,
+        connectedTerraceMaxZ,
+        connectedTerraceBuildingMinX,
+        connectedTerraceBuildingMaxX,
+        connectedTerraceBuildingMinZ,
+        connectedTerraceBuildingMaxZ,
+        connectedBridgeCenterZ,
+        connectedBridgeHalfDepth,
+        connectedBridgeMinX,
+        connectedBridgeMaxX,
+        connectedBridgeMinSurfaceY,
+        connectedBridgeMaxSurfaceY,
+        connectedBridgeOpeningMinZ: connectedBridgeCenterZ - connectedBridgeOpeningHalfDepth,
+        connectedBridgeOpeningMaxZ: connectedBridgeCenterZ + connectedBridgeOpeningHalfDepth,
     };
 }
 
@@ -291,11 +367,18 @@ export function sampleLorienVelmoreRoofLiftHeightWorld(x, z, building) {
     ) {
         return lorienRoofLiftRuntime.currentSurfaceY;
     }
+    const connectedBridgeHeight = sampleConnectedRoofBridgeHeight(localX, localZ, layout);
+    if (Number.isFinite(connectedBridgeHeight)) {
+        return connectedBridgeHeight;
+    }
     if (
         isInsideRoofDeckDriveArea(localX, localZ, layout) ||
-        isInsideRoofBridgeArea(localX, localZ, layout)
+        isInsideRoofBridgeArea(localX, localZ, layout) ||
+        isInsideConnectedTerraceArea(localX, localZ, layout)
     ) {
-        return layout.roofSurfaceY;
+        return isInsideConnectedTerraceArea(localX, localZ, layout)
+            ? layout.connectedTerraceSurfaceY
+            : layout.roofSurfaceY;
     }
     return null;
 }
@@ -396,6 +479,8 @@ export function constrainPositionToLorienVelmoreRoofLiftDriveBounds(
     const allowedRoofArea =
         isInsideRoofDeckDriveArea(localX, localZ, layout) ||
         isInsideRoofBridgeArea(localX, localZ, layout) ||
+        isInsideConnectedRoofBridgeArea(localX, localZ, layout) ||
+        isInsideConnectedTerraceArea(localX, localZ, layout) ||
         isInsideLocalRect(
             localX,
             localZ,
@@ -509,18 +594,32 @@ export function getLorienVelmoreGallerySilenceFactorWorld(x, y, z, building) {
     const roofLayout = getLorienVelmoreRoofLiftLayout(building);
     ensureRoofLiftRuntimeInitialized(roofLayout);
     let roofSilence = 0;
-    const nearRoofDeckSurface =
-        y >= roofLayout.roofSurfaceY - 1 && y <= roofLayout.roofSurfaceY + 3.6;
+    const roofSurfaceCeiling = Math.max(
+        roofLayout.roofSurfaceY,
+        roofLayout.connectedTerraceSurfaceY
+    );
+    const nearRoofDeckSurface = y >= roofLayout.roofSurfaceY - 1 && y <= roofSurfaceCeiling + 3.6;
     if (
         nearRoofDeckSurface &&
         (isInsideRoofDeckDriveArea(localX, localZ, roofLayout) ||
-            isInsideRoofBridgeArea(localX, localZ, roofLayout))
+            isInsideRoofBridgeArea(localX, localZ, roofLayout) ||
+            isInsideConnectedRoofBridgeArea(localX, localZ, roofLayout) ||
+            isInsideConnectedTerraceArea(localX, localZ, roofLayout))
     ) {
-        const roofHeightFactor =
-            1 - normalizedRange(Math.abs(y - roofLayout.roofSurfaceY), 0.9, 2.8);
-        const roofBase = isInsideRoofBridgeArea(localX, localZ, roofLayout)
-            ? LORIEN_ROOF_DECK_SILENCE_FACTOR + 0.08
-            : LORIEN_ROOF_DECK_SILENCE_FACTOR;
+        const connectedBridgeHeight = sampleConnectedRoofBridgeHeight(localX, localZ, roofLayout);
+        const roofSurfaceHeight = Number.isFinite(connectedBridgeHeight)
+            ? connectedBridgeHeight
+            : isInsideConnectedTerraceArea(localX, localZ, roofLayout)
+              ? roofLayout.connectedTerraceSurfaceY
+              : roofLayout.roofSurfaceY;
+        const roofHeightFactor = 1 - normalizedRange(Math.abs(y - roofSurfaceHeight), 0.9, 2.8);
+        const roofBase =
+            isInsideRoofBridgeArea(localX, localZ, roofLayout) ||
+            isInsideConnectedRoofBridgeArea(localX, localZ, roofLayout)
+                ? LORIEN_ROOF_DECK_SILENCE_FACTOR + 0.08
+                : isInsideConnectedTerraceArea(localX, localZ, roofLayout)
+                  ? LORIEN_CONNECTED_TERRACE_SILENCE_FACTOR
+                  : LORIEN_ROOF_DECK_SILENCE_FACTOR;
         roofSilence = clamp01(roofBase * lerp(0.76, 1, roofHeightFactor));
     }
     if (
@@ -615,9 +714,10 @@ function isPlayerOccupyingRoofLiftUpperLevel(playerPosition, layout) {
 
     const localX = playerX - layout.centerX;
     const localZ = playerZ - layout.centerZ;
+    const roofSurfaceCeiling = Math.max(layout.roofSurfaceY, layout.connectedTerraceSurfaceY);
     const nearRoofHeight =
         playerY >= layout.roofSurfaceY - layout.roofCaptureMargin &&
-        playerY <= layout.roofSurfaceY + 3.6;
+        playerY <= roofSurfaceCeiling + 3.6;
     if (!nearRoofHeight) {
         return false;
     }
@@ -625,6 +725,8 @@ function isPlayerOccupyingRoofLiftUpperLevel(playerPosition, layout) {
     return (
         isInsideRoofDeckDriveArea(localX, localZ, layout) ||
         isInsideRoofBridgeArea(localX, localZ, layout) ||
+        isInsideConnectedRoofBridgeArea(localX, localZ, layout) ||
+        isInsideConnectedTerraceArea(localX, localZ, layout) ||
         isInsideRoofLiftShaft(localX, localZ, layout)
     );
 }
@@ -670,6 +772,33 @@ function isInsideRoofBridgeArea(localX, localZ, layout) {
     );
 }
 
+function isInsideConnectedRoofBridgeArea(localX, localZ, layout) {
+    return (
+        localX >= layout.connectedBridgeMinX &&
+        localX <= layout.connectedBridgeMaxX &&
+        localZ >= layout.connectedBridgeCenterZ - layout.connectedBridgeHalfDepth &&
+        localZ <= layout.connectedBridgeCenterZ + layout.connectedBridgeHalfDepth
+    );
+}
+
+function isInsideConnectedTerraceArea(localX, localZ, layout) {
+    return (
+        localX >= layout.connectedTerraceCenterX - layout.connectedTerraceHalfWidth &&
+        localX <= layout.connectedTerraceCenterX + layout.connectedTerraceHalfWidth &&
+        localZ >= layout.connectedTerraceCenterZ - layout.connectedTerraceHalfDepth &&
+        localZ <= layout.connectedTerraceCenterZ + layout.connectedTerraceHalfDepth
+    );
+}
+
+function sampleConnectedRoofBridgeHeight(localX, localZ, layout) {
+    if (!isInsideConnectedRoofBridgeArea(localX, localZ, layout)) {
+        return null;
+    }
+
+    const t = normalizedRange(localX, layout.connectedBridgeMinX, layout.connectedBridgeMaxX);
+    return lerp(layout.connectedBridgeMinSurfaceY, layout.connectedBridgeMaxSurfaceY, t);
+}
+
 function getLorienRoofLiftDriveCorridors(layout, includePlatform = false) {
     const deckRearLimit = layout.roofDeckMaxZ - LORIEN_ROOF_DECK_DRIVE_REAR_MARGIN;
     const bridgeEntryMinZ = Math.min(deckRearLimit - 0.22, layout.bridgeMinZ - 0.12);
@@ -685,6 +814,42 @@ function getLorienRoofLiftDriveCorridors(layout, includePlatform = false) {
             maxX: layout.roofDeckMaxX - LORIEN_ROOF_DECK_DRIVE_SIDE_MARGIN,
             minZ: layout.roofDeckMinZ + LORIEN_ROOF_DECK_DRIVE_FRONT_MARGIN,
             maxZ: deckRearLimit,
+        },
+        {
+            minX: layout.roofDeckMinX,
+            maxX: layout.roofDeckMinX + 3.6,
+            minZ: layout.connectedBridgeCenterZ - layout.connectedBridgeHalfDepth + 0.18,
+            maxZ: layout.connectedBridgeCenterZ + layout.connectedBridgeHalfDepth - 0.18,
+        },
+        {
+            minX: layout.connectedBridgeMinX,
+            maxX: layout.connectedBridgeMaxX,
+            minZ:
+                layout.connectedBridgeCenterZ -
+                layout.connectedBridgeHalfDepth +
+                LORIEN_ROOF_SIDE_BRIDGE_DRIVE_SIDE_MARGIN,
+            maxZ:
+                layout.connectedBridgeCenterZ +
+                layout.connectedBridgeHalfDepth -
+                LORIEN_ROOF_SIDE_BRIDGE_DRIVE_SIDE_MARGIN,
+        },
+        {
+            minX:
+                layout.connectedTerraceCenterX -
+                layout.connectedTerraceHalfWidth +
+                LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_WEST_MARGIN,
+            maxX:
+                layout.connectedTerraceCenterX +
+                layout.connectedTerraceHalfWidth -
+                LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_EAST_MARGIN,
+            minZ:
+                layout.connectedTerraceCenterZ -
+                layout.connectedTerraceHalfDepth +
+                LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_DEPTH_MARGIN,
+            maxZ:
+                layout.connectedTerraceCenterZ +
+                layout.connectedTerraceHalfDepth -
+                LORIEN_ROOF_CONNECTED_TERRACE_DRIVE_DEPTH_MARGIN,
         },
         bridgeCorridor,
     ];
