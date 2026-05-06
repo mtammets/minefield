@@ -1254,7 +1254,11 @@ export function createRoofWeaponSystem({
         const distance = shotDirection.length();
         if (!Number.isFinite(distance) || distance <= 0.0001) {
             return {
-                targetPoint: resolveHunterIdleTargetPoint(hunterBot, hunterForward, weaponTempVectorD).clone(),
+                targetPoint: resolveHunterIdleTargetPoint(
+                    hunterBot,
+                    hunterForward,
+                    weaponTempVectorD
+                ).clone(),
                 canFire: false,
                 locked: false,
             };
@@ -1294,7 +1298,9 @@ export function createRoofWeaponSystem({
 
         const locked = Boolean(aimState?.locked);
         if (locked) {
-            hunterReticleColor.copy(hunterState.triggerHeld ? RETICLE_LOCK_COLOR : RETICLE_HOT_COLOR);
+            hunterReticleColor.copy(
+                hunterState.triggerHeld ? RETICLE_LOCK_COLOR : RETICLE_HOT_COLOR
+            );
         } else if (hunterState.triggerHeld) {
             hunterReticleColor.copy(RETICLE_HOT_COLOR);
         } else {
@@ -1355,11 +1361,17 @@ export function createRoofWeaponSystem({
         const verticalJitter =
             Math.cos(state.shotSequence * 0.57 + hunterState.motionPhase * 0.48) *
             BOT_HUNTER_PLAYER_MISS_VERTICAL_JITTER;
-        missTargetPoint.addScaledVector(horizontalLateral, BOT_HUNTER_PLAYER_MISS_LATERAL_OFFSET * sideSign);
+        missTargetPoint.addScaledVector(
+            horizontalLateral,
+            BOT_HUNTER_PLAYER_MISS_LATERAL_OFFSET * sideSign
+        );
         missTargetPoint.addScaledVector(aimState.shotDirection, depthJitter);
         missTargetPoint.y += verticalJitter;
 
-        const missShotDirection = weaponTempVectorB.subVectors(missTargetPoint, aimState.muzzlePosition);
+        const missShotDirection = weaponTempVectorB.subVectors(
+            missTargetPoint,
+            aimState.muzzlePosition
+        );
         const missDistance = missShotDirection.length();
         if (!Number.isFinite(missDistance) || missDistance <= 0.0001) {
             return null;
@@ -1377,21 +1389,7 @@ export function createRoofWeaponSystem({
         if (!aimState?.targetPoint || !aimState?.shotDirection) {
             return false;
         }
-
-        const nowMs = Date.now();
-        if (nowMs < hunterState.nextPlayerHitWindowAtMs) {
-            return false;
-        }
-
-        hunterState.nextPlayerHitWindowAtMs =
-            nowMs +
-            BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS +
-            Math.random() *
-                Math.max(
-                    0,
-                    BOT_HUNTER_PLAYER_HIT_WINDOW_MAX_MS - BOT_HUNTER_PLAYER_HIT_WINDOW_MIN_MS
-                );
-        return Math.random() < BOT_HUNTER_PLAYER_HIT_CHANCE;
+        return true;
     }
 
     function updateHunterWeaponThermals(dt) {
@@ -1406,10 +1404,7 @@ export function createRoofWeaponSystem({
         hunterState.recoil = THREE.MathUtils.lerp(
             hunterState.recoil,
             0,
-            1 -
-                Math.exp(
-                    -(hunterState.triggerHeld ? WEAPON_RECOIL_RISE : WEAPON_RECOIL_FALL) * dt
-                )
+            1 - Math.exp(-(hunterState.triggerHeld ? WEAPON_RECOIL_RISE : WEAPON_RECOIL_FALL) * dt)
         );
     }
 
@@ -1429,7 +1424,8 @@ export function createRoofWeaponSystem({
             ? aimState.targetPoint || car.position
             : missShotState?.targetPoint || aimState.targetPoint || car.position;
         const resolvedShotDistance = hitPlayer
-            ? Number(aimState.muzzlePosition.distanceTo?.(resolvedTargetPoint)) || BOT_HUNTER_FIRE_RANGE
+            ? Number(aimState.muzzlePosition.distanceTo?.(resolvedTargetPoint)) ||
+              BOT_HUNTER_FIRE_RANGE
             : Number.isFinite(missShotState?.distance)
               ? missShotState.distance
               : Math.min(SHOT_RANGE, BOT_HUNTER_FIRE_RANGE);
@@ -1776,11 +1772,7 @@ export function createRoofWeaponSystem({
             return;
         }
 
-        spawnImpact(
-            projectile.impactPoint,
-            projectile.direction,
-            Boolean(projectile.targetKind)
-        );
+        spawnImpact(projectile.impactPoint, projectile.direction, Boolean(projectile.targetKind));
         if (projectile.obstacleNormal) {
             spawnBulletMark(
                 projectile.impactPoint,
@@ -1806,7 +1798,11 @@ export function createRoofWeaponSystem({
             return;
         }
 
-        if (projectile.gameMode !== 'bots' || projectile.targetKind !== 'bot' || !projectile.targetCollectorId) {
+        if (
+            projectile.gameMode !== 'bots' ||
+            projectile.targetKind !== 'bot' ||
+            !projectile.targetCollectorId
+        ) {
             getAudioController()?.onRoofWeaponImpact?.({
                 hit: Boolean(projectile.targetKind),
                 destroyed: false,

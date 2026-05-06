@@ -153,11 +153,7 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     }
     const cinematicBlendTarget = cinematicMode ? 1 : 0;
     const cinematicBlendRate =
-        cinematicBlendTarget > cinematicBlend
-            ? 0.95
-            : cinematicExitBoostTimer > 0
-              ? 4.8
-              : 3.1;
+        cinematicBlendTarget > cinematicBlend ? 0.95 : cinematicExitBoostTimer > 0 ? 4.8 : 3.1;
     cinematicBlend = THREE.MathUtils.lerp(
         cinematicBlend,
         cinematicBlendTarget,
@@ -166,10 +162,8 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     cinematicExitBoostTimer = Math.max(0, cinematicExitBoostTimer - dt);
 
     if (cinematicMode || cinematicBlend > 0.001) {
-        cinematicOrbitProgress =
-            (cinematicOrbitProgress + dt / CINEMATIC_LOOP_DURATION_SEC) % 1;
-        cinematicLoopProgress =
-            (cinematicLoopProgress + dt / CINEMATIC_LOOP_DURATION_SEC) % 1;
+        cinematicOrbitProgress = (cinematicOrbitProgress + dt / CINEMATIC_LOOP_DURATION_SEC) % 1;
+        cinematicLoopProgress = (cinematicLoopProgress + dt / CINEMATIC_LOOP_DURATION_SEC) % 1;
         cinematicAngle = cinematicOrbitProgress * Math.PI * 2;
     }
     cinematicWasActive = cinematicMode;
@@ -278,7 +272,11 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     const cinematicShot = resolveCinematicShot(car, speed, dt);
     targetPosition.copy(baseTargetPosition).lerp(cinematicTargetPosition, cinematicBlend);
     lookTarget.copy(baseLookTarget).lerp(cinematicLookAtTarget, cinematicBlend);
-    const finalFollowBlend = THREE.MathUtils.lerp(followBlend, cinematicShot.followBlend, cinematicBlend);
+    const finalFollowBlend = THREE.MathUtils.lerp(
+        followBlend,
+        cinematicShot.followBlend,
+        cinematicBlend
+    );
     const finalLookBlend = THREE.MathUtils.lerp(lookBlend, cinematicShot.lookBlend, cinematicBlend);
     const finalFov = THREE.MathUtils.lerp(targetFov, cinematicShot.targetFov, cinematicBlend);
 

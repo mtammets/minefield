@@ -69,6 +69,11 @@ const BOT_PICKUP_DIRECT_APPROACH_RADIUS = 14;
 const BOT_PICKUP_MAX_ROAD_OFFSET = 7.1;
 const BOT_HUNTER_DIRECT_APPROACH_RADIUS = 18;
 const BOT_DIRECT_APPROACH_PADDING = BOT_RADIUS + 0.58;
+const BOT_DIRECT_APPROACH_CORRIDOR_OFFSETS = Object.freeze([
+    -BOT_COLLISION_HALF_WIDTH * 0.82,
+    0,
+    BOT_COLLISION_HALF_WIDTH * 0.82,
+]);
 const BOT_DETOUR_CLEARANCE = BOT_RADIUS + 3.2;
 const BOT_DETOUR_REACH_RADIUS = 6;
 const BOT_AVOIDANCE_BLEND = 1.08;
@@ -79,14 +84,31 @@ const BOT_OBSTACLE_GRID_CELL_SIZE = 12;
 const BOT_NAV_OBSTACLE_PADDING = BOT_RADIUS + 0.96;
 const BOT_AXIS_PATH_OBSTACLE_PADDING = BOT_RADIUS + 1.18;
 const BOT_WAYPOINT_LOOKAHEAD_PADDING = BOT_RADIUS + 0.86;
+const BOT_PATH_CORRIDOR_OFFSETS = Object.freeze([
+    -BOT_COLLISION_HALF_WIDTH * 0.68,
+    0,
+    BOT_COLLISION_HALF_WIDTH * 0.68,
+]);
 const BOT_ROAD_LOOKAHEAD_STEPS = 3;
 const BOT_NAV_MAX_EXPANSIONS = 2600;
 const BOT_PATH_REPLAN_COOLDOWN = 0.55;
 const BOT_NAV_PATH_CACHE_LIMIT = 320;
 const BOT_NAV_MAX_BUILDS_PER_FRAME = 1;
 const BOT_FORWARD_OBSTACLE_LOOKAHEAD = 12;
+const BOT_FORWARD_OBSTACLE_LOOKAHEAD_MAX = 24;
+const BOT_FORWARD_OBSTACLE_LOOKAHEAD_SPEED_FACTOR = 0.42;
 const BOT_FORWARD_OBSTACLE_PADDING = BOT_RADIUS + 0.72;
+const BOT_FORWARD_OBSTACLE_PROBE_OFFSETS = Object.freeze([
+    -BOT_COLLISION_HALF_WIDTH * 0.86,
+    -BOT_COLLISION_HALF_WIDTH * 0.4,
+    0,
+    BOT_COLLISION_HALF_WIDTH * 0.4,
+    BOT_COLLISION_HALF_WIDTH * 0.86,
+]);
 const BOT_FORWARD_OBSTACLE_SLOWDOWN_MIN = 0.18;
+const BOT_FORWARD_OBSTACLE_SOFT_CLEARANCE_RATIO = 0.42;
+const BOT_FORWARD_OBSTACLE_EMERGENCY_CLEARANCE_RATIO = 0.2;
+const BOT_FORWARD_OBSTACLE_STEER_FORCE = 0.92;
 const BOT_FORWARD_OBSTACLE_DRIFT_THREAT = 0.34;
 const BOT_OBSTACLE_VERTICAL_MARGIN = 0.45;
 const BOT_SURFACE_NAV_REFERENCE_Y = 0.6;
@@ -133,22 +155,23 @@ const BOT_PENDING_MINE_DEBRIS_MAX_AGE_MS = 850;
 const BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE = 92;
 const BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE_SQ =
     BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE * BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE;
-const BOT_LIVES_PER_ROUND = 2;
+const BOT_LIVES_PER_ROUND = 10;
 const BOT_RESPAWN_DELAY_MIN_MS = 3000;
 const BOT_RESPAWN_DELAY_MAX_MS = 4000;
 const BOT_RESPAWN_PROTECTION_MS = 1000;
 const BOT_WEAPON_TARGET_CENTER_Y = 0.72;
 const BOT_WEAPON_TARGET_RADIUS = 1.42;
 const BOT_WEAPON_MAX_HEALTH = 100;
-const BOT_WEAPON_DAMAGE_PER_HIT = 12;
+const BOT_WEAPON_HITS_TO_DESTROY = 3;
+const BOT_WEAPON_DAMAGE_PER_HIT = Math.ceil(BOT_WEAPON_MAX_HEALTH / BOT_WEAPON_HITS_TO_DESTROY);
 const BOT_WEAPON_STAGE_WARNING = 0.78;
 const BOT_WEAPON_STAGE_HEAVY = 0.52;
 const BOT_WEAPON_STAGE_CRITICAL = 0.24;
 const BOT_VX9_HUNTER_HOLD_DISTANCE = 18;
 const BOT_VX9_HUNTER_STRAFE_DISTANCE = 8;
 
-const BOT_BODY_COLORS = [0x6cb3ff, 0xff8f7d, 0x9cf89c, 0xe9a3ff, 0xffd86b];
-const BOT_NAMES = ['NOVA-1', 'AXIS-2', 'RIFT-3', 'PULSE-4', 'ORBIT-5'];
+const BOT_BODY_COLORS = [0x6cb3ff];
+const BOT_NAMES = ['NOVA'];
 
 const forward2 = new THREE.Vector2();
 const right2 = new THREE.Vector2();
@@ -161,6 +184,13 @@ const botDebrisTravelScratch = new THREE.Vector3();
 const botDebrisVelocityScratch = new THREE.Vector3();
 const botWeaponTargetCenterScratch = new THREE.Vector3();
 const weaponHitInfoScratch = new THREE.Vector3();
+const forwardObstacleProfileScratch = {
+    speedScale: 1,
+    threat: 0,
+    emergencyBrake: false,
+    avoidanceX: 0,
+    avoidanceZ: 0,
+};
 const navSqrt2 = Math.sqrt(2);
 const NAV_NEIGHBOR_OFFSETS = [
     { x: -1, z: 0, cost: 1 },
@@ -1672,10 +1702,7 @@ function updateBot(
                   cityMapLayout
               )
             : canDriveDirectToTarget(bot.car.position, baseTarget, staticObstacles));
-    const useRoadPath =
-        roadFollowingEnabled &&
-        !BOT_REACTIVE_NAVIGATION_ONLY &&
-        !canDirectApproach;
+    const useRoadPath = roadFollowingEnabled && !BOT_REACTIVE_NAVIGATION_ONLY && !canDirectApproach;
     if (!useRoadPath) {
         bot.roadTarget = null;
         bot.roadPath = null;
@@ -1702,11 +1729,12 @@ function updateBot(
     if (resolvedRoadTarget) {
         bot.detourTarget = null;
     }
-    const detourTarget = !roadFollowingEnabled && resolvedRoadTarget
-        ? null
-        : !roadFollowingEnabled
-          ? resolveDetourTarget(bot, navTarget, worldBounds, buildingObstacles)
-          : null;
+    const detourTarget =
+        !roadFollowingEnabled && resolvedRoadTarget
+            ? null
+            : !roadFollowingEnabled
+              ? resolveDetourTarget(bot, navTarget, worldBounds, buildingObstacles)
+              : null;
     const resolvedTarget = detourTarget || navTarget;
     updateStuckState(bot, resolvedTarget, dt);
 
@@ -1749,18 +1777,32 @@ function updateBot(
         targetDir2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
     }
     targetDir2.normalize();
-    const obstacleSpeedScale = resolveForwardObstacleSlowdown(
+    const forwardObstacleProfile = resolveForwardObstacleProfile(
         bot.car.position,
         targetDir2,
-        nearbyObstacles
+        nearbyObstacles,
+        bot.state.speed
     );
-    const obstacleThreat = 1 - obstacleSpeedScale;
+    if (
+        Math.abs(forwardObstacleProfile.avoidanceX) > 0.0001 ||
+        Math.abs(forwardObstacleProfile.avoidanceZ) > 0.0001
+    ) {
+        targetDir2.x += forwardObstacleProfile.avoidanceX;
+        targetDir2.y += forwardObstacleProfile.avoidanceZ;
+        if (targetDir2.lengthSq() < 0.001) {
+            targetDir2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
+        }
+        targetDir2.normalize();
+    }
+    const obstacleSpeedScale = forwardObstacleProfile.speedScale;
+    const obstacleThreat = forwardObstacleProfile.threat;
 
     const desiredYaw = Math.atan2(-targetDir2.x, -targetDir2.y);
     const headingError = shortestAngle(bot.car.rotation.y, desiredYaw);
     const headingAbs = Math.abs(headingError);
     const driftState = bot.drift;
     const recovering = bot.recoveryTimer > 0;
+    const emergencyBraking = forwardObstacleProfile.emergencyBrake && !recovering;
     if (recovering) {
         driftState.active = false;
         driftState.timer = 0;
@@ -1831,11 +1873,7 @@ function updateBot(
                 driftState.active = true;
                 driftState.timer = randomRange(BOT_DRIFT_DURATION_MIN, BOT_DRIFT_DURATION_MAX);
                 driftState.direction = Math.sign(headingError) || (Math.random() < 0.5 ? -1 : 1);
-                driftState.intensity = THREE.MathUtils.clamp(
-                    0.42 + headingFactor * 0.5,
-                    0.35,
-                    1
-                );
+                driftState.intensity = THREE.MathUtils.clamp(0.42 + headingFactor * 0.5, 0.35, 1);
             }
         }
     }
@@ -1895,6 +1933,9 @@ function updateBot(
         desiredSpeed *= driftSpeedScale;
     }
     desiredSpeed *= obstacleSpeedScale;
+    if (emergencyBraking) {
+        desiredSpeed = Math.min(desiredSpeed, BOT_MIN_SPEED * 0.08 * damageDynamics.speedScale);
+    }
     if (targetPickup) {
         const targetDistance = Math.sqrt(distanceSqXZ(bot.car.position, targetPickup));
         if (targetDistance < 16) {
@@ -1909,8 +1950,7 @@ function updateBot(
         if (playerDistance < BOT_VX9_HUNTER_HOLD_DISTANCE + 10) {
             desiredSpeed = Math.min(
                 desiredSpeed,
-                BOT_MIN_SPEED * damageDynamics.speedScale +
-                    Math.max(0, playerDistance - 5.5) * 1.18
+                BOT_MIN_SPEED * damageDynamics.speedScale + Math.max(0, playerDistance - 5.5) * 1.18
             );
         }
     }
@@ -1921,7 +1961,10 @@ function updateBot(
     }
 
     const speedError = desiredSpeed - bot.state.speed;
-    const maxSpeedDelta = speedError >= 0 ? BOT_ACCELERATION * dt : BOT_BRAKE_DECELERATION * dt;
+    const maxSpeedDelta =
+        speedError >= 0
+            ? BOT_ACCELERATION * dt
+            : BOT_BRAKE_DECELERATION * (emergencyBraking ? 1.7 : 1) * dt;
     const previousSpeed = bot.state.speed;
     bot.state.speed = moveToward(bot.state.speed, desiredSpeed, maxSpeedDelta);
     bot.state.speed *= Math.exp(-(BOT_DRAG + damageDynamics.dragPenalty) * dt);
@@ -2781,7 +2824,11 @@ function resolveBotIndicatorDistanceScale(botPosition, playerPosition) {
         return 1;
     }
     const distance = Math.sqrt(dx * dx + dz * dz);
-    const normalized = THREE.MathUtils.clamp(distance / BOT_INDICATOR_LABEL_DISTANCE_SCALE_RANGE, 0, 1);
+    const normalized = THREE.MathUtils.clamp(
+        distance / BOT_INDICATOR_LABEL_DISTANCE_SCALE_RANGE,
+        0,
+        1
+    );
     return THREE.MathUtils.lerp(1, BOT_INDICATOR_LABEL_DISTANCE_SCALE_MAX, normalized);
 }
 
@@ -2978,14 +3025,15 @@ function canDriveDirectToTarget(position, target, staticObstacles) {
         return false;
     }
 
-    return !isSegmentBlockedByObstacles(
+    return !isCorridorBlockedByObstacles(
         startX,
         startZ,
         endX,
         endZ,
         staticObstacles,
         BOT_DIRECT_APPROACH_PADDING,
-        position?.y
+        position?.y,
+        BOT_DIRECT_APPROACH_CORRIDOR_OFFSETS
     );
 }
 
@@ -3028,14 +3076,10 @@ function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots, ci
     const areaZ = worldBounds.maxZ - worldBounds.minZ;
 
     for (let attempt = 0; attempt < 120; attempt += 1) {
-        const seed = botIndex * 311 + attempt * 37 + 1;
+        const seed = Math.random() * 1000000;
         const roadSpawn = pickRoadAnchorPoint(worldBounds, cityMapLayout, seed);
-        const x = roadSpawn
-            ? roadSpawn.x
-            : worldBounds.minX + randomUnit(seed) * areaX;
-        const z = roadSpawn
-            ? roadSpawn.z
-            : worldBounds.minZ + randomUnit(seed + 97) * areaZ;
+        const x = roadSpawn ? roadSpawn.x : worldBounds.minX + randomUnit(seed) * areaX;
+        const z = roadSpawn ? roadSpawn.z : worldBounds.minZ + randomUnit(seed + 97) * areaZ;
         if (isInsideObstacle(x, z, staticObstacles, 2.4)) {
             continue;
         }
@@ -3060,7 +3104,11 @@ function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots, ci
         };
     }
 
-    const fallbackRoadSpawn = pickRoadAnchorPoint(worldBounds, cityMapLayout, botIndex * 311 + 997);
+    const fallbackRoadSpawn = pickRoadAnchorPoint(
+        worldBounds,
+        cityMapLayout,
+        Math.random() * 1000000
+    );
     if (fallbackRoadSpawn) {
         return {
             x: fallbackRoadSpawn.x,
@@ -3197,55 +3245,66 @@ function addEntityAvoidance(outVec, position, entityPosition, radius, strength) 
     outVec.y += (dz / distance) * force * strength;
 }
 
-function resolveForwardObstacleSlowdown(position, direction, staticObstacles) {
-    if (!position || !direction || !Array.isArray(staticObstacles) || staticObstacles.length === 0) {
-        return 1;
+function resolveForwardObstacleProfile(position, direction, staticObstacles, speed = 0) {
+    const result = forwardObstacleProfileScratch;
+    result.speedScale = 1;
+    result.threat = 0;
+    result.emergencyBrake = false;
+    result.avoidanceX = 0;
+    result.avoidanceZ = 0;
+
+    if (
+        !position ||
+        !direction ||
+        !Array.isArray(staticObstacles) ||
+        staticObstacles.length === 0
+    ) {
+        return result;
     }
 
     const dirX = Number(direction.x);
     const dirZ = Number(direction.y);
     if (!Number.isFinite(dirX) || !Number.isFinite(dirZ)) {
-        return 1;
+        return result;
     }
     const directionLength = Math.hypot(dirX, dirZ);
     if (!Number.isFinite(directionLength) || directionLength <= 0.0001) {
-        return 1;
+        return result;
     }
 
     const normX = dirX / directionLength;
     const normZ = dirZ / directionLength;
+    const rightX = -normZ;
+    const rightZ = normX;
     const startX = Number(position.x);
     const startZ = Number(position.z);
     if (!Number.isFinite(startX) || !Number.isFinite(startZ)) {
-        return 1;
+        return result;
     }
+    const lookaheadDistance = THREE.MathUtils.clamp(
+        BOT_FORWARD_OBSTACLE_LOOKAHEAD +
+            Math.abs(Number(speed) || 0) * BOT_FORWARD_OBSTACLE_LOOKAHEAD_SPEED_FACTOR,
+        BOT_FORWARD_OBSTACLE_LOOKAHEAD,
+        BOT_FORWARD_OBSTACLE_LOOKAHEAD_MAX
+    );
+    let minNormalizedClearance = 1;
+    let centerNormalizedClearance = 1;
+    let blockedProbeCount = 0;
+    let leftThreat = 0;
+    let rightThreat = 0;
 
-    const fullEndX = startX + normX * BOT_FORWARD_OBSTACLE_LOOKAHEAD;
-    const fullEndZ = startZ + normZ * BOT_FORWARD_OBSTACLE_LOOKAHEAD;
-    if (
-        !isSegmentBlockedByObstacles(
-            startX,
-            startZ,
-            fullEndX,
-            fullEndZ,
-            staticObstacles,
-            BOT_FORWARD_OBSTACLE_PADDING,
-            position?.y
-        )
-    ) {
-        return 1;
-    }
+    for (let i = 0; i < BOT_FORWARD_OBSTACLE_PROBE_OFFSETS.length; i += 1) {
+        const offset = BOT_FORWARD_OBSTACLE_PROBE_OFFSETS[i];
+        const probeStartX = startX + rightX * offset;
+        const probeStartZ = startZ + rightZ * offset;
+        const probeEndX = probeStartX + normX * lookaheadDistance;
+        const probeEndZ = probeStartZ + normZ * lookaheadDistance;
 
-    let clearDistance = 0;
-    let blockedDistance = BOT_FORWARD_OBSTACLE_LOOKAHEAD;
-    for (let step = 0; step < 7; step += 1) {
-        const probeDistance = (clearDistance + blockedDistance) * 0.5;
-        const probeEndX = startX + normX * probeDistance;
-        const probeEndZ = startZ + normZ * probeDistance;
+        let normalizedClearance = 1;
         if (
             isSegmentBlockedByObstacles(
-                startX,
-                startZ,
+                probeStartX,
+                probeStartZ,
                 probeEndX,
                 probeEndZ,
                 staticObstacles,
@@ -3253,22 +3312,84 @@ function resolveForwardObstacleSlowdown(position, direction, staticObstacles) {
                 position?.y
             )
         ) {
-            blockedDistance = probeDistance;
+            blockedProbeCount += 1;
+            let clearDistance = 0;
+            let blockedDistance = lookaheadDistance;
+            for (let step = 0; step < 7; step += 1) {
+                const probeDistance = (clearDistance + blockedDistance) * 0.5;
+                const partialEndX = probeStartX + normX * probeDistance;
+                const partialEndZ = probeStartZ + normZ * probeDistance;
+                if (
+                    isSegmentBlockedByObstacles(
+                        probeStartX,
+                        probeStartZ,
+                        partialEndX,
+                        partialEndZ,
+                        staticObstacles,
+                        BOT_FORWARD_OBSTACLE_PADDING,
+                        position?.y
+                    )
+                ) {
+                    blockedDistance = probeDistance;
+                } else {
+                    clearDistance = probeDistance;
+                }
+            }
+            normalizedClearance = THREE.MathUtils.clamp(clearDistance / lookaheadDistance, 0, 1);
+        }
+
+        const threat = 1 - normalizedClearance;
+        minNormalizedClearance = Math.min(minNormalizedClearance, normalizedClearance);
+        if (Math.abs(offset) <= 0.001) {
+            centerNormalizedClearance = normalizedClearance;
+        } else if (offset < 0) {
+            leftThreat += threat;
         } else {
-            clearDistance = probeDistance;
+            rightThreat += threat;
         }
     }
 
-    const normalizedClearance = THREE.MathUtils.clamp(
-        clearDistance / BOT_FORWARD_OBSTACLE_LOOKAHEAD,
-        0,
-        1
-    );
-    return THREE.MathUtils.lerp(
+    if (blockedProbeCount <= 0) {
+        return result;
+    }
+
+    result.speedScale = THREE.MathUtils.lerp(
         BOT_FORWARD_OBSTACLE_SLOWDOWN_MIN,
         1,
-        normalizedClearance
+        minNormalizedClearance
     );
+    result.threat = 1 - minNormalizedClearance;
+
+    if (centerNormalizedClearance < BOT_FORWARD_OBSTACLE_SOFT_CLEARANCE_RATIO) {
+        const centerBias = THREE.MathUtils.clamp(
+            centerNormalizedClearance / BOT_FORWARD_OBSTACLE_SOFT_CLEARANCE_RATIO,
+            0,
+            1
+        );
+        result.speedScale = Math.min(
+            result.speedScale,
+            THREE.MathUtils.lerp(0.08, 0.55, centerBias)
+        );
+    }
+
+    const lateralBias = THREE.MathUtils.clamp(leftThreat - rightThreat, -1, 1);
+    if (Math.abs(lateralBias) > 0.0001) {
+        const steerForce =
+            Math.max(result.threat, 1 - centerNormalizedClearance) *
+            BOT_FORWARD_OBSTACLE_STEER_FORCE;
+        result.avoidanceX = rightX * lateralBias * steerForce;
+        result.avoidanceZ = rightZ * lateralBias * steerForce;
+    }
+
+    result.emergencyBrake =
+        centerNormalizedClearance <= BOT_FORWARD_OBSTACLE_EMERGENCY_CLEARANCE_RATIO ||
+        (minNormalizedClearance <= BOT_FORWARD_OBSTACLE_EMERGENCY_CLEARANCE_RATIO * 0.72 &&
+            blockedProbeCount >= 3);
+    if (result.emergencyBrake) {
+        result.speedScale = Math.min(result.speedScale, 0.06);
+    }
+
+    return result;
 }
 
 function updateStuckState(bot, target, dt) {
@@ -3407,14 +3528,15 @@ function resolveRoadTarget(
 
     if (bot.roadPathIndex < bot.roadPath.length) {
         const currentWaypoint = bot.roadPath[bot.roadPathIndex];
-        const currentPathBlocked = isSegmentBlockedByObstacles(
+        const currentPathBlocked = isCorridorBlockedByObstacles(
             bot.car.position.x,
             bot.car.position.z,
             currentWaypoint.x,
             currentWaypoint.z,
             pathBlockingObstacles,
             BOT_WAYPOINT_LOOKAHEAD_PADDING,
-            bot.car.position?.y
+            bot.car.position?.y,
+            BOT_PATH_CORRIDOR_OFFSETS
         );
         if (currentPathBlocked) {
             bot.forcePathReplan = true;
@@ -3433,14 +3555,15 @@ function resolveRoadTarget(
         );
         for (let index = bot.roadPathIndex + 1; index <= lookaheadEndIndex; index += 1) {
             const candidate = bot.roadPath[index];
-            const blocked = isSegmentBlockedByObstacles(
+            const blocked = isCorridorBlockedByObstacles(
                 bot.car.position.x,
                 bot.car.position.z,
                 candidate.x,
                 candidate.z,
                 pathBlockingObstacles,
                 BOT_WAYPOINT_LOOKAHEAD_PADDING,
-                bot.car.position?.y
+                bot.car.position?.y,
+                BOT_PATH_CORRIDOR_OFFSETS
             );
             if (blocked) {
                 break;
@@ -3469,10 +3592,7 @@ function buildRoadPath(
     navigationPlanner
 ) {
     const roadFollowingEnabled = hasRoadNetwork(cityMapLayout);
-    const roadPathObstacles = filterRoadPathObstacles(
-        staticObstacles,
-        BOT_SURFACE_NAV_REFERENCE_Y
-    );
+    const roadPathObstacles = filterRoadPathObstacles(staticObstacles, BOT_SURFACE_NAV_REFERENCE_Y);
     const axisPath = buildAxisRoadPath(
         position,
         target,
@@ -3521,14 +3641,15 @@ function buildObstacleAwarePath(position, target, worldBounds, staticObstacles, 
     const waypoints = smoothed.slice(1).map((point) => clampPointToWorld(point, worldBounds));
     const finalTarget = clampPointToWorld(target, worldBounds);
     const lastWaypoint = waypoints.length > 0 ? waypoints[waypoints.length - 1] : position;
-    const finalLegBlocked = isSegmentBlockedByObstacles(
+    const finalLegBlocked = isCorridorBlockedByObstacles(
         lastWaypoint.x,
         lastWaypoint.z,
         finalTarget.x,
         finalTarget.z,
         planner.obstaclesForSmoothing,
         BOT_AXIS_PATH_OBSTACLE_PADDING,
-        BOT_SURFACE_NAV_REFERENCE_Y
+        BOT_SURFACE_NAV_REFERENCE_Y,
+        BOT_PATH_CORRIDOR_OFFSETS
     );
     if (!finalLegBlocked) {
         if (
@@ -4018,13 +4139,15 @@ function smoothWaypointPath(points, staticObstacles, obstaclePadding = 0) {
             }
             const from = points[anchorIndex];
             const to = points[nextIndex];
-            const blocked = isSegmentBlockedByObstacles(
+            const blocked = isCorridorBlockedByObstacles(
                 from.x,
                 from.z,
                 to.x,
                 to.z,
                 staticObstacles,
-                obstaclePadding
+                obstaclePadding,
+                null,
+                BOT_PATH_CORRIDOR_OFFSETS
             );
             segmentChecks += 1;
             if (!blocked) {
@@ -4042,13 +4165,7 @@ function smoothWaypointPath(points, staticObstacles, obstaclePadding = 0) {
     return result;
 }
 
-function isWaypointPathBlocked(
-    origin,
-    waypoints,
-    staticObstacles,
-    padding = 0,
-    referenceY = null
-) {
+function isWaypointPathBlocked(origin, waypoints, staticObstacles, padding = 0, referenceY = null) {
     if (!origin || !Array.isArray(waypoints) || waypoints.length === 0) {
         return false;
     }
@@ -4067,11 +4184,68 @@ function isWaypointPathBlocked(
             return true;
         }
         if (
-            isSegmentBlockedByObstacles(
+            isCorridorBlockedByObstacles(
                 fromX,
                 fromZ,
                 toX,
                 toZ,
+                staticObstacles,
+                padding,
+                referenceY,
+                BOT_PATH_CORRIDOR_OFFSETS
+            )
+        ) {
+            return true;
+        }
+        fromX = toX;
+        fromZ = toZ;
+    }
+
+    return false;
+}
+
+function isCorridorBlockedByObstacles(
+    ax,
+    az,
+    bx,
+    bz,
+    staticObstacles,
+    padding = 0,
+    referenceY = null,
+    corridorOffsets = EMPTY_ARRAY
+) {
+    if (isSegmentBlockedByObstacles(ax, az, bx, bz, staticObstacles, padding, referenceY)) {
+        return true;
+    }
+
+    if (!Array.isArray(corridorOffsets) || corridorOffsets.length === 0) {
+        return false;
+    }
+
+    const dirX = bx - ax;
+    const dirZ = bz - az;
+    const length = Math.hypot(dirX, dirZ);
+    if (!Number.isFinite(length) || length <= 0.0001) {
+        return false;
+    }
+
+    const rightX = -dirZ / length;
+    const rightZ = dirX / length;
+    for (let i = 0; i < corridorOffsets.length; i += 1) {
+        const offset = Number(corridorOffsets[i]);
+        if (!Number.isFinite(offset) || Math.abs(offset) <= 0.0001) {
+            continue;
+        }
+        const offsetAx = ax + rightX * offset;
+        const offsetAz = az + rightZ * offset;
+        const offsetBx = bx + rightX * offset;
+        const offsetBz = bz + rightZ * offset;
+        if (
+            isSegmentBlockedByObstacles(
+                offsetAx,
+                offsetAz,
+                offsetBx,
+                offsetBz,
                 staticObstacles,
                 padding,
                 referenceY
@@ -4079,8 +4253,6 @@ function isWaypointPathBlocked(
         ) {
             return true;
         }
-        fromX = toX;
-        fromZ = toZ;
     }
 
     return false;
@@ -4509,11 +4681,7 @@ function measureTurnAngle(from, via, to) {
         return 0;
     }
 
-    const dot = THREE.MathUtils.clamp(
-        (inX * outX + inZ * outZ) / (inLength * outLength),
-        -1,
-        1
-    );
+    const dot = THREE.MathUtils.clamp((inX * outX + inZ * outZ) / (inLength * outLength), -1, 1);
     return Math.acos(dot);
 }
 
@@ -4828,8 +4996,12 @@ function constrainToObstacles(bot, position, state, staticObstacles) {
                 position.z += normalZ * push;
                 moved = true;
                 collided = true;
-                const collisionSeverity = (BOT_RADIUS - Math.min(distance, BOT_RADIUS)) / BOT_RADIUS;
-                if (!strongestBlockingContact || collisionSeverity > strongestBlockingContact.severity) {
+                const collisionSeverity =
+                    (BOT_RADIUS - Math.min(distance, BOT_RADIUS)) / BOT_RADIUS;
+                if (
+                    !strongestBlockingContact ||
+                    collisionSeverity > strongestBlockingContact.severity
+                ) {
                     strongestBlockingContact = {
                         normalX,
                         normalZ,
@@ -4904,7 +5076,10 @@ function constrainToObstacles(bot, position, state, staticObstacles) {
             moved = true;
             collided = true;
             const collisionSeverity = (BOT_RADIUS - Math.min(distance, BOT_RADIUS)) / BOT_RADIUS;
-            if (!strongestBlockingContact || collisionSeverity > strongestBlockingContact.severity) {
+            if (
+                !strongestBlockingContact ||
+                collisionSeverity > strongestBlockingContact.severity
+            ) {
                 strongestBlockingContact = {
                     normalX,
                     normalZ,
@@ -5054,8 +5229,12 @@ function isObstacleRelevantForHeight(obstacle, referenceY = null) {
     if (!obstacle || !Number.isFinite(referenceY)) {
         return true;
     }
-    const minY = Number.isFinite(obstacle.minY) ? obstacle.minY - BOT_OBSTACLE_VERTICAL_MARGIN : -Infinity;
-    const maxY = Number.isFinite(obstacle.maxY) ? obstacle.maxY + BOT_OBSTACLE_VERTICAL_MARGIN : Infinity;
+    const minY = Number.isFinite(obstacle.minY)
+        ? obstacle.minY - BOT_OBSTACLE_VERTICAL_MARGIN
+        : -Infinity;
+    const maxY = Number.isFinite(obstacle.maxY)
+        ? obstacle.maxY + BOT_OBSTACLE_VERTICAL_MARGIN
+        : Infinity;
     return referenceY >= minY && referenceY <= maxY;
 }
 

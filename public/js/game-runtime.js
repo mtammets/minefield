@@ -167,12 +167,7 @@ const RUNTIME_GRAPHICS_RECOVERY_STATUS_COOLDOWN_MS = 2400;
 const RUNTIME_SCENE_REPAIR_STATUS_COOLDOWN_MS = 2400;
 const PLAYER_SPAWN_CLEARANCE = 3.4;
 const PLAYER_SPAWN_BOT_CLEARANCE = 14;
-const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([
-    0,
-    Math.PI * 0.5,
-    Math.PI,
-    -Math.PI * 0.5,
-]);
+const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5]);
 const crashParts = getPlayerCarCrashParts();
 const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
@@ -812,7 +807,9 @@ function buildPlayerSpawnCandidates() {
             x: Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x,
             z: Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z,
             rotations: [
-                Number.isFinite(playerSpawnPoint?.rotationY) ? playerSpawnPoint.rotationY : car.rotation.y,
+                Number.isFinite(playerSpawnPoint?.rotationY)
+                    ? playerSpawnPoint.rotationY
+                    : car.rotation.y,
             ],
         },
     ];
@@ -911,13 +908,14 @@ function resolveRandomPlayerSpawnState({ allowRepeat = false } = {}) {
             ] || selectedEntry;
     }
 
-    const resolvedCandidate =
-        selectedEntry?.candidate ||
+    const resolvedCandidate = selectedEntry?.candidate ||
         playerSpawnCandidates[0] || {
             x: Number.isFinite(playerSpawnPoint?.x) ? playerSpawnPoint.x : car.position.x,
             z: Number.isFinite(playerSpawnPoint?.z) ? playerSpawnPoint.z : car.position.z,
             rotations: [
-                Number.isFinite(playerSpawnPoint?.rotationY) ? playerSpawnPoint.rotationY : car.rotation.y,
+                Number.isFinite(playerSpawnPoint?.rotationY)
+                    ? playerSpawnPoint.rotationY
+                    : car.rotation.y,
             ],
         };
     lastPlayerSpawnCandidateIndex = Number.isInteger(selectedEntry?.index)
@@ -930,8 +928,11 @@ function resolveRandomPlayerSpawnState({ allowRepeat = false } = {}) {
             : PLAYER_SPAWN_CARDINAL_ROTATIONS;
     const rotationY =
         rotations[Math.floor(Math.random() * rotations.length)] ||
-        (Number.isFinite(playerSpawnPoint?.rotationY) ? playerSpawnPoint.rotationY : car.rotation.y);
-    const groundY = getGroundHeightAt(resolvedCandidate.x, resolvedCandidate.z) + PLAYER_RIDE_HEIGHT;
+        (Number.isFinite(playerSpawnPoint?.rotationY)
+            ? playerSpawnPoint.rotationY
+            : car.rotation.y);
+    const groundY =
+        getGroundHeightAt(resolvedCandidate.x, resolvedCandidate.z) + PLAYER_RIDE_HEIGHT;
     return {
         position: new THREE.Vector3(resolvedCandidate.x, groundY, resolvedCandidate.z),
         rotationY,
@@ -1047,7 +1048,9 @@ const carEditModeController = createCarEditModeController({
 });
 
 function getRuntimeEditableParts() {
-    const carParts = Array.isArray(getPlayerCarEditableParts?.()) ? getPlayerCarEditableParts() : [];
+    const carParts = Array.isArray(getPlayerCarEditableParts?.())
+        ? getPlayerCarEditableParts()
+        : [];
     const sceneParts = Array.from(sceneEditModePartDescriptors.values()).map((descriptor) => ({
         id: descriptor.id,
         label: descriptor.label,
@@ -1094,8 +1097,7 @@ function collectSceneEditModePartDescriptors(root) {
             return;
         }
         const label = String(object.userData.editModePartLabel || partId).trim() || partId;
-        const category =
-            String(object.userData.editModePartCategory || 'Scene').trim() || 'Scene';
+        const category = String(object.userData.editModePartCategory || 'Scene').trim() || 'Scene';
         const existing = descriptors.get(partId);
         if (existing) {
             existing.sources.push(object);
@@ -2116,7 +2118,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
 });
 runtimeState.collectibleSystem = collectibleSystem;
 runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
-    botCount: 3,
+    botCount: 1,
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
     getGroundHeightAt,
     cityMapLayout,
