@@ -7,11 +7,11 @@ const WORLD_MAP_ZOOM_MIN_FACTOR = 0.35;
 const WORLD_MAP_ZOOM_MAX_FACTOR = 8;
 const WORLD_MAP_ZOOM_STEP = 1.12;
 const WORLD_MAP_LOCK_OVERVIEW = true;
-const WORLD_MAP_OVERVIEW_UNIT_PADDING = 12;
-const WORLD_MAP_OVERVIEW_VIEWPORT_FILL = 0.98;
+const WORLD_MAP_OVERVIEW_UNIT_PADDING = 0.75;
+const WORLD_MAP_OVERVIEW_VIEWPORT_FILL = 1;
 const MAP_RESIZE_CHECK_INTERVAL_SEC = 0.5;
 const MINIMAP_DRAW_INTERVAL_SEC = 1 / 30;
-const WORLD_MAP_DRAW_INTERVAL_SEC = 1 / 24;
+const WORLD_MAP_DRAW_INTERVAL_SEC = 1 / 60;
 const MAP_UI_LABEL_UPDATE_INTERVAL_SEC = 1 / 12;
 const ROUTE_REBUILD_INTERVAL_SEC = 0.16;
 const ROUTE_REBUILD_DISTANCE_SQ = 2.2 * 2.2;
@@ -45,6 +45,12 @@ export function createMapUiController(options = {}) {
         Array.isArray(options.staticObstacles) ? options.staticObstacles : []
     );
     const chargingZones = normalizeChargingZones(options.chargingZones);
+    const overviewBounds = resolveOverviewBounds({
+        worldBounds,
+        cityMapLayout,
+        staticFeatures,
+        chargingZones,
+    });
     const onStatus = typeof options.onStatus === 'function' ? options.onStatus : () => {};
     const onExpandedChanged =
         typeof options.onExpandedChanged === 'function' ? options.onExpandedChanged : () => {};
@@ -85,14 +91,15 @@ export function createMapUiController(options = {}) {
         pickups: [],
         vehicles: [],
         mines: [],
+        animationTime: 0,
         routeDistanceMeters: null,
         filters: {
             roads: true,
             buildings: true,
-            pickups: true,
+            pickups: false,
             vehicles: true,
-            mines: true,
-            charging: true,
+            mines: false,
+            charging: false,
             trees: false,
             lamps: false,
         },
@@ -113,6 +120,7 @@ export function createMapUiController(options = {}) {
         },
         previousLabelText: {
             legend: '',
+            liveStats: '',
             mode: '',
             range: '',
             coord: '',
@@ -188,6 +196,7 @@ export function createMapUiController(options = {}) {
 
     function update(deltaTime = 1 / 60, frameState = {}) {
         const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.25);
+        state.animationTime = (state.animationTime + dt) % 3600;
         state.timers.entitySync += dt;
         const shouldSyncEntities =
             state.timers.entitySync >= state.qualityProfile.entitySyncIntervalSec;
@@ -253,14 +262,14 @@ export function createMapUiController(options = {}) {
         if (nextExpanded === state.expanded) {
             return {
                 open: state.expanded,
-                message: state.expanded ? 'Map already open.' : 'Map already closed.',
+                message: null,
             };
         }
 
         setExpanded(nextExpanded, { announce: true });
         return {
             open: state.expanded,
-            message: state.expanded ? 'World map opened.' : 'World map closed.',
+            message: null,
         };
     }
 
@@ -284,15 +293,8 @@ export function createMapUiController(options = {}) {
                 state.centerX = state.player.x;
                 state.centerZ = state.player.z;
             }
-            drawWorldMap(1 / 60);
-            if (announce) {
-                onStatus('World map opened. Full city overview enabled.', 1800);
-            }
+            drawWorldMapNow(1 / 60);
             return;
-        }
-
-        if (announce) {
-            onStatus('World map closed.', 1200);
         }
     }
 
@@ -388,8 +390,9 @@ export function createMapUiController(options = {}) {
             ctx.clearRect(0, 0, width, height);
             return;
         }
-        const maxAllowedPadding = Math.max(2, Math.floor(minCanvasSize * 0.45));
-        const panelPadding = clamp(Math.round(width * 0.03), 2, maxAllowedPadding);
+
+        const panelPadding = clamp(Math.round(width * 0.03), 4, Math.floor(minCanvasSize * 0.2));
+        const cornerRadius = Math.round(width * 0.065);
         const mapRect = {
             x: panelPadding,
             y: panelPadding,
@@ -402,7 +405,7 @@ export function createMapUiController(options = {}) {
         }
 
         ctx.clearRect(0, 0, width, height);
-        drawRoundedPanel(ctx, mapRect.x, mapRect.y, mapRect.w, mapRect.h, Math.round(width * 0.06));
+        drawRoundedPanel(ctx, mapRect.x, mapRect.y, mapRect.w, mapRect.h, cornerRadius);
 
         const rangeMeters = resolveMinimapRange(state.player.speedKph);
         const zoom = Math.min(mapRect.w, mapRect.h) / (rangeMeters * 2);
@@ -410,7 +413,7 @@ export function createMapUiController(options = {}) {
         const centerY = mapRect.y + mapRect.h * 0.5;
 
         ctx.save();
-        clipRoundedRect(ctx, mapRect.x, mapRect.y, mapRect.w, mapRect.h, Math.round(width * 0.06));
+        clipRoundedRect(ctx, mapRect.x, mapRect.y, mapRect.w, mapRect.h, cornerRadius);
         ctx.translate(centerX, centerY);
         ctx.rotate(state.player.heading);
 
@@ -447,7 +450,7 @@ export function createMapUiController(options = {}) {
                 range: rangeMeters,
                 circles: staticFeatures.trees,
                 spatialIndex: staticFeatures.treesIndex,
-                color: 'rgba(92, 150, 112, 0.74)',
+                color: 'rgba(112, 166, 122, 0.74)',
             });
         }
 
@@ -460,7 +463,7 @@ export function createMapUiController(options = {}) {
                 range: rangeMeters,
                 circles: staticFeatures.lamps,
                 spatialIndex: staticFeatures.lampsIndex,
-                color: 'rgba(223, 194, 128, 0.78)',
+                color: 'rgba(255, 215, 150, 0.76)',
             });
         }
 
@@ -534,11 +537,16 @@ export function createMapUiController(options = {}) {
         ctx.restore();
 
         drawPlayerArrow(ctx, centerX, centerY, 0, resolveVehicleArrowSize('minimap', zoom), {
-            fillColor: '#ecf8ff',
-            strokeColor: 'rgba(122, 211, 255, 0.95)',
+            fillColor: '#f4fbff',
+            strokeColor: 'rgba(125, 217, 255, 0.98)',
+            glassColor: 'rgba(212, 239, 255, 0.86)',
         });
-
         drawCompassTicks(ctx, mapRect);
+    }
+
+    function drawMinimapNow(deltaTime = 1 / 60) {
+        state.timers.minimapDraw = 0;
+        drawMinimap(deltaTime);
     }
 
     function drawWorldMap(_deltaTime) {
@@ -548,7 +556,6 @@ export function createMapUiController(options = {}) {
 
         const canvas = dom.worldMapCanvas;
         const ctx = worldMapCtx;
-
         const width = canvas.width;
         const height = canvas.height;
         const centerScreenX = width * 0.5;
@@ -561,10 +568,7 @@ export function createMapUiController(options = {}) {
         const worldDrawHeight = Math.max(1, worldMaxY - worldMinY);
 
         ctx.clearRect(0, 0, width, height);
-        ctx.fillStyle = 'rgba(6, 13, 24, 0.96)';
-        ctx.fillRect(0, 0, width, height);
 
-        const gridAlpha = Math.max(0.05, Math.min(0.22, state.zoom * 0.04));
         ctx.save();
         ctx.beginPath();
         ctx.rect(worldMinX, worldMinY, worldDrawWidth, worldDrawHeight);
@@ -575,71 +579,31 @@ export function createMapUiController(options = {}) {
             centerX: state.centerX,
             centerZ: state.centerZ,
             zoom: state.zoom,
-            alpha: gridAlpha,
+            alpha: Math.max(0.012, Math.min(0.045, state.zoom * 0.006)),
         });
+
         ctx.save();
         ctx.translate(centerScreenX, centerScreenY);
 
-        if (state.filters.roads) {
-            drawRoadBands(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                worldBounds,
-                cityMapLayout,
-            });
-        }
+        drawRoadBands(ctx, {
+            mode: 'full',
+            zoom: state.zoom,
+            centerX: state.centerX,
+            centerZ: state.centerZ,
+            range: null,
+            worldBounds,
+            cityMapLayout,
+        });
 
-        if (state.filters.buildings) {
-            drawBuildingFootprints(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                buildings: staticFeatures.buildings,
-                spatialIndex: staticFeatures.buildingsIndex,
-            });
-        }
-
-        if (state.filters.trees) {
-            drawCircleObstacles(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                circles: staticFeatures.trees,
-                spatialIndex: staticFeatures.treesIndex,
-                color: 'rgba(92, 150, 112, 0.72)',
-            });
-        }
-
-        if (state.filters.lamps) {
-            drawCircleObstacles(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                circles: staticFeatures.lamps,
-                spatialIndex: staticFeatures.lampsIndex,
-                color: 'rgba(223, 194, 128, 0.76)',
-            });
-        }
-
-        if (state.filters.charging) {
-            drawChargingZones(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                chargingZones,
-            });
-        }
+        drawBuildingFootprints(ctx, {
+            mode: 'full',
+            zoom: state.zoom,
+            centerX: state.centerX,
+            centerZ: state.centerZ,
+            range: null,
+            buildings: staticFeatures.buildings,
+            spatialIndex: staticFeatures.buildingsIndex,
+        });
 
         if (state.routePoints.length >= 2) {
             drawRouteLine(ctx, {
@@ -649,39 +613,6 @@ export function createMapUiController(options = {}) {
                 centerZ: state.centerZ,
                 range: null,
                 routePoints: state.routePoints,
-            });
-        }
-
-        if (state.filters.pickups) {
-            drawPickupMarkers(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                pickups: state.pickups,
-            });
-        }
-
-        if (state.filters.vehicles) {
-            drawVehicleMarkers(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                vehicles: state.vehicles,
-            });
-        }
-
-        if (state.filters.mines) {
-            drawMineMarkers(ctx, {
-                mode: 'full',
-                zoom: state.zoom,
-                centerX: state.centerX,
-                centerZ: state.centerZ,
-                range: null,
-                mines: state.mines,
             });
         }
 
@@ -696,6 +627,22 @@ export function createMapUiController(options = {}) {
             });
         }
 
+        drawVehicleMarkers(ctx, {
+            mode: 'full',
+            zoom: state.zoom,
+            centerX: state.centerX,
+            centerZ: state.centerZ,
+            range: null,
+            vehicles: state.vehicles,
+        });
+
+        drawTrafficPulseRing(
+            ctx,
+            (state.player.x - state.centerX) * state.zoom,
+            (state.player.z - state.centerZ) * state.zoom,
+            resolveVehicleArrowSize('full', state.zoom) * 1.15,
+            'rgba(123, 219, 255, 0.34)'
+        );
         drawPlayerArrow(
             ctx,
             (state.player.x - state.centerX) * state.zoom,
@@ -704,7 +651,8 @@ export function createMapUiController(options = {}) {
             resolveVehicleArrowSize('full', state.zoom),
             {
                 fillColor: '#ffffff',
-                strokeColor: 'rgba(130, 216, 255, 0.95)',
+                strokeColor: 'rgba(122, 217, 255, 0.98)',
+                glassColor: 'rgba(219, 243, 255, 0.88)',
             }
         );
         ctx.restore();
@@ -720,61 +668,279 @@ export function createMapUiController(options = {}) {
         });
     }
 
+    function drawWorldMapNow(deltaTime = 1 / 60) {
+        state.timers.worldMapDraw = 0;
+        drawWorldMap(deltaTime);
+    }
+
     function drawRoadBands(
         ctx,
         { mode, zoom, centerX, centerZ, range, worldBounds, cityMapLayout }
     ) {
         const xLines = cityMapLayout.roadAxisLinesX;
         const zLines = cityMapLayout.roadAxisLinesZ;
-        const zMin = worldBounds.minZ;
-        const zMax = worldBounds.maxZ;
         const xMin = worldBounds.minX;
         const xMax = worldBounds.maxX;
-
-        ctx.fillStyle = mode === 'full' ? 'rgba(86, 114, 144, 0.7)' : 'rgba(108, 138, 169, 0.84)';
+        const zMin = worldBounds.minZ;
+        const zMax = worldBounds.maxZ;
 
         for (let i = 0; i < xLines.length; i += 1) {
             const line = xLines[i];
-            if (!Number.isFinite(line?.coord) || !Number.isFinite(line?.roadWidth)) {
-                continue;
-            }
             if (
-                Number.isFinite(range) &&
-                Math.abs(line.coord - centerX) > range + Math.max(2, line.roadWidth)
+                !Number.isFinite(line?.coord) ||
+                !Number.isFinite(line?.roadWidth) ||
+                (Number.isFinite(range) &&
+                    Math.abs(line.coord - centerX) > range + Math.max(4, line.roadWidth * 1.4))
             ) {
                 continue;
             }
-            const minRoadX = line.coord - line.roadWidth * 0.5;
-            const maxRoadX = line.coord + line.roadWidth * 0.5;
-            fillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minRoadX, maxRoadX, zMin, zMax);
+            drawSingleRoadBand(ctx, {
+                axis: 'x',
+                line,
+                mode,
+                zoom,
+                centerX,
+                centerZ,
+                extentMin: zMin,
+                extentMax: zMax,
+            });
         }
 
         for (let i = 0; i < zLines.length; i += 1) {
             const line = zLines[i];
-            if (!Number.isFinite(line?.coord) || !Number.isFinite(line?.roadWidth)) {
-                continue;
-            }
             if (
-                Number.isFinite(range) &&
-                Math.abs(line.coord - centerZ) > range + Math.max(2, line.roadWidth)
+                !Number.isFinite(line?.coord) ||
+                !Number.isFinite(line?.roadWidth) ||
+                (Number.isFinite(range) &&
+                    Math.abs(line.coord - centerZ) > range + Math.max(4, line.roadWidth * 1.4))
             ) {
                 continue;
             }
-            const minRoadZ = line.coord - line.roadWidth * 0.5;
-            const maxRoadZ = line.coord + line.roadWidth * 0.5;
-            fillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, xMin, xMax, minRoadZ, maxRoadZ);
+            drawSingleRoadBand(ctx, {
+                axis: 'z',
+                line,
+                mode,
+                zoom,
+                centerX,
+                centerZ,
+                extentMin: xMin,
+                extentMax: xMax,
+            });
         }
+
+        if (mode === 'full') {
+            drawRoadIntersections(ctx, {
+                zoom,
+                centerX,
+                centerZ,
+                xLines,
+                zLines,
+            });
+        }
+    }
+
+    function drawSingleRoadBand(
+        ctx,
+        { axis, line, mode, zoom, centerX, centerZ, extentMin, extentMax }
+    ) {
+        const appearance = resolveRoadAppearance(line.styleKey, mode);
+        const roadHalfWidth = line.roadWidth * 0.5;
+        const sidewalkWidth = resolveRenderedSidewalkWidth(line.styleKey, line.sidewalkWidth);
+        if (sidewalkWidth > 0) {
+            ctx.fillStyle = appearance.sidewalkColor;
+            fillRoadRect(
+                ctx,
+                axis,
+                line.coord,
+                roadHalfWidth + sidewalkWidth,
+                extentMin,
+                extentMax,
+                centerX,
+                centerZ,
+                zoom
+            );
+        }
+
+        ctx.fillStyle = appearance.roadColor;
+        fillRoadRect(
+            ctx,
+            axis,
+            line.coord,
+            roadHalfWidth,
+            extentMin,
+            extentMax,
+            centerX,
+            centerZ,
+            zoom
+        );
+
+        if (appearance.glowColor) {
+            ctx.save();
+            ctx.strokeStyle = appearance.glowColor;
+            ctx.lineWidth = mode === 'full' ? clamp(zoom * 0.14, 3.2, 8.4) : 1.4;
+            ctx.shadowColor = appearance.glowColor;
+            ctx.shadowBlur = mode === 'full' ? clamp(zoom * 0.88, 10, 24) : 5.5;
+            strokeRoadRect(
+                ctx,
+                axis,
+                line.coord,
+                roadHalfWidth,
+                extentMin,
+                extentMax,
+                centerX,
+                centerZ,
+                zoom
+            );
+            ctx.restore();
+        }
+
+        ctx.strokeStyle = appearance.edgeColor;
+        ctx.lineWidth = mode === 'full' ? 1 : 0.8;
+        strokeRoadRect(
+            ctx,
+            axis,
+            line.coord,
+            roadHalfWidth,
+            extentMin,
+            extentMax,
+            centerX,
+            centerZ,
+            zoom
+        );
+
+        drawRoadMarkings(ctx, {
+            axis,
+            line,
+            mode,
+            zoom,
+            centerX,
+            centerZ,
+            extentMin,
+            extentMax,
+            appearance,
+        });
+    }
+
+    function drawRoadIntersections(ctx, { zoom, centerX, centerZ, xLines, zLines }) {
+        void ctx;
+        void zoom;
+        void centerX;
+        void centerZ;
+        void xLines;
+        void zLines;
+    }
+
+    function drawRoadMarkings(
+        ctx,
+        { axis, line, mode, zoom, centerX, centerZ, extentMin, extentMax, appearance }
+    ) {
+        if (mode === 'minimap' && zoom < 4.6) {
+            return;
+        }
+
+        const edgeOffsets = appearance.sideLinePositionRatios.map(
+            (ratio) => (ratio - 0.5) * line.roadWidth
+        );
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = appearance.edgeLineColor;
+        ctx.lineWidth = clamp(zoom * appearance.edgeLineWidthScale, 1.05, 2.3);
+        ctx.shadowColor = mode === 'full' ? appearance.edgeLineColor : 'transparent';
+        ctx.shadowBlur = mode === 'full' ? clamp(zoom * 0.42, 3, 10) : 0;
+        ctx.setLineDash([]);
+        for (let i = 0; i < edgeOffsets.length; i += 1) {
+            drawRoadStripe(
+                ctx,
+                axis,
+                line.coord,
+                edgeOffsets[i],
+                extentMin,
+                extentMax,
+                centerX,
+                centerZ,
+                zoom
+            );
+        }
+
+        if (appearance.centerMode === 'none') {
+            ctx.restore();
+            return;
+        }
+
+        ctx.strokeStyle = appearance.centerLineColor;
+        ctx.lineWidth = clamp(zoom * appearance.centerLineWidthScale, 1.25, 3.2);
+        if (appearance.centerMode === 'double-solid') {
+            const medianOffset = clamp(zoom * 0.26, 2.4, 4.8) / Math.max(zoom, 0.001);
+            ctx.setLineDash([]);
+            drawRoadStripe(
+                ctx,
+                axis,
+                line.coord,
+                -medianOffset,
+                extentMin,
+                extentMax,
+                centerX,
+                centerZ,
+                zoom
+            );
+            drawRoadStripe(
+                ctx,
+                axis,
+                line.coord,
+                medianOffset,
+                extentMin,
+                extentMax,
+                centerX,
+                centerZ,
+                zoom
+            );
+        } else {
+            const dashBase = mode === 'full' ? clamp(zoom * 0.68, 8, 18) : clamp(zoom * 0.6, 5, 12);
+            ctx.setLineDash([dashBase, dashBase * 0.85]);
+            ctx.lineDashOffset = -state.animationTime * (mode === 'full' ? 26 : 18);
+            drawRoadStripe(ctx, axis, line.coord, 0, extentMin, extentMax, centerX, centerZ, zoom);
+        }
+
+        ctx.restore();
+    }
+
+    function drawRoadStripe(
+        ctx,
+        axis,
+        fixedCoord,
+        offset,
+        extentMin,
+        extentMax,
+        centerX,
+        centerZ,
+        zoom
+    ) {
+        const coord = fixedCoord + offset;
+        if (axis === 'x') {
+            const px = (coord - centerX) * zoom;
+            const py0 = (extentMin - centerZ) * zoom;
+            const py1 = (extentMax - centerZ) * zoom;
+            ctx.beginPath();
+            ctx.moveTo(px, py0);
+            ctx.lineTo(px, py1);
+            ctx.stroke();
+            return;
+        }
+
+        const py = (coord - centerZ) * zoom;
+        const px0 = (extentMin - centerX) * zoom;
+        const px1 = (extentMax - centerX) * zoom;
+        ctx.beginPath();
+        ctx.moveTo(px0, py);
+        ctx.lineTo(px1, py);
+        ctx.stroke();
     }
 
     function drawBuildingFootprints(
         ctx,
         { mode, zoom, centerX, centerZ, range, buildings, spatialIndex = null }
     ) {
-        ctx.fillStyle = mode === 'full' ? 'rgba(36, 50, 68, 0.9)' : 'rgba(32, 44, 60, 0.92)';
-        ctx.strokeStyle =
-            mode === 'full' ? 'rgba(144, 182, 217, 0.32)' : 'rgba(138, 174, 205, 0.42)';
-        ctx.lineWidth = 1;
-
         const drawBuildings =
             Number.isFinite(range) && spatialIndex
                 ? querySpatialIndexItems(
@@ -797,17 +963,131 @@ export function createMapUiController(options = {}) {
                     continue;
                 }
             }
-            strokeAndFillWorldQuadFromBounds(
-                ctx,
-                centerX,
-                centerZ,
-                zoom,
-                building.minX,
-                building.maxX,
-                building.minZ,
-                building.maxZ
+
+            const left = (building.minX - centerX) * zoom;
+            const top = (building.minZ - centerZ) * zoom;
+            const widthPx = Math.max(0.8, (building.maxX - building.minX) * zoom);
+            const heightPx = Math.max(0.8, (building.maxZ - building.minZ) * zoom);
+            const radius = clamp(
+                Math.min(widthPx, heightPx) * (mode === 'full' ? 0.16 : 0.12),
+                mode === 'full' ? 2.4 : 1.2,
+                mode === 'full' ? 8 : 4
             );
+            const shadowOffset =
+                mode === 'full' ? clamp(Math.min(widthPx, heightPx) * 0.16, 2, 6.5) : 1;
+            const palette = resolveBuildingPalette(building, mode);
+
+            if (mode === 'full') {
+                ctx.save();
+                ctx.shadowColor = palette.glow;
+                ctx.shadowBlur = clamp(Math.min(widthPx, heightPx) * 0.85, 10, 28);
+                ctx.fillStyle = palette.glowFill;
+                roundedRectPath(ctx, left, top, widthPx, heightPx, radius);
+                ctx.fill();
+                ctx.restore();
+            }
+
+            ctx.fillStyle = palette.shadow;
+            roundedRectPath(
+                ctx,
+                left + shadowOffset,
+                top + shadowOffset,
+                widthPx,
+                heightPx,
+                radius
+            );
+            ctx.fill();
+
+            ctx.fillStyle = palette.body;
+            roundedRectPath(ctx, left, top, widthPx, heightPx, radius);
+            ctx.fill();
+
+            if (mode === 'full') {
+                ctx.save();
+                ctx.strokeStyle = palette.outlineGlow;
+                ctx.lineWidth = 1.8;
+                ctx.shadowColor = palette.glow;
+                ctx.shadowBlur = 14;
+                roundedRectPath(ctx, left, top, widthPx, heightPx, radius);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            ctx.strokeStyle = palette.outline;
+            ctx.lineWidth = mode === 'full' ? 1.1 : 0.9;
+            roundedRectPath(ctx, left, top, widthPx, heightPx, radius);
+            ctx.stroke();
+
+            const roofInset = clamp(
+                Math.min(widthPx, heightPx) * 0.16,
+                1.2,
+                mode === 'full' ? 8 : 7
+            );
+            if (widthPx > roofInset * 2 + 1 && heightPx > roofInset * 2 + 1) {
+                ctx.fillStyle = palette.roof;
+                roundedRectPath(
+                    ctx,
+                    left + roofInset,
+                    top + roofInset,
+                    widthPx - roofInset * 2,
+                    heightPx - roofInset * 2,
+                    Math.max(1, radius * 0.62)
+                );
+                ctx.fill();
+                if (mode === 'full') {
+                    ctx.strokeStyle = palette.roofOutline;
+                    ctx.lineWidth = 0.9;
+                    roundedRectPath(
+                        ctx,
+                        left + roofInset,
+                        top + roofInset,
+                        widthPx - roofInset * 2,
+                        heightPx - roofInset * 2,
+                        Math.max(1, radius * 0.62)
+                    );
+                    ctx.stroke();
+                }
+            }
+
+            if (mode === 'full' && widthPx > 18 && heightPx > 16) {
+                drawBuildingScanlines(ctx, {
+                    left: left + roofInset,
+                    top: top + roofInset,
+                    widthPx: widthPx - roofInset * 2,
+                    heightPx: heightPx - roofInset * 2,
+                    color: palette.detail,
+                });
+            }
         }
+    }
+
+    function drawBuildingScanlines(ctx, { left, top, widthPx, heightPx, color }) {
+        if (widthPx <= 8 || heightPx <= 8) {
+            return;
+        }
+
+        const horizontal = widthPx >= heightPx;
+        const step = clamp(Math.min(widthPx, heightPx) * 0.22, 6, 14);
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.lineCap = 'round';
+        for (
+            let offset = step * 0.8;
+            offset < (horizontal ? heightPx : widthPx) - step * 0.4;
+            offset += step
+        ) {
+            ctx.beginPath();
+            if (horizontal) {
+                ctx.moveTo(left + widthPx * 0.18, top + offset);
+                ctx.lineTo(left + widthPx * 0.82, top + offset);
+            } else {
+                ctx.moveTo(left + offset, top + heightPx * 0.18);
+                ctx.lineTo(left + offset, top + heightPx * 0.82);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
     }
 
     function drawCircleObstacles(
@@ -847,9 +1127,7 @@ export function createMapUiController(options = {}) {
     }
 
     function drawChargingZones(ctx, { mode, zoom, centerX, centerZ, range, chargingZones }) {
-        ctx.strokeStyle =
-            mode === 'full' ? 'rgba(126, 230, 202, 0.82)' : 'rgba(130, 242, 212, 0.86)';
-        ctx.lineWidth = mode === 'full' ? 1.3 : 1.1;
+        const pulse = 0.5 + 0.5 * Math.sin(state.animationTime * 3.4);
         for (let i = 0; i < chargingZones.length; i += 1) {
             const zone = chargingZones[i];
             if (Number.isFinite(range)) {
@@ -860,12 +1138,28 @@ export function createMapUiController(options = {}) {
                     continue;
                 }
             }
+
             const px = (zone.x - centerX) * zoom;
             const py = (zone.z - centerZ) * zoom;
-            const radius = Math.max(2.5, zone.radius * zoom);
+            const radius = Math.max(mode === 'full' ? 4 : 3, zone.radius * zoom);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(px, py, radius + pulse * (mode === 'full' ? 5.4 : 3), 0, Math.PI * 2);
+            ctx.strokeStyle =
+                mode === 'full' ? 'rgba(126, 236, 201, 0.18)' : 'rgba(126, 236, 201, 0.14)';
+            ctx.lineWidth = mode === 'full' ? 2 : 1.2;
+            ctx.stroke();
+
             ctx.beginPath();
             ctx.arc(px, py, radius, 0, Math.PI * 2);
+            ctx.fillStyle = mode === 'full' ? 'rgba(46, 90, 79, 0.36)' : 'rgba(46, 90, 79, 0.28)';
+            ctx.fill();
+            ctx.strokeStyle =
+                mode === 'full' ? 'rgba(132, 244, 214, 0.92)' : 'rgba(132, 244, 214, 0.84)';
+            ctx.lineWidth = mode === 'full' ? 2 : 1.3;
             ctx.stroke();
+            ctx.restore();
         }
     }
 
@@ -875,33 +1169,54 @@ export function createMapUiController(options = {}) {
         }
 
         ctx.save();
-        ctx.strokeStyle =
-            mode === 'full' ? 'rgba(152, 228, 255, 0.96)' : 'rgba(178, 238, 255, 0.95)';
-        ctx.lineWidth = mode === 'full' ? 3 : 2.5;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        ctx.setLineDash(mode === 'full' ? [8, 6] : [6, 4]);
 
         let started = false;
-        for (let i = 0; i < routePoints.length; i += 1) {
-            const point = routePoints[i];
-            if (!isWorldPointVisible(point, centerX, centerZ, range)) {
+        for (let pass = 0; pass < 2; pass += 1) {
+            started = false;
+            ctx.beginPath();
+            for (let i = 0; i < routePoints.length; i += 1) {
+                const point = routePoints[i];
+                if (!isWorldPointVisible(point, centerX, centerZ, range)) {
+                    continue;
+                }
+                const px = (point.x - centerX) * zoom;
+                const py = (point.z - centerZ) * zoom;
+                if (!started) {
+                    ctx.moveTo(px, py);
+                    started = true;
+                } else {
+                    ctx.lineTo(px, py);
+                }
+            }
+
+            if (!started) {
                 continue;
             }
-            const px = (point.x - centerX) * zoom;
-            const py = (point.z - centerZ) * zoom;
-            if (!started) {
-                ctx.beginPath();
-                ctx.moveTo(px, py);
-                started = true;
+
+            if (pass === 0) {
+                ctx.strokeStyle =
+                    mode === 'full' ? 'rgba(93, 232, 255, 0.22)' : 'rgba(93, 232, 255, 0.18)';
+                ctx.lineWidth = mode === 'full' ? 8 : 5;
+                ctx.setLineDash([]);
+                ctx.shadowColor =
+                    mode === 'full' ? 'rgba(93, 232, 255, 0.32)' : 'rgba(93, 232, 255, 0.18)';
+                ctx.shadowBlur = mode === 'full' ? 18 : 8;
+                ctx.stroke();
             } else {
-                ctx.lineTo(px, py);
+                ctx.strokeStyle =
+                    mode === 'full' ? 'rgba(217, 248, 255, 0.95)' : 'rgba(196, 246, 255, 0.92)';
+                ctx.lineWidth = mode === 'full' ? 3.2 : 2.3;
+                const dashBase =
+                    mode === 'full' ? clamp(zoom * 0.72, 10, 20) : clamp(zoom * 0.5, 6, 10);
+                ctx.setLineDash([dashBase, dashBase * 0.9]);
+                ctx.lineDashOffset = -state.animationTime * 22;
+                ctx.shadowColor = 'transparent';
+                ctx.stroke();
             }
         }
 
-        if (started) {
-            ctx.stroke();
-        }
         ctx.restore();
     }
 
@@ -911,36 +1226,120 @@ export function createMapUiController(options = {}) {
             if (!isWorldPointVisible(pickup, centerX, centerZ, range)) {
                 continue;
             }
+
             const px = (pickup.x - centerX) * zoom;
             const py = (pickup.z - centerZ) * zoom;
-            const radius = mode === 'full' ? 4.8 : 3.7;
+            const outerRadius = mode === 'full' ? 5.2 : 4;
+            const innerRadius = mode === 'full' ? 2.5 : 2;
+
             ctx.beginPath();
-            ctx.arc(px, py, radius, 0, Math.PI * 2);
+            ctx.arc(px, py, outerRadius, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(8, 16, 23, 0.44)';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(px, py, outerRadius - 1, 0, Math.PI * 2);
+            ctx.strokeStyle = pickup.isTarget
+                ? 'rgba(240, 250, 255, 0.98)'
+                : 'rgba(212, 239, 255, 0.48)';
+            ctx.lineWidth = pickup.isTarget ? 1.8 : 1.2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(px, py, innerRadius, 0, Math.PI * 2);
             ctx.fillStyle = pickup.color;
             ctx.fill();
-            ctx.lineWidth = pickup.isTarget ? 1.6 : 1;
-            ctx.strokeStyle = pickup.isTarget
-                ? 'rgba(237, 251, 255, 0.98)'
-                : 'rgba(215, 236, 255, 0.52)';
-            ctx.stroke();
         }
     }
 
     function drawVehicleMarkers(ctx, { mode, zoom, centerX, centerZ, range, vehicles }) {
         for (let i = 0; i < vehicles.length; i += 1) {
             const vehicle = vehicles[i];
-            if (!isWorldPointVisible(vehicle, centerX, centerZ, range)) {
-                continue;
-            }
             const px = (vehicle.x - centerX) * zoom;
             const py = (vehicle.z - centerZ) * zoom;
-            const markerSize = resolveVehicleArrowSize(mode, zoom);
+            const markerSize =
+                resolveVehicleArrowSize(mode, zoom) * (vehicle.type === 'player' ? 1.02 : 0.92);
             const markerStyle = resolveVehicleArrowStyle(vehicle.color, mode);
+            const pulseColor =
+                vehicle.type === 'player'
+                    ? 'rgba(255, 151, 126, 0.34)'
+                    : 'rgba(108, 221, 255, 0.26)';
+            const visible = isWorldPointVisible(vehicle, centerX, centerZ, range);
+
+            if (!visible) {
+                if (mode !== 'minimap' || vehicle.type !== 'bot') {
+                    continue;
+                }
+
+                drawMinimapEdgeVehicleIndicator(ctx, {
+                    px,
+                    py,
+                    range,
+                    zoom,
+                    markerSize,
+                    markerStyle,
+                    pulseColor,
+                });
+                continue;
+            }
+
+            drawTrafficPulseRing(ctx, px, py, markerSize * 0.95, pulseColor);
             drawPlayerArrow(ctx, px, py, -vehicle.heading, markerSize, {
                 fillColor: markerStyle.fillColor,
                 strokeColor: markerStyle.strokeColor,
+                glassColor:
+                    vehicle.type === 'player'
+                        ? 'rgba(255, 233, 229, 0.82)'
+                        : 'rgba(214, 238, 255, 0.82)',
+                accentColor:
+                    vehicle.type === 'player'
+                        ? 'rgba(121, 39, 34, 0.32)'
+                        : 'rgba(17, 39, 56, 0.28)',
+                widthScale: vehicle.type === 'player' ? 1.03 : 0.96,
+                lengthScale: vehicle.type === 'player' ? 1.04 : 0.94,
             });
         }
+    }
+
+    function drawMinimapEdgeVehicleIndicator(
+        ctx,
+        { px, py, range, zoom, markerSize, markerStyle, pulseColor }
+    ) {
+        if (!Number.isFinite(range) || !Number.isFinite(zoom)) {
+            return;
+        }
+
+        const distance = Math.hypot(px, py);
+        if (!Number.isFinite(distance) || distance < 0.001) {
+            return;
+        }
+
+        const edgeRadius = Math.max(markerSize * 2.3, range * zoom - markerSize * 2.65 - 6);
+        const unitX = px / distance;
+        const unitY = py / distance;
+        const indicatorX = unitX * edgeRadius;
+        const indicatorY = unitY * edgeRadius;
+        const rotation = Math.atan2(py, px) + Math.PI * 0.5;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(indicatorX - unitX * markerSize * 1.5, indicatorY - unitY * markerSize * 1.5);
+        ctx.lineTo(indicatorX - unitX * markerSize * 3.1, indicatorY - unitY * markerSize * 3.1);
+        ctx.strokeStyle = 'rgba(125, 226, 255, 0.34)';
+        ctx.lineWidth = 1.2;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+        ctx.restore();
+
+        drawTrafficPulseRing(ctx, indicatorX, indicatorY, markerSize * 0.86, pulseColor);
+        drawPlayerArrow(ctx, indicatorX, indicatorY, rotation, markerSize * 0.92, {
+            fillColor: markerStyle.fillColor,
+            strokeColor: markerStyle.strokeColor,
+            glassColor: 'rgba(214, 238, 255, 0.88)',
+            accentColor: 'rgba(17, 39, 56, 0.28)',
+            widthScale: 0.92,
+            lengthScale: 0.9,
+        });
     }
 
     function drawMineMarkers(ctx, { mode, zoom, centerX, centerZ, range, mines }) {
@@ -951,14 +1350,14 @@ export function createMapUiController(options = {}) {
             }
             const px = (mine.x - centerX) * zoom;
             const py = (mine.z - centerZ) * zoom;
-            const size = mode === 'full' ? 5.2 : 4.2;
+            const size = mode === 'full' ? 5.4 : 4.2;
             drawCrossMarker(
                 ctx,
                 px,
                 py,
                 size,
-                mine.armed ? 'rgba(255, 120, 120, 0.96)' : 'rgba(255, 199, 133, 0.9)',
-                mine.armed ? 1.8 : 1.4
+                mine.armed ? 'rgba(255, 127, 127, 0.98)' : 'rgba(255, 204, 138, 0.94)',
+                mine.armed ? 2 : 1.5
             );
         }
     }
@@ -969,104 +1368,331 @@ export function createMapUiController(options = {}) {
         }
         const px = (waypoint.x - centerX) * zoom;
         const py = (waypoint.z - centerZ) * zoom;
-        const outerRadius = mode === 'full' ? 8 : 6;
-        const innerRadius = mode === 'full' ? 3.6 : 2.8;
+        const pulse = 0.5 + 0.5 * Math.sin(state.animationTime * 4.4);
+        const outerRadius = mode === 'full' ? 9 + pulse * 4 : 6 + pulse * 2;
+        const innerRadius = mode === 'full' ? 4 : 3;
 
         ctx.beginPath();
         ctx.arc(px, py, outerRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = 'rgba(255, 236, 162, 0.95)';
-        ctx.lineWidth = 2;
+        ctx.strokeStyle =
+            mode === 'full' ? 'rgba(111, 235, 255, 0.42)' : 'rgba(111, 235, 255, 0.34)';
+        ctx.lineWidth = mode === 'full' ? 2.2 : 1.5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(px, py, innerRadius + 3, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(232, 249, 255, 0.96)';
+        ctx.lineWidth = mode === 'full' ? 2 : 1.4;
         ctx.stroke();
 
         ctx.beginPath();
         ctx.arc(px, py, innerRadius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 216, 112, 0.95)';
+        ctx.fillStyle = 'rgba(126, 241, 255, 0.98)';
         ctx.fill();
     }
 
     function drawMinimapGrid(ctx, range, zoom) {
-        const gridStep = 8;
-        const minCoord = -Math.ceil(range / gridStep) * gridStep;
-        const maxCoord = Math.ceil(range / gridStep) * gridStep;
-        ctx.strokeStyle = 'rgba(164, 202, 233, 0.13)';
+        const ringRadii = [range * 0.36, range * 0.68, range];
+        const sweepRadius = range * zoom;
+        const sweepAngle = state.animationTime * 0.95;
+        ctx.save();
+        ctx.rotate(sweepAngle);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, sweepRadius, -0.2, 0.1);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(116, 240, 255, 0.08)';
+        ctx.fill();
+        ctx.restore();
+
+        ctx.strokeStyle = 'rgba(172, 208, 230, 0.12)';
         ctx.lineWidth = 1;
-        for (let x = minCoord; x <= maxCoord; x += gridStep) {
+        for (let i = 0; i < ringRadii.length; i += 1) {
             ctx.beginPath();
-            ctx.moveTo(x * zoom, -range * zoom);
-            ctx.lineTo(x * zoom, range * zoom);
+            ctx.arc(0, 0, ringRadii[i] * zoom, 0, Math.PI * 2);
             ctx.stroke();
         }
-        for (let z = minCoord; z <= maxCoord; z += gridStep) {
-            const y = z * zoom;
-            ctx.beginPath();
-            ctx.moveTo(-range * zoom, y);
-            ctx.lineTo(range * zoom, y);
-            ctx.stroke();
-        }
+
+        ctx.beginPath();
+        ctx.moveTo(-range * zoom, 0);
+        ctx.lineTo(range * zoom, 0);
+        ctx.moveTo(0, -range * zoom);
+        ctx.lineTo(0, range * zoom);
+        ctx.strokeStyle = 'rgba(172, 208, 230, 0.1)';
+        ctx.stroke();
     }
 
     function drawWorldBackgroundGrid(ctx, { width, height, centerX, centerZ, zoom, alpha }) {
-        ctx.fillStyle = 'rgba(6, 13, 24, 0.96)';
+        const baseGradient = ctx.createLinearGradient(0, 0, 0, height);
+        baseGradient.addColorStop(0, 'rgba(5, 13, 19, 0.46)');
+        baseGradient.addColorStop(1, 'rgba(2, 8, 13, 0.58)');
+        ctx.fillStyle = baseGradient;
         ctx.fillRect(0, 0, width, height);
 
-        const gridStep = 8;
-        const worldSpanX = width / zoom;
-        const worldSpanZ = height / zoom;
-        const minX = centerX - worldSpanX * 0.5;
-        const maxX = centerX + worldSpanX * 0.5;
-        const minZ = centerZ - worldSpanZ * 0.5;
-        const maxZ = centerZ + worldSpanZ * 0.5;
-        const startX = Math.floor(minX / gridStep) * gridStep;
-        const endX = Math.ceil(maxX / gridStep) * gridStep;
-        const startZ = Math.floor(minZ / gridStep) * gridStep;
-        const endZ = Math.ceil(maxZ / gridStep) * gridStep;
+        const centerGlow = ctx.createRadialGradient(
+            width * 0.5,
+            height * 0.5,
+            0,
+            width * 0.5,
+            height * 0.5,
+            Math.min(width, height) * 0.46
+        );
+        centerGlow.addColorStop(0, 'rgba(81, 224, 255, 0.16)');
+        centerGlow.addColorStop(0.45, 'rgba(81, 224, 255, 0.06)');
+        centerGlow.addColorStop(1, 'rgba(81, 224, 255, 0)');
+        ctx.fillStyle = centerGlow;
+        ctx.fillRect(0, 0, width, height);
 
-        ctx.strokeStyle = `rgba(144, 187, 221, ${alpha.toFixed(3)})`;
-        ctx.lineWidth = 1;
-        for (let x = startX; x <= endX; x += gridStep) {
-            const sx = width * 0.5 + (x - centerX) * zoom;
-            ctx.beginPath();
-            ctx.moveTo(sx, 0);
-            ctx.lineTo(sx, height);
-            ctx.stroke();
-        }
-        for (let z = startZ; z <= endZ; z += gridStep) {
-            const sy = height * 0.5 + (z - centerZ) * zoom;
-            ctx.beginPath();
-            ctx.moveTo(0, sy);
-            ctx.lineTo(width, sy);
-            ctx.stroke();
-        }
+        const playerScreenX = width * 0.5 + (state.player.x - centerX) * zoom;
+        const playerScreenY = height * 0.5 + (state.player.z - centerZ) * zoom;
+        const playerGlow = ctx.createRadialGradient(
+            playerScreenX,
+            playerScreenY,
+            0,
+            playerScreenX,
+            playerScreenY,
+            Math.max(width, height) * 0.24
+        );
+        playerGlow.addColorStop(0, 'rgba(134, 237, 255, 0.14)');
+        playerGlow.addColorStop(1, 'rgba(134, 237, 255, 0)');
+        ctx.fillStyle = playerGlow;
+        ctx.fillRect(0, 0, width, height);
+
+        drawWorldGridLines(ctx, {
+            width,
+            height,
+            centerX,
+            centerZ,
+            zoom,
+            step: 6,
+            lineWidth: 1,
+            color: `rgba(129, 231, 255, ${alpha.toFixed(3)})`,
+        });
+        drawWorldGridLines(ctx, {
+            width,
+            height,
+            centerX,
+            centerZ,
+            zoom,
+            step: 18,
+            lineWidth: 1.35,
+            color: `rgba(201, 247, 255, ${Math.min(alpha * 2.6, 0.12).toFixed(3)})`,
+        });
+
+        const sweepY = ((state.animationTime * 34) % (height + 220)) - 110;
+        const sweepGradient = ctx.createLinearGradient(0, sweepY - 90, 0, sweepY + 90);
+        sweepGradient.addColorStop(0, 'rgba(134, 237, 255, 0)');
+        sweepGradient.addColorStop(0.5, 'rgba(134, 237, 255, 0.06)');
+        sweepGradient.addColorStop(1, 'rgba(134, 237, 255, 0)');
+        ctx.fillStyle = sweepGradient;
+        ctx.fillRect(0, sweepY - 90, width, 180);
     }
 
     function drawWorldFrame(ctx, { width, height, worldBounds, centerX, centerZ, zoom }) {
-        const minX = width * 0.5 + (worldBounds.minX - centerX) * zoom;
-        const maxX = width * 0.5 + (worldBounds.maxX - centerX) * zoom;
-        const minY = height * 0.5 + (worldBounds.minZ - centerZ) * zoom;
-        const maxY = height * 0.5 + (worldBounds.maxZ - centerZ) * zoom;
-        ctx.strokeStyle = 'rgba(183, 216, 241, 0.36)';
-        ctx.lineWidth = 1.2;
-        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+        const insetX = clamp(width * 0.09, 46, 112);
+        const insetY = clamp(height * 0.05, 28, 74);
+        const frameX = insetX;
+        const frameY = insetY;
+        const frameW = width - insetX * 2;
+        const frameH = height - insetY * 2;
+        const traffic = summarizeTraffic(state.vehicles);
+        const zoomPercent = Math.round((zoom / Math.max(state.fitZoom, 0.001)) * 100);
+
+        ctx.save();
+
+        const edgeFade = ctx.createRadialGradient(
+            width * 0.5,
+            height * 0.5,
+            Math.min(width, height) * 0.24,
+            width * 0.5,
+            height * 0.5,
+            Math.max(width, height) * 0.72
+        );
+        edgeFade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        edgeFade.addColorStop(1, 'rgba(2, 8, 13, 0.28)');
+        ctx.fillStyle = edgeFade;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.strokeStyle = 'rgba(164, 239, 255, 0.24)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(frameX, frameY, frameW, frameH);
+        drawHudFrameBrackets(ctx, frameX, frameY, frameW, frameH);
+
+        drawHudTitle(ctx, frameX + 18, frameY - 6, 'TACTICAL HOLOGRAM', 'CITY BLUEPRINT');
+        drawHudBadge(
+            ctx,
+            frameX + frameW - 18,
+            frameY + 24,
+            state.routeDistanceMeters != null
+                ? `ROUTE ${Math.round(state.routeDistanceMeters)}M`
+                : `LIVE ${traffic.total}`,
+            'right'
+        );
+        drawHudBadge(ctx, frameX + frameW - 18, frameY + 56, `ZOOM ${zoomPercent}%`, 'right');
+        drawHudFooterText(
+            ctx,
+            frameX + 18,
+            frameY + frameH + 26,
+            `PLAYER X ${Math.round(state.player.x)}  Z ${Math.round(state.player.z)}`
+        );
+        drawHudFooterText(
+            ctx,
+            frameX + frameW - 18,
+            frameY + frameH + 26,
+            WORLD_MAP_LOCK_OVERVIEW ? 'OVERVIEW LOCKED  M CLOSE' : 'LMB WAYPOINT  RMB CLEAR',
+            'right'
+        );
+        drawHudFooterText(
+            ctx,
+            width * 0.5,
+            frameY + frameH + 26,
+            `SECTOR ${Math.round(worldBounds.maxX - worldBounds.minX)} x ${Math.round(worldBounds.maxZ - worldBounds.minZ)}`,
+            'center'
+        );
+
+        const focusX = width * 0.5 + (state.player.x - centerX) * zoom;
+        const focusY = height * 0.5 + (state.player.z - centerZ) * zoom;
+        ctx.beginPath();
+        ctx.moveTo(focusX - 12, focusY);
+        ctx.lineTo(focusX + 12, focusY);
+        ctx.moveTo(focusX, focusY - 12);
+        ctx.lineTo(focusX, focusY + 12);
+        ctx.strokeStyle = 'rgba(215, 248, 255, 0.38)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.restore();
     }
 
     function drawCompassTicks(ctx, mapRect) {
         const cx = mapRect.x + mapRect.w * 0.5;
         const cy = mapRect.y + mapRect.h * 0.5;
-        const radius = Math.max(0, Math.min(mapRect.w, mapRect.h) * 0.5 - 7);
+        const radius = Math.max(0, Math.min(mapRect.w, mapRect.h) * 0.5 - 9);
         if (!Number.isFinite(radius) || radius < 1) {
             return;
         }
         ctx.save();
-        ctx.strokeStyle = 'rgba(174, 220, 248, 0.4)';
+        ctx.strokeStyle = 'rgba(175, 234, 248, 0.24)';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - radius);
+        ctx.lineTo(cx, cy - radius + 12);
+        ctx.strokeStyle = 'rgba(235, 250, 255, 0.72)';
+        ctx.stroke();
         ctx.font = "700 10px 'Orbitron', 'Sora', sans-serif";
-        ctx.fillStyle = 'rgba(212, 236, 252, 0.86)';
+        ctx.fillStyle = 'rgba(226, 248, 255, 0.94)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('N', cx, cy - radius + 10);
+        ctx.fillText('N', cx, cy - radius + 20);
+        ctx.restore();
+    }
+
+    function drawWorldGridLines(
+        ctx,
+        { width, height, centerX, centerZ, zoom, step, lineWidth, color }
+    ) {
+        if (!Number.isFinite(step) || step <= 0 || !Number.isFinite(zoom) || zoom <= 0) {
+            return;
+        }
+
+        const halfWorldWidth = (width / Math.max(1e-6, zoom)) * 0.5;
+        const halfWorldHeight = (height / Math.max(1e-6, zoom)) * 0.5;
+        const minWorldX = centerX - halfWorldWidth;
+        const maxWorldX = centerX + halfWorldWidth;
+        const minWorldZ = centerZ - halfWorldHeight;
+        const maxWorldZ = centerZ + halfWorldHeight;
+
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+
+        const startX = Math.floor(minWorldX / step) * step;
+        for (let worldX = startX; worldX <= maxWorldX + step; worldX += step) {
+            const screenX = width * 0.5 + (worldX - centerX) * zoom;
+            ctx.moveTo(screenX, 0);
+            ctx.lineTo(screenX, height);
+        }
+
+        const startZ = Math.floor(minWorldZ / step) * step;
+        for (let worldZ = startZ; worldZ <= maxWorldZ + step; worldZ += step) {
+            const screenY = height * 0.5 + (worldZ - centerZ) * zoom;
+            ctx.moveTo(0, screenY);
+            ctx.lineTo(width, screenY);
+        }
+
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawHudFrameBrackets(ctx, x, y, width, height) {
+        const segment = clamp(Math.min(width, height) * 0.045, 18, 34);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(176, 241, 255, 0.78)';
+        ctx.lineWidth = 1.4;
+        ctx.shadowColor = 'rgba(91, 223, 255, 0.28)';
+        ctx.shadowBlur = 18;
+        ctx.beginPath();
+        ctx.moveTo(x, y + segment);
+        ctx.lineTo(x, y);
+        ctx.lineTo(x + segment, y);
+        ctx.moveTo(x + width - segment, y);
+        ctx.lineTo(x + width, y);
+        ctx.lineTo(x + width, y + segment);
+        ctx.moveTo(x, y + height - segment);
+        ctx.lineTo(x, y + height);
+        ctx.lineTo(x + segment, y + height);
+        ctx.moveTo(x + width - segment, y + height);
+        ctx.lineTo(x + width, y + height);
+        ctx.lineTo(x + width, y + height - segment);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawHudTitle(ctx, x, y, kicker, title) {
+        ctx.save();
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.font = "700 10px 'Sora', sans-serif";
+        ctx.fillStyle = 'rgba(157, 230, 247, 0.88)';
+        ctx.fillText(kicker, x, y);
+        ctx.font = "800 18px 'Orbitron', 'Sora', sans-serif";
+        ctx.fillStyle = 'rgba(236, 250, 255, 0.96)';
+        ctx.fillText(title, x, y + 14);
+        ctx.restore();
+    }
+
+    function drawHudBadge(ctx, x, y, text, align = 'left') {
+        ctx.save();
+        ctx.font = "800 11px 'Orbitron', 'Sora', sans-serif";
+        const paddingX = 12;
+        const width = ctx.measureText(text).width + paddingX * 2;
+        const height = 28;
+        const left = align === 'right' ? x - width : align === 'center' ? x - width * 0.5 : x;
+        const top = y - height * 0.5;
+        roundedRectPath(ctx, left, top, width, height, 12);
+        ctx.fillStyle = 'rgba(8, 20, 28, 0.62)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(165, 237, 255, 0.28)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(225, 249, 255, 0.96)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, left + width * 0.5, top + height * 0.54);
+        ctx.restore();
+    }
+
+    function drawHudFooterText(ctx, x, y, text, align = 'left') {
+        ctx.save();
+        ctx.font = "700 10px 'Orbitron', 'Sora', sans-serif";
+        ctx.fillStyle = 'rgba(182, 235, 246, 0.74)';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = align;
+        ctx.fillText(text, x, y);
         ctx.restore();
     }
 
@@ -1084,7 +1710,7 @@ export function createMapUiController(options = {}) {
         ctx.fill();
     }
 
-    function strokeAndFillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ) {
+    function strokeWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ) {
         const x0 = (minX - centerX) * zoom;
         const x1 = (maxX - centerX) * zoom;
         const y0 = (minZ - centerZ) * zoom;
@@ -1095,70 +1721,298 @@ export function createMapUiController(options = {}) {
         ctx.lineTo(x1, y1);
         ctx.lineTo(x0, y1);
         ctx.closePath();
-        ctx.fill();
         ctx.stroke();
     }
 
+    function strokeAndFillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ) {
+        fillWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ);
+        strokeWorldQuadFromBounds(ctx, centerX, centerZ, zoom, minX, maxX, minZ, maxZ);
+    }
+
+    function fillRoadRect(
+        ctx,
+        axis,
+        coord,
+        halfWidth,
+        extentMin,
+        extentMax,
+        centerX,
+        centerZ,
+        zoom
+    ) {
+        if (axis === 'x') {
+            fillWorldQuadFromBounds(
+                ctx,
+                centerX,
+                centerZ,
+                zoom,
+                coord - halfWidth,
+                coord + halfWidth,
+                extentMin,
+                extentMax
+            );
+            return;
+        }
+        fillWorldQuadFromBounds(
+            ctx,
+            centerX,
+            centerZ,
+            zoom,
+            extentMin,
+            extentMax,
+            coord - halfWidth,
+            coord + halfWidth
+        );
+    }
+
+    function strokeRoadRect(
+        ctx,
+        axis,
+        coord,
+        halfWidth,
+        extentMin,
+        extentMax,
+        centerX,
+        centerZ,
+        zoom
+    ) {
+        if (axis === 'x') {
+            strokeWorldQuadFromBounds(
+                ctx,
+                centerX,
+                centerZ,
+                zoom,
+                coord - halfWidth,
+                coord + halfWidth,
+                extentMin,
+                extentMax
+            );
+            return;
+        }
+        strokeWorldQuadFromBounds(
+            ctx,
+            centerX,
+            centerZ,
+            zoom,
+            extentMin,
+            extentMax,
+            coord - halfWidth,
+            coord + halfWidth
+        );
+    }
+
+    function resolveRoadAppearance(styleKey, mode) {
+        const fullMode = mode === 'full';
+        if (styleKey === 'boulevard') {
+            return {
+                sidewalkColor: fullMode ? 'rgba(51, 120, 156, 0.12)' : 'rgba(76, 134, 170, 0.2)',
+                roadColor: fullMode ? 'rgba(7, 20, 29, 0.34)' : 'rgba(16, 30, 43, 0.82)',
+                glowColor: fullMode ? 'rgba(93, 229, 255, 0.16)' : 'rgba(93, 229, 255, 0.1)',
+                edgeColor: fullMode ? 'rgba(199, 242, 255, 0.18)' : 'rgba(210, 236, 245, 0.08)',
+                edgeLineColor: fullMode ? 'rgba(174, 241, 255, 0.5)' : 'rgba(208, 241, 250, 0.28)',
+                edgeLineWidthScale: 0.052,
+                sideLinePositionRatios: [0.17, 0.83],
+                centerLineColor: fullMode
+                    ? 'rgba(155, 241, 255, 0.46)'
+                    : 'rgba(155, 241, 255, 0.36)',
+                centerLineWidthScale: 0.045,
+                centerMode: 'dashed',
+            };
+        }
+        if (styleKey === 'service') {
+            return {
+                sidewalkColor: fullMode ? 'rgba(48, 86, 112, 0.08)' : 'rgba(63, 96, 123, 0.1)',
+                roadColor: fullMode ? 'rgba(7, 16, 24, 0.2)' : 'rgba(14, 23, 34, 0.66)',
+                glowColor: fullMode ? 'rgba(92, 213, 255, 0.08)' : 'rgba(92, 213, 255, 0.04)',
+                edgeColor: 'rgba(214, 238, 250, 0.08)',
+                edgeLineColor: fullMode ? 'rgba(149, 209, 226, 0.16)' : 'rgba(149, 209, 226, 0.1)',
+                edgeLineWidthScale: 0.032,
+                sideLinePositionRatios: [0.14, 0.86],
+                centerLineColor: 'rgba(0, 0, 0, 0)',
+                centerLineWidthScale: 0.03,
+                centerMode: 'none',
+            };
+        }
+        return {
+            sidewalkColor: fullMode ? 'rgba(54, 112, 144, 0.1)' : 'rgba(75, 130, 162, 0.18)',
+            roadColor: fullMode ? 'rgba(7, 18, 28, 0.28)' : 'rgba(16, 29, 42, 0.78)',
+            glowColor: fullMode ? 'rgba(91, 223, 255, 0.12)' : 'rgba(91, 223, 255, 0.08)',
+            edgeColor: fullMode ? 'rgba(205, 243, 255, 0.14)' : 'rgba(214, 238, 248, 0.08)',
+            edgeLineColor: fullMode ? 'rgba(196, 241, 255, 0.34)' : 'rgba(208, 239, 250, 0.22)',
+            edgeLineWidthScale: 0.047,
+            sideLinePositionRatios: [0.16, 0.84],
+            centerLineColor: fullMode ? 'rgba(173, 241, 255, 0.38)' : 'rgba(193, 244, 255, 0.32)',
+            centerLineWidthScale: 0.041,
+            centerMode: 'dashed',
+        };
+    }
+
+    function resolveBuildingPalette(building, mode) {
+        const key =
+            Math.abs(
+                Math.round(
+                    (building.minX + building.maxX) * 0.9 +
+                        (building.minZ + building.maxZ) * 1.3 +
+                        (building.maxX - building.minX) * 2.7
+                )
+            ) % 3;
+
+        const fullMode = mode === 'full';
+        if (key === 0) {
+            return {
+                shadow: fullMode ? 'rgba(5, 10, 15, 0.12)' : 'rgba(6, 10, 14, 0.22)',
+                glow: fullMode ? 'rgba(73, 219, 255, 0.26)' : 'rgba(73, 219, 255, 0.08)',
+                glowFill: fullMode ? 'rgba(41, 175, 219, 0.08)' : 'rgba(41, 175, 219, 0.04)',
+                body: fullMode ? 'rgba(54, 192, 227, 0.16)' : 'rgba(88, 167, 195, 0.44)',
+                roof: fullMode ? 'rgba(179, 242, 255, 0.08)' : 'rgba(179, 242, 255, 0.26)',
+                roofOutline: 'rgba(211, 249, 255, 0.18)',
+                outline: 'rgba(193, 245, 255, 0.54)',
+                outlineGlow: 'rgba(148, 239, 255, 0.24)',
+                detail: 'rgba(187, 246, 255, 0.22)',
+            };
+        }
+        if (key === 1) {
+            return {
+                shadow: fullMode ? 'rgba(5, 10, 14, 0.12)' : 'rgba(7, 12, 16, 0.22)',
+                glow: fullMode ? 'rgba(140, 234, 255, 0.24)' : 'rgba(140, 234, 255, 0.08)',
+                glowFill: fullMode ? 'rgba(108, 214, 255, 0.08)' : 'rgba(108, 214, 255, 0.04)',
+                body: fullMode ? 'rgba(149, 224, 255, 0.16)' : 'rgba(132, 194, 223, 0.42)',
+                roof: fullMode ? 'rgba(231, 250, 255, 0.1)' : 'rgba(213, 243, 255, 0.26)',
+                roofOutline: 'rgba(241, 252, 255, 0.18)',
+                outline: 'rgba(231, 249, 255, 0.56)',
+                outlineGlow: 'rgba(179, 241, 255, 0.24)',
+                detail: 'rgba(214, 249, 255, 0.22)',
+            };
+        }
+        return {
+            shadow: fullMode ? 'rgba(5, 10, 14, 0.12)' : 'rgba(7, 11, 15, 0.22)',
+            glow: fullMode ? 'rgba(85, 255, 228, 0.22)' : 'rgba(85, 255, 228, 0.08)',
+            glowFill: fullMode ? 'rgba(71, 220, 192, 0.08)' : 'rgba(71, 220, 192, 0.04)',
+            body: fullMode ? 'rgba(64, 220, 192, 0.14)' : 'rgba(90, 185, 165, 0.4)',
+            roof: fullMode ? 'rgba(203, 255, 241, 0.08)' : 'rgba(191, 246, 230, 0.24)',
+            roofOutline: 'rgba(231, 255, 247, 0.16)',
+            outline: 'rgba(188, 255, 236, 0.48)',
+            outlineGlow: 'rgba(145, 255, 228, 0.22)',
+            detail: 'rgba(205, 255, 241, 0.2)',
+        };
+    }
+
+    function drawPlayerArrow(
+        ctx,
+        x,
+        y,
+        rotation,
+        size,
+        {
+            fillColor,
+            strokeColor,
+            glassColor = 'rgba(214, 238, 255, 0.84)',
+            accentColor = 'rgba(20, 34, 48, 0.24)',
+            widthScale = 1,
+            lengthScale = 1,
+        }
+    ) {
+        const bodyWidth = size * 0.94 * widthScale;
+        const bodyLength = size * 1.72 * lengthScale;
+        const cornerRadius = bodyWidth * 0.28;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(rotation);
+
+        roundedRectPath(
+            ctx,
+            -bodyWidth * 0.5,
+            -bodyLength * 0.5,
+            bodyWidth,
+            bodyLength,
+            cornerRadius
+        );
+        ctx.shadowColor = 'rgba(5, 11, 16, 0.3)';
+        ctx.shadowBlur = Math.max(6, size * 0.46);
+        ctx.shadowOffsetY = Math.max(1, size * 0.08);
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+
+        ctx.shadowColor = 'transparent';
+        ctx.lineWidth = Math.max(1.4, size * 0.15);
+        ctx.strokeStyle = strokeColor;
+        ctx.stroke();
+
+        roundedRectPath(
+            ctx,
+            -bodyWidth * 0.28,
+            -bodyLength * 0.28,
+            bodyWidth * 0.56,
+            bodyLength * 0.54,
+            bodyWidth * 0.14
+        );
+        ctx.fillStyle = glassColor;
+        ctx.fill();
+
+        ctx.beginPath();
+        roundedRectPath(
+            ctx,
+            -bodyWidth * 0.22,
+            bodyLength * 0.1,
+            bodyWidth * 0.44,
+            bodyLength * 0.18,
+            bodyWidth * 0.12
+        );
+        ctx.fillStyle = accentColor;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(0, -bodyLength * 0.62);
+        ctx.lineTo(bodyWidth * 0.22, -bodyLength * 0.36);
+        ctx.lineTo(-bodyWidth * 0.22, -bodyLength * 0.36);
+        ctx.closePath();
+        ctx.fillStyle = strokeColor;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(0, -bodyLength * 0.88);
+        ctx.lineTo(0, -bodyLength * 0.48);
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = Math.max(1.9, size * 0.18);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(0, -bodyLength * 0.94, Math.max(2, size * 0.13), 0, Math.PI * 2);
+        ctx.fillStyle = strokeColor;
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawTrafficPulseRing(ctx, x, y, baseRadius, color) {
+        const pulse = 0.5 + 0.5 * Math.sin(state.animationTime * 5 + x * 0.02 + y * 0.02);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, baseRadius + pulse * baseRadius * 0.24, 0, Math.PI * 2);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.9;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x, y, baseRadius * 0.66 + pulse * baseRadius * 0.12, 0, Math.PI * 2);
+        ctx.strokeStyle = color.replace(/0\.\d+\)/, '0.18)');
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawCrossMarker(ctx, x, y, size, color, width = 1.5) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(x - size, y - size);
+        ctx.lineTo(x + size, y + size);
+        ctx.moveTo(x - size, y + size);
+        ctx.lineTo(x + size, y - size);
+        ctx.stroke();
+        ctx.restore();
+    }
+
     function bindDomEvents() {
-        if (WORLD_MAP_LOCK_OVERVIEW) {
-            dom.centerBtn.textContent = 'FIT MAP';
-        }
-
-        const filterEntries = [
-            ['roads', dom.filterRoads],
-            ['buildings', dom.filterBuildings],
-            ['pickups', dom.filterPickups],
-            ['vehicles', dom.filterVehicles],
-            ['mines', dom.filterMines],
-            ['charging', dom.filterCharging],
-            ['trees', dom.filterTrees],
-            ['lamps', dom.filterLamps],
-        ];
-
-        for (let i = 0; i < filterEntries.length; i += 1) {
-            const [key, input] = filterEntries[i];
-            input.addEventListener('change', () => {
-                state.filters[key] = Boolean(input.checked);
-                if (state.expanded) {
-                    drawWorldMap(1 / 60);
-                }
-                drawMinimap(1 / 60);
-                renderLegend();
-            });
-        }
-
-        dom.closeBtn.addEventListener('click', () => {
-            setExpanded(false, { announce: true });
-        });
-
-        dom.centerBtn.addEventListener('click', () => {
-            if (WORLD_MAP_LOCK_OVERVIEW) {
-                fitWorldOverview();
-                drawWorldMap(1 / 60);
-                onStatus('Map fitted to full city view.', 1200);
-                return;
-            }
-
-            state.followPlayer = true;
-            state.centerX = state.player.x;
-            state.centerZ = state.player.z;
-            drawWorldMap(1 / 60);
-            onStatus('Map centered on your car.', 1200);
-        });
-
-        dom.clearWaypointBtn.addEventListener('click', () => {
-            if (state.waypoint) {
-                state.waypoint = null;
-                state.routePoints = [];
-                state.routeDistanceMeters = null;
-                onStatus('Waypoint cleared.', 1400);
-                drawWorldMap(1 / 60);
-                drawMinimap(1 / 60);
-                updateMetaLabels();
-                renderLegend();
-            }
-        });
-
         dom.worldMapCanvas.addEventListener('pointerdown', handleWorldMapPointerDown);
         dom.worldMapCanvas.addEventListener('pointermove', handleWorldMapPointerMove);
         dom.worldMapCanvas.addEventListener('pointerup', handleWorldMapPointerUp);
@@ -1223,7 +2077,7 @@ export function createMapUiController(options = {}) {
         state.centerX = state.pointer.startCenterX - dx / state.zoom;
         state.centerZ = state.pointer.startCenterZ - dy / state.zoom;
         clampCenterToWorld();
-        drawWorldMap(1 / 60);
+        drawWorldMapNow(1 / 60);
         event.preventDefault();
     }
 
@@ -1247,8 +2101,8 @@ export function createMapUiController(options = {}) {
                 rebuildRoute();
                 updateMetaLabels();
                 renderLegend();
-                drawWorldMap(1 / 60);
-                drawMinimap(1 / 60);
+                drawWorldMapNow(1 / 60);
+                drawMinimapNow(1 / 60);
                 onStatus(
                     `Waypoint set: X ${Math.round(state.waypoint.x)} | Z ${Math.round(state.waypoint.z)}.`,
                     2000
@@ -1284,7 +2138,7 @@ export function createMapUiController(options = {}) {
         }
         state.followPlayer = false;
         clampCenterToWorld();
-        drawWorldMap(1 / 60);
+        drawWorldMapNow(1 / 60);
         renderLegend();
     }
 
@@ -1299,8 +2153,8 @@ export function createMapUiController(options = {}) {
         state.waypoint = null;
         state.routePoints = [];
         state.routeDistanceMeters = null;
-        drawWorldMap(1 / 60);
-        drawMinimap(1 / 60);
+        drawWorldMapNow(1 / 60);
+        drawMinimapNow(1 / 60);
         updateMetaLabels();
         renderLegend();
         onStatus('Waypoint cleared.', 1400);
@@ -1317,7 +2171,7 @@ export function createMapUiController(options = {}) {
         );
 
         if (worldChanged || force) {
-            const fitTargetBounds = worldBounds;
+            const fitTargetBounds = overviewBounds;
             const fitZoom = resolveFitZoom(
                 dom.worldMapCanvas.width,
                 dom.worldMapCanvas.height,
@@ -1340,10 +2194,10 @@ export function createMapUiController(options = {}) {
 
         if (miniChanged || worldChanged || force) {
             if (!dom.miniMapHud.hidden) {
-                drawMinimap(1 / 60);
+                drawMinimapNow(1 / 60);
             }
             if (state.expanded) {
-                drawWorldMap(1 / 60);
+                drawWorldMapNow(1 / 60);
             }
         }
     }
@@ -1371,36 +2225,20 @@ export function createMapUiController(options = {}) {
     }
 
     function renderLegend() {
-        const lines = [];
-        lines.push(`Mode: ${state.mode === 'online' ? 'Online' : 'Bots'}`);
-        lines.push(`Pickups: ${state.pickups.length}`);
-        lines.push(`Vehicles: ${state.vehicles.length + 1}`);
-        lines.push(`Mines: ${state.mines.length}`);
-        if (state.routeDistanceMeters != null) {
-            lines.push(`Route: ${Math.round(state.routeDistanceMeters)} m`);
-        } else {
-            lines.push('Route: none');
-        }
-        const zoomPercent = Math.round((state.zoom / Math.max(state.fitZoom, 0.001)) * 100);
-        lines.push(`Zoom: ${zoomPercent}%`);
-        const nextLegendText = lines.join('\n');
-        if (nextLegendText !== state.previousLabelText.legend) {
-            dom.legend.textContent = nextLegendText;
-            state.previousLabelText.legend = nextLegendText;
-        }
+        return;
     }
 
     function updateMetaLabels() {
-        const nextModeText = state.mode === 'online' ? 'ONLINE' : 'BOTS';
+        const traffic = summarizeTraffic(state.vehicles);
+        const nextModeText = state.mode === 'online' ? 'ONLINE' : 'CITY';
         if (nextModeText !== state.previousLabelText.mode) {
             dom.modeLabel.textContent = nextModeText;
             state.previousLabelText.mode = nextModeText;
         }
-        const minimapRange = resolveMinimapRange(state.player.speedKph);
         const nextRangeText =
             state.routeDistanceMeters != null
-                ? `WP ${Math.round(state.routeDistanceMeters)}m`
-                : `RANGE ${Math.round(minimapRange)}m`;
+                ? `ROUTE ${Math.round(state.routeDistanceMeters)}M`
+                : `LIVE ${traffic.total}`;
         if (nextRangeText !== state.previousLabelText.range) {
             dom.rangeLabel.textContent = nextRangeText;
             state.previousLabelText.range = nextRangeText;
@@ -1408,11 +2246,7 @@ export function createMapUiController(options = {}) {
     }
 
     function updateCoordinateReadout(x, z) {
-        const nextCoordText = `X ${Math.round(x)} | Z ${Math.round(z)}`;
-        if (nextCoordText !== state.previousLabelText.coord) {
-            dom.coordReadout.textContent = nextCoordText;
-            state.previousLabelText.coord = nextCoordText;
-        }
+        return;
     }
 
     function dispose() {
@@ -1422,8 +2256,8 @@ export function createMapUiController(options = {}) {
 
     function fitWorldOverview() {
         state.followPlayer = false;
-        state.centerX = (worldBounds.minX + worldBounds.maxX) * 0.5;
-        state.centerZ = (worldBounds.minZ + worldBounds.maxZ) * 0.5;
+        state.centerX = (overviewBounds.minX + overviewBounds.maxX) * 0.5;
+        state.centerZ = (overviewBounds.minZ + overviewBounds.maxZ) * 0.5;
         state.zoom = state.fitZoom;
         clampCenterToWorld();
     }
@@ -1437,41 +2271,9 @@ function resolveDom() {
 
     const worldMapOverlay = document.getElementById('worldMapOverlay');
     const worldMapCanvas = document.getElementById('worldMapCanvas');
-    const closeBtn = document.getElementById('worldMapCloseBtn');
-    const centerBtn = document.getElementById('worldMapCenterBtn');
-    const clearWaypointBtn = document.getElementById('worldMapClearWaypointBtn');
-    const legend = document.getElementById('worldMapLegend');
-    const coordReadout = document.getElementById('worldMapCoordReadout');
-
-    const filterRoads = document.getElementById('worldMapFilterRoads');
-    const filterBuildings = document.getElementById('worldMapFilterBuildings');
-    const filterPickups = document.getElementById('worldMapFilterPickups');
-    const filterVehicles = document.getElementById('worldMapFilterVehicles');
-    const filterMines = document.getElementById('worldMapFilterMines');
-    const filterCharging = document.getElementById('worldMapFilterCharging');
-    const filterTrees = document.getElementById('worldMapFilterTrees');
-    const filterLamps = document.getElementById('worldMapFilterLamps');
 
     const ready = Boolean(
-        miniMapHud &&
-        miniMapCanvas &&
-        modeLabel &&
-        rangeLabel &&
-        worldMapOverlay &&
-        worldMapCanvas &&
-        closeBtn &&
-        centerBtn &&
-        clearWaypointBtn &&
-        legend &&
-        coordReadout &&
-        filterRoads &&
-        filterBuildings &&
-        filterPickups &&
-        filterVehicles &&
-        filterMines &&
-        filterCharging &&
-        filterTrees &&
-        filterLamps
+        miniMapHud && miniMapCanvas && modeLabel && rangeLabel && worldMapOverlay && worldMapCanvas
     );
 
     return {
@@ -1482,32 +2284,10 @@ function resolveDom() {
         rangeLabel,
         worldMapOverlay,
         worldMapCanvas,
-        closeBtn,
-        centerBtn,
-        clearWaypointBtn,
-        legend,
-        coordReadout,
-        filterRoads,
-        filterBuildings,
-        filterPickups,
-        filterVehicles,
-        filterMines,
-        filterCharging,
-        filterTrees,
-        filterLamps,
     };
 }
 
-function initializeFilterInputs(filters, dom) {
-    dom.filterRoads.checked = filters.roads;
-    dom.filterBuildings.checked = filters.buildings;
-    dom.filterPickups.checked = filters.pickups;
-    dom.filterVehicles.checked = filters.vehicles;
-    dom.filterMines.checked = filters.mines;
-    dom.filterCharging.checked = filters.charging;
-    dom.filterTrees.checked = filters.trees;
-    dom.filterLamps.checked = filters.lamps;
-}
+function initializeFilterInputs(_filters, _dom) {}
 
 function buildStaticFeatures(obstacles = []) {
     const buildings = [];
@@ -1752,10 +2532,16 @@ function normalizeRoadLines(lines) {
         }
         const coord = Number(line.coord);
         const roadWidth = Number(line.roadWidth);
+        const sidewalkWidth = Math.max(0, Number(line.sidewalkWidth) || 0);
         if (!Number.isFinite(coord) || !Number.isFinite(roadWidth) || roadWidth <= 0) {
             continue;
         }
-        result.push({ coord, roadWidth });
+        result.push({
+            coord,
+            roadWidth,
+            sidewalkWidth,
+            styleKey: typeof line.styleKey === 'string' ? line.styleKey : 'avenue',
+        });
     }
 
     result.sort((a, b) => a.coord - b.coord);
@@ -1912,6 +2698,34 @@ function normalizeMinesInPlace(target, mines) {
     }
     target.length = count;
     return target;
+}
+
+function summarizeTraffic(vehicles = []) {
+    let bots = 0;
+    let remotePlayers = 0;
+    for (let i = 0; i < vehicles.length; i += 1) {
+        const type = vehicles[i]?.type;
+        if (type === 'bot') {
+            bots += 1;
+        } else if (type === 'player') {
+            remotePlayers += 1;
+        }
+    }
+    return {
+        bots,
+        remotePlayers,
+        total: vehicles.length + 1,
+    };
+}
+
+function buildWorldMapStatCard(label, value, tone = '') {
+    const toneAttr = tone ? ` data-tone="${tone}"` : '';
+    return (
+        `<div class="worldMapStatCard">` +
+        `<div class="worldMapStatLabel">${label}</div>` +
+        `<div class="worldMapStatValue"${toneAttr}>${value}</div>` +
+        `</div>`
+    );
 }
 
 function normalizeWorldPoint(value, fallback = { x: 0, z: 0 }) {
@@ -2083,34 +2897,62 @@ function pointerEventToWorld(event, canvas, centerX, centerZ, zoom) {
 }
 
 function resolveOverviewBounds({ worldBounds, cityMapLayout, staticFeatures, chargingZones }) {
-    let minX = Number(worldBounds.minX);
-    let maxX = Number(worldBounds.maxX);
-    let minZ = Number(worldBounds.minZ);
-    let maxZ = Number(worldBounds.maxZ);
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let hasContent = false;
+    void chargingZones;
+    const includeBounds = (nextMinX, nextMaxX, nextMinZ, nextMaxZ) => {
+        if (![nextMinX, nextMaxX, nextMinZ, nextMaxZ].every(Number.isFinite)) {
+            return;
+        }
+        minX = Math.min(minX, nextMinX);
+        maxX = Math.max(maxX, nextMaxX);
+        minZ = Math.min(minZ, nextMinZ);
+        maxZ = Math.max(maxZ, nextMaxZ);
+        hasContent = true;
+    };
 
     const xLines = Array.isArray(cityMapLayout?.roadAxisLinesX) ? cityMapLayout.roadAxisLinesX : [];
     const zLines = Array.isArray(cityMapLayout?.roadAxisLinesZ) ? cityMapLayout.roadAxisLinesZ : [];
+    const xLineBounds = resolveRoadLineBounds(xLines);
+    const zLineBounds = resolveRoadLineBounds(zLines);
+    const roadMinX = Number.isFinite(xLineBounds.min) ? xLineBounds.min : worldBounds.minX;
+    const roadMaxX = Number.isFinite(xLineBounds.max) ? xLineBounds.max : worldBounds.maxX;
+    const roadMinZ = Number.isFinite(zLineBounds.min) ? zLineBounds.min : worldBounds.minZ;
+    const roadMaxZ = Number.isFinite(zLineBounds.max) ? zLineBounds.max : worldBounds.maxZ;
 
     for (let i = 0; i < xLines.length; i += 1) {
         const line = xLines[i];
         const coord = Number(line?.coord);
         const halfWidth = Math.max(0, (Number(line?.roadWidth) || 0) * 0.5);
+        const sidewalkWidth = resolveRenderedSidewalkWidth(line?.styleKey, line?.sidewalkWidth);
         if (!Number.isFinite(coord)) {
             continue;
         }
-        minX = Math.min(minX, coord - halfWidth);
-        maxX = Math.max(maxX, coord + halfWidth);
+        includeBounds(
+            coord - halfWidth - sidewalkWidth,
+            coord + halfWidth + sidewalkWidth,
+            roadMinZ,
+            roadMaxZ
+        );
     }
 
     for (let i = 0; i < zLines.length; i += 1) {
         const line = zLines[i];
         const coord = Number(line?.coord);
         const halfWidth = Math.max(0, (Number(line?.roadWidth) || 0) * 0.5);
+        const sidewalkWidth = resolveRenderedSidewalkWidth(line?.styleKey, line?.sidewalkWidth);
         if (!Number.isFinite(coord)) {
             continue;
         }
-        minZ = Math.min(minZ, coord - halfWidth);
-        maxZ = Math.max(maxZ, coord + halfWidth);
+        includeBounds(
+            roadMinX,
+            roadMaxX,
+            coord - halfWidth - sidewalkWidth,
+            coord + halfWidth + sidewalkWidth
+        );
     }
 
     const buildings = Array.isArray(staticFeatures?.buildings) ? staticFeatures.buildings : [];
@@ -2119,37 +2961,14 @@ function resolveOverviewBounds({ worldBounds, cityMapLayout, staticFeatures, cha
         if (!building) {
             continue;
         }
-        if (Number.isFinite(building.minX)) {
-            minX = Math.min(minX, building.minX);
-        }
-        if (Number.isFinite(building.maxX)) {
-            maxX = Math.max(maxX, building.maxX);
-        }
-        if (Number.isFinite(building.minZ)) {
-            minZ = Math.min(minZ, building.minZ);
-        }
-        if (Number.isFinite(building.maxZ)) {
-            maxZ = Math.max(maxZ, building.maxZ);
-        }
+        includeBounds(building.minX, building.maxX, building.minZ, building.maxZ);
     }
 
-    const circles = [
-        ...(Array.isArray(staticFeatures?.trees) ? staticFeatures.trees : []),
-        ...(Array.isArray(staticFeatures?.lamps) ? staticFeatures.lamps : []),
-        ...(Array.isArray(chargingZones) ? chargingZones : []),
-    ];
-    for (let i = 0; i < circles.length; i += 1) {
-        const circle = circles[i];
-        const x = Number(circle?.x);
-        const z = Number(circle?.z);
-        const radius = Math.max(0, Number(circle?.radius) || 0);
-        if (!Number.isFinite(x) || !Number.isFinite(z)) {
-            continue;
-        }
-        minX = Math.min(minX, x - radius);
-        maxX = Math.max(maxX, x + radius);
-        minZ = Math.min(minZ, z - radius);
-        maxZ = Math.max(maxZ, z + radius);
+    if (!hasContent) {
+        minX = Number(worldBounds.minX);
+        maxX = Number(worldBounds.maxX);
+        minZ = Number(worldBounds.minZ);
+        maxZ = Number(worldBounds.maxZ);
     }
 
     const padding = WORLD_MAP_OVERVIEW_UNIT_PADDING;
@@ -2159,6 +2978,39 @@ function resolveOverviewBounds({ worldBounds, cityMapLayout, staticFeatures, cha
         minZ: minZ - padding,
         maxZ: maxZ + padding,
     };
+}
+
+function resolveRoadLineBounds(lines = []) {
+    let min = Number.POSITIVE_INFINITY;
+    let max = Number.NEGATIVE_INFINITY;
+    for (let i = 0; i < lines.length; i += 1) {
+        const coord = Number(lines[i]?.coord);
+        const halfWidth = Math.max(0, (Number(lines[i]?.roadWidth) || 0) * 0.5);
+        const sidewalkWidth = resolveRenderedSidewalkWidth(
+            lines[i]?.styleKey,
+            lines[i]?.sidewalkWidth
+        );
+        if (!Number.isFinite(coord)) {
+            continue;
+        }
+        min = Math.min(min, coord - halfWidth - sidewalkWidth);
+        max = Math.max(max, coord + halfWidth + sidewalkWidth);
+    }
+    return { min, max };
+}
+
+function resolveRenderedSidewalkWidth(styleKey = '', baseWidth = 0) {
+    const numericBaseWidth = Math.max(0, Number(baseWidth) || 0);
+    if (numericBaseWidth <= 0) {
+        return 0;
+    }
+    if (styleKey === 'boulevard') {
+        return numericBaseWidth + 0.9;
+    }
+    if (styleKey === 'service') {
+        return Math.max(1.9, numericBaseWidth - 0.3);
+    }
+    return numericBaseWidth + 0.35;
 }
 
 function resolveFitZoom(canvasWidth, canvasHeight, bounds) {
@@ -2216,21 +3068,81 @@ function roundedRectPath(ctx, x, y, width, height, radius) {
     ctx.closePath();
 }
 
-function drawPlayerArrow(ctx, x, y, rotation, size, { fillColor, strokeColor }) {
+function drawPlayerArrow(
+    ctx,
+    x,
+    y,
+    rotation,
+    size,
+    {
+        fillColor,
+        strokeColor,
+        glassColor = 'rgba(225, 240, 249, 0.84)',
+        accentColor = 'rgba(17, 38, 54, 0.26)',
+        widthScale = 1,
+        lengthScale = 1,
+    }
+) {
+    const bodyWidth = size * 0.96 * widthScale;
+    const bodyLength = size * 1.82 * lengthScale;
+    const cornerRadius = bodyWidth * 0.28;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(rotation);
-    ctx.beginPath();
-    ctx.moveTo(0, -size);
-    ctx.lineTo(size * 0.65, size * 0.74);
-    ctx.lineTo(0, size * 0.32);
-    ctx.lineTo(-size * 0.65, size * 0.74);
-    ctx.closePath();
+
+    ctx.shadowColor = 'rgba(5, 11, 16, 0.34)';
+    ctx.shadowBlur = Math.max(6, size * 0.55);
+    ctx.shadowOffsetY = Math.max(1, size * 0.08);
+    roundedRectPath(ctx, -bodyWidth * 0.5, -bodyLength * 0.5, bodyWidth, bodyLength, cornerRadius);
     ctx.fillStyle = fillColor;
     ctx.fill();
-    ctx.lineWidth = Math.max(1.3, size * 0.18);
+
+    ctx.shadowColor = 'transparent';
+    ctx.lineWidth = Math.max(1.7, size * 0.15);
     ctx.strokeStyle = strokeColor;
     ctx.stroke();
+
+    roundedRectPath(
+        ctx,
+        -bodyWidth * 0.28,
+        -bodyLength * 0.28,
+        bodyWidth * 0.56,
+        bodyLength * 0.54,
+        bodyWidth * 0.14
+    );
+    ctx.fillStyle = glassColor;
+    ctx.fill();
+
+    roundedRectPath(
+        ctx,
+        -bodyWidth * 0.2,
+        bodyLength * 0.08,
+        bodyWidth * 0.4,
+        bodyLength * 0.18,
+        bodyWidth * 0.1
+    );
+    ctx.fillStyle = accentColor;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -bodyLength * 0.64);
+    ctx.lineTo(bodyWidth * 0.22, -bodyLength * 0.35);
+    ctx.lineTo(-bodyWidth * 0.22, -bodyLength * 0.35);
+    ctx.closePath();
+    ctx.fillStyle = strokeColor;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(0, -bodyLength * 0.94);
+    ctx.lineTo(0, -bodyLength * 0.48);
+    ctx.lineWidth = Math.max(2, size * 0.16);
+    ctx.strokeStyle = strokeColor;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, -bodyLength * 0.98, Math.max(2, size * 0.13), 0, Math.PI * 2);
+    ctx.fillStyle = strokeColor;
+    ctx.fill();
     ctx.restore();
 }
 
@@ -2280,7 +3192,7 @@ function resolveMinimapRange(speedKph) {
 
 function resolveVehicleArrowSize(mode, zoom) {
     if (mode === 'full') {
-        return clamp(zoom * 1.45, 14, 22);
+        return clamp(zoom * 2.1, 18, 30);
     }
     return 8.2;
 }

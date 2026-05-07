@@ -27,12 +27,13 @@ const WEAPON_HEAT_FALL = 0.46;
 const HUD_TRACKING_SNAP_SPEED = 15.5;
 const MAX_ACTIVE_PROJECTILES = 18;
 const MAX_ACTIVE_IMPACTS = 18;
-const MAX_ACTIVE_MUZZLE_FLASHES = 6;
+const MAX_ACTIVE_MUZZLE_FLASHES = 10;
 const MAX_ACTIVE_BULLET_MARKS = 32;
 const PROJECTILE_SPEED = 182;
 const PROJECTILE_LENGTH = 0.72;
 const PROJECTILE_MAX_LIFETIME_SEC = 1.4;
 const MUZZLE_FLASH_LIFETIME_SEC = 0.085;
+const MUZZLE_SMOKE_LIFETIME_SEC = 0.22;
 const IMPACT_LIFETIME_SEC = 0.18;
 const BULLET_MARK_LIFETIME_SEC = 14;
 const BULLET_MARK_MIN_DISTANCE = 0.9;
@@ -42,7 +43,7 @@ const BOT_DEBRIS_BUDGET_FAR = 1;
 const BOT_DEBRIS_NEAR_DISTANCE_SQ = 46 * 46;
 const BOT_DEBRIS_MID_DISTANCE_SQ = 86 * 86;
 const BOT_HUNTER_SIGHT_RANGE = 132;
-const BOT_HUNTER_FIRE_RANGE = 112;
+const BOT_HUNTER_FIRE_RANGE = 34;
 const BOT_HUNTER_MIN_FIRE_RANGE = 12;
 const BOT_HUNTER_SIGHT_FORWARD_DOT = 0.38;
 const BOT_HUNTER_MIN_FORWARD_DOT = 0.58;
@@ -124,6 +125,8 @@ const impactRingGeometry = new THREE.RingGeometry(0.18, 0.44, 40);
 const impactGlowGeometry = new THREE.PlaneGeometry(0.9, 0.9);
 const muzzleFlashCoreGeometry = new THREE.PlaneGeometry(0.34, 0.84);
 const muzzleFlashGlowGeometry = new THREE.PlaneGeometry(0.64, 1.18);
+const muzzleFlashShockwaveGeometry = new THREE.RingGeometry(0.08, 0.28, 28);
+const muzzleFlashSmokeGeometry = new THREE.PlaneGeometry(0.78, 1.46);
 const bulletMarkGeometry = new THREE.PlaneGeometry(0.34, 0.34);
 const pickupHaloGeometry = new THREE.RingGeometry(0.85, 1.42, 56);
 const pickupPulseGeometry = new THREE.CylinderGeometry(0.7, 0.7, 0.06, 44, 1, true);
@@ -435,8 +438,7 @@ export function createRoofWeaponSystem({
             !frameState.editModeActive &&
             !frameState.raceIntroActive &&
             !frameState.carDestroyed &&
-            !frameState.pickupRoundFinished &&
-            !frameState.worldMapOpen;
+            !frameState.pickupRoundFinished;
 
         if (!roofWeaponActive) {
             state.triggerHeld = false;
@@ -1001,6 +1003,9 @@ export function createRoofWeaponSystem({
         getAudioController()?.onRoofWeaponShot?.({
             locked: Boolean(aimState.lockedTarget),
             heat: state.heat,
+            position: weaponMuzzleWorldPosition.clone(),
+            direction: weaponShotDirection.clone(),
+            hostile: false,
         });
     }
 
@@ -1035,7 +1040,6 @@ export function createRoofWeaponSystem({
             !frameState.raceIntroActive &&
             !frameState.carDestroyed &&
             !frameState.pickupRoundFinished &&
-            !frameState.worldMapOpen &&
             !hunterBot.destroyed;
 
         const motionState = resolveHunterMotionState(hunterBot);
@@ -1471,6 +1475,9 @@ export function createRoofWeaponSystem({
         getAudioController()?.onRoofWeaponShot?.({
             locked: Boolean(aimState.locked),
             heat: hunterState.heat,
+            position: aimState.muzzlePosition.clone(),
+            direction: resolvedShotDirection.clone(),
+            hostile: true,
         });
     }
 
@@ -1679,20 +1686,52 @@ export function createRoofWeaponSystem({
             depthWrite: false,
             toneMapped: false,
         });
+        const shockwaveMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffc18f,
+            transparent: true,
+            opacity: 0.74,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const smokeMaterial = new THREE.MeshBasicMaterial({
+            map: pickupGlowTexture,
+            color: 0x9fd8ff,
+            transparent: true,
+            opacity: 0.24,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
         const glow = new THREE.Mesh(muzzleFlashGlowGeometry, glowMaterial);
         const core = new THREE.Mesh(muzzleFlashCoreGeometry, coreMaterial);
+        const shockwave = new THREE.Mesh(muzzleFlashShockwaveGeometry, shockwaveMaterial);
+        const smoke = new THREE.Mesh(muzzleFlashSmokeGeometry, smokeMaterial);
         core.rotation.z = Math.PI * 0.25;
-        group.add(glow, core);
+        shockwave.position.z = -0.04;
+        smoke.position.y = 0.14;
+        smoke.position.z = -0.12;
+        smoke.rotation.z = Math.PI * 0.12;
+        smoke.scale.set(0.82, 1.08, 1);
+        group.add(smoke, shockwave, glow, core);
         effectRoot.add(group);
 
         activeMuzzleFlashes.push({
             group,
             glow,
             core,
+            shockwave,
+            smoke,
             glowMaterial,
             coreMaterial,
-            life: MUZZLE_FLASH_LIFETIME_SEC,
-            ttl: MUZZLE_FLASH_LIFETIME_SEC,
+            shockwaveMaterial,
+            smokeMaterial,
+            flashLife: MUZZLE_FLASH_LIFETIME_SEC,
+            flashTtl: MUZZLE_FLASH_LIFETIME_SEC,
+            smokeLife: MUZZLE_SMOKE_LIFETIME_SEC,
+            smokeTtl: MUZZLE_SMOKE_LIFETIME_SEC,
         });
     }
 
@@ -1741,17 +1780,36 @@ export function createRoofWeaponSystem({
 
         for (let i = activeMuzzleFlashes.length - 1; i >= 0; i -= 1) {
             const flash = activeMuzzleFlashes[i];
-            flash.life -= dt;
-            if (flash.life <= 0) {
+            flash.flashLife -= dt;
+            flash.smokeLife -= dt;
+            if (flash.smokeLife <= 0) {
                 disposeMuzzleFlash(flash);
                 activeMuzzleFlashes.splice(i, 1);
                 continue;
             }
-            const normalizedLife = flash.life / flash.ttl;
-            flash.group.scale.setScalar(0.82 + (1 - normalizedLife) * 0.46);
-            flash.glowMaterial.opacity = normalizedLife * 0.88;
-            flash.coreMaterial.opacity = normalizedLife;
+            const flashLifeNormalized = THREE.MathUtils.clamp(
+                flash.flashLife / Math.max(0.0001, flash.flashTtl),
+                0,
+                1
+            );
+            const flashInverse = 1 - flashLifeNormalized;
+            const smokeLifeNormalized = THREE.MathUtils.clamp(
+                flash.smokeLife / Math.max(0.0001, flash.smokeTtl),
+                0,
+                1
+            );
+            const smokeInverse = 1 - smokeLifeNormalized;
+
+            flash.group.scale.setScalar(0.84 + flashInverse * 0.54);
+            flash.glowMaterial.opacity = flashLifeNormalized * 0.88;
+            flash.coreMaterial.opacity = flashLifeNormalized;
+            flash.shockwaveMaterial.opacity = flashLifeNormalized * 0.72;
+            flash.shockwave.scale.setScalar(0.9 + flashInverse * 2.4);
+            flash.smokeMaterial.opacity = smokeLifeNormalized * 0.22;
+            flash.smoke.position.y = 0.14 + smokeInverse * 0.34;
+            flash.smoke.scale.set(0.82 + smokeInverse * 0.58, 1.08 + smokeInverse * 1.7, 1);
             flash.group.rotation.z += dt * 12;
+            flash.smoke.rotation.z += dt * 1.9;
         }
 
         for (let i = activeBulletMarks.length - 1; i >= 0; i -= 1) {
@@ -1794,6 +1852,8 @@ export function createRoofWeaponSystem({
                 destroyed: Boolean(hitResult?.destroyed),
                 position: projectile.impactPoint,
                 distanceMeters: impactDistanceMeters,
+                playerHit: true,
+                shotDirection: projectile.direction.clone(),
             });
             return;
         }
@@ -1808,6 +1868,7 @@ export function createRoofWeaponSystem({
                 destroyed: false,
                 position: projectile.impactPoint,
                 distanceMeters: impactDistanceMeters,
+                shotDirection: projectile.direction.clone(),
             });
             return;
         }
@@ -1819,6 +1880,7 @@ export function createRoofWeaponSystem({
                 destroyed: false,
                 position: projectile.impactPoint,
                 distanceMeters: impactDistanceMeters,
+                shotDirection: projectile.direction.clone(),
             });
             return;
         }
@@ -1845,6 +1907,7 @@ export function createRoofWeaponSystem({
             destroyed: Boolean(hitResult?.destroyed),
             position: projectile.impactPoint,
             distanceMeters: impactDistanceMeters,
+            shotDirection: projectile.direction.clone(),
         });
         if (!hitResult?.destroyed) {
             return;

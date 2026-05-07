@@ -19,6 +19,7 @@ const VEHICLE_COLLISION_CULL_DISTANCE = 52;
 const VEHICLE_COLLISION_CULL_DISTANCE_SQ =
     VEHICLE_COLLISION_CULL_DISTANCE * VEHICLE_COLLISION_CULL_DISTANCE;
 const BOT_STATUS_UPDATE_INTERVAL_SEC = 1 / 12;
+const WORLD_MAP_SCENE_RENDER_INTERVAL_SEC = 0.24;
 const RENDER_STALL_GUARD_EVENT_COOLDOWN_MS = 900;
 const PRE_RENDER_LOAD_SHED_EVENT_COOLDOWN_MS = 900;
 const PRE_RENDER_LOAD_SHED_SCORE_THRESHOLD = 4.6;
@@ -236,6 +237,7 @@ export function createGameLoopController(options = {}) {
     let lastRenderStallGuardEventAtMs = -Number.POSITIVE_INFINITY;
     let lastPreRenderLoadShedEventAtMs = -Number.POSITIVE_INFINITY;
     let frameSequence = 0;
+    let worldMapSceneRenderAccumulatorSec = 0;
 
     return {
         start() {
@@ -398,6 +400,7 @@ export function createGameLoopController(options = {}) {
         const isWelcomeVisible = readWelcomeModalVisible();
         const worldMapDriveLockMode = readWorldMapDriveLockMode();
         const worldMapOpen = readWorldMapOpen();
+        const renderWorldSceneThisFrame = shouldRenderWorldSceneThisFrame(worldMapOpen, frameDelta);
         const gamePaused = readGamePaused();
         let chargingHudEnabled = false;
         let chargingHudActive = false;
@@ -666,7 +669,6 @@ export function createGameLoopController(options = {}) {
                         !readCarDestroyed() &&
                         !gamePaused &&
                         !isEditModeActive &&
-                        !worldMapOpen &&
                         !readPickupRoundFinished() &&
                         !isInsideUfoDiskoStoreWorld(
                             car.position.x,
@@ -825,8 +827,7 @@ export function createGameLoopController(options = {}) {
                     !isEditModeActive &&
                     !raceIntroController.isActive() &&
                     !readCarDestroyed() &&
-                    !readPickupRoundFinished() &&
-                    !worldMapOpen,
+                    !readPickupRoundFinished(),
                 welcomeVisible: isWelcomeVisible,
                 paused: gamePaused,
                 editModeActive: isEditModeActive,
@@ -885,10 +886,12 @@ export function createGameLoopController(options = {}) {
             crashCollisionTriggered: frameCrashCollisionTriggered,
             vehicleContactsCount: frameVehicleContactsCount,
         });
-        updateSunLightPosition();
-        measureStage('render', () => {
-            renderer.render(scene, camera);
-        });
+        if (renderWorldSceneThisFrame) {
+            updateSunLightPosition();
+            measureStage('render', () => {
+                renderer.render(scene, camera);
+            });
+        }
         maybeApplyRenderStallGuard({
             frameStartMs,
             renderStageMs: stageDurations.render,
@@ -914,7 +917,22 @@ export function createGameLoopController(options = {}) {
             botCollectorCount: frameBotCollectorCount,
             mineCollisionEnabled,
             chargingActive: chargingHudActive,
+            worldSceneRendered: renderWorldSceneThisFrame,
         });
+    }
+
+    function shouldRenderWorldSceneThisFrame(worldMapOpen = false, frameDelta = 0) {
+        if (!worldMapOpen) {
+            worldMapSceneRenderAccumulatorSec = 0;
+            return true;
+        }
+
+        worldMapSceneRenderAccumulatorSec += Math.max(0, Number(frameDelta) || 0);
+        if (worldMapSceneRenderAccumulatorSec < WORLD_MAP_SCENE_RENDER_INTERVAL_SEC) {
+            return false;
+        }
+        worldMapSceneRenderAccumulatorSec = 0;
+        return true;
     }
 
     function maybeApplyPreRenderLoadShed({

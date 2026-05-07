@@ -696,48 +696,93 @@ canvas#gameCanvas {
 
 #miniMapHud {
     position: fixed;
-    left: 18px;
-    bottom: 18px;
+    left: 22px;
+    bottom: 22px;
     z-index: 6;
-    width: min(258px, calc(100vw - 34px));
-    border: 1px solid rgba(157, 210, 255, 0.52);
-    border-radius: 14px;
-    padding: 9px;
-    background: linear-gradient(166deg, rgba(9, 20, 36, 0.94), rgba(6, 13, 24, 0.92));
+    width: min(304px, calc(100vw - 40px));
+    overflow: hidden;
+    border: 1px solid rgba(173, 223, 255, 0.22);
+    border-radius: 24px;
+    padding: 12px;
+    background:
+        linear-gradient(180deg, rgba(12, 22, 30, 0.88), rgba(5, 11, 18, 0.9)),
+        radial-gradient(circle at 18% 18%, rgba(111, 211, 255, 0.18), rgba(0, 0, 0, 0) 36%),
+        radial-gradient(circle at 82% 78%, rgba(92, 255, 233, 0.12), rgba(0, 0, 0, 0) 34%);
     box-shadow:
-        0 16px 38px rgba(0, 0, 0, 0.42),
-        inset 0 0 0 1px rgba(220, 240, 255, 0.06);
-    backdrop-filter: blur(6px);
+        0 24px 48px rgba(0, 0, 0, 0.42),
+        0 0 36px rgba(74, 211, 255, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(14px) saturate(1.08);
+}
+
+#miniMapHud::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: inherit;
+    background:
+        linear-gradient(180deg, rgba(206, 244, 255, 0.06), rgba(206, 244, 255, 0)),
+        repeating-linear-gradient(
+            180deg,
+            rgba(173, 233, 255, 0.045) 0,
+            rgba(173, 233, 255, 0.045) 1px,
+            transparent 1px,
+            transparent 6px
+        );
+    opacity: 0.78;
+    pointer-events: none;
+}
+
+#miniMapHud::after {
+    content: '';
+    position: absolute;
+    inset: 11px;
+    border-radius: 18px;
+    border: 1px solid rgba(165, 233, 255, 0.12);
+    box-shadow:
+        inset 0 0 26px rgba(95, 215, 255, 0.05),
+        0 0 18px rgba(95, 215, 255, 0.08);
+    pointer-events: none;
 }
 
 #miniMapCanvas {
+    position: relative;
+    z-index: 1;
     width: 100%;
     aspect-ratio: 1;
     display: block;
-    border-radius: 10px;
-    border: 1px solid rgba(145, 198, 239, 0.44);
-    background: radial-gradient(circle at 50% 50%, rgba(30, 48, 70, 0.34), rgba(10, 17, 29, 0.9));
+    border-radius: 18px;
+    border: 1px solid rgba(196, 231, 255, 0.14);
+    background:
+        radial-gradient(circle at 50% 42%, rgba(54, 112, 146, 0.26), rgba(8, 14, 22, 0.95)),
+        linear-gradient(180deg, rgba(8, 16, 24, 0.96), rgba(3, 9, 15, 0.98));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -24px 48px rgba(0, 0, 0, 0.34),
+        0 0 22px rgba(82, 217, 255, 0.06);
 }
 
 .miniMapMeta {
-    margin-top: 8px;
+    position: relative;
+    z-index: 1;
+    margin-top: 10px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
     font-size: 10px;
-    letter-spacing: 0.9px;
+    letter-spacing: 1.2px;
     text-transform: uppercase;
-    color: rgba(192, 224, 247, 0.92);
+    color: rgba(188, 217, 238, 0.88);
     font-weight: 700;
 }
 
 #miniMapModeLabel {
-    color: rgba(226, 245, 255, 0.98);
+    color: rgba(243, 249, 255, 0.98);
 }
 
 #miniMapRangeLabel {
-    color: rgba(173, 222, 255, 0.94);
+    color: rgba(140, 225, 195, 0.92);
 }
 
 #groundLayerDebugPanel {
@@ -1982,193 +2027,43 @@ body.edit-mode-active #speedometerHud {
     position: fixed;
     inset: 0;
     z-index: 10;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: clamp(10px, 1.8vw, 24px);
+    isolation: isolate;
     background:
-        radial-gradient(circle at 22% 20%, rgba(98, 166, 234, 0.16), rgba(4, 8, 14, 0) 34%),
-        radial-gradient(circle at 78% 80%, rgba(112, 218, 196, 0.12), rgba(4, 8, 14, 0) 36%),
-        rgba(3, 7, 13, 0.82);
-    backdrop-filter: blur(4px);
+        radial-gradient(circle at 50% 50%, rgba(18, 36, 49, 0.22), rgba(3, 8, 13, 0.54) 72%),
+        linear-gradient(180deg, rgba(3, 8, 13, 0.42), rgba(3, 8, 13, 0.58));
+    pointer-events: none;
 }
 
 #worldMapOverlay[hidden] {
     display: none;
 }
 
-.worldMapShell {
-    --world-map-shell-side: min(1320px, calc(100vw - 22px), calc(100vh - 22px));
-    width: var(--world-map-shell-side);
-    height: var(--world-map-shell-side);
-    border: 1px solid rgba(164, 216, 255, 0.48);
-    border-radius: 16px;
-    background: linear-gradient(164deg, rgba(8, 17, 30, 0.95), rgba(5, 12, 22, 0.95));
-    box-shadow:
-        0 28px 90px rgba(0, 0, 0, 0.56),
-        inset 0 0 0 1px rgba(224, 243, 255, 0.06);
-    display: grid;
-    grid-template-rows: auto 1fr;
-    overflow: hidden;
-}
-
-.worldMapHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px 14px;
-    border-bottom: 1px solid rgba(142, 196, 240, 0.26);
-    background: linear-gradient(180deg, rgba(14, 29, 49, 0.84), rgba(9, 18, 31, 0.7));
-}
-
-.worldMapTitleWrap {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.worldMapKicker {
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: rgba(165, 207, 239, 0.9);
-    font-weight: 700;
-}
-
-.worldMapTitle {
-    font-family: 'Orbitron', sans-serif;
-    font-size: 16px;
-    letter-spacing: 1px;
-    font-weight: 800;
-    color: rgba(231, 247, 255, 0.98);
-}
-
-.worldMapHeaderActions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.worldMapBtn {
-    border: 1px solid rgba(150, 206, 251, 0.56);
-    border-radius: 9px;
-    padding: 8px 10px;
-    background: rgba(18, 40, 66, 0.74);
-    color: rgba(232, 247, 255, 0.97);
-    font-family: 'Sora', sans-serif;
-    font-size: 11px;
-    letter-spacing: 0.7px;
-    font-weight: 700;
-    cursor: pointer;
-    transition:
-        transform 120ms ease,
-        filter 120ms ease;
-}
-
-.worldMapBtn:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.08);
-}
-
-.worldMapBtn:active {
-    transform: translateY(0);
-    filter: brightness(0.95);
-}
-
-.worldMapBtn.close {
-    border-color: rgba(255, 169, 169, 0.64);
-    background: rgba(88, 35, 43, 0.72);
-    color: rgba(255, 232, 232, 0.97);
-}
-
-.worldMapBody {
-    min-height: 0;
-    display: grid;
-    grid-template-columns: 1fr 272px;
+#worldMapOverlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        radial-gradient(circle at 50% 48%, rgba(106, 220, 255, 0.08), rgba(106, 220, 255, 0) 34%),
+        repeating-linear-gradient(
+            180deg,
+            rgba(169, 235, 255, 0.028) 0,
+            rgba(169, 235, 255, 0.028) 1px,
+            transparent 1px,
+            transparent 7px
+        );
+    opacity: 0.9;
+    pointer-events: none;
 }
 
 #worldMapCanvas {
-    width: 100%;
-    height: 100%;
+    position: relative;
+    z-index: 1;
+    width: 100vw;
+    height: 100vh;
     display: block;
     cursor: crosshair;
-    background:
-        radial-gradient(circle at 50% 50%, rgba(16, 33, 53, 0.6), rgba(9, 17, 30, 0.92)),
-        linear-gradient(180deg, rgba(9, 19, 33, 0.98), rgba(5, 12, 21, 0.98));
-}
-
-.worldMapSidebar {
-    border-left: 1px solid rgba(142, 196, 240, 0.22);
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-    overflow: auto;
-    background: linear-gradient(180deg, rgba(11, 23, 39, 0.92), rgba(7, 14, 25, 0.92));
-}
-
-.worldMapSectionTitle {
-    margin-top: 4px;
-    margin-bottom: 2px;
-    font-size: 10px;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: rgba(167, 208, 237, 0.94);
-    font-weight: 700;
-}
-
-.worldMapSectionTitle.compact {
-    margin-top: 10px;
-}
-
-.worldMapFilterRow {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: rgba(224, 243, 255, 0.94);
-    font-weight: 600;
-    user-select: none;
-}
-
-.worldMapFilterRow input {
-    margin: 0;
-}
-
-.worldMapLegend {
-    min-height: 58px;
-    border: 1px solid rgba(133, 187, 231, 0.28);
-    border-radius: 9px;
-    padding: 8px;
-    background: rgba(10, 24, 40, 0.62);
-    color: rgba(206, 233, 251, 0.94);
-    font-size: 11px;
-    line-height: 1.45;
-    white-space: pre-line;
-}
-
-.worldMapCoordReadout {
-    border: 1px solid rgba(133, 187, 231, 0.28);
-    border-radius: 9px;
-    padding: 7px 8px;
-    background: rgba(10, 24, 40, 0.62);
-    color: rgba(183, 223, 249, 0.92);
-    font-size: 11px;
-    font-family: 'Orbitron', sans-serif;
-    letter-spacing: 0.6px;
-}
-
-.worldMapHint {
-    margin-top: 2px;
-    border: 1px solid rgba(133, 187, 231, 0.24);
-    border-radius: 9px;
-    padding: 8px;
-    background: rgba(10, 24, 40, 0.52);
-    color: rgba(173, 214, 243, 0.9);
-    font-size: 11px;
-    line-height: 1.4;
+    background: transparent;
+    pointer-events: auto;
 }
 
 body.world-map-open #botPanel,
@@ -4632,67 +4527,6 @@ body.race-intro-active #botPanel {
 
     .leaderboardBtn {
         font-size: 16px;
-    }
-}
-
-@media (max-width: 980px) {
-    .worldMapShell {
-        --world-map-shell-side: min(calc(100vw - 14px), calc(100vh - 14px));
-        width: var(--world-map-shell-side);
-        height: var(--world-map-shell-side);
-        border-radius: 12px;
-    }
-
-    .worldMapBody {
-        grid-template-columns: 1fr 242px;
-    }
-}
-
-@media (max-width: 720px) {
-    .worldMapShell {
-        width: 100vw;
-        height: 100vh;
-        border-radius: 0;
-        border-left: 0;
-        border-right: 0;
-    }
-
-    .worldMapHeader {
-        padding: 10px;
-        flex-direction: column;
-        align-items: stretch;
-    }
-
-    .worldMapHeaderActions {
-        width: 100%;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
-    }
-
-    .worldMapBtn {
-        padding: 8px 6px;
-        font-size: 10px;
-    }
-
-    .worldMapBody {
-        grid-template-columns: 1fr;
-        grid-template-rows: 1fr auto;
-    }
-
-    #worldMapCanvas {
-        min-height: 46vh;
-    }
-
-    .worldMapSidebar {
-        border-left: 0;
-        border-top: 1px solid rgba(142, 196, 240, 0.22);
-        max-height: 42vh;
-        padding: 10px;
-    }
-
-    .worldMapHint {
-        font-size: 10px;
     }
 }
 
