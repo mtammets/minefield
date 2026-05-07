@@ -94,6 +94,7 @@ const LORIEN_VELMORE_GALLERY_VIDEO_PLAYBACK_DELAY_MS = 2000;
 const LORIEN_DOOR_GLASS_BREAK_DISTANCE = 2.25;
 const LORIEN_DOOR_GLASS_BREAK_DISTANCE_SQ =
     LORIEN_DOOR_GLASS_BREAK_DISTANCE * LORIEN_DOOR_GLASS_BREAK_DISTANCE;
+const LORIEN_DOOR_GLASS_SHATTER_HIT_COUNT = 3;
 const LORIEN_DOOR_PANEL_DEPTH = 0.08;
 const LORIEN_ROOF_LIFT_ENTRY_DOOR_OPEN_SPEED = 3.2;
 const LORIEN_ROOF_LIFT_ENTRY_DOOR_CLOSE_SPEED = 4.6;
@@ -379,6 +380,133 @@ export function applyLorienVelmoreMineDetonation(buildingLayer, detonationPositi
     return affectedAnyDoor;
 }
 
+export function applyLorienVelmoreDoorWeaponImpact(buildingLayer, impactPosition) {
+    if (!impactPosition || typeof impactPosition !== 'object') {
+        return null;
+    }
+
+    const hitMatch = resolveLorienVelmoreDoorGlassHit(buildingLayer, impactPosition);
+    if (!hitMatch) {
+        return null;
+    }
+
+    const { doorSystem, panelState } = hitMatch;
+    panelState.damageHits = Math.max(0, Number(panelState.damageHits) || 0) + 1;
+    addLorienDoorCrackMark(doorSystem, panelState, impactPosition);
+    if (panelState.damageHits >= LORIEN_DOOR_GLASS_SHATTER_HIT_COUNT) {
+        setLorienVelmoreDoorPanelBroken(doorSystem, panelState, true);
+    } else {
+        syncLorienVelmoreDoorPanelVisualState(panelState, Number(doorSystem?.openAmount) || 0);
+    }
+
+    return {
+        doorSystem,
+        panelState,
+        broken: Boolean(panelState.broken),
+        damageHits: panelState.damageHits,
+    };
+}
+
+export function resolveStoreInteriorAttackDirective(
+    buildingLayer,
+    playerPosition,
+    attackerPosition = null,
+    options = {}
+) {
+    const resolvedPlayerX = Number(playerPosition?.x);
+    const resolvedPlayerY = Number(playerPosition?.y);
+    const resolvedPlayerZ = Number(playerPosition?.z);
+    if (
+        !Number.isFinite(resolvedPlayerX) ||
+        !Number.isFinite(resolvedPlayerY) ||
+        !Number.isFinite(resolvedPlayerZ)
+    ) {
+        return null;
+    }
+
+    const storeType = isInsideUfoDiskoStoreWorld(
+        resolvedPlayerX,
+        resolvedPlayerY,
+        resolvedPlayerZ,
+        0.18
+    )
+        ? 'ufoDiskoStore'
+        : isInsideLorienVelmoreGalleryWorld(
+              resolvedPlayerX,
+              resolvedPlayerY,
+              resolvedPlayerZ,
+              0.18
+          )
+          ? 'lorienVelmoreGallery'
+          : null;
+    if (!storeType) {
+        return null;
+    }
+
+    const standoffDistance = THREE.MathUtils.clamp(
+        Number(options?.standoffDistance) || 16,
+        8,
+        28
+    );
+    const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
+    if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
+        return null;
+    }
+
+    const referenceX = Number.isFinite(attackerPosition?.x) ? Number(attackerPosition.x) : resolvedPlayerX;
+    const referenceZ = Number.isFinite(attackerPosition?.z) ? Number(attackerPosition.z) : resolvedPlayerZ;
+    let bestDirective = null;
+    for (let index = 0; index < doorSystems.length; index += 1) {
+        const doorSystem = doorSystems[index];
+        if (!isDoorSystemRelevantForStoreAttack(doorSystem, storeType)) {
+            continue;
+        }
+
+        const aimPoint = resolveDoorSystemAttackAimPoint(doorSystem, playerPosition);
+        const driveTarget = resolveDoorSystemOutsideDriveTarget(
+            doorSystem,
+            aimPoint || playerPosition,
+            standoffDistance
+        );
+        if (!driveTarget) {
+            continue;
+        }
+
+        const distanceSq =
+            (driveTarget.x - referenceX) * (driveTarget.x - referenceX) +
+            (driveTarget.z - referenceZ) * (driveTarget.z - referenceZ);
+        const hasBreakableGlass = doorSystemHasBreakableGlass(doorSystem);
+        if (
+            !bestDirective ||
+            distanceSq < bestDirective.distanceSq - 0.001 ||
+            (Math.abs(distanceSq - bestDirective.distanceSq) <= 0.001 &&
+                hasBreakableGlass &&
+                !bestDirective.hasBreakableGlass)
+        ) {
+            bestDirective = {
+                storeType,
+                doorSystem,
+                aimPoint,
+                driveTarget,
+                hasBreakableGlass,
+                distanceSq,
+            };
+        }
+    }
+
+    if (!bestDirective) {
+        return null;
+    }
+
+    return {
+        storeType: bestDirective.storeType,
+        doorSystem: bestDirective.doorSystem,
+        aimPoint: bestDirective.aimPoint,
+        driveTarget: bestDirective.driveTarget,
+        hasBreakableGlass: bestDirective.hasBreakableGlass,
+    };
+}
+
 function appendLorienVelmoreDoorObstacles(
     buildingLayer,
     outputBuffer = [],
@@ -401,12 +529,12 @@ function appendLorienVelmoreDoorObstacles(
                 (Number(doorSystem.panelDepth) || LORIEN_DOOR_PANEL_DEPTH) * 0.5 + 0.05
             );
             for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
-                const panelState = panels[panelIndex];
-                const panelGroup = panelState?.group;
-                const panelWidth = Math.max(0.2, Number(panelState?.width) || 0);
-                if (!panelGroup || !Number.isFinite(panelWidth)) {
-                    continue;
-                }
+            const panelState = panels[panelIndex];
+            const panelGroup = panelState?.group;
+            const panelWidth = Math.max(0.2, Number(panelState?.width) || 0);
+            if (!panelGroup || !Number.isFinite(panelWidth) || panelState?.broken) {
+                continue;
+            }
 
                 const panelCenterX =
                     (Number(doorSystem.centerX) || 0) + (panelGroup.position.x || 0);
@@ -822,17 +950,26 @@ function syncLorienVelmoreDoorPanelVisualState(panelState, openAmount = 0) {
     }
 
     const broken = Boolean(panelState.broken);
+    const damageHits = Math.max(0, Number(panelState.damageHits) || 0);
+    const cracked = broken || damageHits > 0;
+    const damageRatio = broken
+        ? 1
+        : THREE.MathUtils.clamp(
+              damageHits / Math.max(1, LORIEN_DOOR_GLASS_SHATTER_HIT_COUNT - 1),
+              0,
+              1
+          );
     if (panelState.glassMaterial) {
-        panelState.glassMaterial.opacity = broken ? 0.34 : 0.24;
-        panelState.glassMaterial.emissiveIntensity = broken ? 0.04 : 0.06;
-        panelState.glassMaterial.roughness = broken ? 0.18 : 0.08;
-        panelState.glassMaterial.metalness = broken ? 0.04 : 0.1;
-        panelState.glassMaterial.color.setHex(broken ? 0xecf4fb : 0xf8fbff);
+        panelState.glassMaterial.opacity = broken ? 0.34 : lerp(0.24, 0.29, damageRatio);
+        panelState.glassMaterial.emissiveIntensity = lerp(0.06, 0.04, damageRatio);
+        panelState.glassMaterial.roughness = lerp(0.08, 0.18, damageRatio);
+        panelState.glassMaterial.metalness = lerp(0.1, 0.04, damageRatio);
+        panelState.glassMaterial.color.setHex(broken ? 0xecf4fb : damageRatio > 0 ? 0xf1f7ff : 0xf8fbff);
     }
     if (panelState.glowMaterial) {
         panelState.glowMaterial.opacity = broken
             ? 0.14 + openAmount * 0.05
-            : 0.22 + openAmount * 0.14;
+            : lerp(0.22, 0.16, damageRatio) + openAmount * lerp(0.14, 0.08, damageRatio);
     }
     if (Array.isArray(panelState.crackMarks)) {
         for (let index = 0; index < panelState.crackMarks.length; index += 1) {
@@ -841,12 +978,14 @@ function syncLorienVelmoreDoorPanelVisualState(panelState, openAmount = 0) {
                 continue;
             }
             if (crackEntry.material) {
-                crackEntry.material.opacity = broken ? crackEntry.baseOpacity || 0.92 : 0;
+                crackEntry.material.opacity = cracked
+                    ? (crackEntry.baseOpacity || 0.92) * (broken ? 1 : lerp(0.46, 0.7, damageRatio))
+                    : 0;
             }
             if (Array.isArray(crackEntry.meshes)) {
                 crackEntry.meshes.forEach((mesh) => {
                     if (mesh) {
-                        mesh.visible = broken;
+                        mesh.visible = cracked;
                     }
                 });
             }
@@ -859,12 +998,203 @@ function setLorienVelmoreDoorPanelBroken(doorSystem, panelState, broken = true) 
         return;
     }
     panelState.broken = Boolean(broken);
+    if (panelState.broken) {
+        panelState.damageHits = Math.max(
+            LORIEN_DOOR_GLASS_SHATTER_HIT_COUNT,
+            Number(panelState.damageHits) || 0
+        );
+    }
     syncLorienVelmoreDoorPanelVisualState(panelState, Number(doorSystem?.openAmount) || 0);
     if (doorSystem) {
         doorSystem.glassBroken = Array.isArray(doorSystem.panels)
             ? doorSystem.panels.some((entry) => Boolean(entry?.broken))
             : panelState.broken;
     }
+}
+
+function resolveLorienVelmoreDoorGlassHit(buildingLayer, impactPosition) {
+    const doorSystems = buildingLayer?.userData?.lorienVelmoreDoorSystems;
+    if (!Array.isArray(doorSystems) || doorSystems.length === 0) {
+        return null;
+    }
+
+    let bestMatch = null;
+    for (let doorIndex = 0; doorIndex < doorSystems.length; doorIndex += 1) {
+        const doorSystem = doorSystems[doorIndex];
+        const panels = doorSystem?.panels;
+        if (!Array.isArray(panels) || panels.length === 0) {
+            continue;
+        }
+
+        for (let panelIndex = 0; panelIndex < panels.length; panelIndex += 1) {
+            const panelState = panels[panelIndex];
+            const glassHit = measureLorienDoorGlassHit(impactPosition, doorSystem, panelState);
+            if (!glassHit) {
+                continue;
+            }
+            if (!bestMatch || glassHit.score < bestMatch.score) {
+                bestMatch = {
+                    doorSystem,
+                    panelState,
+                    score: glassHit.score,
+                };
+            }
+        }
+    }
+
+    return bestMatch;
+}
+
+function measureLorienDoorGlassHit(impactPosition, doorSystem, panelState) {
+    if (!impactPosition || !doorSystem || !panelState?.group) {
+        return null;
+    }
+
+    const panelCenterX = (Number(doorSystem.centerX) || 0) + (panelState.group.position.x || 0);
+    const panelCenterZ = (Number(doorSystem.centerZ) || 0) + (panelState.group.position.z || 0);
+    const localY = (Number(impactPosition.y) || 0) - (Number(doorSystem.doorBaseY) || 0);
+    const glassWidth = Math.max(0.2, Number(panelState.glassWidth) || Number(panelState.width) || 0);
+    const glassHeight = Math.max(
+        0.2,
+        Number(panelState.glassHeight) || Number(panelState.height) || 0
+    );
+    const glassHalfWidth = glassWidth * 0.5;
+    const glassCenterY = Math.max(0.2, Number(panelState.height) || glassHeight) * 0.5;
+    const glassHalfHeight = glassHeight * 0.5;
+    const slideAxis = doorSystem.panelSlideAxis === 'z' ? 'z' : 'x';
+    const crossOffset =
+        slideAxis === 'x'
+            ? (Number(impactPosition.x) || 0) - panelCenterX
+            : (Number(impactPosition.z) || 0) - panelCenterZ;
+    const depthOffset =
+        slideAxis === 'x'
+            ? (Number(impactPosition.z) || 0) - panelCenterZ
+            : (Number(impactPosition.x) || 0) - panelCenterX;
+    const yOffset = localY - glassCenterY;
+    const widthOverflow = Math.max(0, Math.abs(crossOffset) - glassHalfWidth);
+    const heightOverflow = Math.max(0, Math.abs(yOffset) - glassHalfHeight);
+    const depthAbs = Math.abs(depthOffset);
+    if (widthOverflow > 0.08 || heightOverflow > 0.12 || depthAbs > 0.12) {
+        return null;
+    }
+
+    return {
+        score: depthAbs * 4 + widthOverflow * 10 + heightOverflow * 10,
+    };
+}
+
+function isDoorSystemRelevantForStoreAttack(doorSystem, storeType) {
+    if (!doorSystem || !storeType) {
+        return false;
+    }
+    if (storeType === 'ufoDiskoStore') {
+        return doorSystem.environmentAudioZone === 'ufoDiskoStore';
+    }
+    return doorSystem.affectsLorienGallerySilence !== false;
+}
+
+function doorSystemHasBreakableGlass(doorSystem) {
+    if (!Array.isArray(doorSystem?.panels) || doorSystem.panels.length === 0) {
+        return false;
+    }
+    return doorSystem.panels.some((panelState) => panelState && !panelState.broken);
+}
+
+function resolveDoorSystemAttackAimPoint(doorSystem, playerPosition) {
+    if (!doorSystem) {
+        return null;
+    }
+
+    const panels = Array.isArray(doorSystem.panels) ? doorSystem.panels.filter(Boolean) : [];
+    const intactPanels = panels.filter((panelState) => !panelState?.broken);
+    const candidatePanels = intactPanels.length > 0 ? intactPanels : panels;
+    const baseY = Number(doorSystem.doorBaseY) || 0;
+    const doorHeight = Math.max(0.8, Number(doorSystem.doorHeight) || 0);
+    const centerY = baseY + Math.min(doorHeight - 0.72, Math.max(1.28, doorHeight * 0.48));
+    const playerWorldX = Number(playerPosition?.x) || Number(doorSystem.centerX) || 0;
+    const playerWorldZ = Number(playerPosition?.z) || Number(doorSystem.centerZ) || 0;
+    if (candidatePanels.length === 0) {
+        return {
+            x: Number(doorSystem.centerX) || 0,
+            y: centerY,
+            z: Number(doorSystem.centerZ) || 0,
+        };
+    }
+
+    const slideAxis = doorSystem.panelSlideAxis === 'z' ? 'z' : 'x';
+    let bestPanelState = candidatePanels[0];
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < candidatePanels.length; index += 1) {
+        const panelState = candidatePanels[index];
+        const panelCenterCross =
+            slideAxis === 'x'
+                ? (Number(doorSystem.centerX) || 0) + (panelState?.group?.position?.x || 0)
+                : (Number(doorSystem.centerZ) || 0) + (panelState?.group?.position?.z || 0);
+        const playerCross = slideAxis === 'x' ? playerWorldX : playerWorldZ;
+        const score = Math.abs(playerCross - panelCenterCross);
+        if (score < bestScore) {
+            bestScore = score;
+            bestPanelState = panelState;
+        }
+    }
+
+    const panelCenterX = (Number(doorSystem.centerX) || 0) + (bestPanelState?.group?.position?.x || 0);
+    const panelCenterZ = (Number(doorSystem.centerZ) || 0) + (bestPanelState?.group?.position?.z || 0);
+    const glassHalfWidth = Math.max(
+        0.24,
+        (Number(bestPanelState?.glassWidth) || Number(bestPanelState?.width) || 0.8) * 0.5 - 0.06
+    );
+    return slideAxis === 'x'
+        ? {
+              x: THREE.MathUtils.clamp(playerWorldX, panelCenterX - glassHalfWidth, panelCenterX + glassHalfWidth),
+              y: centerY,
+              z: panelCenterZ,
+          }
+        : {
+              x: panelCenterX,
+              y: centerY,
+              z: THREE.MathUtils.clamp(playerWorldZ, panelCenterZ - glassHalfWidth, panelCenterZ + glassHalfWidth),
+          };
+}
+
+function resolveDoorSystemOutsideDriveTarget(doorSystem, focusPoint, standoffDistance = 16) {
+    if (!doorSystem) {
+        return null;
+    }
+
+    const approachAxis = doorSystem.approachAxis === 'x' ? 'x' : 'z';
+    const insideDirection = Number(doorSystem.insideDirection) < 0 ? -1 : 1;
+    const doorPlaneCoord = Number.isFinite(doorSystem.doorPlaneCoord)
+        ? doorSystem.doorPlaneCoord
+        : Number(doorSystem.doorPlaneZ) || 0;
+    const crossHalfWidth = Math.max(
+        1.4,
+        Math.min(4.6, (Number(doorSystem.sensorHalfWidth) || 2.4) - 0.8)
+    );
+    const focusWorldX = Number(focusPoint?.x) || Number(doorSystem.centerX) || 0;
+    const focusWorldZ = Number(focusPoint?.z) || Number(doorSystem.centerZ) || 0;
+    const focusCross =
+        approachAxis === 'x'
+            ? THREE.MathUtils.clamp(
+                  focusWorldZ - (Number(doorSystem.centerZ) || 0),
+                  -crossHalfWidth,
+                  crossHalfWidth
+              )
+            : THREE.MathUtils.clamp(
+                  focusWorldX - (Number(doorSystem.centerX) || 0),
+                  -crossHalfWidth,
+                  crossHalfWidth
+              );
+    const outsideApproachCoord = doorPlaneCoord - insideDirection * Math.max(8, standoffDistance);
+    return approachAxis === 'x'
+        ? {
+              x: (Number(doorSystem.centerX) || 0) + outsideApproachCoord,
+              z: (Number(doorSystem.centerZ) || 0) + focusCross,
+          }
+        : {
+              x: (Number(doorSystem.centerX) || 0) + focusCross,
+              z: (Number(doorSystem.centerZ) || 0) + outsideApproachCoord,
+          };
 }
 
 function distanceSqToLorienDoorPanel(position, doorSystem, panelState) {
@@ -919,6 +1249,7 @@ function addLorienDoorScorchMark(doorSystem, panelState, detonationPosition) {
             depthWrite: false,
         })
     );
+    scorchMesh.userData.weaponRaycastDisabled = true;
     scorchMesh.position.set(
         THREE.MathUtils.clamp(localImpactX - localCenterX, -halfWidth, halfWidth),
         THREE.MathUtils.clamp(
@@ -1016,6 +1347,8 @@ function addLorienDoorCrackMark(
         new THREE.PlaneGeometry(crackWidth, crackHeight),
         crackMaterial
     );
+    frontMesh.userData.weaponRaycastDisabled = true;
+    backMesh.userData.weaponRaycastDisabled = true;
     const crackLocalX = variantConfig.fullGlass
         ? glassHalfWidth * variantConfig.centerX
         : THREE.MathUtils.clamp(
@@ -4783,7 +5116,7 @@ function createLorienVelmoreDoorLeaf(
         depth: 0.01,
     });
 
-    leaf.userData.lorienDoorPanelState = {
+    const panelState = {
         group: leaf,
         width,
         height,
@@ -4794,10 +5127,15 @@ function createLorienVelmoreDoorLeaf(
         glowMesh,
         glowMaterial: leafGlowMaterial,
         crackMarks: [],
+        damageHits: 0,
         broken: false,
         scorchMarks: [],
     };
-    syncLorienVelmoreDoorPanelVisualState(leaf.userData.lorienDoorPanelState, 0);
+    leaf.userData.lorienDoorPanelState = panelState;
+    glassMesh.userData.lorienDoorRaycastRole = 'glass';
+    glassMesh.userData.lorienDoorPanelState = panelState;
+    glowMesh.userData.weaponRaycastDisabled = true;
+    syncLorienVelmoreDoorPanelVisualState(panelState, 0);
 
     return leaf;
 }

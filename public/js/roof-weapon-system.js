@@ -1,5 +1,9 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
-import { appendLorienVelmoreDoorTraceObstacles } from './environment/buildings.js';
+import {
+    appendLorienVelmoreDoorTraceObstacles,
+    applyLorienVelmoreDoorWeaponImpact,
+    resolveStoreInteriorAttackDirective,
+} from './environment/buildings.js';
 import { getLorienVelmoreRoofLiftLayout } from './environment/lorien-gallery.js';
 import { UNDERGROUND_PARKING_LAYOUT } from './environment/underground-parking.js';
 
@@ -250,8 +254,7 @@ export function createRoofWeaponSystem({
     function getWeaponTraceObstacles() {
         const baseObstacles = getStaticObstacles?.();
         const staticObstacles = Array.isArray(baseObstacles) ? baseObstacles : [];
-        const cityScenery = scene?.getObjectByName?.('cityScenery') || null;
-        const buildingLayer = cityScenery?.userData?.buildingLayer || null;
+        const buildingLayer = getBuildingLayer();
         const dynamicBarriers = appendLorienVelmoreDoorTraceObstacles(
             buildingLayer,
             lorienDoorTraceObstacleBuffer
@@ -266,6 +269,30 @@ export function createRoofWeaponSystem({
         }
         weaponTraceObstacleBuffer.push(...dynamicBarriers);
         return weaponTraceObstacleBuffer;
+    }
+
+    function getBuildingLayer() {
+        const cityScenery = scene?.getObjectByName?.('cityScenery') || null;
+        return cityScenery?.userData?.buildingLayer || null;
+    }
+
+    function shouldIgnoreSceneRaycastHit(hitObject) {
+        if (!hitObject) {
+            return true;
+        }
+        if (hitObject.visible === false || hitObject.isSprite) {
+            return true;
+        }
+        if (hitObject.userData?.weaponRaycastDisabled === true) {
+            return true;
+        }
+        if (
+            hitObject.userData?.lorienDoorRaycastRole === 'glass' &&
+            hitObject.userData?.lorienDoorPanelState?.broken
+        ) {
+            return true;
+        }
+        return false;
     }
 
     function traceSceneGeometryImpact({ start = null, end = null, ignoreOriginRadius = 0 } = {}) {
@@ -292,7 +319,7 @@ export function createRoofWeaponSystem({
         for (let index = 0; index < weaponSceneIntersections.length; index += 1) {
             const intersection = weaponSceneIntersections[index];
             const hitObject = intersection?.object;
-            if (!hitObject || hitObject.visible === false || hitObject.isSprite) {
+            if (shouldIgnoreSceneRaycastHit(hitObject)) {
                 continue;
             }
 
@@ -1222,6 +1249,14 @@ export function createRoofWeaponSystem({
         hunterMount.muzzleAnchor.getWorldPosition(weaponMuzzleWorldPosition);
         const traceObstacles = getWeaponTraceObstacles();
         const visionOrigin = resolveHunterVisionOrigin(hunterBot, weaponTempVectorD);
+        const storeAttackDirective = resolveStoreInteriorAttackDirective(
+            getBuildingLayer(),
+            car.position,
+            hunterBot?.car?.position,
+            {
+                standoffDistance: BOT_HUNTER_FIRE_RANGE * 0.6,
+            }
+        );
 
         const hunterForward = weaponTempVectorC
             .set(0, 0, -1)
@@ -1247,9 +1282,19 @@ export function createRoofWeaponSystem({
             );
         }
         const sightConfirmed = hunterState.sightHoldSec >= BOT_HUNTER_SIGHT_CONFIRM_SEC;
-        const chosenTargetPoint = hasDirectSight
-            ? visibleTarget.point
-            : resolveHunterIdleTargetPoint(hunterBot, hunterForward, weaponTempVectorD);
+        const useStoreDoorAttack =
+            !hasDirectSight &&
+            Boolean(storeAttackDirective?.hasBreakableGlass) &&
+            storeAttackDirective?.aimPoint;
+        const chosenTargetPoint = useStoreDoorAttack
+            ? weaponTempVectorE.set(
+                  Number(storeAttackDirective.aimPoint.x) || 0,
+                  Number(storeAttackDirective.aimPoint.y) || 0,
+                  Number(storeAttackDirective.aimPoint.z) || 0
+              )
+            : hasDirectSight
+              ? visibleTarget.point
+              : resolveHunterIdleTargetPoint(hunterBot, hunterForward, weaponTempVectorD);
 
         const shotDirection = weaponTempVectorB.subVectors(
             chosenTargetPoint,
@@ -1271,7 +1316,7 @@ export function createRoofWeaponSystem({
         shotDirection.multiplyScalar(1 / distance);
         const forwardDot = shotDirection.dot(hunterForward);
         const shotObstacleImpact =
-            hasDirectSight && sightConfirmed
+            hasDirectSight && sightConfirmed && !useStoreDoorAttack
                 ? traceWeaponEnvironmentImpact({
                       start: weaponMuzzleWorldPosition,
                       end: chosenTargetPoint,
@@ -1283,12 +1328,13 @@ export function createRoofWeaponSystem({
             distance >= BOT_HUNTER_MIN_FIRE_RANGE &&
             distance <= BOT_HUNTER_FIRE_RANGE &&
             forwardDot >= BOT_HUNTER_MIN_FORWARD_DOT;
-        const canFire =
-            hasDirectSight && sightConfirmed && withinFireEnvelope && !shotObstacleImpact;
+        const canFire = useStoreDoorAttack
+            ? withinFireEnvelope
+            : hasDirectSight && sightConfirmed && withinFireEnvelope && !shotObstacleImpact;
 
         return {
             targetPoint: chosenTargetPoint.clone(),
-            locked: hasDirectSight && sightConfirmed,
+            locked: useStoreDoorAttack || (hasDirectSight && sightConfirmed),
             canFire,
             muzzlePosition: weaponMuzzleWorldPosition.clone(),
             shotDirection: shotDirection.clone(),
@@ -1838,6 +1884,7 @@ export function createRoofWeaponSystem({
                 Boolean(projectile.targetKind)
             );
         }
+        applyLorienVelmoreDoorWeaponImpact(getBuildingLayer(), projectile.impactPoint);
         const impactDistanceMeters = Number(projectile.impactPoint.distanceTo?.(car.position)) || 0;
 
         if (projectile.targetKind === 'player') {

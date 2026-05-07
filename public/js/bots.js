@@ -1,5 +1,9 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { createCarRig } from './car.js';
+import { resolveStoreInteriorAttackDirective } from './environment/buildings.js';
+import { constrainPositionToLorienVelmoreRoofLiftDriveBounds } from './environment/lorien-gallery.js';
+import { constrainPositionToUndergroundParkingDriveBounds } from './environment/underground-parking.js';
+import { constrainPositionToUpperDeckDriveBounds } from './environment/upper-deck.js';
 import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
 const DEFAULT_BOT_COUNT = 3;
@@ -189,6 +193,7 @@ const botDebrisTravelScratch = new THREE.Vector3();
 const botDebrisVelocityScratch = new THREE.Vector3();
 const botWeaponTargetCenterScratch = new THREE.Vector3();
 const weaponHitInfoScratch = new THREE.Vector3();
+const botConstraintPreviousPositionScratch = { x: 0, y: 0, z: 0 };
 const forwardObstacleProfileScratch = {
     speedScale: 1,
     threat: 0,
@@ -264,6 +269,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     const collisionSnapshotBuffer = [];
     const collectorDescriptorBuffer = [];
     const hudStateBuffer = [];
+    const getBuildingLayer = () => {
+        const cityScenery = scene?.getObjectByName?.('cityScenery') || null;
+        return cityScenery?.userData?.buildingLayer || null;
+    };
     for (let i = 0; i < Math.max(0, botCount); i += 1) {
         const bot = createBot(
             scene,
@@ -300,6 +309,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!enabled) {
                 return;
             }
+            const buildingLayer = getBuildingLayer();
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
                 if (bot.destroyed) {
@@ -316,6 +326,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     staticObstacles,
                     obstacleQueryGrid,
                     buildingObstacles,
+                    buildingLayer,
                     getGroundHeightAt,
                     cityMapLayout,
                     navigationPlanner
@@ -1349,11 +1360,11 @@ function intersectRaySphere(origin, direction, center, radius, maxDistance = Inf
     return hitDistance;
 }
 
-function resolveBotGroundHeight(x, z, getGroundHeightAt) {
+function resolveBotGroundHeight(x, z, getGroundHeightAt, preferredY = null) {
     if (typeof getGroundHeightAt !== 'function') {
         return BOT_RIDE_HEIGHT;
     }
-    return getGroundHeightAt(x, z) + BOT_RIDE_HEIGHT;
+    return getGroundHeightAt(x, z, preferredY) + BOT_RIDE_HEIGHT;
 }
 
 function resetBot(
@@ -1378,7 +1389,8 @@ function resetBot(
         worldBounds,
         staticObstacles,
         placedBots,
-        cityMapLayout
+        cityMapLayout,
+        getGroundHeightAt
     );
     bot.car.position.x = spawnPosition.x;
     bot.car.position.z = spawnPosition.z;
@@ -1506,7 +1518,8 @@ function createBot(
         worldBounds,
         staticObstacles,
         existingBots,
-        cityMapLayout
+        cityMapLayout,
+        getGroundHeightAt
     );
     carRig.car.position.x = spawnPosition.x;
     carRig.car.position.z = spawnPosition.z;
@@ -1597,6 +1610,7 @@ function updateBotAdaptiveTick(
     staticObstacles,
     obstacleQueryGrid,
     buildingObstacles,
+    buildingLayer,
     getGroundHeightAt,
     cityMapLayout,
     navigationPlanner
@@ -1623,6 +1637,7 @@ function updateBotAdaptiveTick(
             staticObstacles,
             obstacleQueryGrid,
             buildingObstacles,
+            buildingLayer,
             getGroundHeightAt,
             cityMapLayout,
             navigationPlanner
@@ -1651,6 +1666,7 @@ function updateBot(
     staticObstacles,
     obstacleQueryGrid,
     buildingObstacles,
+    buildingLayer,
     getGroundHeightAt,
     cityMapLayout,
     navigationPlanner
@@ -1658,7 +1674,7 @@ function updateBot(
     const damageDynamics = getBotDamageDynamics(bot.damageState);
     const roadFollowingEnabled = hasRoadNetwork(cityMapLayout);
     const hunterDriveTarget = bot.roofWeaponHunter
-        ? resolveRoofWeaponHunterDriveTarget(bot, playerPosition)
+        ? resolveRoofWeaponHunterDriveTarget(bot, playerPosition, buildingLayer)
         : null;
     const targetPickup = hunterDriveTarget
         ? null
@@ -2014,6 +2030,9 @@ function updateBot(
     const totalYawRate = yawRate + yawBias;
     bot.state.yawRate = totalYawRate;
     bot.car.rotation.y += totalYawRate * dt;
+    const previousPositionX = bot.car.position.x;
+    const previousPositionY = bot.car.position.y;
+    const previousPositionZ = bot.car.position.z;
 
     forward2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
     bot.state.velocity.copy(forward2).multiplyScalar(bot.state.speed);
@@ -2026,15 +2045,21 @@ function updateBot(
 
     bot.car.position.x += bot.state.velocity.x * dt;
     bot.car.position.z += bot.state.velocity.y * dt;
+    botConstraintPreviousPositionScratch.x = previousPositionX;
+    botConstraintPreviousPositionScratch.y = previousPositionY;
+    botConstraintPreviousPositionScratch.z = previousPositionZ;
 
     constrainToWorld(bot.car.position, bot.state, worldBounds);
     constrainToObstacles(bot, bot.car.position, bot.state, nearbyObstacles);
     constrainToPlayerVehicle(bot, playerPosition);
+    applySpecialDriveConstraintsForBot(bot.car.position, bot.state, botConstraintPreviousPositionScratch);
     bot.car.position.y = resolveBotGroundHeight(
         bot.car.position.x,
         bot.car.position.z,
-        getGroundHeightAt
+        getGroundHeightAt,
+        bot.car.position.y
     );
+    applySpecialDriveConstraintsForBot(bot.car.position, bot.state, botConstraintPreviousPositionScratch);
 
     bot.updateVisuals(bot.state, dt);
 }
@@ -2090,6 +2115,56 @@ function resolveBotSimulationStep(botPosition, playerPosition) {
         return BOT_SIM_MID_STEP;
     }
     return BOT_SIM_FAR_STEP;
+}
+
+function applySpecialDriveConstraintsForBot(position, state, previousPosition = null) {
+    applyBotUpperDeckConstraintResponse(
+        constrainPositionToUpperDeckDriveBounds(position, previousPosition),
+        state
+    );
+    applyBotLorienRoofLiftConstraintResponse(
+        constrainPositionToLorienVelmoreRoofLiftDriveBounds(position, previousPosition),
+        state
+    );
+    applyBotUndergroundParkingConstraintResponse(
+        constrainPositionToUndergroundParkingDriveBounds(position, previousPosition),
+        state
+    );
+}
+
+function applyBotUpperDeckConstraintResponse(constraintResult, state) {
+    if (!constraintResult || constraintResult.mode !== 'lower_block' || !state) {
+        return;
+    }
+    state.velocity.set(0, 0);
+    state.speed = 0;
+    state.acceleration = 0;
+    state.yawRate *= 0.4;
+}
+
+function applyBotLorienRoofLiftConstraintResponse(constraintResult, state) {
+    if (
+        !constraintResult ||
+        !state ||
+        (constraintResult.mode !== 'lorien_roof_lift_block' &&
+            constraintResult.mode !== 'lorien_roof_lift_platform')
+    ) {
+        return;
+    }
+    state.velocity.multiplyScalar(0.45);
+    state.speed *= 0.45;
+    state.acceleration = 0;
+    state.yawRate *= 0.55;
+}
+
+function applyBotUndergroundParkingConstraintResponse(constraintResult, state) {
+    if (!constraintResult || constraintResult.mode !== 'illegal_entry' || !state) {
+        return;
+    }
+    state.velocity.set(0, 0);
+    state.speed = 0;
+    state.acceleration = 0;
+    state.yawRate *= 0.3;
 }
 
 function applyCollisionImpulseToBot(bot, contact) {
@@ -3094,7 +3169,32 @@ function canUseRoadAlignedDirectApproach(position, target, staticObstacles, city
     return sameHorizontalRoad;
 }
 
-function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots, cityMapLayout) {
+function isValidBotSpawnPosition(x, z, getGroundHeightAt) {
+    const position = {
+        x,
+        y: resolveBotGroundHeight(x, z, getGroundHeightAt),
+        z,
+    };
+    if (constrainPositionToUpperDeckDriveBounds(position, null)) {
+        return false;
+    }
+    if (constrainPositionToLorienVelmoreRoofLiftDriveBounds(position, null)) {
+        return false;
+    }
+    if (constrainPositionToUndergroundParkingDriveBounds(position, null)) {
+        return false;
+    }
+    return true;
+}
+
+function findSpawnPoint(
+    botIndex,
+    worldBounds,
+    staticObstacles,
+    existingBots,
+    cityMapLayout,
+    getGroundHeightAt
+) {
     const areaX = worldBounds.maxX - worldBounds.minX;
     const areaZ = worldBounds.maxZ - worldBounds.minZ;
 
@@ -3119,6 +3219,9 @@ function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots, ci
         if (tooClose) {
             continue;
         }
+        if (!isValidBotSpawnPosition(x, z, getGroundHeightAt)) {
+            continue;
+        }
 
         return {
             x,
@@ -3133,10 +3236,29 @@ function findSpawnPoint(botIndex, worldBounds, staticObstacles, existingBots, ci
         Math.random() * 1000000
     );
     if (fallbackRoadSpawn) {
+        if (isValidBotSpawnPosition(fallbackRoadSpawn.x, fallbackRoadSpawn.z, getGroundHeightAt)) {
+            return {
+                x: fallbackRoadSpawn.x,
+                z: fallbackRoadSpawn.z,
+                rotationY: fallbackRoadSpawn.headingY,
+            };
+        }
+    }
+
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+        const seed = Math.random() * 1000000;
+        const fallbackX = worldBounds.minX + randomUnit(seed + 17) * areaX;
+        const fallbackZ = worldBounds.minZ + randomUnit(seed + 53) * areaZ;
+        if (isInsideObstacle(fallbackX, fallbackZ, staticObstacles, 2.4)) {
+            continue;
+        }
+        if (!isValidBotSpawnPosition(fallbackX, fallbackZ, getGroundHeightAt)) {
+            continue;
+        }
         return {
-            x: fallbackRoadSpawn.x,
-            z: fallbackRoadSpawn.z,
-            rotationY: fallbackRoadSpawn.headingY,
+            x: fallbackX,
+            z: fallbackZ,
+            rotationY: randomUnit(seed + 211) * Math.PI * 2,
         };
     }
 
@@ -3168,11 +3290,24 @@ function pickWanderTarget(worldBounds, cityMapLayout) {
     };
 }
 
-function resolveRoofWeaponHunterDriveTarget(bot, playerPosition) {
+function resolveRoofWeaponHunterDriveTarget(bot, playerPosition, buildingLayer = null) {
     const playerX = Number(playerPosition?.x);
+    const playerY = Number(playerPosition?.y);
     const playerZ = Number(playerPosition?.z);
     if (!Number.isFinite(playerX) || !Number.isFinite(playerZ)) {
         return null;
+    }
+
+    const storeAttackDirective = Number.isFinite(playerY)
+        ? resolveStoreInteriorAttackDirective(buildingLayer, playerPosition, bot?.car?.position, {
+              standoffDistance: BOT_VX9_HUNTER_HOLD_DISTANCE,
+          })
+        : null;
+    if (storeAttackDirective?.driveTarget) {
+        return {
+            x: storeAttackDirective.driveTarget.x,
+            z: storeAttackDirective.driveTarget.z,
+        };
     }
 
     const dx = playerX - bot.car.position.x;
