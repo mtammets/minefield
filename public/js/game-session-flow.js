@@ -18,6 +18,7 @@ const ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT = 2;
 const ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION = 3;
 const VEHICLE_RECOVER_MAX_SPEED_KPH = 18;
 const VEHICLE_RECOVER_COOLDOWN_MS = 3500;
+const DEFAULT_START_CAMERA_VIEW_MODE = 1;
 const SCORE_MODEL_TEXT =
     'Pickup: 100 base x combo x (1 + risk + endgame). Mine kill: 220 base x chain x endgame x anti-farm.';
 
@@ -28,6 +29,7 @@ export function createGameSessionController({
     resolvePlayerSpawnState = null,
     getGroundHeightAt,
     setCameraKeyboardControlsEnabled,
+    setCameraViewMode = () => DEFAULT_START_CAMERA_VIEW_MODE,
     resetCameraTrackingState,
     initializePlayerPhysics,
     getVehicleState = () => ({ speed: 0 }),
@@ -398,6 +400,7 @@ export function createGameSessionController({
         chargingProgressHudController.reset();
         crashDebrisController.resetPlayerDamageState();
         roofWeaponSystem?.setTriggerHeld?.(false);
+        roofWeaponSystem?.grantWeapon?.();
         setPlayerBattery(BATTERY_MAX);
         setPlayerBatteryLevel(getPlayerBattery() / BATTERY_MAX);
         setBatteryDepletedState(false, { showStatus: false });
@@ -840,6 +843,7 @@ export function createGameSessionController({
         raceIntroController.stop();
         carEditModeController.setActive(false);
         setCameraKeyboardControlsEnabled(true);
+        setCameraViewMode(DEFAULT_START_CAMERA_VIEW_MODE);
         setPauseState(false);
         controlsHelpUi?.refreshContext?.();
         clearPendingRoundPresentation();
@@ -900,6 +904,7 @@ export function createGameSessionController({
         initializePlayerPhysics(car);
         setPhysicsAccumulator(0);
         lastVehicleRecoverAt = -Number.POSITIVE_INFINITY;
+        roofWeaponSystem?.grantWeapon?.();
     }
 
     function setSelectedPlayerCarColor(colorHex, options = {}) {

@@ -65,6 +65,11 @@ const BOT_ROAD_APPROACH_SLOW_RADIUS = 18;
 const BOT_ROAD_AVOIDANCE_BLEND = 0.18;
 const BOT_ROAD_TURN_SPEED = 12.5;
 const BOT_ROAD_STRAIGHT_SPEED = 18.5;
+const BOT_STRICT_ROAD_FOLLOWING = true;
+const BOT_STRICT_ROAD_WAYPOINT_REACH = 2.2;
+const BOT_STRICT_ROAD_WAYPOINT_REACH_MAX = 3.3;
+const BOT_STRICT_ROAD_GUIDANCE_LOOKAHEAD_MIN = 4.2;
+const BOT_STRICT_ROAD_GUIDANCE_LOOKAHEAD_MAX = 10.5;
 const BOT_PICKUP_DIRECT_APPROACH_RADIUS = 14;
 const BOT_PICKUP_MAX_ROAD_OFFSET = 7.1;
 const BOT_HUNTER_DIRECT_APPROACH_RADIUS = 18;
@@ -190,6 +195,12 @@ const forwardObstacleProfileScratch = {
     emergencyBrake: false,
     avoidanceX: 0,
     avoidanceZ: 0,
+};
+const roadGuidanceTargetScratch = {
+    x: 0,
+    z: 0,
+    axis: '',
+    coord: 0,
 };
 const navSqrt2 = Math.sqrt(2);
 const NAV_NEIGHBOR_OFFSETS = [
@@ -1702,7 +1713,10 @@ function updateBot(
                   cityMapLayout
               )
             : canDriveDirectToTarget(bot.car.position, baseTarget, staticObstacles));
-    const useRoadPath = roadFollowingEnabled && !BOT_REACTIVE_NAVIGATION_ONLY && !canDirectApproach;
+    const useRoadPath =
+        roadFollowingEnabled &&
+        !BOT_REACTIVE_NAVIGATION_ONLY &&
+        (BOT_STRICT_ROAD_FOLLOWING || !canDirectApproach);
     if (!useRoadPath) {
         bot.roadTarget = null;
         bot.roadPath = null;
@@ -1736,43 +1750,51 @@ function updateBot(
               ? resolveDetourTarget(bot, navTarget, worldBounds, buildingObstacles)
               : null;
     const resolvedTarget = detourTarget || navTarget;
+    const roadGuidanceTarget =
+        resolvedRoadTarget && BOT_STRICT_ROAD_FOLLOWING
+            ? resolveStrictRoadGuidanceTarget(bot, resolvedRoadTarget)
+            : null;
+    const steeringTarget = roadGuidanceTarget || resolvedTarget;
+    const roadLockedPatrol = Boolean(roadGuidanceTarget);
     updateStuckState(bot, resolvedTarget, dt);
 
-    targetDir2.set(resolvedTarget.x - bot.car.position.x, resolvedTarget.z - bot.car.position.z);
+    targetDir2.set(steeringTarget.x - bot.car.position.x, steeringTarget.z - bot.car.position.z);
     if (targetDir2.lengthSq() < 0.001) {
         targetDir2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
     }
     targetDir2.normalize();
 
     avoidance2.set(0, 0);
-    addBoundaryAvoidance(avoidance2, bot.car.position, worldBounds);
-    addObstacleAvoidance(avoidance2, bot.car.position, nearbyObstacles);
-    if (hunterDriveTarget) {
-        addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 5.6, 0.28);
-    } else if (targetPickup) {
-        addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 6.8, 0.38);
-    } else {
-        addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 10.5, 1.35);
-    }
-
-    for (let i = 0; i < allBots.length; i += 1) {
-        const other = allBots[i];
-        if (other === bot || other.destroyed) {
-            continue;
+    if (!roadLockedPatrol) {
+        addBoundaryAvoidance(avoidance2, bot.car.position, worldBounds);
+        addObstacleAvoidance(avoidance2, bot.car.position, nearbyObstacles);
+        if (hunterDriveTarget) {
+            addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 5.6, 0.28);
+        } else if (targetPickup) {
+            addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 6.8, 0.38);
+        } else {
+            addEntityAvoidance(avoidance2, bot.car.position, playerPosition, 10.5, 1.35);
         }
-        addEntityAvoidance(
+
+        for (let i = 0; i < allBots.length; i += 1) {
+            const other = allBots[i];
+            if (other === bot || other.destroyed) {
+                continue;
+            }
+            addEntityAvoidance(
+                avoidance2,
+                bot.car.position,
+                other.car.position,
+                BOT_AVOIDANCE_RADIUS,
+                1.1
+            );
+        }
+
+        targetDir2.addScaledVector(
             avoidance2,
-            bot.car.position,
-            other.car.position,
-            BOT_AVOIDANCE_RADIUS,
-            1.1
+            resolvedRoadTarget ? BOT_ROAD_AVOIDANCE_BLEND : BOT_AVOIDANCE_BLEND
         );
     }
-
-    targetDir2.addScaledVector(
-        avoidance2,
-        resolvedRoadTarget ? BOT_ROAD_AVOIDANCE_BLEND : BOT_AVOIDANCE_BLEND
-    );
     if (targetDir2.lengthSq() < 0.001) {
         targetDir2.set(-Math.sin(bot.car.rotation.y), -Math.cos(bot.car.rotation.y));
     }
@@ -1784,8 +1806,9 @@ function updateBot(
         bot.state.speed
     );
     if (
-        Math.abs(forwardObstacleProfile.avoidanceX) > 0.0001 ||
-        Math.abs(forwardObstacleProfile.avoidanceZ) > 0.0001
+        !roadLockedPatrol &&
+        (Math.abs(forwardObstacleProfile.avoidanceX) > 0.0001 ||
+            Math.abs(forwardObstacleProfile.avoidanceZ) > 0.0001)
     ) {
         targetDir2.x += forwardObstacleProfile.avoidanceX;
         targetDir2.y += forwardObstacleProfile.avoidanceZ;
@@ -3549,26 +3572,28 @@ function resolveRoadTarget(
         }
 
         let bestVisibleIndex = bot.roadPathIndex;
-        const lookaheadEndIndex = Math.min(
-            bot.roadPath.length - 1,
-            bot.roadPathIndex + BOT_ROAD_LOOKAHEAD_STEPS
-        );
-        for (let index = bot.roadPathIndex + 1; index <= lookaheadEndIndex; index += 1) {
-            const candidate = bot.roadPath[index];
-            const blocked = isCorridorBlockedByObstacles(
-                bot.car.position.x,
-                bot.car.position.z,
-                candidate.x,
-                candidate.z,
-                pathBlockingObstacles,
-                BOT_WAYPOINT_LOOKAHEAD_PADDING,
-                bot.car.position?.y,
-                BOT_PATH_CORRIDOR_OFFSETS
+        if (!BOT_STRICT_ROAD_FOLLOWING) {
+            const lookaheadEndIndex = Math.min(
+                bot.roadPath.length - 1,
+                bot.roadPathIndex + BOT_ROAD_LOOKAHEAD_STEPS
             );
-            if (blocked) {
-                break;
+            for (let index = bot.roadPathIndex + 1; index <= lookaheadEndIndex; index += 1) {
+                const candidate = bot.roadPath[index];
+                const blocked = isCorridorBlockedByObstacles(
+                    bot.car.position.x,
+                    bot.car.position.z,
+                    candidate.x,
+                    candidate.z,
+                    pathBlockingObstacles,
+                    BOT_WAYPOINT_LOOKAHEAD_PADDING,
+                    bot.car.position?.y,
+                    BOT_PATH_CORRIDOR_OFFSETS
+                );
+                if (blocked) {
+                    break;
+                }
+                bestVisibleIndex = index;
             }
-            bestVisibleIndex = index;
         }
 
         bot.roadPathIndex = bestVisibleIndex;
@@ -4610,11 +4635,132 @@ function buildAxisPathVariants(start, end, xLines, zLines) {
 
 function getRoadWaypointReachRadius(bot) {
     const speed = Math.abs(Number(bot?.state?.speed) || 0);
+    if (BOT_STRICT_ROAD_FOLLOWING) {
+        return THREE.MathUtils.clamp(
+            BOT_STRICT_ROAD_WAYPOINT_REACH + speed * 0.04,
+            BOT_STRICT_ROAD_WAYPOINT_REACH,
+            BOT_STRICT_ROAD_WAYPOINT_REACH_MAX
+        );
+    }
     return THREE.MathUtils.clamp(
         BOT_ROAD_TARGET_REACH + speed * 0.18,
         BOT_ROAD_TARGET_REACH,
         BOT_ROAD_TARGET_REACH + 4.5
     );
+}
+
+function resolveStrictRoadGuidanceTarget(bot, roadTarget) {
+    if (!BOT_STRICT_ROAD_FOLLOWING || !bot || !roadTarget) {
+        return null;
+    }
+
+    const currentWaypoint = roadTarget;
+    const currentIndex = Math.max(0, Number(bot.roadPathIndex) || 0);
+    const previousWaypoint =
+        Array.isArray(bot.roadPath) && currentIndex > 0 ? bot.roadPath[currentIndex - 1] : null;
+    const nextWaypoint =
+        Array.isArray(bot.roadPath) && currentIndex + 1 < bot.roadPath.length
+            ? bot.roadPath[currentIndex + 1]
+            : null;
+
+    let axis = '';
+    if (
+        previousWaypoint &&
+        Math.abs((previousWaypoint.x || 0) - (currentWaypoint.x || 0)) <= 0.001
+    ) {
+        axis = 'vertical';
+    } else if (
+        previousWaypoint &&
+        Math.abs((previousWaypoint.z || 0) - (currentWaypoint.z || 0)) <= 0.001
+    ) {
+        axis = 'horizontal';
+    } else if (
+        nextWaypoint &&
+        Math.abs((nextWaypoint.x || 0) - (currentWaypoint.x || 0)) <= 0.001
+    ) {
+        axis = 'vertical';
+    } else if (
+        nextWaypoint &&
+        Math.abs((nextWaypoint.z || 0) - (currentWaypoint.z || 0)) <= 0.001
+    ) {
+        axis = 'horizontal';
+    } else {
+        const dx = Math.abs((currentWaypoint.x || 0) - (bot.car.position.x || 0));
+        const dz = Math.abs((currentWaypoint.z || 0) - (bot.car.position.z || 0));
+        axis = dx <= dz ? 'vertical' : 'horizontal';
+    }
+
+    const posX = Number(bot.car.position.x) || 0;
+    const posZ = Number(bot.car.position.z) || 0;
+    const targetX = Number(currentWaypoint.x) || 0;
+    const targetZ = Number(currentWaypoint.z) || 0;
+    const alignedPreviousWaypoint =
+        axis === 'vertical'
+            ? previousWaypoint && Math.abs((previousWaypoint.x || 0) - targetX) <= 0.001
+                ? previousWaypoint
+                : null
+            : previousWaypoint && Math.abs((previousWaypoint.z || 0) - targetZ) <= 0.001
+              ? previousWaypoint
+              : null;
+    const alignedNextWaypoint =
+        axis === 'vertical'
+            ? nextWaypoint && Math.abs((nextWaypoint.x || 0) - targetX) <= 0.001
+                ? nextWaypoint
+                : null
+            : nextWaypoint && Math.abs((nextWaypoint.z || 0) - targetZ) <= 0.001
+              ? nextWaypoint
+              : null;
+    const result = roadGuidanceTargetScratch;
+    result.axis = axis;
+    result.coord = axis === 'vertical' ? targetX : targetZ;
+
+    if (axis === 'vertical') {
+        const referenceZ = alignedPreviousWaypoint
+            ? Number(alignedPreviousWaypoint.z) || posZ
+            : posZ;
+        const travelSign =
+            Math.sign(targetZ - referenceZ) ||
+            Math.sign(targetZ - posZ) ||
+            (alignedNextWaypoint ? Math.sign((Number(alignedNextWaypoint.z) || 0) - targetZ) : 0) ||
+            1;
+        const segmentStartZ = alignedPreviousWaypoint ? referenceZ : posZ;
+        const projectedZ = THREE.MathUtils.clamp(
+            posZ,
+            Math.min(segmentStartZ, targetZ),
+            Math.max(segmentStartZ, targetZ)
+        );
+        const remaining = Math.abs(targetZ - projectedZ);
+        const lookahead = THREE.MathUtils.clamp(
+            remaining * 0.72,
+            BOT_STRICT_ROAD_GUIDANCE_LOOKAHEAD_MIN,
+            BOT_STRICT_ROAD_GUIDANCE_LOOKAHEAD_MAX
+        );
+        result.x = targetX;
+        result.z = remaining <= lookahead ? targetZ : projectedZ + travelSign * lookahead;
+        return result;
+    }
+
+    const referenceX = alignedPreviousWaypoint ? Number(alignedPreviousWaypoint.x) || posX : posX;
+    const travelSign =
+        Math.sign(targetX - referenceX) ||
+        Math.sign(targetX - posX) ||
+        (alignedNextWaypoint ? Math.sign((Number(alignedNextWaypoint.x) || 0) - targetX) : 0) ||
+        1;
+    const segmentStartX = alignedPreviousWaypoint ? referenceX : posX;
+    const projectedX = THREE.MathUtils.clamp(
+        posX,
+        Math.min(segmentStartX, targetX),
+        Math.max(segmentStartX, targetX)
+    );
+    const remaining = Math.abs(targetX - projectedX);
+    const lookahead = THREE.MathUtils.clamp(
+        remaining * 0.72,
+        BOT_STRICT_ROAD_GUIDANCE_LOOKAHEAD_MIN,
+        BOT_STRICT_ROAD_GUIDANCE_LOOKAHEAD_MAX
+    );
+    result.x = remaining <= lookahead ? targetX : projectedX + travelSign * lookahead;
+    result.z = targetZ;
+    return result;
 }
 
 function pickRoadAnchorPoint(worldBounds, cityMapLayout, seed) {

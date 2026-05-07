@@ -1,6 +1,5 @@
 export const INPUT_CONTEXTS = Object.freeze({
     gameplay: 'gameplay',
-    fullMap: 'full_map',
     paused: 'paused',
     welcomeModal: 'welcome_modal',
     editMode: 'edit_mode',
@@ -23,9 +22,6 @@ export function resolveGameplayInputContext({
     if (welcomeVisible) {
         return INPUT_CONTEXTS.welcomeModal;
     }
-    if (mapOpen) {
-        return INPUT_CONTEXTS.fullMap;
-    }
     if (paused) {
         return INPUT_CONTEXTS.paused;
     }
@@ -39,9 +35,7 @@ export function resolveGameplayInputContext({
 }
 
 export function resolveWorldMapDriveLockMode({ gameMode = 'bots', inOnlineRoom = false } = {}) {
-    const mode = gameMode === 'online' ? 'online' : 'bots';
-    if (mode === 'online' && inOnlineRoom) {
-        return WORLD_MAP_DRIVE_LOCK_MODES.autobrake;
-    }
-    return WORLD_MAP_DRIVE_LOCK_MODES.pause;
+    void gameMode;
+    void inOnlineRoom;
+    return WORLD_MAP_DRIVE_LOCK_MODES.none;
 }

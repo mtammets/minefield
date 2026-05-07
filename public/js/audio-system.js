@@ -431,6 +431,45 @@ const MINE_DETONATION_OCCLUSION_MIN_GAIN = 0.38;
 const MINE_DETONATION_OCCLUSION_MIN_RATE = 0.93;
 const MINE_DETONATION_OCCLUSION_MAX_LOWPASS_HZ = 18000;
 const MINE_DETONATION_OCCLUSION_MIN_LOWPASS_HZ = 950;
+const ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG = Object.freeze({
+    refDistance: 7.5,
+    maxDistance: 168,
+    rolloffFactor: 1.28,
+    directGain: 0.94,
+    delaySendGain: 0.2,
+    delayTimeSec: 0.094,
+    delayFeedback: 0.3,
+    reverbSendGain: 0.28,
+    wetGain: 0.24,
+    wetLowpassHz: 5400,
+});
+const ROOF_WEAPON_URBAN_IMPACT_AUDIO_CONFIG = Object.freeze({
+    refDistance: 4.8,
+    maxDistance: 116,
+    rolloffFactor: 1.12,
+    directGain: 0.82,
+    delaySendGain: 0.24,
+    delayTimeSec: 0.122,
+    delayFeedback: 0.34,
+    reverbSendGain: 0.32,
+    wetGain: 0.3,
+    wetLowpassHz: 4600,
+});
+const ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG = Object.freeze({
+    offsetDistance: 1.48,
+    lateralOffset: 0.24,
+    verticalOffset: 0.34,
+    refDistance: 1.1,
+    maxDistance: 8,
+    rolloffFactor: 0.16,
+    directGain: 1,
+    delaySendGain: 0.08,
+    delayTimeSec: 0.052,
+    delayFeedback: 0.2,
+    reverbSendGain: 0.1,
+    wetGain: 0.08,
+    wetLowpassHz: 7200,
+});
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -465,6 +504,7 @@ export function createAudioSystem({ camera = null } = {}) {
     let ufoDiskoMusicInstance = null;
     let ufoDiskoMusicImpulseBuffer = null;
     let roofWeaponNoiseBuffer = null;
+    let roofWeaponUrbanImpulseBuffer = null;
     const monumentRhythmState = {
         active: 0,
         bass: 0,
@@ -1672,13 +1712,22 @@ export function createAudioSystem({ camera = null } = {}) {
         playRoofWeaponPickupSynth();
     }
 
-    function onRoofWeaponShot({ locked = false, heat = 0 } = {}) {
+    function onRoofWeaponShot({
+        locked = false,
+        heat = 0,
+        position = null,
+        direction = null,
+        hostile = false,
+    } = {}) {
         if (!isRealtimeAudioReady()) {
             return;
         }
         playRoofWeaponShotSynth({
             locked,
             heat,
+            position,
+            direction,
+            hostile,
         });
     }
 
@@ -1687,13 +1736,23 @@ export function createAudioSystem({ camera = null } = {}) {
         destroyed = false,
         position = null,
         distanceMeters = 0,
+        playerHit = false,
+        shotDirection = null,
     } = {}) {
         if (!isRealtimeAudioReady()) {
             return;
         }
+        if (playerHit) {
+            playRoofWeaponIncomingCue({
+                shotDirection,
+                impactPosition: position,
+                destroyed,
+            });
+        }
         playRoofWeaponImpactSynth({
             hit,
             destroyed,
+            position,
         });
         if (!destroyed) {
             return;
@@ -1767,7 +1826,13 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
-    function playRoofWeaponShotSynth({ locked = false, heat = 0 } = {}) {
+    function playRoofWeaponShotSynth({
+        locked = false,
+        heat = 0,
+        position = null,
+        direction = null,
+        hostile = false,
+    } = {}) {
         const busNode = mixer?.buses?.effects;
         if (!context || !busNode) {
             return false;
@@ -1782,16 +1847,22 @@ export function createAudioSystem({ camera = null } = {}) {
         const outputGain = context.createGain();
         outputGain.gain.setValueAtTime(0.0001, now);
         outputGain.gain.linearRampToValueAtTime(
-            0.34 + clampNumber(heat, 0, 1, 0) * 0.12,
+            0.34 + clampNumber(heat, 0, 1, 0) * 0.12 + (hostile ? 0.04 : 0),
             now + 0.002
         );
         outputGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
 
         const airFilter = context.createBiquadFilter();
         airFilter.type = 'highpass';
-        airFilter.frequency.setValueAtTime(240, now);
+        airFilter.frequency.setValueAtTime(hostile ? 280 : 240, now);
+        const spatialRoute = createRoofWeaponUrbanRoute({
+            busNode,
+            position,
+            direction,
+            config: ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG,
+        });
         outputGain.connect(airFilter);
-        airFilter.connect(busNode);
+        airFilter.connect(spatialRoute.input);
 
         const subTone = context.createOscillator();
         const subToneGain = context.createGain();
@@ -1856,6 +1927,7 @@ export function createAudioSystem({ camera = null } = {}) {
             safeDisconnect(crackGain);
             safeDisconnect(airFilter);
             safeDisconnect(outputGain);
+            spatialRoute.cleanup();
         });
 
         subTone.onended = cleanup;
@@ -1873,7 +1945,7 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
-    function playRoofWeaponImpactSynth({ hit = false, destroyed = false } = {}) {
+    function playRoofWeaponImpactSynth({ hit = false, destroyed = false, position = null } = {}) {
         const busNode = mixer?.buses?.effects;
         if (!context || !busNode) {
             return false;
@@ -1889,7 +1961,12 @@ export function createAudioSystem({ camera = null } = {}) {
         outputGain.gain.setValueAtTime(0.0001, now);
         outputGain.gain.linearRampToValueAtTime(destroyed ? 0.24 : hit ? 0.18 : 0.11, now + 0.002);
         outputGain.gain.exponentialRampToValueAtTime(0.0001, now + (destroyed ? 0.16 : 0.11));
-        outputGain.connect(busNode);
+        const spatialRoute = createRoofWeaponUrbanRoute({
+            busNode,
+            position,
+            config: ROOF_WEAPON_URBAN_IMPACT_AUDIO_CONFIG,
+        });
+        outputGain.connect(spatialRoute.input);
 
         const ping = context.createOscillator();
         const pingGain = context.createGain();
@@ -1924,6 +2001,7 @@ export function createAudioSystem({ camera = null } = {}) {
             safeDisconnect(debrisFilter);
             safeDisconnect(debrisGain);
             safeDisconnect(outputGain);
+            spatialRoute.cleanup();
         });
 
         ping.onended = cleanup;
@@ -1943,6 +2021,248 @@ export function createAudioSystem({ camera = null } = {}) {
             roofWeaponNoiseBuffer = createShortNoiseBuffer(context, 0.18);
         }
         return roofWeaponNoiseBuffer;
+    }
+
+    function getRoofWeaponUrbanImpulseBuffer() {
+        if (!context) {
+            return null;
+        }
+        if (
+            !roofWeaponUrbanImpulseBuffer ||
+            roofWeaponUrbanImpulseBuffer.sampleRate !== context.sampleRate
+        ) {
+            roofWeaponUrbanImpulseBuffer = createUrbanPlazaImpulseBuffer(context, 2.2, 2.3);
+        }
+        return roofWeaponUrbanImpulseBuffer;
+    }
+
+    function createRoofWeaponUrbanRoute({
+        busNode = null,
+        position = null,
+        direction = null,
+        config = ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG,
+    } = {}) {
+        if (!context || !busNode) {
+            return {
+                input: null,
+                cleanup() {},
+            };
+        }
+
+        const now = context.currentTime;
+        const input = context.createGain();
+        input.gain.setValueAtTime(1, now);
+
+        const occlusion = resolveWorldAudioOcclusion(position);
+        const cleanupNodes = [input];
+        let routeSource = input;
+
+        if (isFiniteVector3Like(position)) {
+            const panner = context.createPanner();
+            panner.panningModel = 'HRTF';
+            panner.distanceModel = 'inverse';
+            panner.refDistance = clampNumber(config?.refDistance, 0.5, 32, 6);
+            panner.maxDistance = clampNumber(config?.maxDistance, 4, 260, 120);
+            panner.rolloffFactor = clampNumber(config?.rolloffFactor, 0, 4, 1.2);
+            panner.coneInnerAngle = 360;
+            panner.coneOuterAngle = 360;
+            panner.coneOuterGain = 1;
+            setPannerPosition(
+                panner,
+                Number(position.x) || 0,
+                Number(position.y) || 0,
+                Number(position.z) || 0,
+                now
+            );
+            if (
+                direction &&
+                isFiniteVector3Like(direction) &&
+                typeof panner.orientationX !== 'undefined'
+            ) {
+                setAudioParamValue(panner.orientationX, Number(direction.x) || 0, now);
+                setAudioParamValue(panner.orientationY, Number(direction.y) || 0, now);
+                setAudioParamValue(panner.orientationZ, Number(direction.z) || 0, now);
+            }
+            input.connect(panner);
+            routeSource = panner;
+            cleanupNodes.push(panner);
+        }
+
+        const dryGain = context.createGain();
+        dryGain.gain.setValueAtTime(
+            clampNumber(config?.directGain, 0, 2, 1) * lerpNumber(1, 0.44, occlusion),
+            now
+        );
+        routeSource.connect(dryGain);
+        dryGain.connect(busNode);
+        cleanupNodes.push(dryGain);
+
+        const delaySend = context.createGain();
+        delaySend.gain.setValueAtTime(
+            clampNumber(config?.delaySendGain, 0, 1.2, 0) * lerpNumber(1, 1.18, occlusion),
+            now
+        );
+        const delay = context.createDelay(0.75);
+        delay.delayTime.setValueAtTime(clampNumber(config?.delayTimeSec, 0.01, 0.5, 0.08), now);
+        const delayFeedback = context.createGain();
+        delayFeedback.gain.setValueAtTime(clampNumber(config?.delayFeedback, 0, 0.8, 0.28), now);
+        routeSource.connect(delaySend);
+        delaySend.connect(delay);
+        delay.connect(delayFeedback);
+        delayFeedback.connect(delay);
+        delay.connect(busNode);
+        cleanupNodes.push(delaySend, delay, delayFeedback);
+
+        const reverbSend = context.createGain();
+        reverbSend.gain.setValueAtTime(
+            clampNumber(config?.reverbSendGain, 0, 1.4, 0) * lerpNumber(1, 1.1, occlusion),
+            now
+        );
+        const convolver = context.createConvolver();
+        convolver.buffer = getRoofWeaponUrbanImpulseBuffer();
+        const wetFilter = context.createBiquadFilter();
+        wetFilter.type = 'lowpass';
+        wetFilter.frequency.setValueAtTime(
+            clampNumber(config?.wetLowpassHz, 500, 22000, 5200) * lerpNumber(1, 0.62, occlusion),
+            now
+        );
+        const wetGain = context.createGain();
+        wetGain.gain.setValueAtTime(
+            clampNumber(config?.wetGain, 0, 1.4, 0) * lerpNumber(1, 0.88, occlusion),
+            now
+        );
+        routeSource.connect(reverbSend);
+        reverbSend.connect(convolver);
+        convolver.connect(wetFilter);
+        wetFilter.connect(wetGain);
+        wetGain.connect(busNode);
+        cleanupNodes.push(reverbSend, convolver, wetFilter, wetGain);
+
+        return {
+            input,
+            cleanup: once(() => {
+                for (let i = 0; i < cleanupNodes.length; i += 1) {
+                    safeDisconnect(cleanupNodes[i]);
+                }
+            }),
+        };
+    }
+
+    function playRoofWeaponIncomingCue({
+        shotDirection = null,
+        impactPosition = null,
+        destroyed = false,
+    } = {}) {
+        const busNode = mixer?.buses?.effects;
+        if (!context || !busNode) {
+            return false;
+        }
+
+        const cuePosition = resolveRoofWeaponIncomingCuePosition(shotDirection, impactPosition);
+        const spatialRoute = createRoofWeaponUrbanRoute({
+            busNode,
+            position: cuePosition,
+            config: ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG,
+        });
+        if (!spatialRoute.input) {
+            return false;
+        }
+
+        const noiseBuffer = getRoofWeaponNoiseBuffer();
+        if (!noiseBuffer) {
+            spatialRoute.cleanup();
+            return false;
+        }
+
+        const now = context.currentTime;
+        const outputGain = context.createGain();
+        outputGain.gain.setValueAtTime(0.0001, now);
+        outputGain.gain.linearRampToValueAtTime(destroyed ? 0.18 : 0.145, now + 0.001);
+        outputGain.gain.exponentialRampToValueAtTime(0.0001, now + (destroyed ? 0.12 : 0.09));
+
+        const crackSource = context.createBufferSource();
+        crackSource.buffer = noiseBuffer;
+        const crackFilter = context.createBiquadFilter();
+        crackFilter.type = 'bandpass';
+        crackFilter.frequency.setValueAtTime(destroyed ? 2650 : 3080, now);
+        crackFilter.Q.setValueAtTime(destroyed ? 1.1 : 1.28, now);
+        const crackGain = context.createGain();
+        crackGain.gain.setValueAtTime(0.0001, now);
+        crackGain.gain.linearRampToValueAtTime(destroyed ? 0.32 : 0.26, now + 0.001);
+        crackGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.055);
+
+        const lowThunk = context.createOscillator();
+        const lowThunkGain = context.createGain();
+        lowThunk.type = 'triangle';
+        lowThunk.frequency.setValueAtTime(destroyed ? 188 : 214, now);
+        lowThunk.frequency.exponentialRampToValueAtTime(destroyed ? 92 : 108, now + 0.07);
+        lowThunkGain.gain.setValueAtTime(0.0001, now);
+        lowThunkGain.gain.linearRampToValueAtTime(destroyed ? 0.07 : 0.05, now + 0.002);
+        lowThunkGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+        crackSource.connect(crackFilter);
+        crackFilter.connect(crackGain);
+        crackGain.connect(outputGain);
+        lowThunk.connect(lowThunkGain);
+        lowThunkGain.connect(outputGain);
+        outputGain.connect(spatialRoute.input);
+
+        const cleanup = once(() => {
+            safeDisconnect(crackSource);
+            safeDisconnect(crackFilter);
+            safeDisconnect(crackGain);
+            safeDisconnect(lowThunk);
+            safeDisconnect(lowThunkGain);
+            safeDisconnect(outputGain);
+            spatialRoute.cleanup();
+        });
+
+        crackSource.onended = cleanup;
+        lowThunk.onended = cleanup;
+        crackSource.start(now);
+        lowThunk.start(now);
+        safeStopSource(crackSource, now + 0.06);
+        safeStopSource(lowThunk, now + 0.085);
+        return true;
+    }
+
+    function resolveRoofWeaponIncomingCuePosition(shotDirection = null, impactPosition = null) {
+        const listenerPosition =
+            runtime.playerPosition || camera?.position || impactPosition || null;
+        if (!listenerPosition) {
+            return null;
+        }
+
+        let incomingX = 0;
+        let incomingZ = -1;
+        if (shotDirection && Number.isFinite(shotDirection.x) && Number.isFinite(shotDirection.z)) {
+            incomingX = -(Number(shotDirection.x) || 0);
+            incomingZ = -(Number(shotDirection.z) || 0);
+            const incomingLength = Math.hypot(incomingX, incomingZ);
+            if (incomingLength > 0.0001) {
+                incomingX /= incomingLength;
+                incomingZ /= incomingLength;
+            } else {
+                incomingX = 0;
+                incomingZ = -1;
+            }
+        }
+
+        const lateralX = -incomingZ;
+        const lateralZ = incomingX;
+        return {
+            x:
+                (Number(listenerPosition.x) || 0) +
+                incomingX * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.offsetDistance +
+                lateralX * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.lateralOffset,
+            y:
+                (Number(listenerPosition.y) || 0) +
+                ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.verticalOffset,
+            z:
+                (Number(listenerPosition.z) || 0) +
+                incomingZ * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.offsetDistance +
+                lateralZ * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.lateralOffset,
+        };
     }
 
     function updateLoopLayer(soundId, layerGain, layerRate = LOOP_RATE_DEFAULT) {
@@ -3508,6 +3828,12 @@ function clampNumber(value, min, max, fallback = 0) {
         return fallback;
     }
     return Math.max(min, Math.min(max, numeric));
+}
+
+function isFiniteVector3Like(value) {
+    return Boolean(
+        value && Number.isFinite(value.x) && Number.isFinite(value.y) && Number.isFinite(value.z)
+    );
 }
 
 function randomRange(min, max) {

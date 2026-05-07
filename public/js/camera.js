@@ -9,7 +9,7 @@ import {
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.3, 600);
 camera.position.set(0, 3, 8);
 
-let cameraViewMode = 6;
+let cameraViewMode = 1;
 let manualCinematicMode = false;
 let autoCinematicMode = false;
 let cinematicAngle = 0;
@@ -290,6 +290,17 @@ export { camera, updateCamera };
 
 export function setCameraKeyboardControlsEnabled(nextEnabled) {
     cameraKeyboardControlsEnabled = Boolean(nextEnabled);
+}
+
+export function setCameraViewMode(nextMode) {
+    const numericMode = Math.round(Number(nextMode) || 0);
+    if (numericMode < 1 || numericMode > 8) {
+        return cameraViewMode;
+    }
+    cameraViewMode = numericMode;
+    autoCinematicMode = false;
+    setCinematicMode(false);
+    return cameraViewMode;
 }
 
 export function resetCameraTrackingState() {

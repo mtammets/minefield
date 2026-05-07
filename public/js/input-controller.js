@@ -184,8 +184,7 @@ export function createInputController(options = {}) {
         const isRaceIntroDriveLocked =
             isRaceIntroActive && !raceIntroController.isDrivingUnlocked();
         const inputContext = getInputContext();
-        const worldMapVisible =
-            inputContext === INPUT_CONTEXTS.fullMap || Boolean(isWorldMapVisible());
+        const worldMapVisible = Boolean(isWorldMapVisible());
 
         if (matchesAction(ACTION_IDS.pauseToggle)) {
             event.preventDefault();
@@ -215,16 +214,8 @@ export function createInputController(options = {}) {
             return;
         }
 
-        const allowMapToggleWhilePaused =
-            inputContext === INPUT_CONTEXTS.fullMap && matchesAction(ACTION_IDS.mapToggle);
+        const allowMapToggleWhilePaused = matchesAction(ACTION_IDS.mapToggle);
         if (getIsGamePaused() && !allowMapToggleWhilePaused) {
-            return;
-        }
-        if (
-            inputContext === INPUT_CONTEXTS.fullMap &&
-            !matchesAction(ACTION_IDS.mapToggle) &&
-            !matchesAction(ACTION_IDS.pauseToggle)
-        ) {
             return;
         }
 
@@ -359,9 +350,6 @@ export function createInputController(options = {}) {
             }
             event.preventDefault();
             const result = toggleWorldMap();
-            if (result?.open) {
-                onClearDriveKeys();
-            }
             if (result?.message) {
                 onShowObjectiveInfo(result.message, 1300);
             }
@@ -440,7 +428,6 @@ export function createInputController(options = {}) {
         if (
             getIsWelcomeModalVisible() ||
             getIsGamePaused() ||
-            getInputContext() === INPUT_CONTEXTS.fullMap ||
             raceIntroController.isActive() ||
             getIsCarDestroyed() ||
             carEditModeController.isActive()

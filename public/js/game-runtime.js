@@ -42,6 +42,7 @@ import {
     camera,
     updateCamera,
     setCameraKeyboardControlsEnabled,
+    setCameraViewMode,
     resetCameraTrackingState,
 } from './camera.js';
 import { createCarEditModeController } from './editmode.js';
@@ -2632,6 +2633,7 @@ runtimeState.gameSessionController = createGameSessionController({
     resolvePlayerSpawnState: () => resolveRandomPlayerSpawnState(),
     getGroundHeightAt,
     setCameraKeyboardControlsEnabled,
+    setCameraViewMode,
     resetCameraTrackingState,
     initializePlayerPhysics,
     getVehicleState,
@@ -2835,23 +2837,9 @@ function applyWorldMapVisibilityPolicy(expanded) {
 
     if (nextOpen) {
         runtimeState.worldMapDriveLockMode = resolveCurrentWorldMapDriveLockMode();
-        runtimeState.gameSessionController?.clearDriveKeys();
-
-        if (runtimeState.worldMapDriveLockMode === WORLD_MAP_DRIVE_LOCK_MODES.pause) {
-            const wasPausedBeforeOpen = runtimeState.isGamePaused;
-            runtimeState.gameSessionController?.setPauseState(true, {
-                showPauseMenu: false,
-            });
-            runtimeState.isWorldMapPauseOwned = !wasPausedBeforeOpen && runtimeState.isGamePaused;
-        } else {
-            runtimeState.isWorldMapPauseOwned = false;
-        }
+        runtimeState.isWorldMapPauseOwned = false;
     } else {
         runtimeState.worldMapDriveLockMode = WORLD_MAP_DRIVE_LOCK_MODES.none;
-        runtimeState.gameSessionController?.clearDriveKeys();
-        if (runtimeState.isWorldMapPauseOwned) {
-            runtimeState.gameSessionController?.setPauseState(false);
-        }
         runtimeState.isWorldMapPauseOwned = false;
     }
 
@@ -2872,11 +2860,14 @@ function toggleWorldMapWithPolicy(forceOpen) {
         const modeMessage =
             runtimeState.worldMapDriveLockMode === WORLD_MAP_DRIVE_LOCK_MODES.autobrake
                 ? 'Autobrake engaged.'
-                : 'Time paused.';
+                : '';
         return {
             ...result,
             driveLockMode: runtimeState.worldMapDriveLockMode,
-            message: result.message ? `${result.message} ${modeMessage}` : modeMessage,
+            message:
+                result.message && modeMessage
+                    ? `${result.message} ${modeMessage}`
+                    : result.message || modeMessage,
         };
     }
 
