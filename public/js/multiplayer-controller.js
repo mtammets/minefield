@@ -1,6 +1,7 @@
 import { createCarRig } from './car.js';
 import { createSkidMarkController } from './skidmarks.js';
 import { createCrashDebrisController } from './crash-debris-system.js';
+import { createReplicatedRoofWeaponVisualController } from './roof-weapon-system.js';
 
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const DEFAULT_PLAYER_NAME = 'Driver';
@@ -38,6 +39,7 @@ export function createMultiplayerController(options = {}) {
         getVehicleState = () => ({}),
         getInputState = () => ({}),
         getCrashReplicationState = () => null,
+        getWeaponReplicationState = () => null,
         getGroundHeightAt = () => 0,
         applyNetworkCollisionImpulse = () => false,
         getSelectedCarColorHex = () => 0x2d67a6,
@@ -93,6 +95,7 @@ export function createMultiplayerController(options = {}) {
         reportLocalVehicleContacts,
         reportMinePlaced,
         reportMineDetonated,
+        reportWeaponShot,
         reportPickupCollected,
         isInRoom,
         getSelfId,
@@ -297,6 +300,18 @@ export function createMultiplayerController(options = {}) {
                 ack(response);
             }
         });
+        return true;
+    }
+
+    function reportWeaponShot(shotSnapshot = null) {
+        if (!isPanelVisible || !socket?.connected || !room) {
+            return false;
+        }
+        const sanitizedShot = sanitizeOutgoingWeaponShot(shotSnapshot);
+        if (!sanitizedShot) {
+            return false;
+        }
+        socket.emit('mp:weaponShot', sanitizedShot);
         return true;
     }
 
@@ -580,6 +595,17 @@ export function createMultiplayerController(options = {}) {
         socket.on('mp:mineDetonated', (payload) => {
             onMineDetonated(payload);
         });
+        socket.on('mp:weaponShot', (payload) => {
+            const playerId = payload?.id;
+            if (!playerId || playerId === selfId) {
+                return;
+            }
+            const remote = getOrCreateRemotePlayer(playerId);
+            if (!remote) {
+                return;
+            }
+            remote.weaponController?.playShot?.(payload.shot);
+        });
 
         return socket;
     }
@@ -614,6 +640,7 @@ export function createMultiplayerController(options = {}) {
 
         const vehicleState = getVehicleState() || {};
         const inputState = getInputState() || {};
+        const weaponState = getWeaponReplicationState?.() || null;
         socket.emit('mp:state', {
             x: car.position.x,
             y: car.position.y,
@@ -632,6 +659,14 @@ export function createMultiplayerController(options = {}) {
             inputLeft: Boolean(inputState.left),
             inputRight: Boolean(inputState.right),
             inputHandbrake: Boolean(inputState.handbrake),
+            weaponHasWeapon: Boolean(weaponState?.hasWeapon),
+            weaponTriggerHeld: Boolean(weaponState?.triggerHeld),
+            weaponHeat: clampNumber(weaponState?.heat, 0, 1, 0),
+            weaponLocked: Boolean(weaponState?.locked),
+            weaponHasTarget: Boolean(weaponState?.hasTarget),
+            weaponTargetX: clampNumber(weaponState?.targetX, -5000, 5000, 0),
+            weaponTargetY: clampNumber(weaponState?.targetY, -200, 2500, 0),
+            weaponTargetZ: clampNumber(weaponState?.targetZ, -5000, 5000, 0),
         });
     }
 
@@ -779,6 +814,10 @@ export function createMultiplayerController(options = {}) {
             if (now - remote.lastStateAt > REMOTE_STATE_TIMEOUT_MS) {
                 remote.car.visible = false;
                 remote.skidMarkController?.update?.(dt, { enabled: false });
+                remote.weaponController?.update?.(dt, remote.visualState, {
+                    showMount: false,
+                    isDestroyed: remote.isDestroyed,
+                });
                 updateRemoteCrashDebris(remote, dt);
                 continue;
             }
@@ -786,6 +825,10 @@ export function createMultiplayerController(options = {}) {
             remote.car.visible = !remote.isDestroyed;
             if (!remote.hasState) {
                 remote.skidMarkController?.update?.(dt, { enabled: false });
+                remote.weaponController?.update?.(dt, remote.visualState, {
+                    showMount: false,
+                    isDestroyed: remote.isDestroyed,
+                });
                 updateRemoteCrashDebris(remote, dt);
                 continue;
             }
@@ -806,6 +849,10 @@ export function createMultiplayerController(options = {}) {
                 vehicle: remote.car,
                 vehicleState: remote.visualState,
                 inputState: remote.inputState,
+            });
+            remote.weaponController?.update?.(dt, remote.visualState, {
+                showMount: true,
+                isDestroyed: remote.isDestroyed,
             });
             updateRemoteCrashDebris(remote, dt);
         }
@@ -905,9 +952,14 @@ export function createMultiplayerController(options = {}) {
         const carRig = createCarRig({
             bodyColor: playerSnapshot?.colorHex ?? 0x6cb3ff,
             displayName: playerSnapshot?.name || 'Online',
-            addLights: false,
+            addLights: true,
             addWheelWellLights: false,
             showBatteryIndicator: false,
+            lightConfig: {
+                enableHeadlightProjectors: false,
+                enableTaillightPointLights: false,
+                enableAccentPointLights: false,
+            },
         });
 
         carRig.car.position.copy(car.position);
@@ -923,6 +975,7 @@ export function createMultiplayerController(options = {}) {
             setBodyColor: carRig.setBodyColor,
             skidMarkController: null,
             crashDebrisController: null,
+            weaponController: null,
             targetPosition: carRig.car.position.clone(),
             targetRotationY: carRig.car.rotation.y,
             hasState: false,
@@ -973,6 +1026,10 @@ export function createMultiplayerController(options = {}) {
             isCarDestroyed: () => remote.isDestroyed,
         });
         remote.crashDebrisController.initializeBodyPartBaselines();
+        remote.weaponController = createReplicatedRoofWeaponVisualController({
+            scene,
+            car: carRig.car,
+        });
 
         remotePlayers.set(playerId, remote);
         return remote;
@@ -1112,6 +1169,19 @@ export function createMultiplayerController(options = {}) {
                 ? Boolean(state.inputHandbrake)
                 : remote.visualState.burnout > 0.24 ||
                   (Math.abs(remote.visualState.yawRate) > 0.85 && Math.abs(nextSpeed) > 1.6);
+        remote.weaponController?.applyReplicationState?.({
+            hasWeapon:
+                state.weaponHasWeapon != null
+                    ? Boolean(state.weaponHasWeapon)
+                    : remote.isDestroyed === false,
+            triggerHeld: Boolean(state.weaponTriggerHeld),
+            heat: clampNumber(state.weaponHeat, 0, 1, 0),
+            locked: Boolean(state.weaponLocked),
+            hasTarget: Boolean(state.weaponHasTarget),
+            targetX: clampNumber(state.weaponTargetX, -5000, 5000, 0),
+            targetY: clampNumber(state.weaponTargetY, -200, 2500, 0),
+            targetZ: clampNumber(state.weaponTargetZ, -5000, 5000, 0),
+        });
         const wasDestroyed = Boolean(remote.isDestroyed);
         remote.isDestroyed = Boolean(state.isDestroyed);
         if (!wasDestroyed && remote.isDestroyed) {
@@ -1354,6 +1424,7 @@ export function createMultiplayerController(options = {}) {
         }
         remote.skidMarkController?.reset?.();
         remote.crashDebrisController?.clearDebris?.();
+        remote.weaponController?.dispose?.();
         scene.remove(remote.car);
     }
 
@@ -1433,9 +1504,60 @@ export function createMultiplayerController(options = {}) {
         socket.off('mp:crashReplication');
         socket.off('mp:minePlaced');
         socket.off('mp:mineDetonated');
+        socket.off('mp:weaponShot');
         socket.disconnect();
         socket = null;
     }
+}
+
+function sanitizeOutgoingWeaponShot(snapshot = null) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return null;
+    }
+
+    const startX = clampNumber(snapshot?.start?.x ?? snapshot?.startX, -5000, 5000, Number.NaN);
+    const startY = clampNumber(snapshot?.start?.y ?? snapshot?.startY, -200, 2500, Number.NaN);
+    const startZ = clampNumber(snapshot?.start?.z ?? snapshot?.startZ, -5000, 5000, Number.NaN);
+    const endX = clampNumber(snapshot?.end?.x ?? snapshot?.endX, -5000, 5000, Number.NaN);
+    const endY = clampNumber(snapshot?.end?.y ?? snapshot?.endY, -200, 2500, Number.NaN);
+    const endZ = clampNumber(snapshot?.end?.z ?? snapshot?.endZ, -5000, 5000, Number.NaN);
+    let directionX = Number(snapshot?.direction?.x ?? snapshot?.directionX);
+    let directionY = Number(snapshot?.direction?.y ?? snapshot?.directionY);
+    let directionZ = Number(snapshot?.direction?.z ?? snapshot?.directionZ);
+
+    if (![startX, startY, startZ, endX, endY, endZ].every(Number.isFinite)) {
+        return null;
+    }
+
+    if (![directionX, directionY, directionZ].every(Number.isFinite)) {
+        directionX = endX - startX;
+        directionY = endY - startY;
+        directionZ = endZ - startZ;
+    }
+
+    const directionLength = Math.hypot(directionX, directionY, directionZ);
+    if (!Number.isFinite(directionLength) || directionLength <= 0.0001) {
+        return null;
+    }
+
+    directionX /= directionLength;
+    directionY /= directionLength;
+    directionZ /= directionLength;
+
+    return {
+        startX,
+        startY,
+        startZ,
+        endX,
+        endY,
+        endZ,
+        directionX,
+        directionY,
+        directionZ,
+        speed: clampNumber(snapshot?.speed, 1, 1200, 182),
+        heat: clampNumber(snapshot?.heat, 0, 1, 0),
+        locked: Boolean(snapshot?.locked),
+    };
 }
 
 function resolveDom() {

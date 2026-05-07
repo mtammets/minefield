@@ -57,6 +57,10 @@ const MINE_DEFAULT_TTL_MS = 45_000;
 const MINE_SERVER_PLACE_COOLDOWN_MS = 450;
 const CRASH_REPLICATION_MIN_INTERVAL_MS = 180;
 const VEHICLE_STATUS_MIN_INTERVAL_MS = 140;
+const WEAPON_SHOT_MAX_DISTANCE = 260;
+const WEAPON_SHOT_MIN_DISTANCE = 0.5;
+const WEAPON_SHOT_MAX_START_HORIZONTAL_OFFSET = 8;
+const WEAPON_SHOT_MAX_START_VERTICAL_OFFSET = 6;
 const PICKUP_STATE_MAX_DISTANCE = 4.6;
 const PLAYER_STATE_MAX_HORIZONTAL_SPEED_UNITS_PER_SEC = 82;
 const PLAYER_STATE_MAX_VERTICAL_SPEED_UNITS_PER_SEC = 145;
@@ -133,6 +137,7 @@ const EVENT_RATE_LIMITS = {
     'mp:pickupCollected': { windowMs: 1000, max: 10 },
     'mp:crashReplication': { windowMs: 1000, max: 8 },
     'mp:vehicleStatus': { windowMs: 1000, max: 12 },
+    'mp:weaponShot': { windowMs: 1000, max: 24 },
 };
 
 const app = express();
@@ -1086,6 +1091,39 @@ io.on('connection', (socket) => {
         emitRoomState(room);
     });
 
+    socket.on('mp:weaponShot', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:weaponShot')) {
+            return;
+        }
+
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player || !player.lastState || typeof player.lastState !== 'object') {
+            return;
+        }
+
+        const shot = sanitizeWeaponShot(payload, player.lastState);
+        if (!shot) {
+            return;
+        }
+
+        socket.to(roomCode).emit('mp:weaponShot', {
+            id: socket.id,
+            shot,
+            serverTime: Date.now(),
+        });
+    });
+
     socket.on('disconnect', () => {
         leaveCurrentRoom(socket);
     });
@@ -1799,6 +1837,20 @@ function sanitizePlayerState(payload, fallback) {
     const inputLeft = Boolean(payload?.inputLeft);
     const inputRight = Boolean(payload?.inputRight);
     const inputHandbrake = Boolean(payload?.inputHandbrake);
+    const weaponHasWeapon = Boolean(payload?.weaponHasWeapon);
+    const weaponTriggerHeld = weaponHasWeapon && Boolean(payload?.weaponTriggerHeld);
+    const weaponHeat = clampFinite(payload?.weaponHeat, 0, 1, fallback?.weaponHeat ?? 0);
+    const weaponLocked = weaponHasWeapon && Boolean(payload?.weaponLocked);
+    const weaponHasTarget = weaponHasWeapon && Boolean(payload?.weaponHasTarget);
+    const weaponTargetX = weaponHasTarget
+        ? clampFinite(payload?.weaponTargetX, -5000, 5000, fallback?.weaponTargetX ?? 0)
+        : 0;
+    const weaponTargetY = weaponHasTarget
+        ? clampFinite(payload?.weaponTargetY, -200, 2500, fallback?.weaponTargetY ?? 0)
+        : 0;
+    const weaponTargetZ = weaponHasTarget
+        ? clampFinite(payload?.weaponTargetZ, -5000, 5000, fallback?.weaponTargetZ ?? 0)
+        : 0;
 
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
         return null;
@@ -1822,6 +1874,81 @@ function sanitizePlayerState(payload, fallback) {
         inputLeft,
         inputRight,
         inputHandbrake,
+        weaponHasWeapon,
+        weaponTriggerHeld,
+        weaponHeat: roundTo(weaponHeat, 4),
+        weaponLocked,
+        weaponHasTarget,
+        weaponTargetX: roundTo(weaponTargetX, 4),
+        weaponTargetY: roundTo(weaponTargetY, 4),
+        weaponTargetZ: roundTo(weaponTargetZ, 4),
+    };
+}
+
+function sanitizeWeaponShot(payload, playerState) {
+    if (!payload || typeof payload !== 'object' || !playerState || typeof playerState !== 'object') {
+        return null;
+    }
+
+    const startX = clampFinite(payload.startX, -5000, 5000, Number.NaN);
+    const startY = clampFinite(payload.startY, -200, 2500, Number.NaN);
+    const startZ = clampFinite(payload.startZ, -5000, 5000, Number.NaN);
+    const endX = clampFinite(payload.endX, -5000, 5000, Number.NaN);
+    const endY = clampFinite(payload.endY, -200, 2500, Number.NaN);
+    const endZ = clampFinite(payload.endZ, -5000, 5000, Number.NaN);
+    let directionX = Number(payload.directionX);
+    let directionY = Number(payload.directionY);
+    let directionZ = Number(payload.directionZ);
+
+    if (![startX, startY, startZ, endX, endY, endZ].every(Number.isFinite)) {
+        return null;
+    }
+
+    const startOffsetX = startX - (Number(playerState.x) || 0);
+    const startOffsetZ = startZ - (Number(playerState.z) || 0);
+    const startHorizontalDistance = Math.hypot(startOffsetX, startOffsetZ);
+    if (startHorizontalDistance > WEAPON_SHOT_MAX_START_HORIZONTAL_OFFSET) {
+        return null;
+    }
+    if (Math.abs(startY - (Number(playerState.y) || 0)) > WEAPON_SHOT_MAX_START_VERTICAL_OFFSET) {
+        return null;
+    }
+
+    if (![directionX, directionY, directionZ].every(Number.isFinite)) {
+        directionX = endX - startX;
+        directionY = endY - startY;
+        directionZ = endZ - startZ;
+    }
+    const directionLength = Math.hypot(directionX, directionY, directionZ);
+    if (!Number.isFinite(directionLength) || directionLength <= 0.0001) {
+        return null;
+    }
+    directionX /= directionLength;
+    directionY /= directionLength;
+    directionZ /= directionLength;
+
+    const shotDistance = Math.hypot(endX - startX, endY - startY, endZ - startZ);
+    if (
+        !Number.isFinite(shotDistance) ||
+        shotDistance < WEAPON_SHOT_MIN_DISTANCE ||
+        shotDistance > WEAPON_SHOT_MAX_DISTANCE
+    ) {
+        return null;
+    }
+
+    return {
+        startX: roundTo(startX, 4),
+        startY: roundTo(startY, 4),
+        startZ: roundTo(startZ, 4),
+        endX: roundTo(endX, 4),
+        endY: roundTo(endY, 4),
+        endZ: roundTo(endZ, 4),
+        directionX: roundTo(directionX, 5),
+        directionY: roundTo(directionY, 5),
+        directionZ: roundTo(directionZ, 5),
+        speed: roundTo(clampFinite(payload.speed, 1, 1200, 182), 3),
+        heat: roundTo(clampFinite(payload.heat, 0, 1, 0), 4),
+        locked: Boolean(payload.locked),
     };
 }
 

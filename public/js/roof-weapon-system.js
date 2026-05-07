@@ -164,6 +164,7 @@ export function createRoofWeaponSystem({
     onStatus = () => {},
     onBotDestroyed = () => {},
     onPlayerHit = () => ({ destroyed: false }),
+    onShotFired = () => {},
 } = {}) {
     if (!scene || !camera || !car) {
         return createNoopWeaponSystem();
@@ -249,6 +250,9 @@ export function createRoofWeaponSystem({
         currentLock: null,
         hudX: window.innerWidth * 0.5,
         hudY: window.innerHeight * 0.5,
+        replicationTargetPoint: new THREE.Vector3(),
+        hasReplicationTarget: false,
+        replicationLocked: false,
     };
 
     function getWeaponTraceObstacles() {
@@ -443,6 +447,18 @@ export function createRoofWeaponSystem({
         hasWeapon() {
             return state.hasWeapon;
         },
+        getReplicationState() {
+            return {
+                hasWeapon: state.hasWeapon,
+                triggerHeld: state.hasWeapon && state.triggerHeld,
+                heat: state.heat,
+                locked: state.replicationLocked,
+                hasTarget: state.hasWeapon && state.hasReplicationTarget,
+                targetX: state.replicationTargetPoint.x,
+                targetY: state.replicationTargetPoint.y,
+                targetZ: state.replicationTargetPoint.z,
+            };
+        },
     };
 
     function update(deltaTime = 1 / 60, frameState = {}) {
@@ -479,6 +495,18 @@ export function createRoofWeaponSystem({
         applyWeaponBasePoseToMount(mount, weaponMotionState);
         const aimState = resolveAimState(gameMode, weaponMotionState);
         state.currentLock = aimState.lockedTarget;
+        if (
+            aimState?.targetPoint &&
+            Number.isFinite(aimState.targetPoint.x) &&
+            Number.isFinite(aimState.targetPoint.y) &&
+            Number.isFinite(aimState.targetPoint.z)
+        ) {
+            state.replicationTargetPoint.copy(aimState.targetPoint);
+            state.hasReplicationTarget = true;
+        } else {
+            state.hasReplicationTarget = false;
+        }
+        state.replicationLocked = Boolean(aimState?.lockedTarget);
         updateHudTracking(dt, aimState, roofWeaponActive);
 
         updateWeaponMount(dt, weaponMotionState, aimState, roofWeaponActive);
@@ -1033,6 +1061,14 @@ export function createRoofWeaponSystem({
             position: weaponMuzzleWorldPosition.clone(),
             direction: weaponShotDirection.clone(),
             hostile: false,
+        });
+        onShotFired({
+            start: weaponMuzzleWorldPosition.clone(),
+            end: shotEndPoint.clone(),
+            direction: weaponShotDirection.clone(),
+            locked: Boolean(aimState.lockedTarget),
+            heat: state.heat,
+            speed: PROJECTILE_SPEED,
         });
     }
 
@@ -2711,6 +2747,538 @@ function createPickupWordmarkTexture() {
     return texture;
 }
 
+export function createReplicatedRoofWeaponVisualController({ scene, car } = {}) {
+    if (!scene || !car) {
+        return createNoopReplicatedRoofWeaponVisualController();
+    }
+
+    const effectRoot = new THREE.Group();
+    effectRoot.name = 'replicatedRoofWeaponEffects';
+    scene.add(effectRoot);
+
+    const mountParent = car.getObjectByName('body_shell_group') || car;
+    const mount = createWeaponMount();
+    mount.root.visible = false;
+    mountParent.add(mount.root);
+
+    const reticleColor = new THREE.Color().copy(RETICLE_DEFAULT_COLOR);
+    const targetReticleColor = new THREE.Color().copy(RETICLE_DEFAULT_COLOR);
+    const aimTargetPoint = new THREE.Vector3();
+    const muzzlePosition = new THREE.Vector3();
+    const fallbackLookDirection = new THREE.Vector3();
+    const fallbackLookPoint = new THREE.Vector3();
+    const impactLookPoint = new THREE.Vector3();
+    const flashLookPoint = new THREE.Vector3();
+    const projectileUpVector = new THREE.Vector3(0, 1, 0);
+    const projectileState = {
+        hasWeapon: false,
+        triggerHeld: false,
+        heat: 0,
+        locked: false,
+        hasTarget: false,
+        hoverPhase: Math.random() * Math.PI * 2,
+        lockPulse: Math.random() * Math.PI * 2,
+        recoil: 0,
+        shotSequence: 0,
+    };
+    const activeProjectiles = [];
+    const activeImpacts = [];
+    const activeMuzzleFlashes = [];
+    let disposed = false;
+
+    return {
+        applyReplicationState(snapshot = null) {
+            if (disposed) {
+                return;
+            }
+            projectileState.hasWeapon = Boolean(snapshot?.hasWeapon);
+            projectileState.triggerHeld =
+                projectileState.hasWeapon && Boolean(snapshot?.triggerHeld);
+            projectileState.heat = THREE.MathUtils.clamp(Number(snapshot?.heat) || 0, 0, 1);
+            projectileState.locked = projectileState.hasWeapon && Boolean(snapshot?.locked);
+
+            const hasTarget = Boolean(snapshot?.hasTarget);
+            const targetX = Number(snapshot?.targetX);
+            const targetY = Number(snapshot?.targetY);
+            const targetZ = Number(snapshot?.targetZ);
+            if (
+                hasTarget &&
+                Number.isFinite(targetX) &&
+                Number.isFinite(targetY) &&
+                Number.isFinite(targetZ)
+            ) {
+                aimTargetPoint.set(targetX, targetY, targetZ);
+                projectileState.hasTarget = true;
+            } else {
+                projectileState.hasTarget = false;
+            }
+        },
+        playShot(snapshot = null) {
+            if (disposed || !snapshot || typeof snapshot !== 'object') {
+                return false;
+            }
+
+            const startX = Number(snapshot.startX);
+            const startY = Number(snapshot.startY);
+            const startZ = Number(snapshot.startZ);
+            const endX = Number(snapshot.endX);
+            const endY = Number(snapshot.endY);
+            const endZ = Number(snapshot.endZ);
+            const directionX = Number(snapshot.directionX);
+            const directionY = Number(snapshot.directionY);
+            const directionZ = Number(snapshot.directionZ);
+            if (
+                ![
+                    startX,
+                    startY,
+                    startZ,
+                    endX,
+                    endY,
+                    endZ,
+                    directionX,
+                    directionY,
+                    directionZ,
+                ].every(Number.isFinite)
+            ) {
+                return false;
+            }
+
+            const start = new THREE.Vector3(startX, startY, startZ);
+            const end = new THREE.Vector3(endX, endY, endZ);
+            const direction = new THREE.Vector3(directionX, directionY, directionZ);
+            if (direction.lengthSq() <= 0.0001) {
+                direction.subVectors(end, start);
+            }
+            if (direction.lengthSq() <= 0.0001) {
+                return false;
+            }
+            direction.normalize();
+
+            projectileState.shotSequence += 1;
+            projectileState.recoil = 1;
+            projectileState.triggerHeld = projectileState.hasWeapon;
+
+            spawnReplicatedMuzzleFlash(start, direction);
+            spawnReplicatedProjectile({
+                start,
+                end,
+                direction,
+                speed: THREE.MathUtils.clamp(Number(snapshot.speed) || PROJECTILE_SPEED, 1, 1200),
+            });
+            return true;
+        },
+        update(deltaTime = 1 / 60, vehicleState = {}, options = {}) {
+            if (disposed) {
+                return;
+            }
+
+            const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.05);
+            if (dt <= 0) {
+                updateReplicatedEffects(0);
+                return;
+            }
+
+            projectileState.hoverPhase += dt * 2.2;
+            projectileState.lockPulse += dt * 6.8;
+            projectileState.recoil = THREE.MathUtils.lerp(
+                projectileState.recoil,
+                0,
+                1 -
+                    Math.exp(
+                        -(
+                            projectileState.triggerHeld
+                                ? WEAPON_RECOIL_RISE
+                                : WEAPON_RECOIL_FALL
+                        ) * dt
+                    )
+            );
+
+            const showMount =
+                options.showMount !== false &&
+                projectileState.hasWeapon &&
+                options.isDestroyed !== true;
+            mount.root.visible = showMount;
+            if (showMount) {
+                updateReplicatedMount(dt, vehicleState);
+            }
+
+            updateReplicatedEffects(dt);
+        },
+        dispose() {
+            if (disposed) {
+                return;
+            }
+            disposed = true;
+            clearReplicatedEffects();
+            mount.root.parent?.remove?.(mount.root);
+            scene.remove(effectRoot);
+        },
+    };
+
+    function updateReplicatedMount(dt, vehicleState = {}) {
+        const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.speed || 0) / 42, 0, 1.25);
+        const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.throttle || 0), 0, 1);
+        const idleSway = Math.sin(projectileState.hoverPhase * WEAPON_IDLE_SWAY_SPEED) * 0.01;
+        const speedSway =
+            Math.sin(projectileState.hoverPhase * (WEAPON_SPEED_SWAY_SPEED + speedRatio * 2.2)) *
+            0.012 *
+            speedRatio;
+        const recoilShift = projectileState.recoil * 0.16;
+
+        mount.root.position.set(
+            0,
+            WEAPON_MOUNT_BASE_Y + idleSway * 0.3,
+            WEAPON_MOUNT_BASE_Z + recoilShift
+        );
+        mount.weaponGroup.position.set(0, speedSway * 0.5, recoilShift);
+        mount.weaponGroup.rotation.z = speedSway * 1.2;
+        mount.weaponGroup.rotation.x = idleSway * 0.9 + throttleRatio * 0.02;
+
+        mountParent.updateWorldMatrix(true, false);
+        mount.root.updateWorldMatrix(true, false);
+        if (projectileState.hasTarget) {
+            mount.pitchPivot.lookAt(aimTargetPoint);
+        } else {
+            mount.muzzleAnchor.getWorldPosition(muzzlePosition);
+            fallbackLookDirection.set(0, 0, -1).applyQuaternion(car.quaternion).normalize();
+            fallbackLookPoint
+                .copy(muzzlePosition)
+                .addScaledVector(fallbackLookDirection, CAMERA_AIM_RANGE);
+            mount.pitchPivot.lookAt(fallbackLookPoint);
+        }
+
+        targetReticleColor.copy(RETICLE_DEFAULT_COLOR);
+        if (projectileState.locked) {
+            targetReticleColor.copy(
+                projectileState.triggerHeld ? RETICLE_LOCK_COLOR : RETICLE_HOT_COLOR
+            );
+        } else if (projectileState.triggerHeld) {
+            targetReticleColor.copy(RETICLE_HOT_COLOR);
+        }
+        reticleColor.lerp(targetReticleColor, 1 - Math.exp(-12 * dt));
+
+        const pulse = 0.5 + 0.5 * Math.sin(projectileState.lockPulse);
+        const lockPulse = 0.5 + 0.5 * Math.sin(projectileState.lockPulse * 1.6 + 0.7);
+        const emissiveIntensity =
+            0.65 +
+            projectileState.heat * 1.2 +
+            pulse * 0.22 +
+            (projectileState.locked ? 0.35 + lockPulse * 0.28 : 0);
+
+        for (let i = 0; i < mount.glowMaterials.length; i += 1) {
+            const material = mount.glowMaterials[i];
+            material.color.copy(reticleColor);
+            if (material.emissive?.isColor) {
+                material.emissive.copy(reticleColor);
+            }
+            if ('emissiveIntensity' in material) {
+                material.emissiveIntensity = emissiveIntensity;
+            }
+        }
+        for (let i = 0; i < mount.holoMaterials.length; i += 1) {
+            const material = mount.holoMaterials[i];
+            material.color.copy(reticleColor);
+            material.opacity =
+                0.28 +
+                pulse * 0.12 +
+                projectileState.heat * 0.1 +
+                (projectileState.locked ? 0.12 : 0);
+        }
+        const hotBlend = THREE.MathUtils.clamp(projectileState.heat * 0.8, 0, 1);
+        for (let i = 0; i < mount.metalMaterials.length; i += 1) {
+            const material = mount.metalMaterials[i];
+            weaponTempColor.copy(WEAPON_METAL_COLOR).lerp(WEAPON_HOT_COLOR, hotBlend * 0.24);
+            material.color.copy(weaponTempColor);
+            material.emissive.copy(WEAPON_EDGE_COLOR).lerp(WEAPON_HOT_COLOR, hotBlend * 0.72);
+            material.emissiveIntensity = 0.14 + projectileState.heat * 0.4;
+        }
+
+        mount.holoReticle.scale.setScalar(projectileState.locked ? 1 + lockPulse * 0.12 : 1);
+        mount.holoHalo.scale.setScalar(0.92 + pulse * 0.14 + projectileState.heat * 0.08);
+    }
+
+    function spawnReplicatedProjectile({
+        start = null,
+        end = null,
+        direction = null,
+        speed = PROJECTILE_SPEED,
+    } = {}) {
+        if (!start || !end || !direction) {
+            return;
+        }
+        while (activeProjectiles.length >= MAX_ACTIVE_PROJECTILES) {
+            const entry = activeProjectiles.shift();
+            disposeProjectile(entry);
+        }
+
+        const group = new THREE.Group();
+        const coreMaterial = new THREE.MeshBasicMaterial({
+            color: 0xd8fbff,
+            transparent: true,
+            opacity: 0.95,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            color: 0x67dbff,
+            transparent: true,
+            opacity: 0.42,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+            side: THREE.DoubleSide,
+        });
+        const tipMaterial = new THREE.MeshBasicMaterial({
+            color: 0xf7ffff,
+            transparent: true,
+            opacity: 0.96,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const core = new THREE.Mesh(projectileCoreGeometry, coreMaterial);
+        const glow = new THREE.Mesh(projectileGlowGeometry, glowMaterial);
+        const tip = new THREE.Mesh(projectileTipGeometry, tipMaterial);
+        tip.position.y = PROJECTILE_LENGTH * 0.44;
+        group.add(glow, core, tip);
+        group.position.copy(start);
+        group.quaternion.setFromUnitVectors(projectileUpVector, direction);
+        effectRoot.add(group);
+        activeProjectiles.push({
+            group,
+            coreMaterial,
+            glowMaterial,
+            tipMaterial,
+            life: PROJECTILE_MAX_LIFETIME_SEC,
+            direction: direction.clone(),
+            impactPoint: end.clone(),
+            remainingDistance: Math.max(0.1, start.distanceTo(end)),
+            speed: Math.max(1, Number(speed) || PROJECTILE_SPEED),
+        });
+    }
+
+    function spawnReplicatedImpact(position, direction) {
+        while (activeImpacts.length >= MAX_ACTIVE_IMPACTS) {
+            const entry = activeImpacts.shift();
+            disposeImpact(entry);
+        }
+
+        const group = new THREE.Group();
+        group.position.copy(position);
+        impactLookPoint.copy(position).add(direction);
+        group.lookAt(impactLookPoint);
+
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0x8ee7ff,
+            transparent: true,
+            opacity: 0.92,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const ring = new THREE.Mesh(impactRingGeometry, ringMaterial);
+        group.add(ring);
+
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            map: pickupGlowTexture,
+            color: 0x61d7ff,
+            transparent: true,
+            opacity: 0.6,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const glow = new THREE.Mesh(impactGlowGeometry, glowMaterial);
+        group.add(glow);
+        effectRoot.add(group);
+
+        activeImpacts.push({
+            group,
+            ring,
+            glow,
+            ringMaterial,
+            glowMaterial,
+            life: IMPACT_LIFETIME_SEC,
+            ttl: IMPACT_LIFETIME_SEC,
+        });
+    }
+
+    function spawnReplicatedMuzzleFlash(position, direction) {
+        while (activeMuzzleFlashes.length >= MAX_ACTIVE_MUZZLE_FLASHES) {
+            const entry = activeMuzzleFlashes.shift();
+            disposeMuzzleFlash(entry);
+        }
+
+        const group = new THREE.Group();
+        group.position.copy(position);
+        flashLookPoint.copy(position).add(direction);
+        group.lookAt(flashLookPoint);
+
+        const glowMaterial = new THREE.MeshBasicMaterial({
+            map: pickupGlowTexture,
+            color: 0xffa468,
+            transparent: true,
+            opacity: 0.84,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const coreMaterial = new THREE.MeshBasicMaterial({
+            color: 0xfff2d6,
+            transparent: true,
+            opacity: 0.92,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const shockwaveMaterial = new THREE.MeshBasicMaterial({
+            color: 0xffc18f,
+            transparent: true,
+            opacity: 0.74,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const smokeMaterial = new THREE.MeshBasicMaterial({
+            map: pickupGlowTexture,
+            color: 0x9fd8ff,
+            transparent: true,
+            opacity: 0.24,
+            side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+            toneMapped: false,
+        });
+        const glow = new THREE.Mesh(muzzleFlashGlowGeometry, glowMaterial);
+        const core = new THREE.Mesh(muzzleFlashCoreGeometry, coreMaterial);
+        const shockwave = new THREE.Mesh(muzzleFlashShockwaveGeometry, shockwaveMaterial);
+        const smoke = new THREE.Mesh(muzzleFlashSmokeGeometry, smokeMaterial);
+        core.rotation.z = Math.PI * 0.25;
+        shockwave.position.z = -0.04;
+        smoke.position.y = 0.14;
+        smoke.position.z = -0.12;
+        smoke.rotation.z = Math.PI * 0.12;
+        smoke.scale.set(0.82, 1.08, 1);
+        group.add(smoke, shockwave, glow, core);
+        effectRoot.add(group);
+
+        activeMuzzleFlashes.push({
+            group,
+            glow,
+            core,
+            shockwave,
+            smoke,
+            glowMaterial,
+            coreMaterial,
+            shockwaveMaterial,
+            smokeMaterial,
+            flashLife: MUZZLE_FLASH_LIFETIME_SEC,
+            flashTtl: MUZZLE_FLASH_LIFETIME_SEC,
+            smokeLife: MUZZLE_SMOKE_LIFETIME_SEC,
+            smokeTtl: MUZZLE_SMOKE_LIFETIME_SEC,
+        });
+    }
+
+    function updateReplicatedEffects(dt) {
+        for (let i = activeProjectiles.length - 1; i >= 0; i -= 1) {
+            const projectile = activeProjectiles[i];
+            projectile.life -= dt;
+            const travelDistance =
+                dt > 0
+                    ? Math.min(projectile.remainingDistance, Math.max(0, projectile.speed * dt))
+                    : 0;
+            if (travelDistance > 0) {
+                projectile.group.position.addScaledVector(projectile.direction, travelDistance);
+                projectile.remainingDistance -= travelDistance;
+            }
+
+            const pulse =
+                0.86 +
+                Math.sin((projectileState.shotSequence + i) * 0.9 + projectile.life * 34) * 0.08;
+            projectile.group.scale.setScalar(pulse);
+            projectile.coreMaterial.opacity = 0.92;
+            projectile.glowMaterial.opacity =
+                0.42 + Math.max(0, 1 - projectile.life / PROJECTILE_MAX_LIFETIME_SEC) * 0.12;
+            projectile.tipMaterial.opacity = 0.95;
+
+            if (projectile.remainingDistance > 0.025 && projectile.life > 0) {
+                continue;
+            }
+            spawnReplicatedImpact(projectile.impactPoint, projectile.direction);
+            disposeProjectile(projectile);
+            activeProjectiles.splice(i, 1);
+        }
+
+        for (let i = activeImpacts.length - 1; i >= 0; i -= 1) {
+            const impact = activeImpacts[i];
+            impact.life -= dt;
+            if (impact.life <= 0) {
+                disposeImpact(impact);
+                activeImpacts.splice(i, 1);
+                continue;
+            }
+            const normalizedLife = impact.life / impact.ttl;
+            const inverse = 1 - normalizedLife;
+            impact.ring.scale.setScalar(0.8 + inverse * 2.1);
+            impact.glow.scale.setScalar(0.7 + inverse * 1.35);
+            impact.ringMaterial.opacity = normalizedLife * 0.95;
+            impact.glowMaterial.opacity = normalizedLife * 0.72;
+        }
+
+        for (let i = activeMuzzleFlashes.length - 1; i >= 0; i -= 1) {
+            const flash = activeMuzzleFlashes[i];
+            flash.flashLife -= dt;
+            flash.smokeLife -= dt;
+            if (flash.smokeLife <= 0) {
+                disposeMuzzleFlash(flash);
+                activeMuzzleFlashes.splice(i, 1);
+                continue;
+            }
+            const flashLifeNormalized = THREE.MathUtils.clamp(
+                flash.flashLife / Math.max(0.0001, flash.flashTtl),
+                0,
+                1
+            );
+            const flashInverse = 1 - flashLifeNormalized;
+            const smokeLifeNormalized = THREE.MathUtils.clamp(
+                flash.smokeLife / Math.max(0.0001, flash.smokeTtl),
+                0,
+                1
+            );
+            const smokeInverse = 1 - smokeLifeNormalized;
+
+            flash.group.scale.setScalar(0.84 + flashInverse * 0.54);
+            flash.glowMaterial.opacity = flashLifeNormalized * 0.88;
+            flash.coreMaterial.opacity = flashLifeNormalized;
+            flash.shockwaveMaterial.opacity = flashLifeNormalized * 0.72;
+            flash.shockwave.scale.setScalar(0.9 + flashInverse * 2.4);
+            flash.smokeMaterial.opacity = smokeLifeNormalized * 0.22;
+            flash.smoke.position.y = 0.14 + smokeInverse * 0.34;
+            flash.smoke.scale.set(0.82 + smokeInverse * 0.58, 1.08 + smokeInverse * 1.7, 1);
+            flash.group.rotation.z += dt * 12;
+            flash.smoke.rotation.z += dt * 1.9;
+        }
+    }
+
+    function clearReplicatedEffects() {
+        while (activeProjectiles.length > 0) {
+            disposeProjectile(activeProjectiles.pop());
+        }
+        while (activeImpacts.length > 0) {
+            disposeImpact(activeImpacts.pop());
+        }
+        while (activeMuzzleFlashes.length > 0) {
+            disposeMuzzleFlash(activeMuzzleFlashes.pop());
+        }
+    }
+}
+
 function createNoopWeaponSystem() {
     return {
         update() {},
@@ -2720,5 +3288,28 @@ function createNoopWeaponSystem() {
         hasWeapon() {
             return false;
         },
+        getReplicationState() {
+            return {
+                hasWeapon: false,
+                triggerHeld: false,
+                heat: 0,
+                locked: false,
+                hasTarget: false,
+                targetX: 0,
+                targetY: 0,
+                targetZ: 0,
+            };
+        },
+    };
+}
+
+function createNoopReplicatedRoofWeaponVisualController() {
+    return {
+        applyReplicationState() {},
+        playShot() {
+            return false;
+        },
+        update() {},
+        dispose() {},
     };
 }

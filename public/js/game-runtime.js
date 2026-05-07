@@ -2158,6 +2158,9 @@ runtimeState.weaponSystem = createRoofWeaponSystem({
     onStatus(messageText, timeoutMs = 2000) {
         objectiveUi.showInfo(messageText, timeoutMs);
     },
+    onShotFired(shotEvent = null) {
+        runtimeState.multiplayerController?.reportWeaponShot?.(shotEvent);
+    },
     onBotDestroyed(event = null) {
         handleRoofWeaponBotDestroyed(event || null);
     },
@@ -2501,6 +2504,7 @@ runtimeState.multiplayerController = createMultiplayerController({
     getVehicleState,
     getInputState: () => keys,
     getCrashReplicationState: () => runtimeState.crashDebrisController?.getReplicationState?.(),
+    getWeaponReplicationState: () => runtimeState.weaponSystem?.getReplicationState?.(),
     getGroundHeightAt,
     applyNetworkCollisionImpulse: applyNetworkVehicleCollisionImpulse,
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
