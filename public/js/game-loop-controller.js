@@ -1,9 +1,5 @@
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 import { beginHeavyEventFrame, getHeavyEventBudgetSnapshot } from './frame-heavy-event-budget.js';
-import {
-    isInsideLorienVelmoreGalleryWorld,
-    isInsideUfoDiskoStoreWorld,
-} from './environment/buildings.js';
 import { updateUndergroundParkingRuntime } from './environment/underground-parking.js';
 
 const BOT_MINE_DEPLOY_MIN_SPEED = 8;
@@ -93,6 +89,7 @@ export function createGameLoopController(options = {}) {
         getGameMode,
         getIsWelcomeModalVisible,
         getLocalPlayerId,
+        getIsRoofWeaponZoomActive,
         getWorldMapDriveLockMode,
         getIsWorldMapOpen,
     } = options;
@@ -118,6 +115,8 @@ export function createGameLoopController(options = {}) {
         typeof getIsBatteryDepleted === 'function' ? getIsBatteryDepleted : () => false;
     const readPlayerCollectedCount =
         typeof getPlayerCollectedCount === 'function' ? getPlayerCollectedCount : () => 0;
+    const readRoofWeaponZoomActive =
+        typeof getIsRoofWeaponZoomActive === 'function' ? getIsRoofWeaponZoomActive : () => false;
     const readPlayerScore = typeof getPlayerScore === 'function' ? getPlayerScore : () => 0;
     const readPlayerCarsRemaining =
         typeof getPlayerCarsRemaining === 'function' ? getPlayerCarsRemaining : () => 0;
@@ -665,23 +664,14 @@ export function createGameLoopController(options = {}) {
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
                 updateCamera(car, cameraSpeed, frameDelta, {
                     vehicleState: visualState,
-                    allowAutoCinematic:
-                        !readCarDestroyed() &&
+                    roofWeaponZoomActive:
+                        readRoofWeaponZoomActive() &&
+                        !worldMapOpen &&
                         !gamePaused &&
                         !isEditModeActive &&
-                        !readPickupRoundFinished() &&
-                        !isInsideUfoDiskoStoreWorld(
-                            car.position.x,
-                            car.position.y,
-                            car.position.z,
-                            0.28
-                        ) &&
-                        !isInsideLorienVelmoreGalleryWorld(
-                            car.position.x,
-                            car.position.y,
-                            car.position.z,
-                            0.18
-                        ),
+                        !readCarDestroyed() &&
+                        !readPickupRoundFinished(),
+                    allowAutoCinematic: false,
                 });
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
                 updateGroundMotion(car.position, cameraSpeed, monumentRhythmState, frameDelta, {
@@ -821,6 +811,13 @@ export function createGameLoopController(options = {}) {
         measureStage('roofWeapon', () => {
             roofWeaponSystem?.update?.(frameDelta, {
                 vehicleState: getVehicleState(),
+                roofWeaponZoomActive:
+                    readRoofWeaponZoomActive() &&
+                    !worldMapOpen &&
+                    !gamePaused &&
+                    !isEditModeActive &&
+                    !readCarDestroyed() &&
+                    !readPickupRoundFinished(),
                 controlsEnabled:
                     !isWelcomeVisible &&
                     !gamePaused &&

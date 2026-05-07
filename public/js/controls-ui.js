@@ -51,6 +51,11 @@ const CONTROL_LAYOUTS = Object.freeze({
                     actionId: ACTION_IDS.mineThrow,
                     hint: 'VX-9 pickup turns T into auto-fire',
                 },
+                {
+                    label: 'Aim Zoom',
+                    actionId: ACTION_IDS.roofWeaponZoom,
+                    hint: 'Hold to tighten VX-9 aim',
+                },
             ]),
         },
     ]),
@@ -118,6 +123,11 @@ const CONTROL_LAYOUTS = Object.freeze({
                     label: 'Throw Mine / VX-9',
                     actionId: ACTION_IDS.mineThrow,
                     hint: 'VX-9 pickup turns T into auto-fire',
+                },
+                {
+                    label: 'Aim Zoom',
+                    actionId: ACTION_IDS.roofWeaponZoom,
+                    hint: 'Hold to tighten VX-9 aim',
                 },
             ]),
         },

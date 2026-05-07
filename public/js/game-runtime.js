@@ -3342,6 +3342,8 @@ runtimeState.gameLoopController = createGameLoopController({
     getGameMode: () => runtimeState.gameMode,
     getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
     getLocalPlayerId: () => runtimeState.multiplayerController?.getSelfId?.() || '',
+    getIsRoofWeaponZoomActive: () =>
+        Boolean(runtimeState.inputController?.isRoofWeaponZoomHeld?.()),
     getWorldMapDriveLockMode: () => runtimeState.worldMapDriveLockMode,
     getIsWorldMapOpen: () => runtimeState.isWorldMapOpen,
 });

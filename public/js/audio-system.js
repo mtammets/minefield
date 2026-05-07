@@ -1,6 +1,9 @@
 import { centralParkingLot } from './environment/layout.js';
 import { getLorienVelmoreGallerySilenceFactorWorld } from './environment/lorien-gallery.js';
-import { getUndergroundParkingSilenceFactorWorld } from './environment/underground-parking.js';
+import {
+    getUndergroundParkingSilenceFactorWorld,
+    isUndergroundParkingSpaceIsolatedPosition,
+} from './environment/underground-parking.js';
 import {
     getUfoDiskoStoreAudioState,
     getLorienVelmoreGalleryVideoDisplayState,
@@ -1362,14 +1365,22 @@ export function createAudioSystem({ camera = null } = {}) {
 
         const playerPosition = frameState.playerPosition || null;
         const lowerLevelSilenceFactor = getWorldSilenceFactorAtPosition(playerPosition);
+        const undergroundParkingIsolationActive = isUndergroundParkingSpaceIsolatedPosition(
+            playerPosition,
+            0.18
+        );
         runtime.playerPosition = playerPosition;
         runtime.lowerLevelSilenceFactor = lowerLevelSilenceFactor;
 
         const ambienceBase = welcomeVisible ? WELCOME_MENU_AMBIENCE_GAIN : 0.38;
         const ambienceGameplayBoost = driveAudioEnabled ? 0.2 : 0;
         const crowdGain = welcomeVisible ? WELCOME_MENU_CROWD_GAIN : driveAudioEnabled ? 0.2 : 0.1;
-        const ambienceOcclusion = Math.max(0.04, 1 - lowerLevelSilenceFactor * 0.96);
-        const crowdOcclusion = Math.max(0.02, 1 - lowerLevelSilenceFactor * 0.995);
+        const ambienceOcclusion = undergroundParkingIsolationActive
+            ? 0
+            : Math.max(0.04, 1 - lowerLevelSilenceFactor * 0.96);
+        const crowdOcclusion = undergroundParkingIsolationActive
+            ? 0
+            : Math.max(0.02, 1 - lowerLevelSilenceFactor * 0.995);
 
         updateLoopLayer(
             'engineIdleLoop01',
@@ -1445,6 +1456,7 @@ export function createAudioSystem({ camera = null } = {}) {
             editModeActive,
             pickupRoundFinished,
             lowerLevelSilenceFactor,
+            undergroundParkingIsolationActive,
         });
     }
 
@@ -2442,7 +2454,8 @@ export function createAudioSystem({ camera = null } = {}) {
                 0
             );
         const wideAreaMix = 1 - clampNumber(distance / MONUMENT_AUDIO_CONFIG.maxDistance, 0, 1, 0);
-        const activeMix = shouldBeAudible ? 1 : 0;
+        const activeMix =
+            shouldBeAudible && !Boolean(frameState.undergroundParkingIsolationActive) ? 1 : 0;
         const definitionGain = SOUND_DEFINITIONS[MONUMENT_MUSIC_SOUND_ID]?.gain || 1;
         const lowerLevelMix = clampNumber(frameState.lowerLevelSilenceFactor, 0, 1, 0);
         const sourceOcclusionMix = lerpNumber(1, 0.34, lowerLevelMix);

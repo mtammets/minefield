@@ -62,6 +62,7 @@ export function createStreetLampLayer(_lampLights) {
             pole.position.set(positionX, baseY + 4.3, positionZ);
             pole.castShadow = false;
             pole.receiveShadow = false;
+            pole.userData.weaponLockSoftOccluder = true;
             layer.add(pole);
             addObstacleCircle(positionX, positionZ, 0.58, 'lamp_post', {
                 minY: baseY - 0.35,
@@ -70,6 +71,7 @@ export function createStreetLampLayer(_lampLights) {
 
             const lampHead = new THREE.Mesh(headGeometry, glowMaterial);
             lampHead.position.set(positionX, baseY + 8.6, positionZ);
+            lampHead.userData.weaponLockSoftOccluder = true;
             layer.add(lampHead);
         }
     }

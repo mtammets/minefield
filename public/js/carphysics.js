@@ -8,7 +8,10 @@ import {
 } from './constants.js';
 import { createDefaultCrashDamageTuning, mergeCrashDamageTuning } from './crash-damage-tuning.js';
 import { constrainPositionToLorienVelmoreRoofLiftDriveBounds } from './environment/lorien-gallery.js';
-import { constrainPositionToUndergroundParkingDriveBounds } from './environment/underground-parking.js';
+import {
+    constrainPositionToUndergroundParkingDriveBounds,
+    isUndergroundParkingSpaceIsolatedPosition,
+} from './environment/underground-parking.js';
 import { constrainPositionToUpperDeckDriveBounds } from './environment/upper-deck.js';
 
 export const keys = {
@@ -1221,6 +1224,10 @@ function constrainToVehicles(position, dynamicVehicles = null) {
     }
 
     let collisionCount = 0;
+    const selfUndergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
+        position,
+        0.18
+    );
     const forwardX = -Math.sin(physicsRotationY);
     const forwardZ = -Math.cos(physicsRotationY);
     const closestPoints = { ax: 0, az: 0, bx: 0, bz: 0 };
@@ -1233,6 +1240,20 @@ function constrainToVehicles(position, dynamicVehicles = null) {
         const vehicleX = Number(vehicle.x);
         const vehicleZ = Number(vehicle.z);
         if (!Number.isFinite(vehicleX) || !Number.isFinite(vehicleZ)) {
+            continue;
+        }
+        const otherUndergroundParkingIsolated =
+            typeof vehicle.undergroundParkingIsolated === 'boolean'
+                ? vehicle.undergroundParkingIsolated
+                : isUndergroundParkingSpaceIsolatedPosition(
+                      {
+                          x: vehicleX,
+                          y: Number(vehicle.y),
+                          z: vehicleZ,
+                      },
+                      0.18
+                  );
+        if (selfUndergroundParkingIsolated !== otherUndergroundParkingIsolated) {
             continue;
         }
 

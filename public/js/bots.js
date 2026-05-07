@@ -2,7 +2,11 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import { createCarRig } from './car.js';
 import { resolveStoreInteriorAttackDirective } from './environment/buildings.js';
 import { constrainPositionToLorienVelmoreRoofLiftDriveBounds } from './environment/lorien-gallery.js';
-import { constrainPositionToUndergroundParkingDriveBounds } from './environment/underground-parking.js';
+import {
+    constrainPositionToUndergroundParkingDriveBounds,
+    arePositionsSeparatedByUndergroundParking,
+    isUndergroundParkingSpaceIsolatedPosition,
+} from './environment/underground-parking.js';
 import { constrainPositionToUpperDeckDriveBounds } from './environment/upper-deck.js';
 import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
@@ -353,6 +357,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 snapshot.id = bot.collectorId;
                 snapshot.sourceType = 'bot';
                 snapshot.x = bot.car.position.x;
+                snapshot.y = bot.car.position.y;
                 snapshot.z = bot.car.position.z;
                 snapshot.heading = bot.car.rotation.y;
                 snapshot.halfWidth = BOT_COLLISION_HALF_WIDTH;
@@ -362,6 +367,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 snapshot.mass = BOT_MASS;
                 snapshot.velocityX = bot.state.velocity.x;
                 snapshot.velocityZ = bot.state.velocity.y;
+                snapshot.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
+                    bot.car.position,
+                    0.18
+                );
                 snapshotCount += 1;
             }
             collisionSnapshotBuffer.length = snapshotCount;
@@ -410,6 +419,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 descriptor.collisionRadius = BOT_VEHICLE_COLLISION_RADIUS;
                 descriptor.mineImmune = isBotSpawnProtected(bot, nowMs);
                 descriptor.isRoofWeaponHunter = Boolean(bot.roofWeaponHunter);
+                descriptor.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
+                    bot.car.position,
+                    0.18
+                );
                 descriptorCount += 1;
             }
             collectorDescriptorBuffer.length = descriptorCount;
@@ -606,6 +619,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
                 if (!bot || bot.destroyed || isBotSpawnProtected(bot)) {
+                    continue;
+                }
+                if (arePositionsSeparatedByUndergroundParking(origin, bot.car.position, 0.18)) {
                     continue;
                 }
                 botWeaponTargetCenterScratch.set(

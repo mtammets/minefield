@@ -749,13 +749,20 @@ function resolveRegularBuildingObstacleVerticalRange(building) {
         return null;
     }
 
+    const verticalRange = createSurfaceBuildingObstacleVerticalRange(building);
     if (`${building.gridX}:${building.gridZ}` !== LORIEN_VELMORE_CONNECTED_TERRACE_KEY) {
-        return null;
+        return verticalRange;
     }
 
     const roofLiftLayout = getLorienVelmoreRoofLiftLayout();
+    verticalRange.maxY = roofLiftLayout.connectedTerraceSurfaceY - 1.45;
+    return verticalRange;
+}
+
+function createSurfaceBuildingObstacleVerticalRange(building) {
     return {
-        maxY: roofLiftLayout.connectedTerraceSurfaceY - 1.45,
+        minY: -0.35,
+        maxY: Math.max(6, Number(building?.height) || 0) + 0.8,
     };
 }
 
@@ -2423,6 +2430,7 @@ function addDriveThroughBuildingObstacles(building, variant) {
     const sideWingSpan = Math.max(1.4, (transverseSpan - passageWidth) * 0.5);
     const wingOffset = passageWidth * 0.5 + sideWingSpan * 0.5;
     const collisionPadding = Math.max(0, Number(variant.obstaclePadding) || 0);
+    const obstacleVerticalRange = createSurfaceBuildingObstacleVerticalRange(building);
 
     addObstacleAabb(
         axis === 'x' ? building.x : building.x - wingOffset,
@@ -2430,7 +2438,8 @@ function addDriveThroughBuildingObstacles(building, variant) {
         axis === 'x' ? building.width : sideWingSpan,
         axis === 'x' ? sideWingSpan : building.depth,
         collisionPadding,
-        'building'
+        'building',
+        obstacleVerticalRange
     );
     addObstacleAabb(
         axis === 'x' ? building.x : building.x + wingOffset,
@@ -2438,7 +2447,8 @@ function addDriveThroughBuildingObstacles(building, variant) {
         axis === 'x' ? building.width : sideWingSpan,
         axis === 'x' ? sideWingSpan : building.depth,
         collisionPadding,
-        'building'
+        'building',
+        obstacleVerticalRange
     );
 }
 

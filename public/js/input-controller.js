@@ -60,6 +60,9 @@ export function createInputController(options = {}) {
             initialize() {},
             dispose() {},
             returnToWelcomeFromPauseMenu() {},
+            isRoofWeaponZoomHeld() {
+                return false;
+            },
         };
     }
 
@@ -73,18 +76,25 @@ export function createInputController(options = {}) {
     let fullscreenCursorHideTimeout = null;
     let lastFullscreenPointerX = null;
     let lastFullscreenPointerY = null;
+    let roofWeaponZoomHeld = false;
 
     const onKeyDown = (event) => handleKey(event, true);
     const onKeyUp = (event) => handleKey(event, false);
     const onFullscreenPointerMove = (event) => handleFullscreenCursorPointerMove(event);
     const onFullscreenCursorActivity = (event) => handleFullscreenCursorActivity(event);
     const onWindowPointerUp = (event) => handleWindowPointerUp(event);
-    const onWindowBlur = () => releaseRoofWeaponTrigger();
+    const onWindowBlur = () => {
+        releaseRoofWeaponTrigger();
+        releaseRoofWeaponZoom();
+    };
 
     return {
         initialize,
         dispose,
         returnToWelcomeFromPauseMenu,
+        isRoofWeaponZoomHeld() {
+            return roofWeaponZoomHeld && Boolean(getHasRoofWeapon());
+        },
     };
 
     function initialize() {
@@ -117,6 +127,7 @@ export function createInputController(options = {}) {
         window.removeEventListener('blur', onWindowBlur);
         renderer.domElement.removeEventListener('pointerdown', handleGameCanvasPointerDown);
         releaseRoofWeaponTrigger();
+        releaseRoofWeaponZoom();
         clearFullscreenCursorHideTimeout();
         showFullscreenCursor();
     }
@@ -133,9 +144,14 @@ export function createInputController(options = {}) {
         };
         const roofWeaponBoundThrowAction =
             matchesAction(ACTION_IDS.mineThrow) && Boolean(getHasRoofWeapon());
+        const roofWeaponZoomAction = matchesAction(ACTION_IDS.roofWeaponZoom);
 
         if (roofWeaponBoundThrowAction && !isKeyDown) {
             onSetRoofWeaponTrigger(false);
+            return;
+        }
+        if (roofWeaponZoomAction && !isKeyDown) {
+            setRoofWeaponZoomHeld(false);
             return;
         }
 
@@ -160,6 +176,7 @@ export function createInputController(options = {}) {
                 matchesAction(ACTION_IDS.roofModeBattery) ||
                 matchesAction(ACTION_IDS.roofModeNavigation) ||
                 matchesAction(ACTION_IDS.roofModeChassis) ||
+                matchesAction(ACTION_IDS.roofWeaponZoom) ||
                 roofWeaponGrantShortcut ||
                 matchesAction(ACTION_IDS.mineDrop) ||
                 matchesAction(ACTION_IDS.mineThrow) ||
@@ -202,6 +219,7 @@ export function createInputController(options = {}) {
                 lastEscapeKeyDownAtMs = performance.now();
             }
             if (isKeyDown && !finalScoreboardUi.isVisible()) {
+                setRoofWeaponZoomHeld(false);
                 const nextPausedState = !getIsGamePaused();
                 onSetPauseState(nextPausedState);
                 if (document.fullscreenElement) {
@@ -321,6 +339,17 @@ export function createInputController(options = {}) {
                 onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
             }
             reportAction(ACTION_IDS.mineThrow);
+            return;
+        }
+
+        if (roofWeaponZoomAction) {
+            if (isRaceIntroDriveLocked || !getHasRoofWeapon()) {
+                setRoofWeaponZoomHeld(false);
+                return;
+            }
+            event.preventDefault();
+            setRoofWeaponZoomHeld(isKeyDown);
+            reportAction(ACTION_IDS.roofWeaponZoom);
             return;
         }
 
@@ -492,6 +521,14 @@ export function createInputController(options = {}) {
         onSetRoofWeaponTrigger(false);
     }
 
+    function setRoofWeaponZoomHeld(nextHeld) {
+        roofWeaponZoomHeld = Boolean(nextHeld);
+    }
+
+    function releaseRoofWeaponZoom() {
+        setRoofWeaponZoomHeld(false);
+    }
+
     function resolveSceneClickUrl(pointerNdc) {
         if (!sceneClickRoot) {
             return '';
@@ -590,6 +627,7 @@ export function createInputController(options = {}) {
     }
 
     function returnToWelcomeFromPauseMenu() {
+        releaseRoofWeaponZoom();
         onStartNewGame();
         onShowWelcomeModal();
 

@@ -10,6 +10,10 @@ import {
     MINE_THROW_VERTICAL_SPEED,
     MINE_THROW_GRAVITY,
 } from './constants.js';
+import {
+    arePositionsSeparatedByUndergroundParking,
+    isUndergroundParkingSpaceIsolatedPosition,
+} from './environment/underground-parking.js';
 import { tryConsumeHeavyEventToken } from './frame-heavy-event-budget.js';
 
 const MINE_SURFACE_OFFSET = 0.06;
@@ -151,6 +155,7 @@ export function createMineSystemController(options = {}) {
         toX: 0,
         toZ: 0,
         collisionRadius: DEFAULT_TARGET_COLLISION_RADIUS,
+        undergroundParkingIsolated: false,
     };
 
     prewarmDetonationEffects();
@@ -664,6 +669,8 @@ export function createMineSystemController(options = {}) {
                     localMineSweepMovement.toX = localMovement.toX;
                     localMineSweepMovement.toZ = localMovement.toZ;
                     localMineSweepMovement.collisionRadius = localMovement.collisionRadius;
+                    localMineSweepMovement.undergroundParkingIsolated =
+                        localMovement.undergroundParkingIsolated;
                     localMovementForMine = localMineSweepMovement;
                 }
                 if (
@@ -1013,6 +1020,15 @@ export function createMineSystemController(options = {}) {
             const dz = candidateMine.mesh.position.z - detonationPosition.z;
             const distanceSq = dx * dx + dy * dy + dz * dz;
             if (distanceSq > maxDistanceSq) {
+                continue;
+            }
+            if (
+                arePositionsSeparatedByUndergroundParking(
+                    detonationPosition,
+                    candidateMine.mesh.position,
+                    0.18
+                )
+            ) {
                 continue;
             }
             chainMineCandidates.push({
@@ -2300,6 +2316,7 @@ function createMovementSnapshot({
         toX,
         toZ,
         collisionRadius: resolveCollisionRadius(collisionRadius),
+        undergroundParkingIsolated: isUndergroundParkingSpaceIsolatedPosition(position, 0.18),
     };
 }
 
@@ -2619,11 +2636,24 @@ function resolveThrownMineMovementImpact({
     }
     t = THREE.MathUtils.clamp(t, 0, 1);
 
-    return {
-        t,
+    const impactPosition = {
         x: thrownMineClosestPointsScratch.ax,
         y: THREE.MathUtils.lerp(startY, endY, t),
         z: thrownMineClosestPointsScratch.az,
+    };
+    if (
+        typeof movement.undergroundParkingIsolated === 'boolean' &&
+        movement.undergroundParkingIsolated !==
+            isUndergroundParkingSpaceIsolatedPosition(impactPosition, 0.18)
+    ) {
+        return null;
+    }
+
+    return {
+        t,
+        x: impactPosition.x,
+        y: impactPosition.y,
+        z: impactPosition.z,
         triggerPlayerId,
         targetPlayerId,
         emitNetworkEvent,
@@ -2884,6 +2914,13 @@ function movementIntersectsMineRadius({
     targetCollisionRadius = null,
 } = {}) {
     if (!movement || !minePosition || typeof minePosition !== 'object') {
+        return false;
+    }
+    if (
+        typeof movement.undergroundParkingIsolated === 'boolean' &&
+        movement.undergroundParkingIsolated !==
+            isUndergroundParkingSpaceIsolatedPosition(minePosition, 0.18)
+    ) {
         return false;
     }
     const centerX = Number(minePosition.x);

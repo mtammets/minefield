@@ -2,6 +2,7 @@ import { createCarRig } from './car.js';
 import { createSkidMarkController } from './skidmarks.js';
 import { createCrashDebrisController } from './crash-debris-system.js';
 import { createReplicatedRoofWeaponVisualController } from './roof-weapon-system.js';
+import { isUndergroundParkingSpaceIsolatedPosition } from './environment/underground-parking.js';
 
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const DEFAULT_PLAYER_NAME = 'Driver';
@@ -182,6 +183,7 @@ export function createMultiplayerController(options = {}) {
             snapshot.playerId = remote.id;
             snapshot.sourceType = 'player';
             snapshot.x = remote.car.position.x;
+            snapshot.y = remote.car.position.y;
             snapshot.z = remote.car.position.z;
             snapshot.heading = normalizeAngle(remote.car.rotation.y);
             snapshot.colorHex = remote.colorHex;
@@ -192,6 +194,10 @@ export function createMultiplayerController(options = {}) {
             snapshot.mass = MP_COLLISION_MASS;
             snapshot.velocityX = clampNumber(remote.visualState?.velocity?.x, -400, 400, 0);
             snapshot.velocityZ = clampNumber(remote.visualState?.velocity?.y, -400, 400, 0);
+            snapshot.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
+                remote.car.position,
+                0.18
+            );
             snapshotCount += 1;
         }
         collisionSnapshotBuffer.length = snapshotCount;
