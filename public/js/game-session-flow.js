@@ -18,7 +18,7 @@ const ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT = 2;
 const ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION = 3;
 const VEHICLE_RECOVER_MAX_SPEED_KPH = 18;
 const VEHICLE_RECOVER_COOLDOWN_MS = 3500;
-const DEFAULT_START_CAMERA_VIEW_MODE = 1;
+const DEFAULT_START_CAMERA_VIEW_MODE = 6;
 const SCORE_MODEL_TEXT =
     'Pickup: 100 base x combo x (1 + risk + endgame). Mine kill: 220 base x chain x endgame x anti-farm.';
 

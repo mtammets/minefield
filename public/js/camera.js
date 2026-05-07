@@ -9,7 +9,7 @@ import {
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.3, 600);
 camera.position.set(0, 3, 8);
 
-let cameraViewMode = 1;
+let cameraViewMode = 6;
 let manualCinematicMode = false;
 let autoCinematicMode = false;
 let cinematicAngle = 0;
