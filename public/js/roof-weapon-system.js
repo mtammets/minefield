@@ -43,13 +43,13 @@ const DEFAULT_ZOOM_HUD_PROFILE = Object.freeze({
 });
 const CHASE_CAMERA_HUD_PROFILE = Object.freeze({
     aimNdcX: 0,
-    aimNdcY: 0.14,
+    aimNdcY: 0.18,
     hudScale: 0.82,
     autoLockScreenDistance: AUTO_LOCK_MAX_SCREEN_DISTANCE,
 });
 const CHASE_CAMERA_ZOOM_HUD_PROFILE = Object.freeze({
     aimNdcX: 0,
-    aimNdcY: 0.14,
+    aimNdcY: 0.18,
     hudScale: 0.62,
     autoLockScreenDistance: AUTO_LOCK_MAX_SCREEN_DISTANCE,
 });
@@ -533,6 +533,9 @@ export function createRoofWeaponSystem({
         },
         hasWeapon() {
             return state.hasWeapon;
+        },
+        getCurrentLockPoint() {
+            return state.currentLock?.point || null;
         },
         getReplicationState() {
             return {

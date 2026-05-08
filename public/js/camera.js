@@ -25,9 +25,6 @@ const CINEMATIC_LOOP_DURATION_SEC = 18;
 const ROOF_WEAPON_ZOOM_IN_SPEED = 11.5;
 const ROOF_WEAPON_ZOOM_OUT_SPEED = 8.5;
 const ROOF_WEAPON_ZOOM_LOOK_SPEED = 17.5;
-const CHASE_ROOF_WEAPON_ZOOM_CAMERA_LIFT = 0.9;
-const CHASE_ROOF_WEAPON_ZOOM_LOOK_LIFT = 0.52;
-const CHASE_ROOF_WEAPON_ZOOM_LOOK_AHEAD = 1.4;
 const CINEMATIC_LOOP_TRACK = Object.freeze([
     { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
     { t: 0.22, radius: 10.1, height: 5.5, fov: 71, lookAhead: 2.2, lookHeight: 1.02 },
@@ -312,14 +309,6 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
             );
             targetPosition.lerp(roofWeaponZoomTargetPosition, roofWeaponZoomBlend);
         }
-        if (cameraViewMode === 6) {
-            const chaseZoomForwardX = -Math.sin(smoothedHeading);
-            const chaseZoomForwardZ = -Math.cos(smoothedHeading);
-            targetPosition.y += CHASE_ROOF_WEAPON_ZOOM_CAMERA_LIFT * roofWeaponZoomBlend;
-            lookTarget.x += chaseZoomForwardX * CHASE_ROOF_WEAPON_ZOOM_LOOK_AHEAD * roofWeaponZoomBlend;
-            lookTarget.y += CHASE_ROOF_WEAPON_ZOOM_LOOK_LIFT * roofWeaponZoomBlend;
-            lookTarget.z += chaseZoomForwardZ * CHASE_ROOF_WEAPON_ZOOM_LOOK_AHEAD * roofWeaponZoomBlend;
-        }
         finalFov = THREE.MathUtils.lerp(
             finalFov,
             resolveRoofWeaponZoomFov(finalFov),
@@ -479,8 +468,6 @@ function findClosestCinematicTrackProgress(radius, height) {
 
 function resolveRoofWeaponZoomFov(baseFov) {
     switch (cameraViewMode) {
-        case 6:
-            return 20;
         case 7:
             return 16.5;
         case 2:
@@ -492,8 +479,6 @@ function resolveRoofWeaponZoomFov(baseFov) {
 
 function resolveRoofWeaponZoomPullDistance(zoomDistance) {
     switch (cameraViewMode) {
-        case 6:
-            return Math.min(zoomDistance * 0.44, 3.9);
         case 7:
             return Math.min(zoomDistance * 0.24, 0.96);
         case 2:
