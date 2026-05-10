@@ -209,6 +209,8 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     const effects = [];
     const collectEffectPool = [];
     const pendingCollectEffects = [];
+    const pendingCollectedPickups = new Map();
+    const authoritativeCollectedPickupIds = new Set();
     let pendingCollectEffectReadIndex = 0;
     let droppedQueuedCollectEffects = 0;
     let skippedRemoteCollectEffects = 0;
@@ -321,22 +323,22 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                     }
                 }
 
-                removePickup(pickupId, pickup, true);
-
-                onCorrectPickup({
+                const pendingCollection = beginPickupCollection(pickupId, pickup);
+                const pickupResult = onCorrectPickup({
                     pickupId,
                     pickupColorIndex: pickup.shapeIndex,
                     pickupColorHex: pickup.color,
                     position: pickupPosition,
                     collectorId: collector.id,
+                    confirmCollection() {
+                        pendingCollection.confirm();
+                    },
+                    restoreCollection() {
+                        pendingCollection.restore();
+                    },
                 });
-                if (finiteMode) {
-                    finiteRoundState.collected += 1;
-                }
-
-                if (!resolvedSingleType) {
-                    targetColorIndex = getNextTargetColorIndex(targetColorIndex);
-                    emitTargetColorChanged();
+                if (!pickupResult || pickupResult.deferred !== true) {
+                    pendingCollection.confirm();
                 }
             }
 
@@ -345,6 +347,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 if (
                     !finiteRoundState.exhausted &&
                     pickups.size === 0 &&
+                    pendingCollectedPickups.size === 0 &&
                     getRemainingFiniteSpawnCount() === 0
                 ) {
                     finiteRoundState.exhausted = true;
@@ -375,6 +378,8 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             pickupCooldownUntil.clear();
             activePickupIds.clear();
             visiblePickupCache.length = 0;
+            pendingCollectedPickups.clear();
+            authoritativeCollectedPickupIds.clear();
 
             if (resetOptions && typeof resetOptions === 'object') {
                 const nextSeedOffset = Number(resetOptions.seedOffset);
@@ -410,6 +415,47 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             }
 
             return visiblePickupCache;
+        },
+        applyCollectedPickupStateSnapshot(pickupIds = []) {
+            authoritativeCollectedPickupIds.clear();
+            if (Array.isArray(pickupIds)) {
+                for (let i = 0; i < pickupIds.length; i += 1) {
+                    const pickupId = typeof pickupIds[i] === 'string' ? pickupIds[i].trim() : '';
+                    if (pickupId) {
+                        authoritativeCollectedPickupIds.add(pickupId);
+                    }
+                }
+            }
+
+            if (authoritativeCollectedPickupIds.size === 0) {
+                for (const pendingCollection of pendingCollectedPickups.values()) {
+                    pendingCollection?.restore?.();
+                }
+                return 0;
+            }
+
+            let removedCount = 0;
+            for (const pickupId of authoritativeCollectedPickupIds) {
+                const pendingCollection = pendingCollectedPickups.get(pickupId);
+                if (pendingCollection) {
+                    pendingCollection.confirm();
+                    removedCount += 1;
+                    continue;
+                }
+
+                const pickup = pickups.get(pickupId);
+                if (!pickup) {
+                    continue;
+                }
+                removePickup(pickupId, pickup, false);
+                finalizeCollectedPickup();
+                removedCount += 1;
+            }
+
+            if (finiteMode) {
+                spawnFinitePickupsIntoActiveSlots();
+            }
+            return removedCount;
         },
         getSpawnProgress() {
             if (!finiteMode) {
@@ -451,6 +497,12 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     };
 
     function clearPickups(applyCooldown) {
+        for (const pendingCollection of pendingCollectedPickups.values()) {
+            if (pendingCollection?.pickup) {
+                disposePickup(pendingCollection.pickup);
+            }
+        }
+        pendingCollectedPickups.clear();
         for (const [pickupId, pickup] of pickups) {
             removePickup(pickupId, pickup, applyCooldown);
         }
@@ -556,10 +608,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         if (dt > 1 / 32 || activeEffectCount >= Math.floor(MAX_COLLECT_EFFECT_POOL_SIZE * 0.9)) {
             return COLLECT_EFFECT_SPAWN_PER_FRAME_SEVERE_LOAD;
         }
-        if (
-            dt > 1 / 42 ||
-            activeEffectCount >= Math.floor(MAX_COLLECT_EFFECT_POOL_SIZE * 0.75)
-        ) {
+        if (dt > 1 / 42 || activeEffectCount >= Math.floor(MAX_COLLECT_EFFECT_POOL_SIZE * 0.75)) {
             return COLLECT_EFFECT_SPAWN_PER_FRAME_UNDER_LOAD;
         }
         return COLLECT_EFFECT_SPAWN_PER_FRAME;
@@ -633,12 +682,70 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         }
     }
 
+    function beginPickupCollection(pickupId, pickup) {
+        if (!pickup || !pickupId || pendingCollectedPickups.has(pickupId)) {
+            return {
+                confirm() {},
+                restore() {},
+            };
+        }
+
+        pickupGroup.remove(pickup.mesh);
+        pickups.delete(pickupId);
+
+        let resolved = false;
+        const pendingCollection = {
+            pickup,
+            confirm() {
+                if (resolved) {
+                    return false;
+                }
+                resolved = true;
+                pendingCollectedPickups.delete(pickupId);
+                disposePickup(pickup);
+                finalizeCollectedPickup();
+                return true;
+            },
+            restore() {
+                if (resolved) {
+                    return false;
+                }
+                resolved = true;
+                pendingCollectedPickups.delete(pickupId);
+                if (authoritativeCollectedPickupIds.has(pickupId)) {
+                    disposePickup(pickup);
+                    finalizeCollectedPickup();
+                    return false;
+                }
+                pickups.set(pickupId, pickup);
+                pickupGroup.add(pickup.mesh);
+                return true;
+            },
+        };
+        pendingCollectedPickups.set(pickupId, pendingCollection);
+        return pendingCollection;
+    }
+
+    function finalizeCollectedPickup() {
+        if (finiteMode) {
+            finiteRoundState.collected += 1;
+        }
+
+        if (!resolvedSingleType) {
+            targetColorIndex = getNextTargetColorIndex(targetColorIndex);
+            emitTargetColorChanged();
+        }
+    }
+
     function spawnFinitePickupsIntoActiveSlots() {
         if (!enabled || !finiteMode) {
             return;
         }
 
-        while (pickups.size < resolvedMaxActivePickups && getRemainingFiniteSpawnCount() > 0) {
+        while (
+            pickups.size + pendingCollectedPickups.size < resolvedMaxActivePickups &&
+            getRemainingFiniteSpawnCount() > 0
+        ) {
             const queueItem = finiteSpawnQueue[finiteSpawnQueueReadIndex];
             finiteSpawnQueueReadIndex += 1;
             if (!queueItem) {
@@ -668,6 +775,9 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             }
 
             const pickupId = `${resolvedIdPrefix}:fixed:${queueItem.serial}`;
+            if (authoritativeCollectedPickupIds.has(pickupId)) {
+                continue;
+            }
             pickup.cellX = queueItem.cellX;
             pickup.cellZ = queueItem.cellZ;
             pickup.expireAt = makePickupExpireAt(queueItem.cellX, queueItem.cellZ);
@@ -899,10 +1009,13 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                     }
 
                     activePickupIds.add(pickupId);
+                    if (authoritativeCollectedPickupIds.has(pickupId)) {
+                        continue;
+                    }
                     if (pickups.has(pickupId)) {
                         continue;
                     }
-                    if (pickups.size >= maxActivePickups) {
+                    if (pickups.size + pendingCollectedPickups.size >= maxActivePickups) {
                         continue;
                     }
 
@@ -1068,11 +1181,13 @@ function buildBalancedCellCycle(cells, seedOffset = 0) {
 }
 
 function sortCellsBySeed(cells, salt, seedOffset = 0) {
-    return cells.slice().sort(
-        (a, b) =>
-            hashCell(a.cellX, a.cellZ, salt, seedOffset) -
-            hashCell(b.cellX, b.cellZ, salt, seedOffset)
-    );
+    return cells
+        .slice()
+        .sort(
+            (a, b) =>
+                hashCell(a.cellX, a.cellZ, salt, seedOffset) -
+                hashCell(b.cellX, b.cellZ, salt, seedOffset)
+        );
 }
 
 function cloneFiniteQueueItems(queueItems = []) {

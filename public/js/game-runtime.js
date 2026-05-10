@@ -16,6 +16,7 @@ import {
     ensureWorldBuilt,
     getGroundHeightAt,
     updateGroundMotion,
+    getEnvironmentSyncState,
     chargingZones,
 } from './environment.js';
 import {
@@ -1938,7 +1939,14 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
         objectiveUi.setTargetColor(targetColorHex);
         runtimeState.botTrafficSystem?.setSharedTargetColor(targetColorHex);
     },
-    onCorrectPickup: ({ pickupId, pickupColorHex, collectorId, position }) => {
+    onCorrectPickup: ({
+        pickupId,
+        pickupColorHex,
+        collectorId,
+        position,
+        confirmCollection,
+        restoreCollection,
+    }) => {
         recordPerformanceDiagnosticEvent('pickup_collected', {
             gameMode: runtimeState.gameMode,
             collectorId,
@@ -1963,8 +1971,10 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                     },
                     (response) => {
                         if (!response?.ok) {
+                            restoreCollection?.();
                             return;
                         }
+                        confirmCollection?.();
                         runtimeState.playerScore = Math.max(
                             0,
                             Math.round(Number(response.playerScore) || 0)
@@ -2018,9 +2028,12 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                         );
                     }
                 );
-                return;
+                return {
+                    deferred: true,
+                };
             }
 
+            confirmCollection?.();
             const nextTotalCollected = runtimeState.totalCollectedCount + 1;
             const roundProgress = THREE.MathUtils.clamp(
                 nextTotalCollected / Math.max(1, ROUND_TOTAL_PICKUPS),
@@ -2058,6 +2071,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             return;
         }
         if (runtimeState.gameMode === 'bots') {
+            confirmCollection?.();
             const nextTotalCollected = runtimeState.totalCollectedCount + 1;
             const roundProgress = THREE.MathUtils.clamp(
                 nextTotalCollected / Math.max(1, ROUND_TOTAL_PICKUPS),
@@ -2152,9 +2166,15 @@ runtimeState.weaponSystem = createRoofWeaponSystem({
     getGroundHeightAt,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getGameMode: () => runtimeState.gameMode,
+    getIsMultiplayerActive: () =>
+        runtimeState.gameMode === 'online' &&
+        Boolean(runtimeState.multiplayerController?.isInRoom?.()),
     getVehicleState,
     getStaticObstacles: () => staticObstacles,
     getAudioController: () => runtimeState.audioController,
+    reportWeaponPickupCollected(payload = null, ack = null) {
+        return runtimeState.multiplayerController?.reportWeaponPickupCollected?.(payload, ack);
+    },
     onStatus(messageText, timeoutMs = 2000) {
         objectiveUi.showInfo(messageText, timeoutMs);
     },
@@ -2538,9 +2558,20 @@ runtimeState.multiplayerController = createMultiplayerController({
         });
         runtimeState.mineController?.handleRemoteMineDetonated?.(snapshot);
     },
+    onCollectedPickupSnapshot(collectedPickupIds) {
+        runtimeState.collectibleSystem?.applyCollectedPickupStateSnapshot?.(collectedPickupIds);
+    },
+    onWeaponPickupSnapshot(pickupSnapshots) {
+        runtimeState.weaponSystem?.applyPickupStateSnapshot?.(pickupSnapshots);
+    },
+    onEnvironmentStateSnapshot(environmentState) {
+        runtimeState.authoritativeEnvironmentState =
+            environmentState && typeof environmentState === 'object' ? environmentState : null;
+    },
     onAuthoritativeRoundState(authoritativeState) {
         if (!authoritativeState?.inRoom) {
             runtimeState.authoritativeScoreByPlayerId.clear();
+            runtimeState.authoritativeEnvironmentState = null;
             runtimeState.scorePopupController?.clear?.();
             if (runtimeState.gameMode === 'online') {
                 runtimeState.playerCollectedCount = 0;
@@ -3300,6 +3331,16 @@ runtimeState.gameLoopController = createGameLoopController({
     getVehicleState,
     getGroundHeightAt,
     updateGroundMotion,
+    getEnvironmentSyncState,
+    getAuthoritativeEnvironmentState: () => runtimeState.authoritativeEnvironmentState,
+    reportEnvironmentState(environmentState) {
+        return (
+            runtimeState.multiplayerController?.reportEnvironmentState?.(environmentState) || false
+        );
+    },
+    isEnvironmentStateAuthority() {
+        return runtimeState.multiplayerController?.isRoomHost?.() === true;
+    },
     updateCarVisuals,
     updateCamera,
     resetCameraTrackingState,

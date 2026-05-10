@@ -14,7 +14,7 @@ import { updateBillboardRuntime } from './billboards.js';
 import { updateMonumentRuntime } from './monument.js';
 import { createCityScenery } from './city-scenery.js';
 import { createWorldBoundary } from './boundary.js';
-import { updateBuildingRuntime } from './buildings.js';
+import { getBuildingRuntimeEnvironmentState, updateBuildingRuntime } from './buildings.js';
 
 const ground = new THREE.Group();
 const cityScenery = new THREE.Group();
@@ -94,6 +94,14 @@ function updateGroundMotion(
     }
 }
 
+function getEnvironmentSyncState() {
+    if (!environmentBuilt) {
+        return null;
+    }
+
+    return getBuildingRuntimeEnvironmentState(runtimeCityScenery.userData?.buildingLayer);
+}
+
 export {
     sceneBackgroundColor,
     sceneFog,
@@ -111,5 +119,6 @@ export {
     ensureWorldBuilt,
     getGroundHeightAt,
     updateGroundMotion,
+    getEnvironmentSyncState,
     chargingZones,
 };

@@ -57,6 +57,10 @@ export function createGameLoopController(options = {}) {
         getVehicleState,
         getGroundHeightAt,
         updateGroundMotion,
+        getEnvironmentSyncState = () => null,
+        getAuthoritativeEnvironmentState = () => null,
+        reportEnvironmentState = () => false,
+        isEnvironmentStateAuthority = () => false,
         updateCarVisuals,
         updateCamera,
         resetCameraTrackingState,
@@ -213,6 +217,32 @@ export function createGameLoopController(options = {}) {
         }
 
         return roofLiftOccupantBuffer.length > 0 ? roofLiftOccupantBuffer : EMPTY_ARRAY;
+    }
+
+    function updateEnvironmentMotion(
+        playerSpeed = 0,
+        monumentRhythmState = null,
+        frameDelta = 1 / 60
+    ) {
+        const inOnlineRoom = multiplayerController?.isInRoom?.() === true;
+        const isAuthority = inOnlineRoom && isEnvironmentStateAuthority();
+        const authoritativeWorldState =
+            inOnlineRoom && !isAuthority ? getAuthoritativeEnvironmentState() : null;
+
+        updateGroundMotion(car.position, playerSpeed, monumentRhythmState, frameDelta, {
+            playerActive: !readCarDestroyed(),
+            roofLiftOccupantPositions: getRoofLiftOccupantPositions(),
+            authoritativeWorldState,
+        });
+
+        if (!isAuthority) {
+            return;
+        }
+
+        const environmentState = getEnvironmentSyncState();
+        if (environmentState && typeof environmentState === 'object') {
+            reportEnvironmentState(environmentState);
+        }
     }
     const chargingHudFrameState = {
         enabled: false,
@@ -512,10 +542,7 @@ export function createGameLoopController(options = {}) {
                 updateCarVisuals(vehicleState, frameDelta);
                 const introFinished = raceIntroController.update(frameDelta);
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
-                updateGroundMotion(car.position, 0, monumentRhythmState, frameDelta, {
-                    playerActive: !readCarDestroyed(),
-                    roofLiftOccupantPositions: getRoofLiftOccupantPositions(),
-                });
+                updateEnvironmentMotion(0, monumentRhythmState, frameDelta);
                 starsController.update(frameDelta);
                 if (introFinished) {
                     resetCameraTrackingState();
@@ -624,8 +651,15 @@ export function createGameLoopController(options = {}) {
                     const vehicleContacts = consumeVehicleCollisionContacts(vehicleContactsBuffer);
                     frameVehicleContactsCount = vehicleContacts.length;
                     if (vehicleContacts.length > 0) {
-                        crashDebrisController.processVehicleCollisionContacts(vehicleContacts);
-                        audioController?.onVehicleCollisionContacts?.(vehicleContacts);
+                        const resolvedVehicleContacts = vehicleContacts.filter(
+                            (contact) => contact?.suppressLocalEffects !== true
+                        );
+                        if (resolvedVehicleContacts.length > 0) {
+                            crashDebrisController.processVehicleCollisionContacts(
+                                resolvedVehicleContacts
+                            );
+                            audioController?.onVehicleCollisionContacts?.(resolvedVehicleContacts);
+                        }
                         multiplayerController?.reportLocalVehicleContacts?.(
                             vehicleContacts,
                             vehicleState
@@ -674,10 +708,7 @@ export function createGameLoopController(options = {}) {
                     allowAutoCinematic: false,
                 });
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
-                updateGroundMotion(car.position, cameraSpeed, monumentRhythmState, frameDelta, {
-                    playerActive: !readCarDestroyed(),
-                    roofLiftOccupantPositions: getRoofLiftOccupantPositions(),
-                });
+                updateEnvironmentMotion(cameraSpeed, monumentRhythmState, frameDelta);
                 starsController.update(frameDelta);
                 if (!readPickupRoundFinished()) {
                     const botTrafficSystem = getBotTrafficSystem();
@@ -750,10 +781,7 @@ export function createGameLoopController(options = {}) {
             }
             starsController.update(frameDelta);
             const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
-            updateGroundMotion(car.position, 0, monumentRhythmState, frameDelta, {
-                playerActive: !readCarDestroyed(),
-                roofLiftOccupantPositions: getRoofLiftOccupantPositions(),
-            });
+            updateEnvironmentMotion(0, monumentRhythmState, frameDelta);
         } else {
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
         }

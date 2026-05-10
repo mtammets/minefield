@@ -57,10 +57,13 @@ const MINE_DEFAULT_TTL_MS = 45_000;
 const MINE_SERVER_PLACE_COOLDOWN_MS = 450;
 const CRASH_REPLICATION_MIN_INTERVAL_MS = 180;
 const VEHICLE_STATUS_MIN_INTERVAL_MS = 140;
+const ENVIRONMENT_STATE_MIN_INTERVAL_MS = 45;
 const WEAPON_SHOT_MAX_DISTANCE = 260;
 const WEAPON_SHOT_MIN_DISTANCE = 0.5;
 const WEAPON_SHOT_MAX_START_HORIZONTAL_OFFSET = 8;
 const WEAPON_SHOT_MAX_START_VERTICAL_OFFSET = 6;
+const WEAPON_PICKUP_RESPAWN_DELAY_MS = 900;
+const ROOM_ROOF_LIFT_DEFAULT_SURFACE_Y = 0.16;
 const PICKUP_STATE_MAX_DISTANCE = 4.6;
 const PLAYER_STATE_MAX_HORIZONTAL_SPEED_UNITS_PER_SEC = 82;
 const PLAYER_STATE_MAX_VERTICAL_SPEED_UNITS_PER_SEC = 145;
@@ -135,6 +138,8 @@ const EVENT_RATE_LIMITS = {
     'mp:minePlaced': { windowMs: 1000, max: 8 },
     'mp:mineDetonated': { windowMs: 1000, max: 12 },
     'mp:pickupCollected': { windowMs: 1000, max: 10 },
+    'mp:weaponPickupCollected': { windowMs: 1000, max: 10 },
+    'mp:environmentState': { windowMs: 1000, max: 24 },
     'mp:crashReplication': { windowMs: 1000, max: 8 },
     'mp:vehicleStatus': { windowMs: 1000, max: 12 },
     'mp:weaponShot': { windowMs: 1000, max: 24 },
@@ -417,6 +422,7 @@ io.on('connection', (socket) => {
     socket.data.profile = createDefaultProfile(socket.id);
     socket.data.roomCode = null;
     socket.data.lastCollisionRelays = new Map();
+    socket.data.lastEnvironmentStateAt = 0;
     socket.data.rateLimitStore = new Map();
 
     socket.on('mp:createRoom', (payload, ack) => {
@@ -475,6 +481,8 @@ io.on('connection', (socket) => {
                 updatedAt: Date.now(),
                 players: new Map(),
                 mines: new Map(),
+                weaponPickups: createRoomWeaponPickupState(),
+                environmentState: createRoomEnvironmentState(),
                 collectedPickupIds: new Map(),
                 roundState: createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT),
             };
@@ -543,6 +551,7 @@ io.on('connection', (socket) => {
                 room.roundState && typeof room.roundState === 'object'
                     ? room.roundState
                     : createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT);
+            room.weaponPickups = syncRoomWeaponPickupState(room, Date.now());
             recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
             room.updatedAt = Date.now();
             socket.join(roomCode);
@@ -668,6 +677,43 @@ io.on('connection', (socket) => {
         });
     });
 
+    socket.on('mp:environmentState', (payload) => {
+        if (!consumeInboundEventQuota(socket, 'mp:environmentState')) {
+            return;
+        }
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            return;
+        }
+        if (room.hostId !== socket.id) {
+            return;
+        }
+
+        const now = Date.now();
+        if (now - (socket.data.lastEnvironmentStateAt || 0) < ENVIRONMENT_STATE_MIN_INTERVAL_MS) {
+            return;
+        }
+
+        const nextState = sanitizeEnvironmentStateUpdate(payload, room.environmentState, now);
+        if (!nextState) {
+            return;
+        }
+
+        socket.data.lastEnvironmentStateAt = now;
+        room.environmentState = nextState;
+        room.updatedAt = now;
+        socket.to(roomCode).emit('mp:environmentState', {
+            state: serializeRoomEnvironmentState(nextState),
+            serverTime: now,
+        });
+    });
+
     socket.on('mp:collision', (payload) => {
         if (!consumeInboundEventQuota(socket, 'mp:collision')) {
             return;
@@ -721,6 +767,9 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const targetVelocityX = clampFinite(targetPlayer.lastState?.velocityX, -400, 400, 0);
+        const targetVelocityZ = clampFinite(targetPlayer.lastState?.velocityZ, -400, 400, 0);
+
         io.to(relay.targetId).emit('mp:collision', {
             sourcePlayerId: socket.id,
             normalX: validatedRelay.relay.normalX,
@@ -729,6 +778,17 @@ io.on('connection', (socket) => {
             impactSpeed: validatedRelay.relay.impactSpeed,
             otherVelocityX: validatedRelay.relay.otherVelocityX,
             otherVelocityZ: validatedRelay.relay.otherVelocityZ,
+            mass: validatedRelay.relay.mass,
+            serverTime: now,
+        });
+        io.to(socket.id).emit('mp:collision', {
+            sourcePlayerId: relay.targetId,
+            normalX: -validatedRelay.relay.normalX,
+            normalZ: -validatedRelay.relay.normalZ,
+            penetration: validatedRelay.relay.penetration,
+            impactSpeed: validatedRelay.relay.impactSpeed,
+            otherVelocityX: targetVelocityX,
+            otherVelocityZ: targetVelocityZ,
             mass: validatedRelay.relay.mass,
             serverTime: now,
         });
@@ -994,6 +1054,95 @@ io.on('connection', (socket) => {
                       }
                     : null,
             roundState: serializeRoomRoundState(room.roundState),
+        });
+    });
+
+    socket.on('mp:weaponPickupCollected', (payload, ack) => {
+        if (!consumeInboundEventQuota(socket, 'mp:weaponPickupCollected')) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Rate limited',
+            });
+            return;
+        }
+
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Not in room',
+            });
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            safeAck(ack, {
+                ok: false,
+                error: 'Room missing',
+            });
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Player missing',
+            });
+            return;
+        }
+
+        const now = Date.now();
+        const pickupId = sanitizeWeaponPickupId(payload?.pickupId);
+        if (!pickupId) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Invalid pickup',
+            });
+            return;
+        }
+
+        const weaponPickups = syncRoomWeaponPickupState(room, now);
+        const pickupState = weaponPickups[pickupId];
+        if (!pickupState) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Pickup missing',
+            });
+            return;
+        }
+
+        if (!pickupState.available) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Pickup unavailable',
+                pickup: serializeRoomWeaponPickupState(pickupState),
+            });
+            return;
+        }
+
+        pickupState.available = false;
+        pickupState.collectedAt = now;
+        pickupState.collectedByPlayerId = socket.id;
+        pickupState.respawnAt = now + WEAPON_PICKUP_RESPAWN_DELAY_MS;
+        room.updatedAt = now;
+
+        if (player.lastState && typeof player.lastState === 'object') {
+            player.lastState.weaponHasWeapon = true;
+            player.lastState.weaponTriggerHeld = false;
+            player.lastState.weaponLocked = false;
+            player.lastState.weaponHasTarget = false;
+            player.lastState.weaponTargetX = 0;
+            player.lastState.weaponTargetY = 0;
+            player.lastState.weaponTargetZ = 0;
+        }
+
+        emitRoomState(room);
+        safeAck(ack, {
+            ok: true,
+            pickup: serializeRoomWeaponPickupState(pickupState),
         });
     });
 
@@ -1636,12 +1785,201 @@ function createRoomPlayer(id, profile) {
     };
 }
 
+function createRoomWeaponPickupState(nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    return {
+        roof: {
+            id: 'roof',
+            available: true,
+            respawnAt: 0,
+            collectedAt: 0,
+            collectedByPlayerId: '',
+            updatedAt: now,
+        },
+        parking: {
+            id: 'parking',
+            available: true,
+            respawnAt: 0,
+            collectedAt: 0,
+            collectedByPlayerId: '',
+            updatedAt: now,
+        },
+    };
+}
+
+function createRoomEnvironmentState(nowMs = Date.now()) {
+    return {
+        roofLift: createRoomRoofLiftEnvironmentState(nowMs),
+    };
+}
+
+function createRoomRoofLiftEnvironmentState(nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    return {
+        currentSurfaceY: ROOM_ROOF_LIFT_DEFAULT_SURFACE_Y,
+        targetSurfaceY: ROOM_ROOF_LIFT_DEFAULT_SURFACE_Y,
+        normalizedTravel: 0,
+        isMoving: false,
+        updatedAt: now,
+    };
+}
+
+function syncRoomWeaponPickupState(room, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const baseState =
+        room?.weaponPickups && typeof room.weaponPickups === 'object'
+            ? room.weaponPickups
+            : createRoomWeaponPickupState(now);
+    const nextState = {
+        roof: normalizeRoomWeaponPickupState(baseState.roof, 'roof', now),
+        parking: normalizeRoomWeaponPickupState(baseState.parking, 'parking', now),
+    };
+    if (nextState.roof.respawnAt > 0 && now >= nextState.roof.respawnAt) {
+        nextState.roof.available = true;
+        nextState.roof.respawnAt = 0;
+        nextState.roof.collectedByPlayerId = '';
+        nextState.roof.updatedAt = now;
+    }
+    if (nextState.parking.respawnAt > 0 && now >= nextState.parking.respawnAt) {
+        nextState.parking.available = true;
+        nextState.parking.respawnAt = 0;
+        nextState.parking.collectedByPlayerId = '';
+        nextState.parking.updatedAt = now;
+    }
+    if (room && typeof room === 'object') {
+        room.weaponPickups = nextState;
+    }
+    return nextState;
+}
+
+function syncRoomEnvironmentState(room, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const baseState =
+        room?.environmentState && typeof room.environmentState === 'object'
+            ? room.environmentState
+            : createRoomEnvironmentState(now);
+    const nextState = {
+        roofLift: normalizeRoomRoofLiftEnvironmentState(baseState.roofLift, now),
+    };
+    if (room && typeof room === 'object') {
+        room.environmentState = nextState;
+    }
+    return nextState;
+}
+
+function sanitizeEnvironmentStateUpdate(payload, fallbackState, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const baseState =
+        fallbackState && typeof fallbackState === 'object'
+            ? fallbackState
+            : createRoomEnvironmentState(now);
+
+    return {
+        roofLift: normalizeRoomRoofLiftEnvironmentState(payload?.roofLift, now, baseState.roofLift),
+    };
+}
+
+function normalizeRoomRoofLiftEnvironmentState(value, nowMs = Date.now(), fallback = null) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const baseState =
+        fallback && typeof fallback === 'object'
+            ? fallback
+            : createRoomRoofLiftEnvironmentState(now);
+    const currentSurfaceY = clampFinite(
+        value?.currentSurfaceY,
+        -32,
+        320,
+        baseState.currentSurfaceY
+    );
+    const targetSurfaceY = clampFinite(value?.targetSurfaceY, -32, 320, baseState.targetSurfaceY);
+    const normalizedTravel = clampFinite(value?.normalizedTravel, 0, 1, baseState.normalizedTravel);
+    const diff = Math.abs(targetSurfaceY - currentSurfaceY);
+    return {
+        currentSurfaceY,
+        targetSurfaceY,
+        normalizedTravel,
+        isMoving: diff > 0.01 && Boolean(value?.isMoving),
+        updatedAt: now,
+    };
+}
+
+function normalizeRoomWeaponPickupState(value, fallbackId, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const pickupId = sanitizeWeaponPickupId(value?.id) || fallbackId;
+    const respawnAt = Math.max(0, Math.round(Number(value?.respawnAt) || 0));
+    const available = Boolean(value?.available) || respawnAt <= 0;
+    return {
+        id: pickupId,
+        available,
+        respawnAt: available ? 0 : respawnAt,
+        collectedAt: Math.max(0, Math.round(Number(value?.collectedAt) || 0)),
+        collectedByPlayerId: sanitizeSocketLikeId(value?.collectedByPlayerId),
+        updatedAt: Math.max(0, Math.round(Number(value?.updatedAt) || now)),
+    };
+}
+
+function serializeRoomWeaponPickupState(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    return {
+        id: sanitizeWeaponPickupId(value.id),
+        available: Boolean(value.available),
+        respawnAt: Math.max(0, Math.round(Number(value.respawnAt) || 0)),
+        collectedAt: Math.max(0, Math.round(Number(value.collectedAt) || 0)),
+        collectedByPlayerId: sanitizeSocketLikeId(value.collectedByPlayerId),
+    };
+}
+
+function serializeRoomEnvironmentState(value) {
+    if (!value || typeof value !== 'object') {
+        return {
+            roofLift: serializeRoomRoofLiftEnvironmentState(createRoomRoofLiftEnvironmentState()),
+        };
+    }
+    return {
+        roofLift: serializeRoomRoofLiftEnvironmentState(value.roofLift),
+    };
+}
+
+function serializeRoomRoofLiftEnvironmentState(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    return {
+        currentSurfaceY: clampFinite(
+            value.currentSurfaceY,
+            -32,
+            320,
+            ROOM_ROOF_LIFT_DEFAULT_SURFACE_Y
+        ),
+        targetSurfaceY: clampFinite(
+            value.targetSurfaceY,
+            -32,
+            320,
+            ROOM_ROOF_LIFT_DEFAULT_SURFACE_Y
+        ),
+        normalizedTravel: clampFinite(value.normalizedTravel, 0, 1, 0),
+        isMoving: Boolean(value.isMoving),
+    };
+}
+
+function serializeRoomWeaponPickupStates(value) {
+    const state = value && typeof value === 'object' ? value : createRoomWeaponPickupState();
+    return ['roof', 'parking']
+        .map((pickupId) => serializeRoomWeaponPickupState(state[pickupId]))
+        .filter(Boolean);
+}
+
 function serializeRoom(room) {
     pruneExpiredMines(room, Date.now());
+    pruneCollectedPickupHistory(room, Date.now());
     room.roundState =
         room.roundState && typeof room.roundState === 'object'
             ? room.roundState
             : createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT);
+    syncRoomWeaponPickupState(room, Date.now());
+    syncRoomEnvironmentState(room, Date.now());
     recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
     const mineMap = room?.mines instanceof Map ? room.mines : new Map();
     const players = Array.from(room.players.values())
@@ -1682,6 +2020,9 @@ function serializeRoom(room) {
         playerCount: players.length,
         maxPlayers: MAX_PLAYERS_PER_ROOM,
         roundState: serializeRoomRoundState(room.roundState),
+        collectedPickupIds: serializeCollectedPickupIds(room),
+        weaponPickups: serializeRoomWeaponPickupStates(room.weaponPickups),
+        environmentState: serializeRoomEnvironmentState(room.environmentState),
         players,
         mines: Array.from(mineMap.values())
             .sort((a, b) => a.createdAt - b.createdAt)
@@ -1692,6 +2033,17 @@ function serializeRoom(room) {
 
 function emitRoomState(room) {
     io.to(room.code).emit('mp:roomState', serializeRoom(room));
+}
+
+function serializeCollectedPickupIds(room) {
+    if (!room || !(room.collectedPickupIds instanceof Map) || room.collectedPickupIds.size === 0) {
+        return [];
+    }
+
+    return Array.from(room.collectedPickupIds.keys())
+        .map((pickupId) => (typeof pickupId === 'string' ? pickupId.trim() : ''))
+        .filter(Boolean)
+        .sort();
 }
 
 function leaveCurrentRoom(socket) {
@@ -1832,6 +2184,13 @@ function sanitizePlayerState(payload, fallback) {
     const yawRate = clampFinite(payload?.yawRate, -24, 24, fallback?.yawRate ?? 0);
     const velocityX = clampFinite(payload?.velocityX, -400, 400, fallback?.velocityX ?? 0);
     const velocityZ = clampFinite(payload?.velocityZ, -400, 400, fallback?.velocityZ ?? 0);
+    const batteryDepleted = Boolean(payload?.batteryDepleted);
+    const chargingLevelNormalized = clampFinite(
+        payload?.chargingLevelNormalized,
+        0,
+        1,
+        fallback?.chargingLevelNormalized ?? 0
+    );
     const inputForward = Boolean(payload?.inputForward);
     const inputBackward = Boolean(payload?.inputBackward);
     const inputLeft = Boolean(payload?.inputLeft);
@@ -1869,6 +2228,8 @@ function sanitizePlayerState(payload, fallback) {
         yawRate: roundTo(yawRate, 4),
         velocityX: roundTo(velocityX, 4),
         velocityZ: roundTo(velocityZ, 4),
+        batteryDepleted,
+        chargingLevelNormalized: roundTo(chargingLevelNormalized, 4),
         inputForward,
         inputBackward,
         inputLeft,
@@ -1886,7 +2247,12 @@ function sanitizePlayerState(payload, fallback) {
 }
 
 function sanitizeWeaponShot(payload, playerState) {
-    if (!payload || typeof payload !== 'object' || !playerState || typeof playerState !== 'object') {
+    if (
+        !payload ||
+        typeof payload !== 'object' ||
+        !playerState ||
+        typeof playerState !== 'object'
+    ) {
         return null;
     }
 
@@ -2073,6 +2439,14 @@ function sanitizeMineDetonationType(value) {
     }
     const normalized = value.trim().toLowerCase();
     return normalized === 'timed_throw' || normalized === 'impact_throw' ? normalized : '';
+}
+
+function sanitizeWeaponPickupId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'roof' || normalized === 'parking' ? normalized : '';
 }
 
 function sanitizeMineId(value) {

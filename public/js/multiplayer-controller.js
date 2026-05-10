@@ -9,6 +9,7 @@ const DEFAULT_PLAYER_NAME = 'Driver';
 const PLAYER_NAME_MAX_LENGTH = 18;
 const ROOM_CODE_LENGTH = 6;
 const STATE_SEND_INTERVAL_MS = 50;
+const ENVIRONMENT_STATE_SEND_INTERVAL_MS = 80;
 const PROFILE_SYNC_INTERVAL_MS = 500;
 const REMOTE_STATE_TIMEOUT_MS = 10_000;
 const REMOTE_LERP_SPEED = 11;
@@ -50,6 +51,9 @@ export function createMultiplayerController(options = {}) {
         onMineSnapshot = () => {},
         onMinePlaced = () => {},
         onMineDetonated = () => {},
+        onCollectedPickupSnapshot = () => {},
+        onWeaponPickupSnapshot = () => {},
+        onEnvironmentStateSnapshot = () => {},
         onAuthoritativeRoundState = () => {},
     } = options;
 
@@ -78,6 +82,8 @@ export function createMultiplayerController(options = {}) {
     let lastCrashReplicationSentAt = 0;
     let lastVehicleStatusSentAt = 0;
     let lastVehicleStatusValue = null;
+    let lastEnvironmentStateSentAt = 0;
+    let lastEnvironmentStateSignature = '';
     let lastProfileSyncedAt = 0;
     let lastProfileSignature = '';
     let localPlayerName = DEFAULT_PLAYER_NAME;
@@ -96,9 +102,12 @@ export function createMultiplayerController(options = {}) {
         reportLocalVehicleContacts,
         reportMinePlaced,
         reportMineDetonated,
+        reportWeaponPickupCollected,
         reportWeaponShot,
         reportPickupCollected,
+        reportEnvironmentState,
         isInRoom,
+        isRoomHost,
         getSelfId,
         getLocalPlayerName,
         startOnlineRoomFlow,
@@ -192,6 +201,7 @@ export function createMultiplayerController(options = {}) {
             snapshot.radius = MP_COLLISION_RADIUS;
             snapshot.collisionRadius = MP_COLLISION_RADIUS;
             snapshot.mass = MP_COLLISION_MASS;
+            snapshot.authoritativeNetworkCollision = true;
             snapshot.velocityX = clampNumber(remote.visualState?.velocity?.x, -400, 400, 0);
             snapshot.velocityZ = clampNumber(remote.visualState?.velocity?.y, -400, 400, 0);
             snapshot.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
@@ -232,6 +242,9 @@ export function createMultiplayerController(options = {}) {
         const localVelocityX = clampNumber(vehicleStateSnapshot?.velocity?.x, -400, 400, 0);
         const localVelocityZ = clampNumber(vehicleStateSnapshot?.velocity?.y, -400, 400, 0);
         for (const [targetPlayerId, contact] of strongestByTarget.entries()) {
+            if (selfId && targetPlayerId && selfId.localeCompare(targetPlayerId) >= 0) {
+                continue;
+            }
             const lastSentAt = lastCollisionRelaySentAtByTarget.get(targetPlayerId) || 0;
             if (now - lastSentAt < COLLISION_RELAY_INTERVAL_MS) {
                 continue;
@@ -272,6 +285,25 @@ export function createMultiplayerController(options = {}) {
         return true;
     }
 
+    function reportWeaponPickupCollected(payload = null, ack = null) {
+        if (!isPanelVisible || !socket?.connected || !room) {
+            if (typeof ack === 'function') {
+                ack({
+                    ok: false,
+                    error: 'Offline',
+                });
+            }
+            return false;
+        }
+        const message = payload && typeof payload === 'object' ? payload : {};
+        socket.emit('mp:weaponPickupCollected', message, (response) => {
+            if (typeof ack === 'function') {
+                ack(response);
+            }
+        });
+        return true;
+    }
+
     function reportPickupCollected(payload = null, ack = null) {
         if (!isPanelVisible || !socket?.connected || !room) {
             if (typeof ack === 'function') {
@@ -309,6 +341,31 @@ export function createMultiplayerController(options = {}) {
         return true;
     }
 
+    function reportEnvironmentState(environmentState = null) {
+        if (!isRoomHost()) {
+            return false;
+        }
+        const sanitizedState = sanitizeOutgoingEnvironmentState(environmentState);
+        if (!sanitizedState) {
+            return false;
+        }
+
+        const signature = createEnvironmentStateSignature(sanitizedState);
+        if (signature === lastEnvironmentStateSignature) {
+            return false;
+        }
+
+        const now = performance.now();
+        if (now - lastEnvironmentStateSentAt < ENVIRONMENT_STATE_SEND_INTERVAL_MS) {
+            return false;
+        }
+
+        lastEnvironmentStateSentAt = now;
+        lastEnvironmentStateSignature = signature;
+        socket.emit('mp:environmentState', sanitizedState);
+        return true;
+    }
+
     function reportWeaponShot(shotSnapshot = null) {
         if (!isPanelVisible || !socket?.connected || !room) {
             return false;
@@ -323,6 +380,10 @@ export function createMultiplayerController(options = {}) {
 
     function isInRoom() {
         return Boolean(isPanelVisible && room?.roomCode && socket?.connected);
+    }
+
+    function isRoomHost() {
+        return Boolean(isInRoom() && selfId && room?.hostId && room.hostId === selfId);
     }
 
     function getSelfId() {
@@ -601,6 +662,16 @@ export function createMultiplayerController(options = {}) {
         socket.on('mp:mineDetonated', (payload) => {
             onMineDetonated(payload);
         });
+        socket.on('mp:environmentState', (payload) => {
+            const snapshot = payload?.state;
+            if (!snapshot || typeof snapshot !== 'object') {
+                return;
+            }
+            if (room && typeof room === 'object') {
+                room.environmentState = snapshot;
+            }
+            onEnvironmentStateSnapshot(snapshot);
+        });
         socket.on('mp:weaponShot', (payload) => {
             const playerId = payload?.id;
             if (!playerId || playerId === selfId) {
@@ -660,6 +731,8 @@ export function createMultiplayerController(options = {}) {
             yawRate: clampNumber(vehicleState.yawRate, -24, 24, 0),
             velocityX: clampNumber(vehicleState?.velocity?.x, -400, 400, 0),
             velocityZ: clampNumber(vehicleState?.velocity?.y, -400, 400, 0),
+            batteryDepleted: Boolean(vehicleState?.batteryDepleted),
+            chargingLevelNormalized: clampNumber(vehicleState?.chargingLevelNormalized, 0, 1, 0),
             inputForward: Boolean(inputState.forward),
             inputBackward: Boolean(inputState.backward),
             inputLeft: Boolean(inputState.left),
@@ -848,7 +921,8 @@ export function createMultiplayerController(options = {}) {
             remote.visualState.acceleration =
                 (speed - remote.visualState.lastSpeed) / Math.max(dt, 1e-3);
             remote.visualState.lastSpeed = speed;
-            remote.visualState.batteryDepleted = remote.isDestroyed;
+            remote.visualState.batteryDepleted =
+                Boolean(remote.visualState.batteryDepleted) || remote.isDestroyed;
             remote.updateVisuals(remote.visualState, dt);
             remote.skidMarkController?.update?.(dt, {
                 enabled: !remote.isDestroyed,
@@ -877,9 +951,20 @@ export function createMultiplayerController(options = {}) {
             lastVehicleStatusValue = null;
             lastVehicleStatusSentAt = 0;
             lastCrashReplicationSentAt = 0;
+            lastEnvironmentStateSentAt = 0;
+            lastEnvironmentStateSignature = '';
         }
         if (Array.isArray(snapshot.mines)) {
             onMineSnapshot(snapshot.mines);
+        }
+        if (Array.isArray(snapshot.collectedPickupIds)) {
+            onCollectedPickupSnapshot(snapshot.collectedPickupIds);
+        }
+        if (Array.isArray(snapshot.weaponPickups)) {
+            onWeaponPickupSnapshot(snapshot.weaponPickups);
+        }
+        if (snapshot.environmentState && typeof snapshot.environmentState === 'object') {
+            onEnvironmentStateSnapshot(snapshot.environmentState);
         }
 
         const selfPlayer = snapshot.players.find((player) => player?.id === selfId);
@@ -927,10 +1012,15 @@ export function createMultiplayerController(options = {}) {
         lastCrashReplicationSentAt = 0;
         lastVehicleStatusSentAt = 0;
         lastVehicleStatusValue = null;
+        lastEnvironmentStateSentAt = 0;
+        lastEnvironmentStateSignature = '';
         lastProfileSyncedAt = 0;
         lastProfileSignature = '';
         lastCollisionRelaySentAtByTarget.clear();
         onMineSnapshot([]);
+        onCollectedPickupSnapshot([]);
+        onWeaponPickupSnapshot([]);
+        onEnvironmentStateSnapshot(null);
 
         for (const remote of remotePlayers.values()) {
             removeRemotePlayer(remote);
@@ -962,8 +1052,8 @@ export function createMultiplayerController(options = {}) {
             addWheelWellLights: false,
             showBatteryIndicator: false,
             lightConfig: {
-                enableHeadlightProjectors: false,
-                enableTaillightPointLights: false,
+                enableHeadlightProjectors: true,
+                enableTaillightPointLights: true,
                 enableAccentPointLights: false,
             },
         });
@@ -1013,6 +1103,7 @@ export function createMultiplayerController(options = {}) {
                 },
                 lastSpeed: 0,
                 batteryDepleted: false,
+                chargingLevelNormalized: 0,
             },
         };
         const crashParts = carRig.getCrashParts?.() || [];
@@ -1153,6 +1244,16 @@ export function createMultiplayerController(options = {}) {
             hasExtendedVehicleState
                 ? remote.visualState.velocity.y
                 : Math.cos(remote.targetRotationY) * nextSpeed
+        );
+        remote.visualState.batteryDepleted =
+            state.batteryDepleted != null
+                ? Boolean(state.batteryDepleted)
+                : remote.visualState.batteryDepleted;
+        remote.visualState.chargingLevelNormalized = clampNumber(
+            state.chargingLevelNormalized,
+            0,
+            1,
+            remote.visualState.chargingLevelNormalized
         );
         remote.inputState.forward =
             state.inputForward != null
@@ -1510,6 +1611,7 @@ export function createMultiplayerController(options = {}) {
         socket.off('mp:crashReplication');
         socket.off('mp:minePlaced');
         socket.off('mp:mineDetonated');
+        socket.off('mp:environmentState');
         socket.off('mp:weaponShot');
         socket.disconnect();
         socket = null;
@@ -1566,6 +1668,48 @@ function sanitizeOutgoingWeaponShot(snapshot = null) {
     };
 }
 
+function sanitizeOutgoingEnvironmentState(snapshot = null) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return null;
+    }
+
+    const roofLift = sanitizeOutgoingRoofLiftState(snapshot.roofLift);
+    if (!roofLift) {
+        return null;
+    }
+
+    return {
+        roofLift,
+    };
+}
+
+function sanitizeOutgoingRoofLiftState(snapshot = null) {
+    if (!snapshot || typeof snapshot !== 'object') {
+        return null;
+    }
+
+    return {
+        currentSurfaceY: clampNumber(snapshot.currentSurfaceY, -32, 320, 0.16),
+        targetSurfaceY: clampNumber(snapshot.targetSurfaceY, -32, 320, 0.16),
+        normalizedTravel: clampNumber(snapshot.normalizedTravel, 0, 1, 0),
+        isMoving: Boolean(snapshot.isMoving),
+    };
+}
+
+function createEnvironmentStateSignature(snapshot = null) {
+    const roofLift = snapshot?.roofLift;
+    if (!roofLift || typeof roofLift !== 'object') {
+        return '';
+    }
+
+    return [
+        Number(roofLift.currentSurfaceY || 0).toFixed(3),
+        Number(roofLift.targetSurfaceY || 0).toFixed(3),
+        Number(roofLift.normalizedTravel || 0).toFixed(3),
+        roofLift.isMoving ? '1' : '0',
+    ].join('|');
+}
+
 function resolveDom() {
     return {
         panel: document.getElementById('multiplayerPanel'),
@@ -1596,6 +1740,15 @@ function createNoopController() {
         reportMineDetonated() {
             return false;
         },
+        reportWeaponPickupCollected(payload = null, ack = null) {
+            if (typeof ack === 'function') {
+                ack({
+                    ok: false,
+                    error: 'Offline',
+                });
+            }
+            return false;
+        },
         reportPickupCollected(payload = null, ack = null) {
             if (typeof ack === 'function') {
                 ack({
@@ -1605,7 +1758,16 @@ function createNoopController() {
             }
             return false;
         },
+        reportWeaponShot() {
+            return false;
+        },
+        reportEnvironmentState() {
+            return false;
+        },
         isInRoom() {
+            return false;
+        },
+        isRoomHost() {
             return false;
         },
         getSelfId() {

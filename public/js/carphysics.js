@@ -236,7 +236,11 @@ const right = new THREE.Vector2();
 const movement = new THREE.Vector3();
 const collisionNormal = new THREE.Vector2();
 const mergedObstacleCandidates = [];
-const obstacleCollisionSamples = [{ x: 0, z: 0 }, { x: 0, z: 0 }, { x: 0, z: 0 }];
+const obstacleCollisionSamples = [
+    { x: 0, z: 0 },
+    { x: 0, z: 0 },
+    { x: 0, z: 0 },
+];
 const physicsPosition = new THREE.Vector3();
 const previousPhysicsPosition = new THREE.Vector3();
 const interpolatedPosition = new THREE.Vector3();
@@ -1343,7 +1347,6 @@ function constrainToVehicles(position, dynamicVehicles = null) {
             }
         }
 
-        collisionCount += 1;
         const otherMass = Math.max(0.4, vehicle.mass || VEHICLE_COLLISION_MASS);
         const penetrationCorrection =
             penetration * VEHICLE_COLLISION_PENETRATION_SHARE * (0.7 + otherMass * 0.22);
@@ -1360,13 +1363,18 @@ function constrainToVehicles(position, dynamicVehicles = null) {
             continue;
         }
 
-        const normalResponse = impactSpeed * TUNING.vehicleImpactResponse;
-        vehicleState.velocity.x += normalX * normalResponse;
-        vehicleState.velocity.y += normalZ * normalResponse;
+        const authoritativePlayerCollision =
+            vehicle.sourceType === 'player' && vehicle.authoritativeNetworkCollision === true;
+        if (!authoritativePlayerCollision) {
+            collisionCount += 1;
+            const normalResponse = impactSpeed * TUNING.vehicleImpactResponse;
+            vehicleState.velocity.x += normalX * normalResponse;
+            vehicleState.velocity.y += normalZ * normalResponse;
 
-        const sideFactor = forwardX * normalZ - forwardZ * normalX;
-        const yawKick = THREE.MathUtils.clamp(impactSpeed / 20, 0, 1);
-        vehicleState.yawRate += sideFactor * yawKick * (1.4 + otherMass * 0.2);
+            const sideFactor = forwardX * normalZ - forwardZ * normalX;
+            const yawKick = THREE.MathUtils.clamp(impactSpeed / 20, 0, 1);
+            vehicleState.yawRate += sideFactor * yawKick * (1.4 + otherMass * 0.2);
+        }
 
         const contactPosition = new THREE.Vector3(
             position.x - normalX * selfContactRadius * 0.35,
@@ -1389,6 +1397,7 @@ function constrainToVehicles(position, dynamicVehicles = null) {
             penetration,
             impactSpeed,
             position: contactPosition,
+            suppressLocalEffects: authoritativePlayerCollision,
         };
         if (typeof vehicle.botId === 'string' && vehicle.botId.trim()) {
             contact.botId = vehicle.botId;

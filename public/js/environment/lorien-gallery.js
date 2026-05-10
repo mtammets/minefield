@@ -256,6 +256,33 @@ export function getLorienVelmoreRoofLiftState(building) {
     };
 }
 
+export function applyLorienVelmoreRoofLiftStateSnapshot(snapshot, building) {
+    const layout = getLorienVelmoreRoofLiftLayout(building);
+    ensureRoofLiftRuntimeInitialized(layout);
+    const maxSurfaceY = Math.max(layout.roofSurfaceY, layout.connectedTerraceSurfaceY) + 2.5;
+    const currentSurfaceY = Number(snapshot?.currentSurfaceY);
+    const targetSurfaceY = Number(snapshot?.targetSurfaceY);
+    lorienRoofLiftRuntime.currentSurfaceY = clamp(
+        Number.isFinite(currentSurfaceY) ? currentSurfaceY : lorienRoofLiftRuntime.currentSurfaceY,
+        layout.bottomSurfaceY,
+        maxSurfaceY
+    );
+    lorienRoofLiftRuntime.targetSurfaceY = clamp(
+        Number.isFinite(targetSurfaceY) ? targetSurfaceY : lorienRoofLiftRuntime.targetSurfaceY,
+        layout.bottomSurfaceY,
+        maxSurfaceY
+    );
+    lorienRoofLiftRuntime.isMoving =
+        Boolean(snapshot?.isMoving) &&
+        Math.abs(lorienRoofLiftRuntime.currentSurfaceY - lorienRoofLiftRuntime.targetSurfaceY) >
+            0.01;
+    lorienRoofLiftRuntime.wasPlayerOnPlatform = false;
+    lorienRoofLiftRuntime.platformHoldTime = 0;
+    lorienRoofLiftRuntime.awaitingPlatformExit = false;
+    lorienRoofLiftRuntime.upperLevelVacancyTime = 0;
+    return getLorienVelmoreRoofLiftState(building);
+}
+
 export function updateLorienVelmoreRoofLiftState(
     playerPosition,
     deltaTime = 1 / 60,
@@ -264,6 +291,9 @@ export function updateLorienVelmoreRoofLiftState(
 ) {
     const layout = getLorienVelmoreRoofLiftLayout(building);
     ensureRoofLiftRuntimeInitialized(layout);
+    if (options?.authoritativeState && typeof options.authoritativeState === 'object') {
+        return applyLorienVelmoreRoofLiftStateSnapshot(options.authoritativeState, building);
+    }
     const playerActive = options?.playerActive !== false;
     const activePlayerPosition = playerActive ? playerPosition : null;
     const otherOccupantPositions = Array.isArray(options?.roofLiftOccupantPositions)

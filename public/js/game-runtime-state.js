@@ -31,6 +31,7 @@ export function createGameRuntimeState({ selectedCarColorHex, batteryMax, player
         scoredMineDeployIds: new Set(),
         scoredMineDetonationIds: new Set(),
         authoritativeScoreByPlayerId: new Map(),
+        authoritativeEnvironmentState: null,
         multiplayerController: null,
         gameSessionController: null,
         gameLoopController: null,

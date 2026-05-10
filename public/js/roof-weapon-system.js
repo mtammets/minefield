@@ -220,9 +220,11 @@ export function createRoofWeaponSystem({
     getGroundHeightAt = () => 0,
     getBotTrafficSystem = () => null,
     getGameMode = () => 'bots',
+    getIsMultiplayerActive = () => false,
     getVehicleState = () => ({}),
     getStaticObstacles = () => [],
     getAudioController = () => null,
+    reportWeaponPickupCollected = () => false,
     onStatus = () => {},
     onBotDestroyed = () => {},
     onPlayerHit = () => ({ destroyed: false }),
@@ -316,6 +318,7 @@ export function createRoofWeaponSystem({
         replicationTargetPoint: new THREE.Vector3(),
         hasReplicationTarget: false,
         replicationLocked: false,
+        pendingPickupId: '',
     };
 
     function resetHudPosition(hudProfile = resolveHudProfile()) {
@@ -495,6 +498,7 @@ export function createRoofWeaponSystem({
             state.heat = 0;
             state.fireCooldown = 0;
             state.currentLock = null;
+            state.pendingPickupId = '';
             resetHudPosition();
             resetPickupEntries();
             hideWeapon();
@@ -516,6 +520,7 @@ export function createRoofWeaponSystem({
             state.heat = 0;
             state.fireCooldown = 0;
             state.currentLock = null;
+            state.pendingPickupId = '';
             resetHudPosition();
             if (state.hasWeapon) {
                 hideWeapon();
@@ -536,6 +541,9 @@ export function createRoofWeaponSystem({
         },
         getCurrentLockPoint() {
             return state.currentLock?.point || null;
+        },
+        applyPickupStateSnapshot(pickupSnapshots = []) {
+            applyPickupStateSnapshot(pickupSnapshots);
         },
         getReplicationState() {
             return {
@@ -563,6 +571,8 @@ export function createRoofWeaponSystem({
                 ? frameState.vehicleState
                 : getVehicleState();
         const gameMode = frameState.gameMode === 'online' ? 'online' : getGameMode();
+        const multiplayerPickupSyncActive =
+            gameMode === 'online' && Boolean(getIsMultiplayerActive?.());
         const roofWeaponActive =
             state.hasWeapon &&
             controlsEnabled &&
@@ -580,7 +590,7 @@ export function createRoofWeaponSystem({
 
         updatePickupRespawns(dt);
         updatePickups(dt);
-        maybeCollectPickup(frameState);
+        maybeCollectPickup(frameState, multiplayerPickupSyncActive);
 
         const weaponMotionState = resolveWeaponMotionState(vehicleState);
         applyWeaponBasePoseToMount(mount, weaponMotionState);
@@ -663,6 +673,31 @@ export function createRoofWeaponSystem({
         }
     }
 
+    function applyPickupStateSnapshot(pickupSnapshots = []) {
+        if (!Array.isArray(pickupSnapshots) || pickupSnapshots.length === 0) {
+            return;
+        }
+        const nowMs = Date.now();
+        for (let index = 0; index < pickupSnapshots.length; index += 1) {
+            const snapshot = pickupSnapshots[index];
+            const pickupId = typeof snapshot?.id === 'string' ? snapshot.id.trim() : '';
+            if (!pickupId) {
+                continue;
+            }
+            const entry = pickupEntries.find((candidate) => candidate.id === pickupId);
+            if (!entry) {
+                continue;
+            }
+            const available = Boolean(snapshot?.available);
+            const respawnAt = Math.max(0, Math.round(Number(snapshot?.respawnAt) || 0));
+            entry.available = available;
+            entry.respawnTimer = available ? 0 : Math.max(0, (respawnAt - nowMs) / 1000);
+            if (state.pendingPickupId === entry.id && available) {
+                state.pendingPickupId = '';
+            }
+        }
+    }
+
     function updatePickupRespawns(dt) {
         for (let index = 0; index < pickupEntries.length; index += 1) {
             const entry = pickupEntries[index];
@@ -706,11 +741,14 @@ export function createRoofWeaponSystem({
         }
     }
 
-    function maybeCollectPickup(frameState) {
+    function maybeCollectPickup(frameState, multiplayerPickupSyncActive = false) {
         if (state.hasWeapon) {
             return;
         }
         if (frameState.carDestroyed || frameState.pickupRoundFinished) {
+            return;
+        }
+        if (multiplayerPickupSyncActive && state.pendingPickupId) {
             return;
         }
 
@@ -731,22 +769,64 @@ export function createRoofWeaponSystem({
                 continue;
             }
 
-            collectPickup(entry);
+            collectPickup(entry, multiplayerPickupSyncActive);
             return;
         }
     }
 
-    function collectPickup(entry) {
+    function collectPickup(entry, multiplayerPickupSyncActive = false) {
         entry.available = false;
-        entry.respawnTimer = PICKUP_RESPAWN_DELAY_SEC;
-        activateWeapon();
         entry.pickup.root.visible = false;
+        if (!multiplayerPickupSyncActive) {
+            entry.respawnTimer = PICKUP_RESPAWN_DELAY_SEC;
+            activateWeapon();
+            return;
+        }
+
+        entry.respawnTimer = 0;
+        state.pendingPickupId = entry.id;
+        const requestAccepted = reportWeaponPickupCollected?.(
+            {
+                pickupId: entry.id,
+            },
+            (response) => {
+                handlePickupCollectionResponse(entry.id, response);
+            }
+        );
+        if (requestAccepted === false) {
+            state.pendingPickupId = '';
+            entry.available = true;
+            entry.respawnTimer = 0;
+            entry.pickup.root.visible = true;
+        }
+    }
+
+    function handlePickupCollectionResponse(entryId, response) {
+        const entry = pickupEntries.find((candidate) => candidate.id === entryId);
+        state.pendingPickupId = state.pendingPickupId === entryId ? '' : state.pendingPickupId;
+        if (response?.pickup) {
+            applyPickupStateSnapshot([response.pickup]);
+        }
+        if (response?.ok) {
+            activateWeapon();
+            return;
+        }
+        if (entry) {
+            if (response?.pickup) {
+                entry.available = Boolean(response.pickup.available);
+            } else {
+                entry.available = true;
+            }
+            entry.respawnTimer = entry.available ? 0 : entry.respawnTimer;
+            entry.pickup.root.visible = entry.available;
+        }
     }
 
     function activateWeapon() {
         state.hasWeapon = true;
         state.triggerHeld = false;
         state.fireCooldown = 0;
+        state.pendingPickupId = '';
         mount.root.visible = true;
         resetHudPosition();
         onStatus('VX-9 online. Auto-lock engaged. Hold T to fire.', 2600);
@@ -3616,6 +3696,7 @@ function createNoopWeaponSystem() {
         setTriggerHeld() {},
         resetRound() {},
         onPlayerDestroyed() {},
+        applyPickupStateSnapshot() {},
         hasWeapon() {
             return false;
         },
