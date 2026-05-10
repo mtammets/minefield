@@ -65,7 +65,7 @@ export const VEHICLE_SECOND_WHEEL_DETACH_SPEED = 36;
 export const VEHICLE_DENT_MAX = 1.7;
 
 export const STATUS_DEFAULT_TEXT =
-    'Rear-wheel drive and powerful: controllable both forward and reverse. Collect energy spheres.';
+    'Rear-wheel drive and powerful: controllable both forward and reverse. Energy spheres grant bonus points.';
 export const ROOF_MENU_MODE_LABELS = {
     dashboard: 'Dashboard',
     battery: 'Energy',

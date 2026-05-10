@@ -2,52 +2,52 @@ const BOTS_MISSION_DEFINITIONS = Object.freeze([
     Object.freeze({
         id: 'street-sweep',
         title: 'Street Sweep',
-        brief: 'Map the district, keep the first hunter off your line, and build momentum before reinforcements arrive.',
-        botCount: 1,
-        pickupTarget: 8,
-        eliminationTarget: 0,
+        brief: 'Break the opening patrol and stay alive while the first reinforcements roll in.',
+        botCount: 2,
+        eliminationTarget: 4,
         pickupPool: 12,
         maxActivePickups: 4,
+        reinforcementDelayMs: 1200,
     }),
     Object.freeze({
         id: 'cut-the-feed',
         title: 'Cut The Feed',
-        brief: 'Two rival rigs flood the avenue. Secure the shard route and permanently disable one of them.',
+        brief: 'Hold the avenue and grind through a longer wave before the line stabilizes.',
         botCount: 2,
-        pickupTarget: 10,
-        eliminationTarget: 1,
+        eliminationTarget: 5,
         pickupPool: 16,
         maxActivePickups: 5,
+        reinforcementDelayMs: 1250,
     }),
     Object.freeze({
         id: 'break-the-blockade',
         title: 'Break The Blockade',
-        brief: 'The convoy thickens. Stay on the objective line while removing the enforcers one by one.',
-        botCount: 3,
-        pickupTarget: 12,
-        eliminationTarget: 2,
+        brief: 'The blockade thickens. Keep pressure on the sector until the whole rotation is down.',
+        botCount: 2,
+        eliminationTarget: 6,
         pickupPool: 20,
         maxActivePickups: 5,
+        reinforcementDelayMs: 1300,
     }),
     Object.freeze({
         id: 'night-harvest',
         title: 'Night Harvest',
-        brief: 'Four bots now own the sector. Keep the route alive and thin the pack before the city dries up.',
-        botCount: 4,
-        pickupTarget: 14,
-        eliminationTarget: 3,
+        brief: 'Night traffic closes in. Outlast a heavier reinforcement cycle without losing the car.',
+        botCount: 2,
+        eliminationTarget: 7,
         pickupPool: 24,
         maxActivePickups: 6,
+        reinforcementDelayMs: 1350,
     }),
     Object.freeze({
         id: 'final-sweep',
         title: 'Final Sweep',
-        brief: 'Full deployment. Five hunters, one contract, no safe lane. Clear the entire squad and close the run.',
-        botCount: 5,
-        pickupTarget: 16,
-        eliminationTarget: 5,
+        brief: 'Final contract. Drain the last reinforcement pool and finish the sector cleanly.',
+        botCount: 2,
+        eliminationTarget: 8,
         pickupPool: 30,
         maxActivePickups: 6,
+        reinforcementDelayMs: 1400,
     }),
 ]);
 
@@ -62,24 +62,25 @@ export function createBotsMissionDirector({
     objectiveUi = null,
     getGameMode = () => 'bots',
     prepareMission = () => {},
+    scheduleMissionReinforcement = () => false,
     setMissionTransitionLocked = () => {},
     startMissionCountdown = () => {},
     finalizeCampaign = () => {},
     getPlayerCollectedCount = () => 0,
-    getPlayerScore = () => 0,
     getTotalScore = () => 0,
 } = {}) {
     const totalMissions = BOTS_MISSION_DEFINITIONS.length;
-    const campaignPickupObjectiveTotal = BOTS_MISSION_DEFINITIONS.reduce(
-        (sum, mission) => sum + Math.max(0, Math.round(Number(mission.pickupTarget) || 0)),
+    const campaignPickupPoolTotal = BOTS_MISSION_DEFINITIONS.reduce(
+        (sum, mission) => sum + Math.max(0, Math.round(Number(mission.pickupPool) || 0)),
         0
     );
     let campaignActive = false;
     let missionResolved = false;
     let missionIndex = -1;
     let missionPlayerPickupStart = 0;
+    let missionEliminatedCount = 0;
+    let missionSpawnedCount = 0;
     let transitionTimeout = null;
-    let missionEliminatedCollectorIds = new Set();
 
     return {
         startCampaign({ shouldStartCountdown = false } = {}) {
@@ -92,7 +93,8 @@ export function createBotsMissionDirector({
             missionResolved = false;
             missionIndex = -1;
             missionPlayerPickupStart = 0;
-            missionEliminatedCollectorIds = new Set();
+            missionEliminatedCount = 0;
+            missionSpawnedCount = 0;
             return beginMission(0, {
                 shouldStartCountdown,
                 isCampaignStart: true,
@@ -103,14 +105,9 @@ export function createBotsMissionDirector({
                 return false;
             }
             if (normalizeCollectorId(collectorId) !== 'player') {
-                refreshHud();
                 return false;
             }
             refreshHud();
-            if (isCurrentMissionComplete()) {
-                queueMissionSuccess();
-                return true;
-            }
             return false;
         },
         handleBotDestroyed(botEvent = null) {
@@ -118,22 +115,43 @@ export function createBotsMissionDirector({
                 return false;
             }
             const collectorId = normalizeCollectorId(botEvent?.collectorId);
-            const livesRemaining = Math.max(0, Math.round(Number(botEvent?.livesRemaining) || 0));
-            if (!collectorId || livesRemaining > 0 || missionEliminatedCollectorIds.has(collectorId)) {
+            if (!collectorId) {
                 return false;
             }
-            missionEliminatedCollectorIds.add(collectorId);
-            refreshHud();
+
             const mission = getCurrentMission();
-            if (mission?.eliminationTarget > 0) {
+            if (!mission) {
+                return false;
+            }
+
+            const eliminationTarget = Math.max(
+                0,
+                Math.round(Number(mission.eliminationTarget) || 0)
+            );
+            missionEliminatedCount = Math.min(eliminationTarget, missionEliminatedCount + 1);
+            refreshHud();
+            if (eliminationTarget > 0) {
                 objectiveUi?.showInfo?.(
-                    `${resolveEliminationProgressText(mission, missionEliminatedCollectorIds.size)} secured.`,
+                    `${resolveEliminationProgressText(mission, missionEliminatedCount)} secured.`,
                     1200
                 );
             }
             if (isCurrentMissionComplete()) {
                 queueMissionSuccess();
                 return true;
+            }
+
+            if (missionSpawnedCount < eliminationTarget) {
+                const scheduled = scheduleMissionReinforcement({
+                    collectorId,
+                    delayMs: Math.max(
+                        0,
+                        Math.round(Number(mission.reinforcementDelayMs) || 0)
+                    ),
+                });
+                if (scheduled) {
+                    missionSpawnedCount += 1;
+                }
             }
             return false;
         },
@@ -145,21 +163,15 @@ export function createBotsMissionDirector({
                 queueMissionSuccess();
                 return true;
             }
-            const mission = getCurrentMission();
-            if (!mission) {
-                return false;
-            }
-            queueCampaignFailure(
-                `Mission ${missionIndex + 1} failed: the pickup route went dry before the quota was cleared.`
-            );
-            return true;
+            objectiveUi?.showInfo?.('Pickup bonus exhausted. Mission continues.', 1500);
+            refreshHud();
+            return false;
         },
         handlePlayerOutOfCars() {
             if (!campaignActive || missionResolved || normalizeGameMode(getGameMode()) !== 'bots') {
                 return false;
             }
-            const mission = getCurrentMission();
-            if (!mission) {
+            if (!getCurrentMission()) {
                 return false;
             }
             queueCampaignFailure(
@@ -171,15 +183,11 @@ export function createBotsMissionDirector({
             if (!campaignActive) {
                 return 0;
             }
-            const additionalPlayerPickups = Math.max(
-                0,
-                Math.round(Number(options?.additionalPlayerPickups) || 0)
-            );
             const additionalEliminations = Math.max(
                 0,
                 Math.round(Number(options?.additionalEliminations) || 0)
             );
-            return getCurrentMissionProgress(additionalPlayerPickups, additionalEliminations);
+            return getCurrentMissionProgress(additionalEliminations);
         },
         refreshHud() {
             refreshHud();
@@ -193,7 +201,8 @@ export function createBotsMissionDirector({
             missionResolved = false;
             missionIndex = -1;
             missionPlayerPickupStart = 0;
-            missionEliminatedCollectorIds = new Set();
+            missionEliminatedCount = 0;
+            missionSpawnedCount = 0;
         },
     };
 
@@ -205,7 +214,11 @@ export function createBotsMissionDirector({
         clearPendingTransition();
         missionIndex = nextMissionIndex;
         missionResolved = false;
-        missionEliminatedCollectorIds = new Set();
+        missionEliminatedCount = 0;
+        missionSpawnedCount = Math.min(
+            Math.max(0, Math.round(Number(mission.botCount) || 0)),
+            Math.max(0, Math.round(Number(mission.eliminationTarget) || 0))
+        );
         setMissionTransitionLocked(false);
         prepareMission(mission, {
             missionNumber: missionIndex + 1,
@@ -228,28 +241,22 @@ export function createBotsMissionDirector({
         if (!mission) {
             return;
         }
-        const playerPickups = getMissionPlayerPickups();
-        const eliminations = missionEliminatedCollectorIds.size;
-        const progress = getCurrentMissionProgress();
         objectiveUi?.setMissionState?.({
             missionNumber: missionIndex + 1,
             totalMissions,
             title: mission.title,
-            pickupCurrent: playerPickups,
-            pickupTarget: mission.pickupTarget,
-            botCount: mission.botCount,
-            eliminationCurrent: eliminations,
+            pickupCurrent: getMissionPlayerPickups(),
+            pickupTarget: 0,
+            pickupRequired: false,
+            botCount: mission.eliminationTarget,
+            eliminationCurrent: missionEliminatedCount,
             eliminationTarget: mission.eliminationTarget,
-            progressValue: progress,
+            progressValue: getCurrentMissionProgress(),
         });
     }
 
     function queueMissionSuccess() {
         if (missionResolved) {
-            return;
-        }
-        const mission = getCurrentMission();
-        if (!mission) {
             return;
         }
         missionResolved = true;
@@ -280,11 +287,11 @@ export function createBotsMissionDirector({
                 titleText: 'CAMPAIGN COMPLETE',
                 finishLabel: 'All missions cleared',
                 finishReason: 'campaign-complete',
-                totalPickups: campaignPickupObjectiveTotal,
+                totalPickups: campaignPickupPoolTotal,
                 totalCollected: Math.max(0, Math.round(Number(getPlayerCollectedCount()) || 0)),
                 totalScore: Math.max(0, Math.round(Number(getTotalScore()) || 0)),
                 summaryText:
-                    'All contracts cleared. Rival waves escalated and the whole sector was swept clean.',
+                    'All contracts cleared. Reinforcements ran dry and the whole sector was swept clean.',
             });
         }, 150);
     }
@@ -304,7 +311,7 @@ export function createBotsMissionDirector({
                 titleText: 'MISSION FAILED',
                 finishLabel: `Mission ${failedMissionIndex + 1} failed`,
                 finishReason: 'mission-failed',
-                totalPickups: campaignPickupObjectiveTotal,
+                totalPickups: campaignPickupPoolTotal,
                 totalCollected: Math.max(0, Math.round(Number(getPlayerCollectedCount()) || 0)),
                 totalScore: Math.max(0, Math.round(Number(getTotalScore()) || 0)),
                 summaryText: messageText,
@@ -323,26 +330,22 @@ export function createBotsMissionDirector({
         );
     }
 
-    function getCurrentMissionProgress(additionalPlayerPickups = 0, additionalEliminations = 0) {
+    function getCurrentMissionProgress(additionalEliminations = 0) {
         const mission = getCurrentMission();
         if (!mission) {
             return 0;
         }
-        const progressValues = [];
-        const playerPickups = getMissionPlayerPickups() + Math.max(0, additionalPlayerPickups);
-        const eliminationCount =
-            missionEliminatedCollectorIds.size + Math.max(0, additionalEliminations);
-        if (mission.pickupTarget > 0) {
-            progressValues.push(clamp01(playerPickups / Math.max(1, mission.pickupTarget)));
-        }
-        if (mission.eliminationTarget > 0) {
-            progressValues.push(clamp01(eliminationCount / Math.max(1, mission.eliminationTarget)));
-        }
-        if (progressValues.length === 0) {
+        const eliminationTarget = Math.max(
+            0,
+            Math.round(Number(mission.eliminationTarget) || 0)
+        );
+        if (eliminationTarget <= 0) {
             return 0;
         }
-        const total = progressValues.reduce((sum, value) => sum + value, 0);
-        return clamp01(total / progressValues.length);
+        return clamp01(
+            (missionEliminatedCount + Math.max(0, additionalEliminations)) /
+                Math.max(1, eliminationTarget)
+        );
     }
 
     function isCurrentMissionComplete() {
@@ -350,12 +353,7 @@ export function createBotsMissionDirector({
         if (!mission) {
             return false;
         }
-        const pickupsMet =
-            mission.pickupTarget <= 0 || getMissionPlayerPickups() >= mission.pickupTarget;
-        const eliminationsMet =
-            mission.eliminationTarget <= 0 ||
-            missionEliminatedCollectorIds.size >= mission.eliminationTarget;
-        return pickupsMet && eliminationsMet;
+        return missionEliminatedCount >= Math.max(0, Math.round(Number(mission.eliminationTarget) || 0));
     }
 
     function clearPendingTransition() {
@@ -379,6 +377,15 @@ function normalizeGameMode(value) {
 
 function normalizeCollectorId(value) {
     return typeof value === 'string' ? value.trim().toLowerCase() : '';
+}
+
+function resolveEliminationProgressText(mission = null, eliminationCount = 0) {
+    const eliminationTarget = Math.max(0, Math.round(Number(mission?.eliminationTarget) || 0));
+    const resolvedEliminationCount = Math.max(0, Math.round(Number(eliminationCount) || 0));
+    if (eliminationTarget <= 0) {
+        return String(resolvedEliminationCount);
+    }
+    return `${Math.min(resolvedEliminationCount, eliminationTarget)}/${eliminationTarget}`;
 }
 
 export { BOTS_MISSION_DEFINITIONS };

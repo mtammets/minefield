@@ -38,7 +38,8 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
         totalMissions: 5,
         title: 'Street Sweep',
         pickupCurrent: 0,
-        pickupTarget: 8,
+        pickupTarget: 0,
+        pickupRequired: false,
         botCount: 1,
         eliminationCurrent: 0,
         eliminationTarget: 0,
@@ -98,7 +99,8 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
                 totalMissions: 5,
                 title: 'Street Sweep',
                 pickupCurrent: 0,
-                pickupTarget: 8,
+                pickupTarget: 0,
+                pickupRequired: false,
                 botCount: 1,
                 eliminationCurrent: 0,
                 eliminationTarget: 0,
@@ -121,7 +123,9 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
             0,
             Math.round(Number(nextMissionState.pickupCurrent) || 0)
         );
-        const pickupTarget = Math.max(1, Math.round(Number(nextMissionState.pickupTarget) || 1));
+        const pickupTarget = Math.max(0, Math.round(Number(nextMissionState.pickupTarget) || 0));
+        const pickupRequired =
+            nextMissionState.pickupRequired !== false && pickupTarget > 0;
         const botCount = Math.max(0, Math.round(Number(nextMissionState.botCount) || 0));
         const eliminationCurrent = Math.max(
             0,
@@ -138,6 +142,7 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
         );
 
         rootEl.dataset.eliminationMode = eliminationTarget > 0 ? 'true' : 'false';
+        rootEl.dataset.pickupRequired = pickupRequired ? 'true' : 'false';
 
         if (counterEl) {
             counterEl.textContent = `M${missionNumber}`;
@@ -149,7 +154,9 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
             titleEl.textContent = normalizeText(nextMissionState.title, 'Mission');
         }
         if (primaryEl) {
-            primaryEl.textContent = `${Math.min(pickupCurrent, pickupTarget)}/${pickupTarget}`;
+            primaryEl.textContent = pickupRequired
+                ? `${Math.min(pickupCurrent, pickupTarget)}/${pickupTarget}`
+                : `+${pickupCurrent}`;
         }
         if (secondaryEl) {
             secondaryEl.textContent =

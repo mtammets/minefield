@@ -1509,7 +1509,10 @@ function prepareBotsMissionEnvironment(mission = null) {
     runtimeState.botTrafficSystem?.setEnabled?.(true);
     runtimeState.botTrafficSystem?.reset?.({
         sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
-        activeBotCount: mission.botCount,
+        activeBotCount: Math.min(
+            Math.max(0, Math.round(Number(mission.botCount) || 0)),
+            Math.max(0, Math.round(Number(mission.eliminationTarget) || 0))
+        ),
         resetCollectedCount: false,
         resetLives: true,
         respawnProtectionMs: 0,
@@ -2293,24 +2296,9 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
         recordPerformanceDiagnosticEvent('bot_destroyed', {
             collectorId: typeof botEvent?.collectorId === 'string' ? botEvent.collectorId : '',
             name: typeof botEvent?.name === 'string' ? botEvent.name : '',
-            livesRemaining: Math.max(0, Math.round(Number(botEvent?.livesRemaining) || 0)),
-            respawnAtMs: Number.isFinite(botEvent?.respawnAtMs) ? botEvent.respawnAtMs : 0,
             position: serializeEventPosition(botEvent?.position),
         });
         runtimeState.botsMissionDirector?.handleBotDestroyed?.(botEvent);
-        renderBotsHud();
-    },
-    onBotRespawn(botEvent = null) {
-        recordPerformanceDiagnosticEvent('bot_respawned', {
-            collectorId: typeof botEvent?.collectorId === 'string' ? botEvent.collectorId : '',
-            name: typeof botEvent?.name === 'string' ? botEvent.name : '',
-            livesRemaining: Math.max(0, Math.round(Number(botEvent?.livesRemaining) || 0)),
-            spawnProtectionMs: Math.max(
-                0,
-                Math.round(Number(botEvent?.spawnProtectionMsRemaining) || 0)
-            ),
-            position: serializeEventPosition(botEvent?.position),
-        });
         renderBotsHud();
     },
 });
@@ -3033,11 +3021,21 @@ runtimeState.gameSessionController = createGameSessionController({
 runtimeState.botsMissionDirector = createBotsMissionDirector({
     objectiveUi,
     getGameMode: () => runtimeState.gameMode,
-    prepareMission(mission) {
-        prepareBotsMissionEnvironment(mission);
+    prepareMission(mission, context = null) {
+        prepareBotsMissionEnvironment({
+            ...mission,
+            missionNumber: Math.max(1, Math.round(Number(context?.missionNumber) || 1)),
+        });
     },
     setMissionTransitionLocked(nextLocked) {
         setBotsMissionTransitionLocked(nextLocked);
+    },
+    scheduleMissionReinforcement({ collectorId = '', delayMs = 0 } = {}) {
+        return (
+            runtimeState.botTrafficSystem?.scheduleReinforcement?.(collectorId, {
+                delayMs,
+            }) || false
+        );
     },
     startMissionCountdown() {
         runtimeState.gameSessionController?.startRaceIntroSequence?.();
