@@ -79,7 +79,11 @@
                             </div>
                         </div>
                         <div id="welcomeAuthSignedOutView" class="welcomeAuthSignedOutView">
-                            <div class="welcomeAuthModeTabs" role="tablist" aria-label="Account mode">
+                            <div
+                                class="welcomeAuthModeTabs"
+                                role="tablist"
+                                aria-label="Account mode"
+                            >
                                 <button
                                     id="welcomeAuthSignInTab"
                                     class="welcomeAuthModeTab"
@@ -102,7 +106,11 @@
                                 </button>
                             </div>
                             <div class="welcomeAuthFields">
-                                <div id="welcomeAuthDisplayNameField" class="welcomeAuthField" hidden>
+                                <div
+                                    id="welcomeAuthDisplayNameField"
+                                    class="welcomeAuthField"
+                                    hidden
+                                >
                                     <label
                                         class="welcomeAuthLabel"
                                         for="welcomeAuthDisplayNameInput"
@@ -173,12 +181,65 @@
                             </div>
                         </div>
                         <div id="welcomeAuthSignedInView" class="welcomeAuthSignedInView" hidden>
-                            <div class="welcomeAuthIdentityLabel">SIGNED IN AS</div>
-                            <div id="welcomeAuthSignedInName" class="welcomeAuthSignedInName">
-                                Driver
+                            <div class="welcomeAuthProfileRow">
+                                <div
+                                    id="welcomeAuthAvatarFrame"
+                                    class="welcomeAuthAvatarFrame"
+                                    data-has-image="false"
+                                >
+                                    <img
+                                        id="welcomeAuthAvatarImage"
+                                        class="welcomeAuthAvatarImage"
+                                        alt="Profile photo"
+                                        hidden
+                                    />
+                                    <div
+                                        id="welcomeAuthAvatarFallback"
+                                        class="welcomeAuthAvatarFallback"
+                                    >
+                                        D
+                                    </div>
+                                </div>
+                                <div class="welcomeAuthProfileMeta">
+                                    <div
+                                        id="welcomeAuthSignedInName"
+                                        class="welcomeAuthSignedInName"
+                                    >
+                                        Driver
+                                    </div>
+                                    <div
+                                        id="welcomeAuthSignedInEmail"
+                                        class="welcomeAuthSignedInEmail"
+                                    >
+                                        driver@example.com
+                                    </div>
+                                    <div class="welcomeAuthAvatarHint">
+                                        JPG, PNG or WebP. Square crop is applied automatically.
+                                    </div>
+                                </div>
                             </div>
-                            <div id="welcomeAuthSignedInEmail" class="welcomeAuthSignedInEmail">
-                                driver@example.com
+                            <input
+                                id="welcomeAuthAvatarInput"
+                                class="welcomeAuthFileInput"
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                hidden
+                            />
+                            <div class="welcomeAuthActions welcomeAuthInlineActions">
+                                <button
+                                    id="welcomeAuthAvatarUploadBtn"
+                                    class="welcomeAuthSecondaryBtn"
+                                    type="button"
+                                >
+                                    CHANGE PHOTO
+                                </button>
+                                <button
+                                    id="welcomeAuthAvatarRemoveBtn"
+                                    class="welcomeAuthSecondaryBtn"
+                                    type="button"
+                                >
+                                    REMOVE PHOTO
+                                </button>
                             </div>
                             <div class="welcomeAuthActions">
                                 <button
@@ -466,7 +527,7 @@
                         >
                             <div class="welcomePreviewLeaderboardHeader">
                                 <div class="welcomePreviewLeaderboardHeading">
-                                    <div class="welcomePreviewLeaderboardEyebrow">PLAYER PROFILE</div>
+                                    <div class="welcomePreviewLeaderboardEyebrow">YOUR PROFILE</div>
                                     <div
                                         id="welcomePreviewAccountTitle"
                                         class="welcomePreviewLeaderboardTitle welcomePreviewAccountTitle"
@@ -502,7 +563,9 @@
                         >
                             <div class="welcomePreviewLeaderboardHeader">
                                 <div class="welcomePreviewLeaderboardHeading">
-                                    <div class="welcomePreviewLeaderboardEyebrow">PLAYER SUPPORT</div>
+                                    <div class="welcomePreviewLeaderboardEyebrow">
+                                        PLAYER SUPPORT
+                                    </div>
                                     <div
                                         id="welcomePreviewDonateTitle"
                                         class="welcomePreviewLeaderboardTitle welcomePreviewDonateTitle"
@@ -537,7 +600,9 @@
                         >
                             <div class="welcomePreviewLeaderboardHeader">
                                 <div class="welcomePreviewLeaderboardHeading">
-                                    <div class="welcomePreviewLeaderboardEyebrow">MULTIPLAYER SESSION</div>
+                                    <div class="welcomePreviewLeaderboardEyebrow">
+                                        MULTIPLAYER SESSION
+                                    </div>
                                     <div
                                         id="welcomePreviewOnlineTitle"
                                         class="welcomePreviewLeaderboardTitle welcomePreviewOnlineTitle"
@@ -588,7 +653,11 @@
             <aside id="missionHud" aria-label="Mission director">
                 <div class="missionHudTopbar">
                     <div id="missionHudCounter" class="missionHudCounter">M1</div>
-                    <div id="missionHudTimeline" class="missionHudTimeline" aria-hidden="true"></div>
+                    <div
+                        id="missionHudTimeline"
+                        class="missionHudTimeline"
+                        aria-hidden="true"
+                    ></div>
                     <div class="missionHudTarget" aria-label="Target shard">
                         <span id="missionHudTargetSwatch" class="missionHudTargetSwatch"></span>
                     </div>
@@ -602,7 +671,11 @@
                         <div id="missionHudPrimary" class="missionHudMetricValue">0/8</div>
                     </div>
                     <div class="missionHudMetric missionHudMetricThreat">
-                        <div id="missionHudThreatIcons" class="missionHudThreatIcons" aria-hidden="true"></div>
+                        <div
+                            id="missionHudThreatIcons"
+                            class="missionHudThreatIcons"
+                            aria-hidden="true"
+                        ></div>
                         <div id="missionHudSecondary" class="missionHudMetricValue">1</div>
                     </div>
                 </div>

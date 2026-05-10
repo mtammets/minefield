@@ -46,6 +46,8 @@ export function createWelcomeModalController({
     onPrepareStart,
     onAuthSubmit,
     onAuthSignOut,
+    onAuthUpdateProfileImage,
+    onAuthRemoveProfileImage,
     onAuthChangePassword,
     onAuthDeleteAccount,
     onRefreshGlobalLeaderboard,
@@ -83,6 +85,12 @@ export function createWelcomeModalController({
     const authConfirmPasswordInputEl = document.getElementById('welcomeAuthConfirmPasswordInput');
     const authSubmitBtnEl = document.getElementById('welcomeAuthSubmitBtn');
     const authStatusEl = document.getElementById('welcomeAuthStatus');
+    const authAvatarFrameEl = document.getElementById('welcomeAuthAvatarFrame');
+    const authAvatarImageEl = document.getElementById('welcomeAuthAvatarImage');
+    const authAvatarFallbackEl = document.getElementById('welcomeAuthAvatarFallback');
+    const authAvatarInputEl = document.getElementById('welcomeAuthAvatarInput');
+    const authAvatarUploadBtnEl = document.getElementById('welcomeAuthAvatarUploadBtn');
+    const authAvatarRemoveBtnEl = document.getElementById('welcomeAuthAvatarRemoveBtn');
     const authSignedInNameEl = document.getElementById('welcomeAuthSignedInName');
     const authSignedInEmailEl = document.getElementById('welcomeAuthSignedInEmail');
     const authChangePasswordToggleBtnEl = document.getElementById(
@@ -125,12 +133,8 @@ export function createWelcomeModalController({
     const previewLoadingProgressEl = document.getElementById('welcomePreviewLoadingProgress');
     const previewLoadingFillEl = document.getElementById('welcomePreviewLoadingFill');
     const previewLoadingPercentEl = document.getElementById('welcomePreviewLoadingPercent');
-    const previewLeaderboardOverlayEl = document.getElementById(
-        'welcomePreviewLeaderboardOverlay'
-    );
-    const previewLeaderboardStatusEl = document.getElementById(
-        'welcomePreviewLeaderboardStatus'
-    );
+    const previewLeaderboardOverlayEl = document.getElementById('welcomePreviewLeaderboardOverlay');
+    const previewLeaderboardStatusEl = document.getElementById('welcomePreviewLeaderboardStatus');
     const previewLeaderboardListEl = document.getElementById('welcomePreviewLeaderboardList');
     const previewLeaderboardRefreshBtnEl = document.getElementById(
         'welcomePreviewLeaderboardRefreshBtn'
@@ -139,6 +143,7 @@ export function createWelcomeModalController({
         'welcomePreviewLeaderboardCloseBtn'
     );
     const previewAccountOverlayEl = document.getElementById('welcomePreviewAccountOverlay');
+    const previewAccountTitleEl = document.getElementById('welcomePreviewAccountTitle');
     const previewAccountBodyEl = document.getElementById('welcomePreviewAccountBody');
     const previewAccountCloseBtnEl = document.getElementById('welcomePreviewAccountCloseBtn');
     const previewDonateOverlayEl = document.getElementById('welcomePreviewDonateOverlay');
@@ -278,17 +283,18 @@ export function createWelcomeModalController({
     );
     const hasAuthPanel = Boolean(
         authPanelEl &&
-            authStatePillEl &&
-            authSignedOutViewEl &&
-            authSignedInViewEl &&
-            authSignInTabEl &&
-            authSignUpTabEl &&
-            authEmailInputEl &&
-            authPasswordInputEl &&
-            authSubmitBtnEl &&
-            authStatusEl &&
-            authSignOutBtnEl &&
-            authDeleteAccountBtnEl
+        authStatePillEl &&
+        authSignedOutViewEl &&
+        authSignedInViewEl &&
+        authSignInTabEl &&
+        authSignUpTabEl &&
+        authEmailInputEl &&
+        authPasswordInputEl &&
+        authSubmitBtnEl &&
+        authStatusEl &&
+        authAvatarInputEl &&
+        authSignOutBtnEl &&
+        authDeleteAccountBtnEl
     );
     const taglineRotation = {
         activeIndex: 0,
@@ -407,7 +413,9 @@ export function createWelcomeModalController({
             syncAuthUi();
         });
         authDisplayNameInputEl?.addEventListener('input', () => {
-            authDisplayNameInputEl.value = sanitizeOnlinePlayerNameInput(authDisplayNameInputEl.value);
+            authDisplayNameInputEl.value = sanitizeOnlinePlayerNameInput(
+                authDisplayNameInputEl.value
+            );
             clearLocalAuthStatus();
             syncAuthUi();
         });
@@ -453,6 +461,31 @@ export function createWelcomeModalController({
         });
         authPasswordChangeCancelBtnEl?.addEventListener('click', () => {
             handlePasswordChangeCancel();
+        });
+        authAvatarUploadBtnEl?.addEventListener('click', () => {
+            if (authUiState.loading || !authUiState.authenticated) {
+                return;
+            }
+            authAvatarInputEl.value = '';
+            authAvatarInputEl.click();
+        });
+        authAvatarInputEl?.addEventListener('change', () => {
+            void handleProfileImageSelection();
+        });
+        authAvatarRemoveBtnEl?.addEventListener('click', () => {
+            void handleProfileImageRemoval();
+        });
+        authAvatarImageEl?.addEventListener('error', () => {
+            if (authAvatarFrameEl) {
+                authAvatarFrameEl.dataset.hasImage = 'false';
+            }
+            if (authAvatarImageEl) {
+                authAvatarImageEl.hidden = true;
+                authAvatarImageEl.removeAttribute('src');
+            }
+            if (authAvatarFallbackEl) {
+                authAvatarFallbackEl.hidden = false;
+            }
         });
     }
 
@@ -1289,14 +1322,20 @@ export function createWelcomeModalController({
             typeof onAuthChangePassword === 'function' &&
             Boolean(
                 authChangePasswordToggleBtnEl &&
-                    authPasswordChangePanelEl &&
-                    authNewPasswordInputEl &&
-                    authConfirmNewPasswordInputEl &&
-                    authPasswordChangeSubmitBtnEl &&
-                    authPasswordChangeCancelBtnEl
+                authPasswordChangePanelEl &&
+                authNewPasswordInputEl &&
+                authConfirmNewPasswordInputEl &&
+                authPasswordChangeSubmitBtnEl &&
+                authPasswordChangeCancelBtnEl
             );
+        const canManageProfileImage =
+            authenticated &&
+            enabled &&
+            Boolean(authUiState.profileImageEnabled && authAvatarInputEl && authAvatarUploadBtnEl);
+        const hasProfileImage = Boolean(authUiState.avatarUrl);
         const localStatus = authLocalStatusText.trim();
-        const remoteStatus = typeof authUiState.statusText === 'string' ? authUiState.statusText.trim() : '';
+        const remoteStatus =
+            typeof authUiState.statusText === 'string' ? authUiState.statusText.trim() : '';
         const statusText =
             localStatus ||
             remoteStatus ||
@@ -1323,7 +1362,11 @@ export function createWelcomeModalController({
             authConfirmFieldEl.hidden = !showSignUp;
         }
         if (authStatePillEl) {
-            authStatePillEl.textContent = authenticated ? 'SIGNED IN' : enabled ? 'GUEST' : 'OFFLINE';
+            authStatePillEl.textContent = authenticated
+                ? 'SIGNED IN'
+                : enabled
+                  ? 'GUEST'
+                  : 'OFFLINE';
             authStatePillEl.dataset.tone = authenticated ? 'success' : enabled ? 'muted' : 'error';
         }
         if (authSignedInNameEl) {
@@ -1331,6 +1374,27 @@ export function createWelcomeModalController({
         }
         if (authSignedInEmailEl) {
             authSignedInEmailEl.textContent = authUiState.email || 'Authenticated session';
+        }
+        if (authAvatarFrameEl) {
+            authAvatarFrameEl.dataset.hasImage = hasProfileImage ? 'true' : 'false';
+        }
+        if (authAvatarFallbackEl) {
+            authAvatarFallbackEl.textContent = resolveProfileImageFallbackLabel(authUiState);
+            authAvatarFallbackEl.hidden = hasProfileImage;
+        }
+        if (authAvatarImageEl) {
+            if (hasProfileImage) {
+                if (authAvatarImageEl.getAttribute('src') !== authUiState.avatarUrl) {
+                    authAvatarImageEl.src = authUiState.avatarUrl;
+                }
+                authAvatarImageEl.hidden = false;
+            } else {
+                authAvatarImageEl.hidden = true;
+                authAvatarImageEl.removeAttribute('src');
+            }
+        }
+        if (previewAccountTitleEl) {
+            previewAccountTitleEl.textContent = authUiState.displayName || 'ACCOUNT';
         }
         if (authChangePasswordToggleBtnEl) {
             authChangePasswordToggleBtnEl.hidden = !canChangePassword;
@@ -1343,6 +1407,32 @@ export function createWelcomeModalController({
         }
         if (authPasswordChangePanelEl) {
             authPasswordChangePanelEl.hidden = !canChangePassword || !authPasswordChangeOpen;
+        }
+        if (authAvatarInputEl) {
+            authAvatarInputEl.disabled = !canManageProfileImage || busy;
+        }
+        if (authAvatarUploadBtnEl) {
+            authAvatarUploadBtnEl.hidden = !authenticated || !authUiState.profileImageEnabled;
+            authAvatarUploadBtnEl.disabled =
+                !canManageProfileImage || busy || typeof onAuthUpdateProfileImage !== 'function';
+            authAvatarUploadBtnEl.textContent =
+                busy && authUiState.pendingAction === 'update-avatar'
+                    ? 'UPLOADING PHOTO...'
+                    : hasProfileImage
+                      ? 'CHANGE PHOTO'
+                      : 'ADD PHOTO';
+        }
+        if (authAvatarRemoveBtnEl) {
+            authAvatarRemoveBtnEl.hidden = !authenticated || !authUiState.profileImageEnabled;
+            authAvatarRemoveBtnEl.disabled =
+                !canManageProfileImage ||
+                busy ||
+                !hasProfileImage ||
+                typeof onAuthRemoveProfileImage !== 'function';
+            authAvatarRemoveBtnEl.textContent =
+                busy && authUiState.pendingAction === 'remove-avatar'
+                    ? 'REMOVING PHOTO...'
+                    : 'REMOVE PHOTO';
         }
         if (authDisplayNameInputEl && !authDisplayNameInputEl.value) {
             authDisplayNameInputEl.value = sanitizeOnlinePlayerNameInput(
@@ -1484,11 +1574,11 @@ export function createWelcomeModalController({
     function setWelcomeLeaderboardOpen(nextOpen, options = {}) {
         welcomeLeaderboardOpen = Boolean(
             nextOpen &&
-                leaderboardBtnEl &&
-                previewShellEl &&
-                previewLeaderboardOverlayEl &&
-                previewLeaderboardStatusEl &&
-                previewLeaderboardListEl
+            leaderboardBtnEl &&
+            previewShellEl &&
+            previewLeaderboardOverlayEl &&
+            previewLeaderboardStatusEl &&
+            previewLeaderboardListEl
         );
         if (!options.skipSync) {
             syncWelcomeLeaderboardUi();
@@ -1496,14 +1586,13 @@ export function createWelcomeModalController({
     }
 
     function syncWelcomeLeaderboardUi() {
-        const hasWelcomeLeaderboard =
-            Boolean(
-                leaderboardBtnEl &&
-                    previewShellEl &&
-                    previewLeaderboardOverlayEl &&
-                    previewLeaderboardStatusEl &&
-                    previewLeaderboardListEl
-            );
+        const hasWelcomeLeaderboard = Boolean(
+            leaderboardBtnEl &&
+            previewShellEl &&
+            previewLeaderboardOverlayEl &&
+            previewLeaderboardStatusEl &&
+            previewLeaderboardListEl
+        );
         if (!hasWelcomeLeaderboard) {
             return;
         }
@@ -1514,7 +1603,9 @@ export function createWelcomeModalController({
         previewLeaderboardOverlayEl.hidden = !welcomeLeaderboardOpen;
 
         if (previewLeaderboardRefreshBtnEl) {
-            previewLeaderboardRefreshBtnEl.disabled = Boolean(welcomeGlobalLeaderboardState.loading);
+            previewLeaderboardRefreshBtnEl.disabled = Boolean(
+                welcomeGlobalLeaderboardState.loading
+            );
         }
         if (previewLeaderboardStatusEl) {
             const fallbackStatus = welcomeGlobalLeaderboardState.loading
@@ -1544,11 +1635,11 @@ export function createWelcomeModalController({
     function setWelcomeAccountOpen(nextOpen, options = {}) {
         welcomeAccountOpen = Boolean(
             nextOpen &&
-                accountBtnEl &&
-                previewShellEl &&
-                previewAccountOverlayEl &&
-                previewAccountBodyEl &&
-                authPanelEl
+            accountBtnEl &&
+            previewShellEl &&
+            previewAccountOverlayEl &&
+            previewAccountBodyEl &&
+            authPanelEl
         );
         if (!options.skipSync) {
             syncWelcomeAccountUi();
@@ -1558,10 +1649,10 @@ export function createWelcomeModalController({
     function syncWelcomeAccountUi() {
         const hasWelcomeAccount = Boolean(
             accountBtnEl &&
-                previewShellEl &&
-                previewAccountOverlayEl &&
-                previewAccountBodyEl &&
-                authPanelEl
+            previewShellEl &&
+            previewAccountOverlayEl &&
+            previewAccountBodyEl &&
+            authPanelEl
         );
         if (!hasWelcomeAccount) {
             return;
@@ -1574,7 +1665,9 @@ export function createWelcomeModalController({
     }
 
     function setWelcomeDonateOpen(nextOpen, options = {}) {
-        welcomeDonateOpen = Boolean(nextOpen && donateBtnEl && previewShellEl && previewDonateOverlayEl);
+        welcomeDonateOpen = Boolean(
+            nextOpen && donateBtnEl && previewShellEl && previewDonateOverlayEl
+        );
         if (!options.skipSync) {
             syncWelcomeDonateUi();
         }
@@ -1633,7 +1726,11 @@ export function createWelcomeModalController({
             preserveStatus: Boolean(options.preserveStatus),
         });
         if (authUiState.authenticated) {
-            if (authPasswordChangeOpen && authNewPasswordInputEl && !authNewPasswordInputEl.disabled) {
+            if (
+                authPasswordChangeOpen &&
+                authNewPasswordInputEl &&
+                !authNewPasswordInputEl.disabled
+            ) {
                 authNewPasswordInputEl.focus();
                 authNewPasswordInputEl.select?.();
                 return;
@@ -1726,6 +1823,69 @@ export function createWelcomeModalController({
         syncAuthUi();
     }
 
+    async function handleProfileImageSelection() {
+        if (
+            authUiState.loading ||
+            !authUiState.authenticated ||
+            !authUiState.profileImageEnabled ||
+            typeof onAuthUpdateProfileImage !== 'function'
+        ) {
+            if (authAvatarInputEl) {
+                authAvatarInputEl.value = '';
+            }
+            return;
+        }
+
+        const file = authAvatarInputEl?.files?.[0] || null;
+        if (!file) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        syncAuthUi();
+
+        const response = await Promise.resolve(onAuthUpdateProfileImage(file)).catch((error) => ({
+            ok: false,
+            error: error?.message || 'Could not update the profile photo.',
+        }));
+
+        if (authAvatarInputEl) {
+            authAvatarInputEl.value = '';
+        }
+        if (!response?.ok && response?.error) {
+            setLocalAuthStatus(String(response.error), 'error');
+            syncAuthUi();
+            return;
+        }
+        syncAuthUi();
+    }
+
+    async function handleProfileImageRemoval() {
+        if (
+            authUiState.loading ||
+            !authUiState.authenticated ||
+            !authUiState.avatarUrl ||
+            typeof onAuthRemoveProfileImage !== 'function'
+        ) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        syncAuthUi();
+
+        const response = await Promise.resolve(onAuthRemoveProfileImage()).catch((error) => ({
+            ok: false,
+            error: error?.message || 'Could not remove the profile photo.',
+        }));
+
+        if (!response?.ok && response?.error) {
+            setLocalAuthStatus(String(response.error), 'error');
+            syncAuthUi();
+            return;
+        }
+        syncAuthUi();
+    }
+
     function handlePasswordChangeToggle() {
         if (!authUiState.authenticated || authUiState.loading || !authUiState.enabled) {
             return;
@@ -1811,7 +1971,11 @@ export function createWelcomeModalController({
             return;
         }
         const confirmationText = window.prompt('Type DELETE to confirm account deletion.', '');
-        if (String(confirmationText || '').trim().toUpperCase() !== 'DELETE') {
+        if (
+            String(confirmationText || '')
+                .trim()
+                .toUpperCase() !== 'DELETE'
+        ) {
             setLocalAuthStatus('Account deletion was cancelled.', 'info');
             syncAuthUi();
             return;
@@ -1853,10 +2017,10 @@ export function createWelcomeModalController({
             typeof onAuthChangePassword === 'function' &&
             Boolean(
                 authPasswordChangePanelEl &&
-                    authNewPasswordInputEl &&
-                    authConfirmNewPasswordInputEl &&
-                    authPasswordChangeSubmitBtnEl &&
-                    authPasswordChangeCancelBtnEl
+                authNewPasswordInputEl &&
+                authConfirmNewPasswordInputEl &&
+                authPasswordChangeSubmitBtnEl &&
+                authPasswordChangeCancelBtnEl
             );
         authPasswordChangeOpen = canOpen;
         if (!authPasswordChangeOpen || options.clearInputs) {
@@ -2923,12 +3087,14 @@ export function createWelcomeModalController({
         const source = state && typeof state === 'object' ? state : {};
         return {
             enabled: Boolean(source.enabled),
+            profileImageEnabled: Boolean(source.profileImageEnabled),
             ready: Boolean(source.ready),
             loading: Boolean(source.loading),
             pendingAction: typeof source.pendingAction === 'string' ? source.pendingAction : '',
             authenticated: Boolean(source.authenticated),
             displayName: sanitizeOnlinePlayerNameInput(source.displayName || ''),
             email: sanitizeAuthEmailInput(source.email || ''),
+            avatarUrl: sanitizeProfileImageUrl(source.avatarUrl || ''),
             statusText: typeof source.statusText === 'string' ? source.statusText : '',
             statusTone: sanitizeAuthTone(source.statusTone),
             requiresEmailConfirmation: Boolean(source.requiresEmailConfirmation),
@@ -2958,6 +3124,38 @@ export function createWelcomeModalController({
             normalized === 'muted'
             ? normalized
             : 'muted';
+    }
+
+    function sanitizeProfileImageUrl(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const normalized = value.trim();
+        if (!normalized) {
+            return '';
+        }
+        try {
+            const parsed = new URL(
+                normalized,
+                typeof window?.location?.origin === 'string' ? window.location.origin : undefined
+            );
+            if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+                return '';
+            }
+            return parsed.toString();
+        } catch {
+            return '';
+        }
+    }
+
+    function resolveProfileImageFallbackLabel(authState = authUiState) {
+        const preferredSource =
+            sanitizeOnlinePlayerNameInput(authState?.displayName || '') ||
+            sanitizeAuthEmailInput(authState?.email || '') ||
+            DEFAULT_ONLINE_PLAYER_NAME;
+        const firstCharacter =
+            Array.from(preferredSource.trim())[0] || Array.from(DEFAULT_ONLINE_PLAYER_NAME)[0];
+        return firstCharacter.toUpperCase();
     }
 
     function normalizeOnlineRoomCode(value) {

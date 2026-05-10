@@ -247,6 +247,12 @@ const {
     onAuthSignOut() {
         return runtimeState.authController?.signOut?.();
     },
+    onAuthUpdateProfileImage(file) {
+        return runtimeState.authController?.updateProfileImage?.(file);
+    },
+    onAuthRemoveProfileImage() {
+        return runtimeState.authController?.removeProfileImage?.();
+    },
     onAuthChangePassword(credentials) {
         return runtimeState.authController?.changePassword?.(credentials);
     },
@@ -1226,11 +1232,7 @@ function resolveCollectorWorldPosition(collectorId = 'player') {
     return runtimeState.multiplayerController?.getPlayerWorldPosition?.(collectorId) || null;
 }
 
-function spawnScorePopup({
-    collectorId = 'player',
-    pointsAwarded = 0,
-    sourceLabel = '',
-} = {}) {
+function spawnScorePopup({ collectorId = 'player', pointsAwarded = 0, sourceLabel = '' } = {}) {
     const awarded = Math.max(0, Math.round(Number(pointsAwarded) || 0));
     if (awarded <= 0) {
         return;
@@ -1383,7 +1385,9 @@ function buildPickupStatusContext(pointsAwarded, scoring) {
         batteryPercent: Math.round(runtimeState.playerBattery),
         pointsAwarded: Math.max(0, Math.round(Number(pointsAwarded) || 0)),
         sourceLabel:
-            typeof scoring?.label === 'string' && scoring.label.trim() ? scoring.label.trim() : 'Pickup',
+            typeof scoring?.label === 'string' && scoring.label.trim()
+                ? scoring.label.trim()
+                : 'Pickup',
     };
 }
 
@@ -1427,7 +1431,9 @@ function buildBotHudStateWithScores() {
             0,
             Math.round(
                 Number(bot?.score) ||
-                    Number(runtimeState.scoringSystem?.getCollectorScore?.(bot?.collectorId || '') || 0)
+                    Number(
+                        runtimeState.scoringSystem?.getCollectorScore?.(bot?.collectorId || '') || 0
+                    )
             )
         ),
     }));

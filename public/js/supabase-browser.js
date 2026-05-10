@@ -65,12 +65,15 @@ function normalizeSupabaseBrowserConfig(config) {
     const url = sanitizeSupabasePublicUrl(source.url);
     const anonKey = sanitizeSupabasePublicKey(source.anonKey);
     const projectRef = sanitizeSupabaseProjectRef(source.projectRef);
+    const profileImagesBucket = sanitizeSupabaseStorageBucketName(source.profileImagesBucket);
 
     return {
         enabled: Boolean(source.enabled && url && anonKey),
         url,
         anonKey,
         projectRef,
+        profileImagesBucket,
+        profileImagesEnabled: Boolean(source.profileImagesEnabled && profileImagesBucket),
         leaderboardEnabled: Boolean(source.leaderboardEnabled),
     };
 }
@@ -108,6 +111,20 @@ function sanitizeSupabaseProjectRef(value) {
     }
     const normalized = value.trim().toLowerCase();
     return /^[a-z0-9]{6,32}$/u.test(normalized) ? normalized : '';
+}
+
+function sanitizeSupabaseStorageBucketName(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length < 3 || normalized.length > 63) {
+        return '';
+    }
+    if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/u.test(normalized)) {
+        return '';
+    }
+    return normalized;
 }
 
 function resolveSupabaseBrowserStorageKey(projectRef) {

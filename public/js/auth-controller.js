@@ -5,6 +5,10 @@ const DEFAULT_DRIVER_NAME = 'Driver';
 const PLAYER_NAME_MAX_LENGTH = 18;
 const AUTH_PASSWORD_MIN_LENGTH = 6;
 const AUTH_DELETE_ACCOUNT_ENDPOINT_PATH = '/api/auth/account';
+const PROFILE_IMAGE_MAX_INPUT_BYTES = 10 * 1024 * 1024;
+const PROFILE_IMAGE_OUTPUT_SIZE_PX = 512;
+const PROFILE_IMAGE_OUTPUT_QUALITY = 0.86;
+const PROFILE_IMAGE_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 export function createAuthController({ onStateChanged = null } = {}) {
     const listeners = new Set();
@@ -13,6 +17,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
     let supabaseClient = null;
     let authSubscription = null;
     let currentSession = null;
+    let browserConfig = createInitialBrowserConfig();
 
     return {
         async initialize() {
@@ -155,8 +160,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
                     email,
                     displayName,
                     requiresEmailConfirmation: true,
-                    statusText:
-                        'Account created. Check your email and confirm before signing in.',
+                    statusText: 'Account created. Check your email and confirm before signing in.',
                     statusTone: 'info',
                 });
                 return {
@@ -316,6 +320,153 @@ export function createAuthController({ onStateChanged = null } = {}) {
                 return updateRequestFailure(error);
             }
         },
+        async updateProfileImage(file) {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                const errorMessage = 'Supabase auth is unavailable on this server.';
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: errorMessage,
+                    statusTone: 'error',
+                });
+                return {
+                    ok: false,
+                    error: errorMessage,
+                };
+            }
+
+            if (!state.authenticated || !state.userId) {
+                return updateValidationFailure('Sign in before changing the profile photo.');
+            }
+
+            if (!browserConfig.profileImagesEnabled || !browserConfig.profileImagesBucket) {
+                return updateValidationFailure(
+                    'Profile image storage is not configured on this server.'
+                );
+            }
+
+            updateState({
+                loading: true,
+                pendingAction: 'update-avatar',
+                statusText: 'Preparing profile photo...',
+                statusTone: 'info',
+                requiresEmailConfirmation: false,
+            });
+
+            try {
+                const preparedImage = await prepareProfileImageUpload(file);
+                const oldAvatarPath = resolveProfileImagePath(currentSession?.user);
+                const nextAvatarPath = buildProfileImageStoragePath(
+                    state.userId,
+                    preparedImage.extension
+                );
+                const uploadResult = await supabaseClient.storage
+                    .from(browserConfig.profileImagesBucket)
+                    .upload(nextAvatarPath, preparedImage.blob, {
+                        cacheControl: '3600',
+                        contentType: preparedImage.contentType,
+                        upsert: false,
+                    });
+                if (uploadResult.error) {
+                    throw uploadResult.error;
+                }
+
+                updateState({
+                    statusText: 'Saving profile photo...',
+                    statusTone: 'info',
+                });
+
+                const metadata = buildUpdatedUserMetadata(
+                    currentSession?.user,
+                    {
+                        avatar_path: nextAvatarPath,
+                    },
+                    state.displayName
+                );
+                const { data, error } = await supabaseClient.auth.updateUser({
+                    data: metadata,
+                });
+                if (error) {
+                    await removeStoredProfileImages([nextAvatarPath]).catch(() => {});
+                    throw error;
+                }
+
+                if (oldAvatarPath && oldAvatarPath !== nextAvatarPath) {
+                    await removeStoredProfileImages([oldAvatarPath]).catch(() => {});
+                }
+
+                applySession(mergeCurrentSessionUser(data?.user), {
+                    statusText: 'Profile photo updated.',
+                    statusTone: 'success',
+                });
+                return {
+                    ok: true,
+                };
+            } catch (error) {
+                return updateRequestFailure(error);
+            }
+        },
+        async removeProfileImage() {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                const errorMessage = 'Supabase auth is unavailable on this server.';
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: errorMessage,
+                    statusTone: 'error',
+                });
+                return {
+                    ok: false,
+                    error: errorMessage,
+                };
+            }
+
+            if (!state.authenticated || !state.userId) {
+                return updateValidationFailure('Sign in before removing the profile photo.');
+            }
+
+            const currentAvatarPath = resolveProfileImagePath(currentSession?.user);
+            if (!currentAvatarPath) {
+                return updateValidationFailure('No profile photo is set.');
+            }
+
+            updateState({
+                loading: true,
+                pendingAction: 'remove-avatar',
+                statusText: 'Removing profile photo...',
+                statusTone: 'info',
+                requiresEmailConfirmation: false,
+            });
+
+            try {
+                const metadata = buildUpdatedUserMetadata(
+                    currentSession?.user,
+                    {
+                        avatar_path: '',
+                    },
+                    state.displayName
+                );
+                const { data, error } = await supabaseClient.auth.updateUser({
+                    data: metadata,
+                });
+                if (error) {
+                    throw error;
+                }
+
+                await removeStoredProfileImages([currentAvatarPath]).catch(() => {});
+                applySession(mergeCurrentSessionUser(data?.user), {
+                    statusText: 'Profile photo removed.',
+                    statusTone: 'success',
+                });
+                return {
+                    ok: true,
+                };
+            } catch (error) {
+                return updateRequestFailure(error);
+            }
+        },
         dispose() {
             if (authSubscription && typeof authSubscription.unsubscribe === 'function') {
                 authSubscription.unsubscribe();
@@ -328,7 +479,9 @@ export function createAuthController({ onStateChanged = null } = {}) {
             };
         },
         getAccessToken() {
-            return typeof currentSession?.access_token === 'string' ? currentSession.access_token : '';
+            return typeof currentSession?.access_token === 'string'
+                ? currentSession.access_token
+                : '';
         },
         isAuthenticated() {
             return Boolean(state.authenticated);
@@ -361,13 +514,18 @@ export function createAuthController({ onStateChanged = null } = {}) {
 
     async function initializeInternal() {
         const config = await getSupabaseBrowserConfig();
+        browserConfig =
+            config && typeof config === 'object' ? config : createInitialBrowserConfig();
         if (!config.enabled) {
             updateState({
                 enabled: false,
+                profileImageEnabled: false,
                 ready: true,
                 loading: false,
                 pendingAction: '',
                 authenticated: false,
+                avatarUrl: '',
+                avatarStoragePath: '',
                 statusText: 'Supabase auth is unavailable on this server.',
                 statusTone: 'error',
             });
@@ -376,6 +534,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
 
         updateState({
             enabled: true,
+            profileImageEnabled: Boolean(config.profileImagesEnabled && config.profileImagesBucket),
             ready: false,
             loading: true,
             pendingAction: '',
@@ -388,6 +547,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
             if (!supabaseClient) {
                 updateState({
                     enabled: false,
+                    profileImageEnabled: false,
                     ready: true,
                     loading: false,
                     statusText: 'Supabase auth client failed to load.',
@@ -397,11 +557,15 @@ export function createAuthController({ onStateChanged = null } = {}) {
             }
 
             if (!authSubscription) {
-                const subscriptionResult = supabaseClient.auth.onAuthStateChange((event, session) => {
-                    handleAuthStateChange(event, session);
-                });
+                const subscriptionResult = supabaseClient.auth.onAuthStateChange(
+                    (event, session) => {
+                        handleAuthStateChange(event, session);
+                    }
+                );
                 authSubscription =
-                    subscriptionResult?.data?.subscription || subscriptionResult?.subscription || null;
+                    subscriptionResult?.data?.subscription ||
+                    subscriptionResult?.subscription ||
+                    null;
             }
 
             const { data, error } = await supabaseClient.auth.getSession();
@@ -416,10 +580,15 @@ export function createAuthController({ onStateChanged = null } = {}) {
             currentSession = null;
             updateState({
                 enabled: true,
+                profileImageEnabled: Boolean(
+                    browserConfig.profileImagesEnabled && browserConfig.profileImagesBucket
+                ),
                 ready: true,
                 loading: false,
                 pendingAction: '',
                 authenticated: false,
+                avatarUrl: '',
+                avatarStoragePath: '',
                 statusText: normalizeSupabaseAuthError(error),
                 statusTone: 'error',
             });
@@ -443,8 +612,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
 
         if (event === 'USER_UPDATED') {
             applySession(session, {
-                statusText: 'Account updated.',
-                statusTone: 'success',
+                preserveStatus: true,
             });
             return;
         }
@@ -468,6 +636,14 @@ export function createAuthController({ onStateChanged = null } = {}) {
         const authenticated = Boolean(currentSession?.access_token && user?.id);
         const email = sanitizeEmail(user?.email || '');
         const displayName = resolveDisplayName(user, email);
+        const avatarStoragePath = authenticated ? resolveProfileImagePath(user) : '';
+        const avatarUrl = authenticated
+            ? resolveProfileImagePublicUrl(
+                  browserConfig.url,
+                  browserConfig.profileImagesBucket,
+                  avatarStoragePath
+              )
+            : '';
         if (authenticated && displayName) {
             writeStoredPlayerName(displayName);
         }
@@ -475,6 +651,9 @@ export function createAuthController({ onStateChanged = null } = {}) {
         const shouldPreserveStatus = Boolean(options?.preserveStatus);
         updateState({
             enabled: true,
+            profileImageEnabled: Boolean(
+                browserConfig.profileImagesEnabled && browserConfig.profileImagesBucket
+            ),
             ready: true,
             loading: false,
             pendingAction: '',
@@ -482,6 +661,8 @@ export function createAuthController({ onStateChanged = null } = {}) {
             userId: authenticated ? sanitizeUserId(user?.id) : '',
             email: authenticated ? email : '',
             displayName: authenticated ? displayName : '',
+            avatarUrl,
+            avatarStoragePath,
             requiresEmailConfirmation: false,
             statusText:
                 typeof options?.statusText === 'string'
@@ -506,6 +687,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
         currentSession = null;
         updateState({
             enabled: state.enabled,
+            profileImageEnabled: state.profileImageEnabled,
             ready: true,
             loading: false,
             pendingAction: '',
@@ -513,6 +695,8 @@ export function createAuthController({ onStateChanged = null } = {}) {
             userId: '',
             email: '',
             displayName: '',
+            avatarUrl: '',
+            avatarStoragePath: '',
             requiresEmailConfirmation: false,
             statusText,
             statusTone: 'info',
@@ -558,6 +742,36 @@ export function createAuthController({ onStateChanged = null } = {}) {
         });
     }
 
+    async function removeStoredProfileImages(paths = []) {
+        const safePaths = Array.isArray(paths)
+            ? paths.map((path) => sanitizeProfileImagePath(path)).filter(Boolean)
+            : [];
+        if (!supabaseClient || !browserConfig.profileImagesBucket || safePaths.length === 0) {
+            return;
+        }
+        const { error } = await supabaseClient.storage
+            .from(browserConfig.profileImagesBucket)
+            .remove(safePaths);
+        if (error) {
+            throw error;
+        }
+    }
+
+    function mergeCurrentSessionUser(nextUser = null) {
+        if (!currentSession || typeof currentSession !== 'object') {
+            return currentSession;
+        }
+        return {
+            ...currentSession,
+            user:
+                nextUser && typeof nextUser === 'object'
+                    ? nextUser
+                    : currentSession.user && typeof currentSession.user === 'object'
+                      ? currentSession.user
+                      : null,
+        };
+    }
+
     function getStateSnapshot() {
         return {
             ...state,
@@ -568,6 +782,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
 function createInitialAuthState() {
     return {
         enabled: false,
+        profileImageEnabled: false,
         ready: false,
         loading: false,
         pendingAction: '',
@@ -575,9 +790,23 @@ function createInitialAuthState() {
         userId: '',
         email: '',
         displayName: '',
+        avatarUrl: '',
+        avatarStoragePath: '',
         requiresEmailConfirmation: false,
         statusText: 'Create an account or sign in to unlock online rooms and score sync.',
         statusTone: 'muted',
+    };
+}
+
+function createInitialBrowserConfig() {
+    return {
+        enabled: false,
+        url: '',
+        anonKey: '',
+        projectRef: '',
+        profileImagesBucket: '',
+        profileImagesEnabled: false,
+        leaderboardEnabled: false,
     };
 }
 
@@ -614,6 +843,79 @@ function sanitizeUserId(value) {
     }
     const normalized = value.trim().slice(0, 128);
     return /^[a-zA-Z0-9-]{6,128}$/u.test(normalized) ? normalized : '';
+}
+
+function sanitizeProfileImageBucketName(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length < 3 || normalized.length > 63) {
+        return '';
+    }
+    if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/u.test(normalized)) {
+        return '';
+    }
+    return normalized;
+}
+
+function sanitizeProfileImagePath(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized.length > 512 || normalized.includes('..')) {
+        return '';
+    }
+    const segments = normalized.split('/');
+    if (segments.some((segment) => !/^[a-zA-Z0-9._-]{1,120}$/u.test(segment))) {
+        return '';
+    }
+    return normalized;
+}
+
+function resolveProfileImagePath(user) {
+    return sanitizeProfileImagePath(user?.user_metadata?.avatar_path || '');
+}
+
+function resolveProfileImagePublicUrl(baseUrl, bucketName, profileImagePath) {
+    const safeBaseUrl =
+        typeof baseUrl === 'string' && /^(https?:)?\/\//iu.test(baseUrl.trim())
+            ? baseUrl.trim().replace(/\/+$/u, '')
+            : '';
+    const safeBucketName = sanitizeProfileImageBucketName(bucketName);
+    const safeProfileImagePath = sanitizeProfileImagePath(profileImagePath);
+    if (!safeBaseUrl || !safeBucketName || !safeProfileImagePath) {
+        return '';
+    }
+    const encodedPath = safeProfileImagePath
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+    return `${safeBaseUrl}/storage/v1/object/public/${encodeURIComponent(safeBucketName)}/${encodedPath}`;
+}
+
+function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') {
+    const currentMetadata =
+        user?.user_metadata && typeof user.user_metadata === 'object' ? user.user_metadata : {};
+    const displayName =
+        sanitizeDisplayName(currentMetadata.display_name || '') ||
+        sanitizeDisplayName(fallbackDisplayName) ||
+        DEFAULT_DRIVER_NAME;
+    const nextAvatarPath = sanitizeProfileImagePath(updates.avatar_path || '');
+    return {
+        ...currentMetadata,
+        display_name: displayName,
+        avatar_path: nextAvatarPath,
+    };
+}
+
+function buildProfileImageStoragePath(userId, extension = 'webp') {
+    const safeUserId = sanitizeUserId(userId);
+    const safeExtension = extension === 'jpg' ? 'jpg' : 'webp';
+    const timestamp = Date.now().toString(36);
+    const randomSuffix = Math.random().toString(36).slice(2, 10);
+    return sanitizeProfileImagePath(`${safeUserId}/${timestamp}-${randomSuffix}.${safeExtension}`);
 }
 
 function resolveDisplayName(user, email = '') {
@@ -656,6 +958,76 @@ function resolveEmailRedirectUrl() {
     return origin ? `${origin}${pathname}` : undefined;
 }
 
+async function prepareProfileImageUpload(file) {
+    if (!(file instanceof File)) {
+        throw new Error('Choose an image file first.');
+    }
+    if (!PROFILE_IMAGE_ALLOWED_TYPES.has(file.type)) {
+        throw new Error('Only JPG, PNG, or WebP images are supported.');
+    }
+    if (!Number.isFinite(file.size) || file.size <= 0) {
+        throw new Error('The selected image is empty.');
+    }
+    if (file.size > PROFILE_IMAGE_MAX_INPUT_BYTES) {
+        throw new Error('Choose an image smaller than 10 MB.');
+    }
+
+    const image = await loadImageFromFile(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = PROFILE_IMAGE_OUTPUT_SIZE_PX;
+    canvas.height = PROFILE_IMAGE_OUTPUT_SIZE_PX;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        throw new Error('Could not prepare the selected image.');
+    }
+
+    const sourceWidth = Math.max(1, image.naturalWidth || image.width || 1);
+    const sourceHeight = Math.max(1, image.naturalHeight || image.height || 1);
+    const cropSize = Math.max(1, Math.min(sourceWidth, sourceHeight));
+    const cropX = Math.max(0, (sourceWidth - cropSize) * 0.5);
+    const cropY = Math.max(0, (sourceHeight - cropSize) * 0.5);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
+
+    const webpBlob = await canvasToBlob(canvas, 'image/webp', PROFILE_IMAGE_OUTPUT_QUALITY);
+    const jpegBlob =
+        webpBlob || (await canvasToBlob(canvas, 'image/jpeg', PROFILE_IMAGE_OUTPUT_QUALITY));
+    if (!jpegBlob) {
+        throw new Error('Could not encode the selected image.');
+    }
+
+    return {
+        blob: jpegBlob,
+        contentType: jpegBlob.type || 'image/jpeg',
+        extension: jpegBlob.type === 'image/webp' ? 'webp' : 'jpg',
+    };
+}
+
+function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(image);
+        };
+        image.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('The selected file is not a valid image.'));
+        };
+        image.src = objectUrl;
+    });
+}
+
+function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob || null), type, quality);
+    });
+}
+
 function normalizeSupabaseAuthError(error) {
     const message =
         typeof error?.message === 'string' && error.message.trim()
@@ -672,6 +1044,19 @@ function normalizeSupabaseAuthError(error) {
     }
     if (/password should be at least/iu.test(message)) {
         return `Password must be at least ${AUTH_PASSWORD_MIN_LENGTH} characters.`;
+    }
+    if (/mime type|image format|not a valid image/iu.test(message)) {
+        return 'Only JPG, PNG, or WebP images are supported.';
+    }
+    if (/larger than|too large|payload too large|entity too large/iu.test(message)) {
+        return 'Choose a smaller image and try again.';
+    }
+    if (
+        /bucket.*not found|storage.*not configured|row-level security|violates row-level security/iu.test(
+            message
+        )
+    ) {
+        return 'Profile image storage is not configured correctly on this server.';
     }
     return message;
 }

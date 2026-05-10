@@ -756,7 +756,11 @@ canvas#gameCanvas {
     border: 1px solid color-mix(in srgb, var(--mission-target-color) 70%, white 18%);
     background:
         radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.42), transparent 42%),
-        linear-gradient(180deg, color-mix(in srgb, var(--mission-target-color) 82%, white 18%), var(--mission-target-color));
+        linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--mission-target-color) 82%, white 18%),
+            var(--mission-target-color)
+        );
     box-shadow:
         0 0 28px color-mix(in srgb, var(--mission-target-color) 34%, transparent),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
@@ -814,7 +818,11 @@ canvas#gameCanvas {
     border: 1px solid color-mix(in srgb, var(--mission-target-color) 70%, white 20%);
     background:
         radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.38), transparent 40%),
-        linear-gradient(180deg, color-mix(in srgb, var(--mission-target-color) 84%, white 16%), var(--mission-target-color));
+        linear-gradient(
+            180deg,
+            color-mix(in srgb, var(--mission-target-color) 84%, white 16%),
+            var(--mission-target-color)
+        );
     box-shadow: 0 0 18px color-mix(in srgb, var(--mission-target-color) 20%, transparent);
     transform: rotate(45deg);
 }
@@ -5361,12 +5369,65 @@ body.race-intro-active #botPanel {
     box-shadow: none;
 }
 
+.welcomeAuthProfileRow {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+}
+
+.welcomeAuthAvatarFrame {
+    width: 78px;
+    height: 78px;
+    border: 1px solid rgba(156, 199, 223, 0.48);
+    border-radius: 22px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background:
+        radial-gradient(circle at 30% 20%, rgba(168, 216, 246, 0.16), transparent 60%),
+        linear-gradient(180deg, rgba(16, 37, 58, 0.96), rgba(8, 18, 29, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 22px rgba(0, 0, 0, 0.18);
+}
+
+.welcomeAuthAvatarImage {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.welcomeAuthAvatarImage[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthAvatarFallback {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    color: rgba(235, 247, 255, 0.98);
+    text-transform: uppercase;
+}
+
+.welcomeAuthProfileMeta {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
 .welcomeAuthSignedInName {
     font-family: 'Sora', sans-serif;
     font-size: 16px;
     font-weight: 800;
     letter-spacing: 0.3px;
     color: rgba(237, 246, 252, 0.98);
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .welcomeAuthSignedInEmail {
@@ -5376,6 +5437,15 @@ body.race-intro-active #botPanel {
     letter-spacing: 0.3px;
     color: rgba(186, 214, 232, 0.94);
     overflow-wrap: anywhere;
+}
+
+.welcomeAuthAvatarHint {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    line-height: 1.45;
+    color: rgba(165, 199, 220, 0.9);
 }
 
 .welcomeAuthStatus {
@@ -6594,7 +6664,7 @@ body.race-intro-active #botPanel {
     #welcomeStartBtn,
     #welcomeStartOnlineBtn,
     #welcomeLeaderboardBtn,
-#welcomeAccountBtn,
+    #welcomeAccountBtn,
     #welcomeDonateBtn {
         min-height: 54px;
         padding: 0 14px;
@@ -6604,7 +6674,7 @@ body.race-intro-active #botPanel {
     #welcomeStartBtn span,
     #welcomeStartOnlineBtn span,
     #welcomeLeaderboardBtn span,
-#welcomeAccountBtn span,
+    #welcomeAccountBtn span,
     #welcomeDonateBtn span {
         font-size: 16px;
     }

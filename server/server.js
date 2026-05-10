@@ -20,6 +20,7 @@ const {
     createSupabaseServiceClient,
     resolveSupabaseConnectOrigin,
     resolveSupabaseRuntimeConfig,
+    sanitizeSupabaseStorageBucketName,
 } = require('./supabase-config');
 const {
     isSocketCorsOriginAllowed,
@@ -132,14 +133,22 @@ const HTTP_CONNECT_SRC_VALUES = [
     'https://region1.google-analytics.com',
     'https://stats.g.doubleclick.net',
 ];
+const HTTP_IMG_SRC_VALUES = [
+    "'self'",
+    'data:',
+    'blob:',
+    'https://www.google-analytics.com',
+    'https://stats.g.doubleclick.net',
+];
 if (SUPABASE_CONNECT_ORIGIN) {
     HTTP_CONNECT_SRC_VALUES.push(SUPABASE_CONNECT_ORIGIN);
+    HTTP_IMG_SRC_VALUES.push(SUPABASE_CONNECT_ORIGIN);
 }
 const HTTP_CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
     "script-src 'self' https://cdn.jsdelivr.net https://www.googletagmanager.com",
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https://www.google-analytics.com https://stats.g.doubleclick.net",
+    `img-src ${Array.from(new Set(HTTP_IMG_SRC_VALUES)).join(' ')}`,
     "media-src 'self' data: blob:",
     "font-src 'self' data:",
     `connect-src ${Array.from(new Set(HTTP_CONNECT_SRC_VALUES)).join(' ')}`,
@@ -164,6 +173,7 @@ const HTTP_LEADERBOARD_SUBMIT_WINDOW_MS = 60_000;
 const HTTP_LEADERBOARD_SUBMIT_MAX = 12;
 const ONLINE_AUTH_REQUIRED_ERROR = 'Sign in is required for online rooms.';
 const ONLINE_AUTH_SERVER_ERROR = 'Online auth is not configured on this server.';
+const PROFILE_IMAGE_STORAGE_LIST_LIMIT = 100;
 
 const EVENT_RATE_LIMITS = {
     'mp:createRoom': { windowMs: 10_000, max: 8 },
@@ -346,9 +356,21 @@ app.delete('/api/auth/account', async (req, res) => {
             }
         }
 
+        let deletedProfileImages = 0;
+        try {
+            const cleanupResult = await deleteStoredProfileImagesForUser(authIdentity.userId);
+            deletedProfileImages = Math.max(
+                0,
+                Math.round(Number(cleanupResult?.deletedCount) || 0)
+            );
+        } catch (cleanupError) {
+            console.warn('Profile image cleanup after account deletion failed:', cleanupError);
+        }
+
         res.json({
             ok: true,
             deletedLeaderboardEntries,
+            deletedProfileImages,
         });
     } catch (error) {
         console.error('Supabase account deletion failed:', error);
@@ -1489,7 +1511,9 @@ async function startServer() {
             console.log('Supabase leaderboard API is enabled.');
         }
         if (supabaseRuntimeConfig.publicEnabled && !supabaseServiceClient) {
-            console.warn('Supabase public auth is enabled, but server-side token validation is not.');
+            console.warn(
+                'Supabase public auth is enabled, but server-side token validation is not.'
+            );
         }
     });
 }
@@ -2493,6 +2517,84 @@ function sanitizeAuthEmail(value) {
     }
     const normalized = value.trim().toLowerCase().slice(0, 320);
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized) ? normalized : '';
+}
+
+function sanitizeSupabaseStorageObjectPath(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized.length > 512 || normalized.includes('..')) {
+        return '';
+    }
+    const segments = normalized.split('/');
+    if (segments.some((segment) => !/^[a-zA-Z0-9._-]{1,120}$/u.test(segment))) {
+        return '';
+    }
+    return normalized;
+}
+
+async function deleteStoredProfileImagesForUser(userId) {
+    const safeUserId = sanitizeSupabaseUserId(userId);
+    const safeBucketName = sanitizeSupabaseStorageBucketName(
+        supabaseRuntimeConfig.profileImagesBucket
+    );
+    if (!supabaseServiceClient || !safeUserId || !safeBucketName) {
+        return {
+            deletedCount: 0,
+        };
+    }
+
+    const storage = supabaseServiceClient.storage.from(safeBucketName);
+    const paths = [];
+    let offset = 0;
+
+    while (true) {
+        const { data, error } = await storage.list(safeUserId, {
+            limit: PROFILE_IMAGE_STORAGE_LIST_LIMIT,
+            offset,
+            sortBy: {
+                column: 'name',
+                order: 'asc',
+            },
+        });
+        if (error) {
+            if (/bucket.*not found|not found/iu.test(error.message || '')) {
+                return {
+                    deletedCount: 0,
+                };
+            }
+            throw error;
+        }
+
+        const items = Array.isArray(data) ? data : [];
+        paths.push(
+            ...items
+                .map((item) =>
+                    sanitizeSupabaseStorageObjectPath(`${safeUserId}/${item?.name || ''}`)
+                )
+                .filter(Boolean)
+        );
+        if (items.length < PROFILE_IMAGE_STORAGE_LIST_LIMIT) {
+            break;
+        }
+        offset += items.length;
+    }
+
+    if (paths.length === 0) {
+        return {
+            deletedCount: 0,
+        };
+    }
+
+    const { error } = await storage.remove(paths);
+    if (error) {
+        throw error;
+    }
+
+    return {
+        deletedCount: paths.length,
+    };
 }
 
 function resolveEmailName(email) {
