@@ -59,6 +59,7 @@ export function createRuntimeUiControllers({
         onExit() {
             getInputController()?.returnToWelcome?.();
         },
+        getAuthState,
     });
 
     const pauseMenuUi = createPauseMenuController({

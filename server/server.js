@@ -461,6 +461,7 @@ app.post('/api/leaderboard/round-result', async (req, res) => {
         const result = await leaderboardStore.submitRoundResult({
             ...req.body,
             userId: authIdentity.userId,
+            avatarPath: authIdentity.avatarPath || '',
         });
         if (!result?.ok) {
             res.status(400).json({
@@ -2094,6 +2095,7 @@ async function resolveSupabaseIdentityFromAccessToken(accessToken) {
             userId: sanitizeSupabaseUserId(data.user.id),
             email,
             displayName: resolveAuthenticatedDisplayName(data.user, email),
+            avatarPath: sanitizeSupabaseStorageObjectPath(data.user?.user_metadata?.avatar_path || ''),
         };
     } catch {
         return null;

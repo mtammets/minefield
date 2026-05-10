@@ -3,6 +3,7 @@ export function createFinalScoreboardController({
     onExit,
     onDownloadLog,
     onRefreshGlobalLeaderboard,
+    getAuthState = () => null,
 } = {}) {
     const rootEl = document.getElementById('finalLeaderboard');
     const titleEl = document.getElementById('leaderboardTitle');
@@ -84,6 +85,8 @@ export function createFinalScoreboardController({
             const playerEntry = playerIndex >= 0 ? normalizedEntries[playerIndex] : null;
             const playerScore = Math.max(0, Math.round(Number(playerEntry?.score) || 0));
             const roundOpponentCount = normalizedEntries.filter((entry) => !isPlayerEntry(entry)).length;
+            const authState = getAuthState?.() || null;
+            const playerAvatarUrl = sanitizeLeaderboardImageUrl(authState?.avatarUrl || '');
 
             const resolvedWinnerLabel = resolveWinnerLabel(
                 normalizedEntries,
@@ -157,10 +160,19 @@ export function createFinalScoreboardController({
                         : isPlayer
                           ? '<span class="leaderboardNameTag">YOU</span>'
                           : '';
+                    const avatarHtml = buildLeaderboardAvatarHtml({
+                        avatarUrl: sanitizeLeaderboardImageUrl(
+                            entry?.avatarUrl || (isPlayer ? playerAvatarUrl : '')
+                        ),
+                        name: resolveEntryName(entry),
+                    });
                     return (
                         `<div class="${rowClass}">` +
                         `<span class="leaderboardRank">#${index + 1}</span>` +
+                        '<span class="leaderboardNameCell">' +
+                        avatarHtml +
                         `<span class="leaderboardName">${displayName}${nameTag}</span>` +
+                        '</span>' +
                         `<span class="leaderboardScore">${numberFormatter.format(score)} pts</span>` +
                         `<span class="leaderboardCollected">${numberFormatter.format(collectedCount)}x</span>` +
                         `</div>`
@@ -423,6 +435,7 @@ function normalizeGlobalLeaderboardEntry(entry) {
 
     return {
         playerName,
+        avatarUrl: sanitizeLeaderboardImageUrl(entry.avatarUrl || entry.avatar_url),
         score,
         rank: Math.max(1, Math.round(Number(entry.rank) || 1)),
         segment: normalizeGlobalLeaderboardSegment(entry.segment),
@@ -475,12 +488,19 @@ function buildGlobalLeaderboardRowHtml(entry, formatter) {
     if (createdLabel) {
         parts.push(createdLabel);
     }
+    const avatarHtml = buildLeaderboardAvatarHtml({
+        avatarUrl: entry.avatarUrl,
+        name: entry.playerName,
+    });
 
     return (
         `<div class="leaderboardGlobalRow${entry.isViewer ? ' is-viewer' : ''}">` +
         '<div class="leaderboardGlobalHead">' +
         `<span class="leaderboardGlobalRank">#${entry.rank}</span>` +
+        '<span class="leaderboardGlobalIdentity">' +
+        avatarHtml +
         `<span class="leaderboardGlobalName">${escapeHtml(entry.playerName)}</span>` +
+        '</span>' +
         `<span class="leaderboardGlobalScore">${formatter.format(entry.score)} pts</span>` +
         '</div>' +
         `<div class="leaderboardGlobalMeta">${escapeHtml(parts.join(' | ') || 'Saved in Supabase')}</div>` +
@@ -509,6 +529,14 @@ function resolveGlobalLeaderboardName(value) {
     return normalized || '';
 }
 
+function sanitizeLeaderboardImageUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return /^(https?:)?\/\//iu.test(normalized) ? normalized : '';
+}
+
 function sanitizeGlobalLeaderboardDate(value) {
     if (typeof value !== 'string') {
         return '';
@@ -534,4 +562,30 @@ function formatGlobalLeaderboardDate(value) {
     } catch {
         return '';
     }
+}
+
+function buildLeaderboardAvatarHtml({ avatarUrl = '', name = '' } = {}) {
+    const safeAvatarUrl = sanitizeLeaderboardImageUrl(avatarUrl);
+    const safeName = resolveGlobalLeaderboardName(name) || resolveEntryName({ name });
+    const fallbackLabel = escapeHtml(resolveLeaderboardAvatarFallback(safeName));
+    const altText = escapeHtml(safeName ? `${safeName} profile photo` : 'Profile photo');
+    if (safeAvatarUrl) {
+        return (
+            '<span class="leaderboardAvatar">' +
+            `<img class="leaderboardAvatarImage" src="${escapeHtml(safeAvatarUrl)}" alt="${altText}" loading="lazy" decoding="async" />` +
+            '</span>'
+        );
+    }
+    return `<span class="leaderboardAvatar leaderboardAvatarFallback" aria-hidden="true">${fallbackLabel}</span>`;
+}
+
+function resolveLeaderboardAvatarFallback(name) {
+    const normalized = typeof name === 'string' ? name.trim() : '';
+    if (!normalized) {
+        return '?';
+    }
+    const parts = normalized.split(/\s+/u).filter(Boolean);
+    const letters = parts.slice(0, 2).map((part) => Array.from(part)[0] || '');
+    const fallback = letters.join('').toUpperCase();
+    return fallback || Array.from(normalized)[0]?.toUpperCase?.() || '?';
 }

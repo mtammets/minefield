@@ -5,6 +5,7 @@ const LEADERBOARD_SELECT_COLUMNS = [
     'id',
     'user_id',
     'player_name',
+    'avatar_path',
     'score',
     'collected_count',
     'total_pickups',
@@ -126,7 +127,10 @@ export function createGlobalLeaderboardController({
                 await refreshLeaderboardEntries(LEADERBOARD_DEFAULT_LIMIT);
                 return {
                     ok: true,
-                    entry: normalizePublicLeaderboardEntry(responsePayload?.entry),
+                    entry: normalizePublicLeaderboardEntry(responsePayload?.entry, {}, {
+                        supabaseConfig,
+                        authState,
+                    }),
                 };
             } catch {
                 updateState({
@@ -199,7 +203,13 @@ export function createGlobalLeaderboardController({
         const queryLimit = clampInteger(limit, 1, LEADERBOARD_MAX_LIMIT, LEADERBOARD_DEFAULT_LIMIT);
         const accessToken =
             typeof getAccessToken === 'function' ? sanitizeAccessToken(getAccessToken()) : '';
-        const serverRead = await readLeaderboardEntriesFromServer(queryLimit, accessToken);
+        const authState = getAuthState();
+        const serverRead = await readLeaderboardEntriesFromServer(
+            queryLimit,
+            accessToken,
+            supabaseConfig,
+            authState
+        );
         if (serverRead.ok) {
             updateState({
                 enabled: true,
@@ -216,7 +226,7 @@ export function createGlobalLeaderboardController({
             return serverRead.entries;
         }
 
-        const directRead = await readLeaderboardEntriesDirect(queryLimit);
+        const directRead = await readLeaderboardEntriesDirect(queryLimit, supabaseConfig, authState);
         if (directRead.ok) {
             updateState({
                 enabled: true,
@@ -262,7 +272,7 @@ function createInitialLeaderboardState() {
     };
 }
 
-async function readLeaderboardEntriesDirect(limit) {
+async function readLeaderboardEntriesDirect(limit, supabaseConfig = null, authState = null) {
     try {
         const supabaseClient = await getSupabaseBrowserClient();
         if (!supabaseClient) {
@@ -290,7 +300,11 @@ async function readLeaderboardEntriesDirect(limit) {
         }
 
         const normalizedEntries = Array.isArray(data)
-            ? data.map((entry) => normalizePublicLeaderboardEntry(entry)).filter(Boolean)
+            ? data
+                  .map((entry) =>
+                      normalizePublicLeaderboardEntry(entry, {}, { supabaseConfig, authState })
+                  )
+                  .filter(Boolean)
             : [];
         const uniqueEntries = buildBestUniqueLeaderboardEntries(normalizedEntries, limit);
 
@@ -311,7 +325,12 @@ async function readLeaderboardEntriesDirect(limit) {
     }
 }
 
-async function readLeaderboardEntriesFromServer(limit, accessToken = '') {
+async function readLeaderboardEntriesFromServer(
+    limit,
+    accessToken = '',
+    supabaseConfig = null,
+    authState = null
+) {
     try {
         const response = await window.fetch(
             `${LEADERBOARD_READ_ENDPOINT_PATH}?limit=${encodeURIComponent(String(limit))}&window=${encodeURIComponent(String(LEADERBOARD_VIEWER_WINDOW_RADIUS))}`,
@@ -346,7 +365,11 @@ async function readLeaderboardEntriesFromServer(limit, accessToken = '') {
 
         return {
             ok: true,
-            entries: rawEntries.map((entry) => normalizePublicLeaderboardEntry(entry)).filter(Boolean),
+            entries: rawEntries
+                .map((entry) =>
+                    normalizePublicLeaderboardEntry(entry, {}, { supabaseConfig, authState })
+                )
+                .filter(Boolean),
             totalEntries: clampInteger(payload.totalEntries, 0, 1_000_000, 0),
             viewerRank: clampInteger(payload.viewerRank, 0, 1_000_000, 0),
             viewerHasEntry: Boolean(payload.viewerHasEntry),
@@ -408,7 +431,7 @@ function normalizeSubmittedRoundResult(rawPayload = {}) {
     };
 }
 
-function normalizePublicLeaderboardEntry(entry = null, fallbackMeta = {}) {
+function normalizePublicLeaderboardEntry(entry = null, fallbackMeta = {}, options = {}) {
     if (!entry || typeof entry !== 'object') {
         return null;
     }
@@ -419,10 +442,33 @@ function normalizePublicLeaderboardEntry(entry = null, fallbackMeta = {}) {
         return null;
     }
 
+    const authState = options?.authState && typeof options.authState === 'object' ? options.authState : null;
+    const supabaseConfig =
+        options?.supabaseConfig && typeof options.supabaseConfig === 'object'
+            ? options.supabaseConfig
+            : null;
+    const userId = sanitizeLeaderboardUserId(entry.userId || entry.user_id);
+    const avatarPath = sanitizeProfileImagePath(entry.avatarPath || entry.avatar_path);
+    const viewerUserId = sanitizeLeaderboardUserId(authState?.userId || '');
+    const viewerAvatarUrl =
+        authState?.authenticated && viewerUserId && viewerUserId === userId
+            ? sanitizeProfileImageUrl(authState?.avatarUrl || '')
+            : '';
+    const avatarUrl =
+        viewerAvatarUrl ||
+        sanitizeProfileImageUrl(entry.avatarUrl || entry.avatar_url) ||
+        resolveProfileImagePublicUrl(
+            supabaseConfig?.url || '',
+            supabaseConfig?.profileImagesBucket || '',
+            avatarPath
+        );
+
     return {
         id: typeof entry.id === 'string' ? entry.id : '',
-        userId: sanitizeLeaderboardUserId(entry.userId || entry.user_id),
+        userId,
         playerName,
+        avatarPath,
+        avatarUrl,
         score,
         collectedCount: clampInteger(entry.collectedCount ?? entry.collected_count, 0, 10_000, 0),
         totalPickups: clampInteger(entry.totalPickups ?? entry.total_pickups, 0, 10_000, 0),
@@ -578,6 +624,60 @@ function sanitizeCarSkinId(value) {
         .replace(/[^a-z0-9_-]/g, '')
         .slice(0, 48);
     return normalized || '';
+}
+
+function sanitizeProfileImageBucketName(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized.length < 3 || normalized.length > 63) {
+        return '';
+    }
+    if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/u.test(normalized)) {
+        return '';
+    }
+    return normalized;
+}
+
+function sanitizeProfileImagePath(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized.length > 512 || normalized.includes('..')) {
+        return '';
+    }
+    const segments = normalized.split('/');
+    if (segments.some((segment) => !/^[a-zA-Z0-9._-]{1,120}$/u.test(segment))) {
+        return '';
+    }
+    return normalized;
+}
+
+function sanitizeProfileImageUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return /^(https?:)?\/\//iu.test(normalized) ? normalized : '';
+}
+
+function resolveProfileImagePublicUrl(baseUrl, bucketName, profileImagePath) {
+    const safeBaseUrl =
+        typeof baseUrl === 'string' && /^(https?:)?\/\//iu.test(baseUrl.trim())
+            ? baseUrl.trim().replace(/\/+$/u, '')
+            : '';
+    const safeBucketName = sanitizeProfileImageBucketName(bucketName);
+    const safeProfileImagePath = sanitizeProfileImagePath(profileImagePath);
+    if (!safeBaseUrl || !safeBucketName || !safeProfileImagePath) {
+        return '';
+    }
+    const encodedPath = safeProfileImagePath
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+    return `${safeBaseUrl}/storage/v1/object/public/${encodeURIComponent(safeBucketName)}/${encodedPath}`;
 }
 
 function sanitizeIsoTimestamp(value) {

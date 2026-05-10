@@ -13,6 +13,7 @@ test('sanitizeRoundResultPayload keeps valid leaderboard rows', () => {
     const payload = sanitizeRoundResultPayload({
         userId: '123e4567-e89b-12d3-a456-426614174000',
         playerName: 'Driver One',
+        avatarPath: '123e4567-e89b-12d3-a456-426614174000/profile.webp',
         score: 8420,
         collectedCount: 12,
         totalPickups: 30,
@@ -26,6 +27,7 @@ test('sanitizeRoundResultPayload keeps valid leaderboard rows', () => {
     assert.deepEqual(payload, {
         userId: '123e4567-e89b-12d3-a456-426614174000',
         playerName: 'Driver One',
+        avatarPath: '123e4567-e89b-12d3-a456-426614174000/profile.webp',
         score: 8420,
         collectedCount: 12,
         totalPickups: 30,
@@ -53,6 +55,7 @@ test('buildLeaderboardRecord maps to database columns', () => {
     const record = buildLeaderboardRecord({
         userId: '123e4567-e89b-12d3-a456-426614174000',
         playerName: 'Driver',
+        avatarPath: '123e4567-e89b-12d3-a456-426614174000/profile.webp',
         score: 1100,
         collectedCount: 4,
         totalPickups: 30,
@@ -66,6 +69,7 @@ test('buildLeaderboardRecord maps to database columns', () => {
     assert.equal(typeof record.id, 'string');
     assert.equal(record.user_id, '123e4567-e89b-12d3-a456-426614174000');
     assert.equal(record.player_name, 'Driver');
+    assert.equal(record.avatar_path, '123e4567-e89b-12d3-a456-426614174000/profile.webp');
     assert.equal(record.score, 1100);
     assert.equal(record.game_mode, 'bots');
 });
@@ -74,6 +78,7 @@ test('normalizeLeaderboardEntry converts public rows to browser shape', () => {
     const entry = normalizeLeaderboardEntry({
         id: 'row-1',
         player_name: 'Driver',
+        avatar_path: '123e4567-e89b-12d3-a456-426614174000/profile.webp',
         score: 5000,
         collected_count: 8,
         total_pickups: 30,
@@ -89,6 +94,7 @@ test('normalizeLeaderboardEntry converts public rows to browser shape', () => {
         id: 'row-1',
         userId: '',
         playerName: 'Driver',
+        avatarPath: '123e4567-e89b-12d3-a456-426614174000/profile.webp',
         score: 5000,
         collectedCount: 8,
         totalPickups: 30,
@@ -111,6 +117,21 @@ test('normalizeLeaderboardEntry preserves postgres Date timestamps', () => {
     });
 
     assert.equal(entry.createdAt, '2026-05-10T12:34:56.000Z');
+});
+
+test('sanitizeRoundResultPayload drops invalid avatar paths', () => {
+    const payload = sanitizeRoundResultPayload({
+        userId: '123e4567-e89b-12d3-a456-426614174000',
+        playerName: 'Driver One',
+        avatarPath: '../bad-path.webp',
+        score: 8420,
+        collectedCount: 12,
+        totalPickups: 30,
+        totalScore: 19240,
+        gameMode: 'online',
+    });
+
+    assert.equal(payload?.avatarPath, '');
 });
 
 test('sanitizeLeaderboardLimit clamps query sizes', () => {

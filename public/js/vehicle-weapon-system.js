@@ -370,11 +370,11 @@ export function createVehicleWeaponSystem({
         return false;
     }
 
-    function shouldIgnoreWeaponLockObstacle(obstacle) {
+    function shouldIgnoreWeaponSoftOccluderObstacle(obstacle) {
         return obstacle?.category === 'lamp_post';
     }
 
-    function shouldIgnoreWeaponLockSceneRaycastHit(hitObject) {
+    function shouldIgnoreWeaponSoftOccluderSceneRaycastHit(hitObject) {
         return hitObject?.userData?.weaponLockSoftOccluder === true;
     }
 
@@ -1015,8 +1015,8 @@ export function createVehicleWeaponSystem({
                 end: samplePoint,
                 obstacles: staticObstacles,
                 ignoreOriginRadius: BULLET_MARK_MIN_DISTANCE,
-                shouldIgnoreObstacle: shouldIgnoreWeaponLockObstacle,
-                shouldIgnoreHitObject: shouldIgnoreWeaponLockSceneRaycastHit,
+                shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+                shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
             });
             if (obstacleImpact) {
                 continue;
@@ -1026,8 +1026,8 @@ export function createVehicleWeaponSystem({
                 end: samplePoint,
                 obstacles: staticObstacles,
                 ignoreOriginRadius: BULLET_MARK_MIN_DISTANCE,
-                shouldIgnoreObstacle: shouldIgnoreWeaponLockObstacle,
-                shouldIgnoreHitObject: shouldIgnoreWeaponLockSceneRaycastHit,
+                shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+                shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
             });
             if (muzzleObstacleImpact) {
                 continue;
@@ -1412,6 +1412,8 @@ export function createVehicleWeaponSystem({
             end: shotEndPoint,
             obstacles: getWeaponTraceObstacles(),
             ignoreOriginRadius: BULLET_MARK_MIN_DISTANCE,
+            shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+            shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
         });
         let resolvedHitTarget = hitTarget;
         let obstacleNormal = null;
@@ -1637,6 +1639,8 @@ export function createVehicleWeaponSystem({
                 end: samplePoint,
                 obstacles,
                 ignoreOriginRadius: BOT_HUNTER_OBSTACLE_IGNORE_RADIUS,
+                shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+                shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
             });
             if (obstacleImpact) {
                 continue;
@@ -1755,6 +1759,8 @@ export function createVehicleWeaponSystem({
                       end: chosenTargetPoint,
                       obstacles: traceObstacles,
                       ignoreOriginRadius: BOT_HUNTER_OBSTACLE_IGNORE_RADIUS,
+                      shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+                      shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
                   })
                 : null;
         const withinFireEnvelope =
@@ -1927,6 +1933,8 @@ export function createVehicleWeaponSystem({
             end: shotEndPoint,
             obstacles: getWeaponTraceObstacles(),
             ignoreOriginRadius: BOT_HUNTER_OBSTACLE_IGNORE_RADIUS,
+            shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+            shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
         });
 
         let resolvedHitTarget = null;

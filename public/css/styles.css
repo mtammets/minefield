@@ -2648,6 +2648,45 @@ body.race-intro-active #miniMapHud {
     letter-spacing: 0.5px;
 }
 
+.leaderboardNameCell {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.leaderboardAvatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    border: 1px solid rgba(145, 198, 242, 0.44);
+    overflow: hidden;
+    flex: 0 0 auto;
+    background: linear-gradient(160deg, rgba(17, 41, 67, 0.92), rgba(8, 22, 39, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 10px 18px rgba(0, 0, 0, 0.18);
+}
+
+.leaderboardAvatarImage {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.leaderboardAvatarFallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(226, 242, 255, 0.96);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+}
+
 .leaderboardName {
     min-width: 0;
     color: #f1f8ff;
@@ -2859,6 +2898,13 @@ body.race-intro-active #miniMapHud {
     grid-template-columns: 72px minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
+}
+
+.leaderboardGlobalIdentity {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .leaderboardGlobalRank {
@@ -4859,8 +4905,11 @@ body.race-intro-active #botPanel {
         grid-area: rank;
     }
 
-    .leaderboardName {
+    .leaderboardNameCell {
         grid-area: name;
+    }
+
+    .leaderboardName {
         font-size: clamp(20px, 6vw, 28px);
     }
 
@@ -6418,6 +6467,45 @@ body.race-intro-active #botPanel {
     grid-template-columns: 72px minmax(0, 1fr) auto;
     gap: 10px;
     align-items: center;
+}
+
+.welcomePreviewLeaderboardIdentity {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.welcomePreviewLeaderboardAvatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    border: 1px solid rgba(145, 198, 242, 0.44);
+    overflow: hidden;
+    flex: 0 0 auto;
+    background: linear-gradient(160deg, rgba(17, 41, 67, 0.92), rgba(8, 22, 39, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 10px 18px rgba(0, 0, 0, 0.18);
+}
+
+.welcomePreviewLeaderboardAvatarImage {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.welcomePreviewLeaderboardAvatarFallback {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(226, 242, 255, 0.96);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
 }
 
 .welcomePreviewLeaderboardRank {

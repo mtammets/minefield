@@ -5,7 +5,9 @@ const { createSupabaseServiceClient } = require('./supabase-config');
 const GLOBAL_LEADERBOARD_TABLE_NAME = 'global_leaderboard';
 const LEADERBOARD_PUBLIC_SELECT_COLUMNS = [
     'id',
+    'user_id',
     'player_name',
+    'avatar_path',
     'score',
     'collected_count',
     'total_pickups',
@@ -19,6 +21,7 @@ const LEADERBOARD_PUBLIC_SELECT_COLUMNS = [
 const PLAYER_NAME_MAX_LENGTH = 18;
 const CAR_SKIN_ID_MAX_LENGTH = 48;
 const WINNER_LABEL_MAX_LENGTH = 72;
+const AVATAR_PATH_MAX_LENGTH = 512;
 
 function createLeaderboardStore(config = {}) {
     const supabaseClient = createSupabaseServiceClient(config);
@@ -45,7 +48,10 @@ function createLeaderboardStore(config = {}) {
                 throw error;
             }
 
-            return Array.isArray(data) ? data.map((entry) => normalizeLeaderboardEntry(entry)) : [];
+            const entries = Array.isArray(data)
+                ? data.map((entry) => normalizeLeaderboardEntry(entry))
+                : [];
+            return enrichLeaderboardEntriesWithProfileImagePaths(entries, supabaseClient);
         },
         async readLeaderboardView(options = {}) {
             const topLimit = sanitizeLeaderboardLimit(options?.topLimit, 5);
@@ -56,12 +62,19 @@ function createLeaderboardStore(config = {}) {
             const viewerUserId = sanitizeLeaderboardUserId(options?.viewerUserId);
 
             if (config?.databaseEnabled && config?.databaseConnectionString) {
-                return readLeaderboardViewFromDatabase({
+                const leaderboardView = await readLeaderboardViewFromDatabase({
                     connectionString: config.databaseConnectionString,
                     topLimit,
                     viewerWindowRadius,
                     viewerUserId,
                 });
+                return {
+                    ...leaderboardView,
+                    entries: await enrichLeaderboardEntriesWithProfileImagePaths(
+                        leaderboardView.entries,
+                        supabaseClient
+                    ),
+                };
             }
 
             const entries = await this.readTopEntries(topLimit);
@@ -189,6 +202,7 @@ async function ensureLeaderboardSchema({ connectionString } = {}) {
                 collected_count integer not null default 0 check (collected_count >= 0),
                 total_pickups integer not null default 0 check (total_pickups >= 0),
                 total_score integer not null default 0 check (total_score >= 0),
+                avatar_path text not null default '',
                 game_mode text not null check (game_mode in ('bots', 'online')),
                 finish_reason text not null default '',
                 winner_label text not null default '',
@@ -198,6 +212,9 @@ async function ensureLeaderboardSchema({ connectionString } = {}) {
 
             alter table public.${GLOBAL_LEADERBOARD_TABLE_NAME}
                 add column if not exists user_id text not null default '';
+
+            alter table public.${GLOBAL_LEADERBOARD_TABLE_NAME}
+                add column if not exists avatar_path text not null default '';
 
             create index if not exists global_leaderboard_score_created_idx
                 on public.${GLOBAL_LEADERBOARD_TABLE_NAME} (score desc, collected_count desc, created_at asc);
@@ -245,6 +262,7 @@ function buildLeaderboardRecord(rawPayload = {}) {
         collected_count: payload.collectedCount,
         total_pickups: payload.totalPickups,
         total_score: payload.totalScore,
+        avatar_path: payload.avatarPath,
         game_mode: payload.gameMode,
         finish_reason: payload.finishReason,
         winner_label: payload.winnerLabel,
@@ -264,6 +282,7 @@ function sanitizeRoundResultPayload(rawPayload = {}) {
     const finishReason = sanitizeLeaderboardFinishReason(payload.finishReason);
     const winnerLabel = sanitizeLeaderboardWinnerLabel(payload.winnerLabel);
     const carSkinId = sanitizeLeaderboardCarSkinId(payload.carSkinId);
+    const avatarPath = sanitizeLeaderboardAvatarPath(payload.avatarPath || payload.avatar_path);
 
     if (!userId || !playerName || !gameMode || score <= 0) {
         return null;
@@ -276,6 +295,7 @@ function sanitizeRoundResultPayload(rawPayload = {}) {
         collectedCount,
         totalPickups,
         totalScore,
+        avatarPath,
         gameMode,
         finishReason,
         winnerLabel,
@@ -288,6 +308,7 @@ function normalizeLeaderboardEntry(entry = {}) {
         id: typeof entry?.id === 'string' ? entry.id : '',
         userId: sanitizeLeaderboardUserId(entry?.user_id || entry?.userId),
         playerName: sanitizeLeaderboardPlayerName(entry?.player_name || entry?.playerName),
+        avatarPath: sanitizeLeaderboardAvatarPath(entry?.avatar_path || entry?.avatarPath),
         score: clampInteger(entry?.score, 0, 10_000_000, 0),
         collectedCount: clampInteger(entry?.collected_count ?? entry?.collectedCount, 0, 10_000, 0),
         totalPickups: clampInteger(entry?.total_pickups ?? entry?.totalPickups, 0, 10_000, 0),
@@ -301,6 +322,68 @@ function normalizeLeaderboardEntry(entry = {}) {
         carSkinId: sanitizeLeaderboardCarSkinId(entry?.car_skin_id || entry?.carSkinId),
         createdAt: sanitizeIsoTimestamp(entry?.created_at || entry?.createdAt),
     };
+}
+
+async function enrichLeaderboardEntriesWithProfileImagePaths(entries = [], supabaseClient = null) {
+    const normalizedEntries = Array.isArray(entries) ? entries.filter(Boolean) : [];
+    if (!supabaseClient || normalizedEntries.length === 0) {
+        return normalizedEntries;
+    }
+
+    const uniqueUserIds = Array.from(
+        new Set(
+            normalizedEntries
+                .map((entry) => sanitizeLeaderboardUserId(entry?.userId))
+                .filter(Boolean)
+        )
+    );
+    if (uniqueUserIds.length === 0) {
+        return normalizedEntries;
+    }
+
+    const avatarPathByUserId = new Map();
+    await Promise.all(
+        uniqueUserIds.map(async (userId) => {
+            const currentAvatarPath = await readLeaderboardProfileImagePathForUser(
+                supabaseClient,
+                userId
+            );
+            if (currentAvatarPath) {
+                avatarPathByUserId.set(userId, currentAvatarPath);
+            }
+        })
+    );
+
+    return normalizedEntries.map((entry) => {
+        const userId = sanitizeLeaderboardUserId(entry?.userId);
+        const avatarPath =
+            (userId ? avatarPathByUserId.get(userId) : '') ||
+            sanitizeLeaderboardAvatarPath(entry?.avatarPath);
+        if (avatarPath === entry?.avatarPath) {
+            return entry;
+        }
+        return {
+            ...entry,
+            avatarPath,
+        };
+    });
+}
+
+async function readLeaderboardProfileImagePathForUser(supabaseClient, userId) {
+    const safeUserId = sanitizeLeaderboardUserId(userId);
+    if (!supabaseClient?.auth?.admin?.getUserById || !safeUserId) {
+        return '';
+    }
+
+    try {
+        const { data, error } = await supabaseClient.auth.admin.getUserById(safeUserId);
+        if (error || !data?.user) {
+            return '';
+        }
+        return sanitizeLeaderboardAvatarPath(data.user.user_metadata?.avatar_path || '');
+    } catch {
+        return '';
+    }
 }
 
 async function readLeaderboardViewFromDatabase({
@@ -322,6 +405,7 @@ async function readLeaderboardViewFromDatabase({
                             id,
                             user_id,
                             player_name,
+                            avatar_path,
                             score,
                             collected_count,
                             total_pickups,
@@ -345,6 +429,7 @@ async function readLeaderboardViewFromDatabase({
                         id,
                         user_id,
                         player_name,
+                        avatar_path,
                         score,
                         collected_count,
                         total_pickups,
@@ -388,6 +473,7 @@ async function readLeaderboardViewFromDatabase({
                     id,
                     user_id,
                     player_name,
+                    avatar_path,
                     score,
                     collected_count,
                     total_pickups,
@@ -477,6 +563,21 @@ function sanitizeLeaderboardCarSkinId(value) {
         .replace(/[^a-z0-9_-]/g, '')
         .slice(0, CAR_SKIN_ID_MAX_LENGTH);
     return normalized || '';
+}
+
+function sanitizeLeaderboardAvatarPath(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized.length > AVATAR_PATH_MAX_LENGTH || normalized.includes('..')) {
+        return '';
+    }
+    const segments = normalized.split('/');
+    if (segments.some((segment) => !/^[a-zA-Z0-9._-]{1,120}$/u.test(segment))) {
+        return '';
+    }
+    return normalized;
 }
 
 function sanitizeLeaderboardGameMode(value) {
@@ -601,6 +702,7 @@ module.exports = {
     createLeaderboardStore,
     ensureLeaderboardSchema,
     normalizeLeaderboardEntry,
+    sanitizeLeaderboardAvatarPath,
     sanitizeLeaderboardCarSkinId,
     sanitizeLeaderboardFinishReason,
     sanitizeLeaderboardGameMode,

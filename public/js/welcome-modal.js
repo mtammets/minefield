@@ -3401,6 +3401,7 @@ function normalizeWelcomeGlobalLeaderboardEntry(entry) {
     }
     return {
         playerName,
+        avatarUrl: sanitizeWelcomeLeaderboardImageUrl(entry.avatarUrl || entry.avatar_url),
         score,
         rank: Math.max(1, Math.round(Number(entry.rank) || 1)),
         segment: normalizeWelcomeLeaderboardSegment(entry.segment),
@@ -3469,11 +3470,15 @@ function buildWelcomeLeaderboardRowHtml(entry, formatter) {
     if (createdLabel) {
         parts.push(createdLabel);
     }
+    const avatarHtml = buildWelcomeLeaderboardAvatarHtml(entry);
     return (
         `<div class="welcomePreviewLeaderboardRow${entry.rank === 1 ? ' is-first' : ''}${entry.isViewer ? ' is-viewer' : ''}">` +
         '<div class="welcomePreviewLeaderboardHead">' +
         `<span class="welcomePreviewLeaderboardRank">#${entry.rank}</span>` +
+        '<span class="welcomePreviewLeaderboardIdentity">' +
+        avatarHtml +
         `<span class="welcomePreviewLeaderboardName">${escapeWelcomeLeaderboardHtml(entry.playerName)}</span>` +
+        '</span>' +
         `<span class="welcomePreviewLeaderboardScore">${formatter.format(entry.score)} pts</span>` +
         '</div>' +
         `<div class="welcomePreviewLeaderboardMeta">${escapeWelcomeLeaderboardHtml(parts.join(' | ') || 'Saved in Supabase')}</div>` +
@@ -3499,6 +3504,14 @@ function normalizeWelcomeLeaderboardSegment(value) {
 
 function sanitizeWelcomeLeaderboardName(value) {
     return typeof value === 'string' ? value.trim().slice(0, 64) : '';
+}
+
+function sanitizeWelcomeLeaderboardImageUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return /^(https?:)?\/\//iu.test(normalized) ? normalized : '';
 }
 
 function sanitizeWelcomeLeaderboardDate(value) {
@@ -3534,4 +3547,30 @@ function escapeWelcomeLeaderboardHtml(value) {
         .replaceAll('>', '&gt;')
         .replaceAll('"', '&quot;')
         .replaceAll("'", '&#39;');
+}
+
+function buildWelcomeLeaderboardAvatarHtml(entry) {
+    const playerName = sanitizeWelcomeLeaderboardName(entry?.playerName || '');
+    const avatarUrl = sanitizeWelcomeLeaderboardImageUrl(entry?.avatarUrl || '');
+    const fallbackLabel = escapeWelcomeLeaderboardHtml(resolveWelcomeLeaderboardAvatarFallback(playerName));
+    const altText = escapeWelcomeLeaderboardHtml(playerName ? `${playerName} profile photo` : 'Profile photo');
+    if (avatarUrl) {
+        return (
+            '<span class="welcomePreviewLeaderboardAvatar">' +
+            `<img class="welcomePreviewLeaderboardAvatarImage" src="${escapeWelcomeLeaderboardHtml(avatarUrl)}" alt="${altText}" loading="lazy" decoding="async" />` +
+            '</span>'
+        );
+    }
+    return `<span class="welcomePreviewLeaderboardAvatar welcomePreviewLeaderboardAvatarFallback" aria-hidden="true">${fallbackLabel}</span>`;
+}
+
+function resolveWelcomeLeaderboardAvatarFallback(playerName) {
+    const normalized = sanitizeWelcomeLeaderboardName(playerName);
+    if (!normalized) {
+        return '?';
+    }
+    const parts = normalized.split(/\s+/u).filter(Boolean);
+    const letters = parts.slice(0, 2).map((part) => Array.from(part)[0] || '');
+    const fallback = letters.join('').toUpperCase();
+    return fallback || Array.from(normalized)[0]?.toUpperCase?.() || '?';
 }
