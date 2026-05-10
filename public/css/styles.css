@@ -5121,52 +5121,6 @@ body.race-intro-active #botPanel {
     display: none;
 }
 
-.welcomeAuthHeader {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.welcomeAuthEyebrow,
-.welcomeAuthIdentityLabel {
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.1px;
-    text-transform: uppercase;
-    color: rgba(180, 210, 228, 0.96);
-}
-
-.welcomeAuthStatePill {
-    border: 1px solid rgba(143, 183, 207, 0.5);
-    border-radius: 999px;
-    min-height: 26px;
-    padding: 0 10px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.9px;
-    text-transform: uppercase;
-    color: rgba(203, 226, 241, 0.96);
-    background: rgba(11, 24, 36, 0.82);
-}
-
-.welcomeAuthStatePill[data-tone='success'] {
-    color: #ebfff7;
-    border-color: rgba(142, 236, 184, 0.72);
-    background: linear-gradient(180deg, rgba(28, 106, 71, 0.8), rgba(13, 48, 31, 0.84));
-}
-
-.welcomeAuthStatePill[data-tone='error'] {
-    color: rgba(255, 220, 220, 0.98);
-    border-color: rgba(255, 159, 159, 0.72);
-    background: linear-gradient(180deg, rgba(93, 37, 37, 0.82), rgba(54, 20, 20, 0.88));
-}
-
 .welcomeAuthSignedOutView,
 .welcomeAuthSignedInView {
     display: grid;
@@ -5419,15 +5373,34 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthSignedInName {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    gap: 8px;
+    min-height: 28px;
+    padding: 0 12px;
+    border: 1px solid rgba(142, 236, 184, 0.7);
+    border-radius: 999px;
     font-family: 'Sora', sans-serif;
-    font-size: 16px;
+    font-size: 11px;
     font-weight: 800;
-    letter-spacing: 0.3px;
-    color: rgba(237, 246, 252, 0.98);
-    min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #ebfff7;
+    background: linear-gradient(180deg, rgba(28, 106, 71, 0.9), rgba(13, 48, 31, 0.94));
+    box-shadow:
+        0 8px 18px rgba(21, 88, 56, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welcomeAuthSignedInName::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #9cf2c1;
+    box-shadow: 0 0 12px rgba(156, 242, 193, 0.75);
+    flex: 0 0 auto;
 }
 
 .welcomeAuthSignedInEmail {
@@ -5437,15 +5410,6 @@ body.race-intro-active #botPanel {
     letter-spacing: 0.3px;
     color: rgba(186, 214, 232, 0.94);
     overflow-wrap: anywhere;
-}
-
-.welcomeAuthAvatarHint {
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-    line-height: 1.45;
-    color: rgba(165, 199, 220, 0.9);
 }
 
 .welcomeAuthStatus {

@@ -72,7 +72,6 @@ export function createWelcomeModalController({
     const startBtnEl = document.getElementById('welcomeStartBtn');
     const startOnlineBtnEl = document.getElementById('welcomeStartOnlineBtn');
     const authPanelEl = document.getElementById('welcomeAuthPanel');
-    const authStatePillEl = document.getElementById('welcomeAuthStatePill');
     const authSignedOutViewEl = document.getElementById('welcomeAuthSignedOutView');
     const authSignedInViewEl = document.getElementById('welcomeAuthSignedInView');
     const authSignInTabEl = document.getElementById('welcomeAuthSignInTab');
@@ -283,7 +282,6 @@ export function createWelcomeModalController({
     );
     const hasAuthPanel = Boolean(
         authPanelEl &&
-        authStatePillEl &&
         authSignedOutViewEl &&
         authSignedInViewEl &&
         authSignInTabEl &&
@@ -1361,16 +1359,8 @@ export function createWelcomeModalController({
         if (authConfirmFieldEl) {
             authConfirmFieldEl.hidden = !showSignUp;
         }
-        if (authStatePillEl) {
-            authStatePillEl.textContent = authenticated
-                ? 'SIGNED IN'
-                : enabled
-                  ? 'GUEST'
-                  : 'OFFLINE';
-            authStatePillEl.dataset.tone = authenticated ? 'success' : enabled ? 'muted' : 'error';
-        }
         if (authSignedInNameEl) {
-            authSignedInNameEl.textContent = authUiState.displayName || DEFAULT_ONLINE_PLAYER_NAME;
+            authSignedInNameEl.textContent = 'ONLINE';
         }
         if (authSignedInEmailEl) {
             authSignedInEmailEl.textContent = authUiState.email || 'Authenticated session';
