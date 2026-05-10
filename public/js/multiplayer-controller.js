@@ -45,8 +45,11 @@ export function createMultiplayerController(options = {}) {
         getGroundHeightAt = () => 0,
         applyNetworkCollisionImpulse = () => false,
         getSelectedCarColorHex = () => 0x2d67a6,
+        getSelectedCarSkinId = () => '',
         getPlayerCollectedCount = () => 0,
         getIsCarDestroyed = () => false,
+        getAuthAccessToken = () => '',
+        getAuthState = () => null,
         objectiveUi = null,
         onMineSnapshot = () => {},
         onMinePlaced = () => {},
@@ -55,6 +58,7 @@ export function createMultiplayerController(options = {}) {
         onWeaponPickupSnapshot = () => {},
         onEnvironmentStateSnapshot = () => {},
         onAuthoritativeRoundState = () => {},
+        onLeaveRoom = null,
     } = options;
 
     if (!scene || !car) {
@@ -116,6 +120,7 @@ export function createMultiplayerController(options = {}) {
         getScoreboardEntries,
         getPlayerWorldPosition,
         getRemoteVehiclePositions,
+        handleAuthenticationStateChanged,
     };
 
     function initialize() {
@@ -129,7 +134,7 @@ export function createMultiplayerController(options = {}) {
         writeStorage(MP_NAME_STORAGE_KEY, localPlayerName);
         addListener(dom.leaveButton, 'click', handleLeaveRoomClick);
 
-        setStatus('Not in room. Open Welcome to create or join.', 'info');
+        setStatus(resolveSignedOutStatusText(), resolveSignedOutStatusTone());
         renderPlayerList();
         updateRoomMeta();
         updatePanel();
@@ -398,6 +403,11 @@ export function createMultiplayerController(options = {}) {
         if (!isPanelVisible || isBusy || room?.roomCode) {
             return false;
         }
+        if (!isAuthenticatedForOnline()) {
+            setStatus('Sign in to create or join an online room.', 'error');
+            updatePanel();
+            return false;
+        }
         const preferredPlayerName = sanitizePlayerName(
             startContext?.playerName || localPlayerName || DEFAULT_PLAYER_NAME
         );
@@ -574,6 +584,11 @@ export function createMultiplayerController(options = {}) {
         socket.emit('mp:leaveRoom', {}, () => {
             isBusy = false;
             objectiveUi?.showInfo?.('Left online room.', 1600);
+            if (typeof onLeaveRoom === 'function') {
+                setPanelVisible(false);
+                onLeaveRoom();
+                return;
+            }
             clearRoomState();
             setStatus('Room left. You are offline.', 'info');
             updatePanel();
@@ -581,7 +596,22 @@ export function createMultiplayerController(options = {}) {
     }
 
     function ensureSocket() {
+        const accessToken = readAuthAccessToken();
+        if (!isAuthenticatedForOnline() || !accessToken) {
+            setStatus('Sign in to create or join an online room.', 'error');
+            updatePanel();
+            return null;
+        }
+
+        if (socket && socket.auth?.accessToken !== accessToken) {
+            clearRoomState();
+            teardownSocketConnection();
+        }
+
         if (socket) {
+            socket.auth = {
+                accessToken,
+            };
             return socket;
         }
 
@@ -591,16 +621,24 @@ export function createMultiplayerController(options = {}) {
         }
 
         socket = window.io({
+            auth: {
+                accessToken,
+            },
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 400,
             reconnectionDelayMax: 2000,
         });
+        socket.io?.on?.('reconnect_attempt', () => {
+            socket.auth = {
+                accessToken: readAuthAccessToken(),
+            };
+        });
 
         socket.on('connect', () => {
             if (!room) {
-                setStatus('Connected. Open Welcome to create or join.', 'info');
+                setStatus('Connected. Ready for authenticated online play.', 'info');
             }
             updatePanel();
         });
@@ -614,9 +652,10 @@ export function createMultiplayerController(options = {}) {
             resolveRoomFlowWaiters(false);
         });
 
-        socket.on('connect_error', () => {
+        socket.on('connect_error', (error) => {
             isBusy = false;
-            setStatus('Server connection failed. Check if the server is running.', 'error');
+            const message = resolveSocketConnectionErrorMessage(error);
+            setStatus(message, 'error');
             updatePanel();
             resolveRoomFlowWaiters(false);
         });
@@ -698,7 +737,7 @@ export function createMultiplayerController(options = {}) {
         }
 
         const profile = readProfileFromUi();
-        const signature = `${profile.name}|${profile.colorHex}`;
+        const signature = `${profile.name}|${profile.colorHex}|${profile.skinId}`;
         if (!force && signature === lastProfileSignature) {
             return;
         }
@@ -1046,6 +1085,7 @@ export function createMultiplayerController(options = {}) {
         }
 
         const carRig = createCarRig({
+            skinId: playerSnapshot?.skinId || '',
             bodyColor: playerSnapshot?.colorHex ?? 0x6cb3ff,
             displayName: playerSnapshot?.name || 'Online',
             addLights: true,
@@ -1065,10 +1105,13 @@ export function createMultiplayerController(options = {}) {
         const remote = {
             id: playerId,
             name: playerSnapshot?.name || 'Online',
+            skinId: typeof playerSnapshot?.skinId === 'string' ? playerSnapshot.skinId : '',
             colorHex: (playerSnapshot?.colorHex ?? 0x6cb3ff) >>> 0,
             car: carRig.car,
             updateVisuals: carRig.updateVisuals,
             setBodyColor: carRig.setBodyColor,
+            setSkin: carRig.setSkin,
+            setAppearance: carRig.setAppearance,
             skidMarkController: null,
             crashDebrisController: null,
             weaponController: null,
@@ -1133,13 +1176,26 @@ export function createMultiplayerController(options = {}) {
     }
 
     function applyRemoteMeta(remote, playerSnapshot = {}) {
+        const nextSkinId =
+            typeof playerSnapshot.skinId === 'string' && playerSnapshot.skinId.trim()
+                ? playerSnapshot.skinId.trim()
+                : remote.skinId || '';
         const snapshotColorNumeric = Number(playerSnapshot.colorHex);
         const nextColor = Number.isFinite(snapshotColorNumeric)
             ? Math.max(0, Math.min(0xffffff, Math.round(snapshotColorNumeric))) >>> 0
             : remote.colorHex || 0x6cb3ff;
-        if (nextColor !== remote.colorHex) {
+        if (nextColor !== remote.colorHex || nextSkinId !== remote.skinId) {
             remote.colorHex = nextColor;
-            remote.setBodyColor?.(nextColor);
+            remote.skinId = nextSkinId;
+            if (typeof remote.setAppearance === 'function') {
+                remote.setAppearance({
+                    skinId: nextSkinId,
+                    colorHex: nextColor,
+                });
+            } else {
+                remote.setBodyColor?.(nextColor);
+                remote.setSkin?.(nextSkinId);
+            }
         }
         if (typeof playerSnapshot.name === 'string' && playerSnapshot.name.trim()) {
             remote.name = playerSnapshot.name.trim();
@@ -1521,8 +1577,35 @@ export function createMultiplayerController(options = {}) {
             updatePanel();
             return;
         }
-        setStatus('Not in room. Open Welcome to create or join.', 'info');
+        setStatus(resolveSignedOutStatusText(), resolveSignedOutStatusTone());
         updatePanel();
+    }
+
+    function handleAuthenticationStateChanged(nextState = null) {
+        const authState = nextState && typeof nextState === 'object' ? nextState : null;
+        const authenticated = Boolean(authState?.authenticated);
+        const nextName = sanitizePlayerName(
+            authState?.displayName || localPlayerName || DEFAULT_PLAYER_NAME
+        );
+        localPlayerName = nextName;
+        writeStorage(MP_NAME_STORAGE_KEY, nextName);
+
+        if (authenticated) {
+            if (isPanelVisible && !room?.roomCode) {
+                setStatus('Account ready. Open Welcome to create or join a room.', 'info');
+                updatePanel();
+            }
+            return;
+        }
+
+        isBusy = false;
+        resolveRoomFlowWaiters(false);
+        clearRoomState();
+        teardownSocketConnection();
+        if (isPanelVisible) {
+            setStatus('Signed out. Sign in to create or join an online room.', 'info');
+            updatePanel();
+        }
     }
 
     function removeRemotePlayer(remote) {
@@ -1544,10 +1627,36 @@ export function createMultiplayerController(options = {}) {
         const safeName = sanitizePlayerName(localPlayerName || DEFAULT_PLAYER_NAME);
         localPlayerName = safeName;
         const safeColorHex = clampColorHex(getSelectedCarColorHex());
+        const safeSkinId =
+            typeof getSelectedCarSkinId === 'function' && typeof getSelectedCarSkinId() === 'string'
+                ? getSelectedCarSkinId().trim()
+                : '';
         return {
             name: safeName,
             colorHex: safeColorHex,
+            skinId: safeSkinId,
         };
+    }
+
+    function isAuthenticatedForOnline() {
+        return Boolean(getAuthState()?.authenticated);
+    }
+
+    function readAuthAccessToken() {
+        if (typeof getAuthAccessToken !== 'function') {
+            return '';
+        }
+        return sanitizeAccessToken(getAuthAccessToken());
+    }
+
+    function resolveSignedOutStatusText() {
+        return isAuthenticatedForOnline()
+            ? 'Not in room. Open Welcome to create or join.'
+            : 'Sign in to create or join an online room.';
+    }
+
+    function resolveSignedOutStatusTone() {
+        return isAuthenticatedForOnline() ? 'info' : 'muted';
     }
 
     function createRoomFlowWaiter(timeoutMs = ONLINE_ROOM_FLOW_PREP_TIMEOUT_MS) {
@@ -1727,6 +1836,7 @@ function createNoopController() {
         update() {},
         dispose() {},
         setPanelVisible() {},
+        handleAuthenticationStateChanged() {},
         isPanelVisible() {
             return false;
         },
@@ -1886,6 +1996,23 @@ function sanitizePlayerName(value) {
         .slice(0, PLAYER_NAME_MAX_LENGTH);
 
     return normalized || DEFAULT_PLAYER_NAME;
+}
+
+function sanitizeAccessToken(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return normalized.length >= 32 ? normalized.slice(0, 8192) : '';
+}
+
+function resolveSocketConnectionErrorMessage(error) {
+    const rawMessage =
+        typeof error?.message === 'string' && error.message.trim() ? error.message.trim() : '';
+    if (/auth/i.test(rawMessage)) {
+        return rawMessage;
+    }
+    return 'Server connection failed. Check if the server is running.';
 }
 
 function normalizeRoomCode(value) {

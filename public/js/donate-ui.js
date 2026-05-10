@@ -30,6 +30,7 @@ const DONATE_CANCELED_STATUS = 'Donation checkout was canceled.';
 const DONATE_SUBMIT_DEFAULT_LABEL = 'Donate';
 const DONATE_SUBMIT_PENDING_LABEL = 'Opening checkout...';
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
+const WELCOME_DONATE_CLOSE_EVENT = 'silentdrift:welcome-donate-close';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
 const WELCOME_ONLINE_CLOSE_EVENT = 'silentdrift:welcome-online-close';
 
@@ -71,7 +72,6 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     let initialized = false;
     let selectedPresetAmountCents = DONATE_PRESET_AMOUNTS_CENTS[0] || null;
     let activeContextKey = '';
-    let isWelcomeOnlineFlowOpen = false;
     let isSubmittingDonation = false;
 
     return {
@@ -114,15 +114,18 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
             }
         });
         document.addEventListener(WELCOME_ONLINE_OPEN_EVENT, () => {
-            isWelcomeOnlineFlowOpen = true;
             if (activeContextKey === 'welcome' && !panelRootEl.hidden) {
                 close();
             }
             setButtonsVisible(true);
         });
         document.addEventListener(WELCOME_ONLINE_CLOSE_EVENT, () => {
-            isWelcomeOnlineFlowOpen = false;
             setButtonsVisible(true);
+        });
+        document.addEventListener(WELCOME_DONATE_CLOSE_EVENT, () => {
+            if (activeContextKey === 'welcome' && !panelRootEl.hidden) {
+                close();
+            }
         });
     }
 
@@ -182,9 +185,13 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
     }
 
     function close() {
+        const closingWelcomeContext = activeContextKey === 'welcome';
         panelRootEl.hidden = true;
         activeContextKey = '';
         updateButtonExpandedState();
+        if (closingWelcomeContext) {
+            document.dispatchEvent(new CustomEvent(WELCOME_DONATE_CLOSE_EVENT));
+        }
     }
 
     function isAvailable() {
@@ -512,8 +519,7 @@ export function createDonateUiController({ onStatus = () => {} } = {}) {
 
     function setButtonsVisible(visible) {
         donateContexts.forEach((entry) => {
-            const shouldHideForWelcomeOnline = entry.key === 'welcome' && isWelcomeOnlineFlowOpen;
-            entry.buttonEl.hidden = !visible || shouldHideForWelcomeOnline;
+            entry.buttonEl.hidden = !visible;
             entry.buttonEl.disabled = false;
         });
     }

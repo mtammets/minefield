@@ -1,6 +1,6 @@
 import { clearAnalyticsCookies } from './analytics-cookie-cleanup.js';
+import { fetchPublicConfig } from './public-config.js';
 
-const PUBLIC_CONFIG_ENDPOINT_PATH = '/api/public-config';
 const GA_SCRIPT_SRC_BASE = 'https://www.googletagmanager.com/gtag/js';
 const GA_SCRIPT_ELEMENT_ID = 'minefield-ga4-script';
 const CONSENT_STORAGE_KEY = 'minefield-cookie-consent-v1';
@@ -214,30 +214,6 @@ function ensureGoogleTagScriptLoaded() {
     });
 
     return gaScriptLoadPromise;
-}
-
-async function fetchPublicConfig() {
-    const controller = new AbortController();
-    const timeoutHandle = window.setTimeout(() => {
-        controller.abort();
-    }, 3500);
-
-    try {
-        const response = await window.fetch(PUBLIC_CONFIG_ENDPOINT_PATH, {
-            method: 'GET',
-            cache: 'no-store',
-            credentials: 'same-origin',
-            signal: controller.signal,
-        });
-        if (!response.ok) {
-            return null;
-        }
-        return await response.json();
-    } catch {
-        return null;
-    } finally {
-        window.clearTimeout(timeoutHandle);
-    }
 }
 
 function readStoredConsentStatus() {

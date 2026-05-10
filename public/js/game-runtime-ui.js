@@ -5,24 +5,34 @@ import { createPauseMenuController } from './pause-menu-ui.js';
 import { createDonateUiController } from './donate-ui.js';
 import { createControlsHelpController } from './controls-ui.js';
 import { createSpeedometerController } from './speedometer-ui.js';
+import { createObjectiveHudController } from './objective-hud-ui.js';
 
 export function createRuntimeUiControllers({
     toCssHex,
     colorNameFromHex,
     statusDefaultText,
-    resolvePlayerCarColorHex,
-    getCarColorPresetIndex,
+    resolvePlayerCarSkinId,
+    getCarSkinPresetIndex,
     getIsCarDestroyed,
     getSelectedCarColorHex,
+    getSelectedCarSkinId,
     getGameSessionController,
     getInputController,
     getGameMode = () => 'bots',
     getIsInOnlineRoom = () => false,
     getMineInventorySnapshot = () => null,
     onPrepareStart,
+    onAuthSubmit = null,
+    onAuthSignOut = null,
+    onAuthChangePassword = null,
+    onAuthDeleteAccount = null,
+    onRefreshGlobalLeaderboard = null,
+    getAuthState = () => null,
     onDownloadPerformanceLog = null,
 }) {
-    const objectiveUi = createNoopObjectiveUi();
+    const objectiveUi = createObjectiveHudController({
+        statusDefaultText: '',
+    });
     const controlsHelpUi = createControlsHelpController({
         getGameMode,
         getIsInOnlineRoom,
@@ -41,14 +51,17 @@ export function createRuntimeUiControllers({
         onDownloadLog(roundSnapshot = null) {
             onDownloadPerformanceLog?.(roundSnapshot);
         },
+        onRefreshGlobalLeaderboard() {
+            onRefreshGlobalLeaderboard?.();
+        },
         onExit() {
-            getInputController()?.returnToWelcomeFromPauseMenu();
+            getInputController()?.returnToWelcome?.();
         },
     });
 
     const pauseMenuUi = createPauseMenuController({
         onExit() {
-            getInputController()?.returnToWelcomeFromPauseMenu();
+            getInputController()?.returnToWelcome?.();
         },
         onResume() {
             getGameSessionController()?.setPauseState(false);
@@ -56,11 +69,17 @@ export function createRuntimeUiControllers({
     });
 
     const welcomeModalUi = createWelcomeModalController({
-        initialColorHex: getSelectedCarColorHex(),
-        getCurrentColorHex: getSelectedCarColorHex,
-        resolvePlayerCarColorHex,
-        getCarColorPresetIndex,
+        initialSkinId: getSelectedCarSkinId(),
+        getCurrentSkinId: getSelectedCarSkinId,
+        resolvePlayerCarSkinId,
+        getCarSkinPresetIndex,
         onPrepareStart,
+        onAuthSubmit,
+        onAuthSignOut,
+        onAuthChangePassword,
+        onAuthDeleteAccount,
+        onRefreshGlobalLeaderboard,
+        getAuthState,
         toCssHex,
         onStartRequested(mode) {
             if (mode !== 'bots') {
@@ -68,8 +87,8 @@ export function createRuntimeUiControllers({
             }
             getGameSessionController()?.requestGameplayFullscreen?.();
         },
-        onColorChange(colorHex) {
-            getGameSessionController()?.setSelectedPlayerCarColor(colorHex);
+        onSkinChange(skinId) {
+            getGameSessionController()?.setSelectedPlayerCarSkin(skinId);
         },
         onStart(mode, startContext = null) {
             getGameSessionController()?.dismissWelcomeModal(mode, startContext);
@@ -96,19 +115,5 @@ export function createRuntimeUiControllers({
         welcomeModalUi,
         donateUi,
         speedometerUi,
-    };
-}
-
-function createNoopObjectiveUi() {
-    return {
-        setTargetColor() {},
-        flashCorrect() {},
-        showFailure() {},
-        showCrash() {},
-        showInfo() {},
-        showResult() {},
-        resetStatus() {},
-        setGameplayVisible() {},
-        registerControlAction() {},
     };
 }

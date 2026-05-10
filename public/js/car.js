@@ -2,6 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import { initializeWheels } from './wheels.js';
 import { addLightsToCar, addLuxuryBody, createSuspensionLinkage } from './carbody.js';
 import { PLAYER_RIDE_HEIGHT } from './constants.js';
+import { DEFAULT_PLAYER_CAR_SKIN_ID } from './car-skins.js';
 
 const DEFAULT_CAR_BASE_RIDE_HEIGHT = PLAYER_RIDE_HEIGHT;
 const PLAYER_REAR_LIGHT_Z = 2.045;
@@ -74,6 +75,7 @@ const POWER_DOWN = {
 export function createCarRig(options = {}) {
     const {
         bodyColor = 0x2d67a6,
+        skinId = DEFAULT_PLAYER_CAR_SKIN_ID,
         displayName = 'MAREK',
         addLights = true,
         addWheelWellLights = true,
@@ -96,6 +98,7 @@ export function createCarRig(options = {}) {
 
     const bodyMeta = addLuxuryBody(bodyRig, {
         bodyColor,
+        skinId,
         displayName,
         roofScreenDynamic,
     });
@@ -509,6 +512,12 @@ export function createCarRig(options = {}) {
         },
         setBodyColor(colorHex) {
             bodyMeta?.setBodyColor?.(colorHex);
+        },
+        setSkin(nextSkinId) {
+            bodyMeta?.setSkin?.(nextSkinId);
+        },
+        setAppearance(appearance = null) {
+            bodyMeta?.setAppearance?.(appearance);
         },
         getEditableParts() {
             return editablePartDescriptors.map((descriptor) => ({
@@ -1131,6 +1140,8 @@ const setPlayerRoofMenuMode = playerCarRig.setRoofMenuMode;
 const setPlayerRoofMenuModeFromUv = playerCarRig.setRoofMenuModeFromUv;
 const getPlayerRoofMenuMode = playerCarRig.getRoofMenuMode;
 const setPlayerCarBodyColor = playerCarRig.setBodyColor;
+const setPlayerCarSkin = playerCarRig.setSkin;
+const setPlayerCarAppearance = playerCarRig.setAppearance;
 const getPlayerCarEditableParts = playerCarRig.getEditableParts;
 const setPlayerCarPartVisibility = playerCarRig.setEditablePartVisibility;
 const setAllPlayerCarPartsVisibility = playerCarRig.setAllEditablePartsVisibility;
@@ -1151,6 +1162,8 @@ export {
     setPlayerRoofMenuModeFromUv,
     getPlayerRoofMenuMode,
     setPlayerCarBodyColor,
+    setPlayerCarSkin,
+    setPlayerCarAppearance,
     getPlayerCarEditableParts,
     setPlayerCarPartVisibility,
     setAllPlayerCarPartsVisibility,

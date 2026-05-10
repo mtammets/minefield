@@ -1,11 +1,29 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import {
     CAR_COLOR_STORAGE_KEY,
+    PLAYER_CAR_SKIN_STORAGE_KEY,
     PLAYER_TOP_SPEED_STORAGE_KEY,
     GRAPHICS_QUALITY_MODE_STORAGE_KEY,
     CAR_COLOR_PRESETS,
     DEFAULT_PLAYER_CAR_COLOR_HEX,
 } from './constants.js';
+import {
+    CAR_SKIN_PRESETS,
+    DEFAULT_PLAYER_CAR_SKIN_ID,
+    getCarSkinPresetByColorHex,
+    getCarSkinPresetById,
+    getCarSkinPresetIndex,
+    resolvePlayerCarSkinId,
+} from './car-skins.js';
+
+export {
+    CAR_SKIN_PRESETS,
+    DEFAULT_PLAYER_CAR_SKIN_ID,
+    getCarSkinPresetByColorHex,
+    getCarSkinPresetById,
+    getCarSkinPresetIndex,
+    resolvePlayerCarSkinId,
+} from './car-skins.js';
 
 const GRAPHICS_QUALITY_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
 
@@ -91,15 +109,34 @@ export function getCarColorPresetIndex(colorHex) {
     return 0;
 }
 
-export function readPersistedPlayerCarColorHex() {
+export function readPersistedPlayerCarSkinId() {
     try {
-        const storedValue = window.localStorage.getItem(CAR_COLOR_STORAGE_KEY);
-        if (!storedValue) {
-            return DEFAULT_PLAYER_CAR_COLOR_HEX;
+        const storedValue = window.localStorage.getItem(PLAYER_CAR_SKIN_STORAGE_KEY);
+        if (storedValue) {
+            return resolvePlayerCarSkinId(storedValue);
         }
-        return parseColorHexInput(storedValue);
     } catch {
-        return DEFAULT_PLAYER_CAR_COLOR_HEX;
+        // localStorage can fail in restricted browsing modes.
+    }
+    return getCarSkinPresetByColorHex(readPersistedPlayerCarColorHexLegacy()).id;
+}
+
+export function readPersistedPlayerCarColorHex() {
+    const fallbackPreset = getCarSkinPresetById(readPersistedPlayerCarSkinId());
+    const fallbackColorHex = fallbackPreset.bodyColor >>> 0;
+    try {
+        return readPersistedPlayerCarColorHexLegacy(fallbackColorHex);
+    } catch {
+        return fallbackColorHex;
+    }
+}
+
+export function persistPlayerCarSkinId(skinId) {
+    const resolvedSkinId = resolvePlayerCarSkinId(skinId || DEFAULT_PLAYER_CAR_SKIN_ID);
+    try {
+        window.localStorage.setItem(PLAYER_CAR_SKIN_STORAGE_KEY, resolvedSkinId);
+    } catch {
+        // localStorage can fail in restricted browsing modes.
     }
 }
 
@@ -145,6 +182,14 @@ function parseColorHexInput(input) {
 
     const parsedHex = Number.parseInt(normalizedHex, 16);
     return Number.isFinite(parsedHex) ? parsedHex >>> 0 : DEFAULT_PLAYER_CAR_COLOR_HEX >>> 0;
+}
+
+function readPersistedPlayerCarColorHexLegacy(fallbackColorHex = DEFAULT_PLAYER_CAR_COLOR_HEX) {
+    const storedValue = window.localStorage.getItem(CAR_COLOR_STORAGE_KEY);
+    if (!storedValue) {
+        return fallbackColorHex >>> 0;
+    }
+    return parseColorHexInput(storedValue);
 }
 
 function resolveGraphicsQualityMode(value, fallback = 'auto') {

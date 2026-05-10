@@ -1,9 +1,16 @@
-export function createGameRuntimeState({ selectedCarColorHex, batteryMax, playerCarPoolSize }) {
+export function createGameRuntimeState({
+    selectedCarColorHex,
+    selectedCarSkinId,
+    batteryMax,
+    playerCarPoolSize,
+}) {
     return {
         physicsAccumulator: 0,
         selectedCarColorHex: selectedCarColorHex >>> 0,
+        selectedCarSkinId: typeof selectedCarSkinId === 'string' ? selectedCarSkinId : '',
         isCarDestroyed: false,
         botTrafficSystem: null,
+        botsMissionDirector: null,
         playerBattery: batteryMax,
         isBatteryDepleted: false,
         playerCollectedCount: 0,
@@ -20,6 +27,7 @@ export function createGameRuntimeState({ selectedCarColorHex, batteryMax, player
         isWorldMapOpen: false,
         worldMapDriveLockMode: 'none',
         isWorldMapPauseOwned: false,
+        authController: null,
         inputController: null,
         crashDebrisController: null,
         mineController: null,

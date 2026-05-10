@@ -7,6 +7,13 @@
     --hud-text-dim: rgba(183, 214, 241, 0.9);
     --hud-shadow: 0 12px 30px rgba(0, 0, 0, 0.34);
     --hud-radius: 13px;
+    --viewport-height: 100vh;
+}
+
+@supports (height: 100dvh) {
+    :root {
+        --viewport-height: 100dvh;
+    }
 }
 
 html,
@@ -258,25 +265,26 @@ canvas#gameCanvas {
     white-space: nowrap;
 }
 
-.scorePopupCombo {
+.scorePopupPickup {
     border-color: rgba(255, 222, 148, 0.72);
     background: linear-gradient(168deg, rgba(36, 27, 10, 0.88), rgba(19, 15, 8, 0.74));
 }
 
-.scorePopupCombo .scorePopupPrimary {
+.scorePopupPickup .scorePopupPrimary {
     color: #ffe2a2;
     text-shadow: 0 0 16px rgba(255, 193, 90, 0.54);
 }
 
-.scorePopupRisk {
-    border-color: rgba(255, 170, 121, 0.76);
-}
-
-.scorePopupEndgame {
+.scorePopupImpact {
     border-color: rgba(255, 122, 122, 0.84);
     box-shadow:
         0 14px 28px rgba(31, 0, 0, 0.32),
         inset 0 0 0 1px rgba(255, 154, 154, 0.14);
+}
+
+.scorePopupImpact .scorePopupPrimary {
+    color: #ffe0bf;
+    text-shadow: 0 0 16px rgba(255, 136, 90, 0.48);
 }
 
 #raceIntroOverlay {
@@ -639,17 +647,291 @@ canvas#gameCanvas {
     }
 }
 
-#botPanel {
+#leftHudStack {
     position: fixed;
     left: 18px;
     top: 18px;
-    width: 260px;
+    z-index: 4;
+    width: min(320px, calc(100vw - 36px));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+#missionHud {
+    position: relative;
+    width: 100%;
+    padding: 14px 14px 13px;
+    border: 1px solid rgba(145, 201, 248, 0.3);
+    border-radius: 24px;
+    background:
+        linear-gradient(175deg, rgba(7, 15, 27, 0.96), rgba(4, 9, 18, 0.97)),
+        radial-gradient(circle at 16% 12%, rgba(111, 211, 255, 0.12), rgba(0, 0, 0, 0) 38%);
+    color: #e8f3ff;
+    font-family: 'Sora', sans-serif;
+    box-shadow:
+        0 24px 56px rgba(0, 0, 0, 0.34),
+        inset 0 0 0 1px rgba(218, 240, 255, 0.05);
+    backdrop-filter: blur(14px) saturate(1.08);
+    --mission-target-color: #7cf9ff;
+}
+
+#missionHud::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    border: 1px solid var(--hud-border-soft);
+}
+
+#missionHud[hidden] {
+    display: none;
+}
+
+.missionHudTopbar,
+.missionHudMetrics,
+.missionHudMetric,
+.missionHudTarget,
+.missionHudProgressShell,
+.missionHudProgressTrack,
+.missionHudStatus {
+    position: relative;
+    z-index: 1;
+}
+
+.missionHudTopbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.missionHudCounter {
+    flex: 0 0 auto;
+    min-width: 48px;
+    padding: 7px 10px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 218, 137, 0.36);
+    background: linear-gradient(180deg, rgba(86, 62, 22, 0.46), rgba(48, 34, 12, 0.62));
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-align: center;
+    color: rgba(255, 228, 158, 0.92);
+}
+
+.missionHudTimeline {
+    min-width: 0;
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-inline: 2px;
+}
+
+.missionHudTimelineDot {
+    flex: 1 1 0;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(124, 146, 172, 0.26);
+    box-shadow: inset 0 0 0 1px rgba(196, 225, 255, 0.05);
+}
+
+.missionHudTimelineDot[data-tone='complete'] {
+    background: linear-gradient(90deg, rgba(255, 214, 123, 0.86), rgba(255, 239, 170, 0.92));
+}
+
+.missionHudTimelineDot[data-tone='current'] {
+    background: linear-gradient(90deg, rgba(143, 242, 215, 0.92), rgba(133, 232, 255, 0.92));
+    box-shadow: 0 0 18px rgba(112, 228, 245, 0.2);
+}
+
+.missionHudTargetSwatch {
+    width: 42px;
+    height: 42px;
+    border-radius: 15px;
+    border: 1px solid color-mix(in srgb, var(--mission-target-color) 70%, white 18%);
+    background:
+        radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.42), transparent 42%),
+        linear-gradient(180deg, color-mix(in srgb, var(--mission-target-color) 82%, white 18%), var(--mission-target-color));
+    box-shadow:
+        0 0 28px color-mix(in srgb, var(--mission-target-color) 34%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.missionHudTitle {
+    position: relative;
+    z-index: 1;
+    margin-top: 12px;
+    font-size: 32px;
+    line-height: 0.92;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: rgba(248, 251, 255, 0.98);
+}
+
+.missionHudMetrics {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.missionHudMetric {
+    min-width: 0;
+    min-height: 88px;
+    padding: 12px;
+    border: 1px solid rgba(132, 180, 226, 0.18);
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(14, 27, 45, 0.84), rgba(9, 17, 31, 0.92));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        inset 0 -16px 24px rgba(0, 0, 0, 0.12);
+}
+
+.missionHudMetricChrome,
+.missionHudThreatIcons {
+    min-height: 24px;
+}
+
+.missionHudMetricChrome {
+    display: flex;
+    align-items: center;
+}
+
+.missionHudMetricGlyph {
+    display: inline-block;
+}
+
+.missionHudMetricGlyphPickup {
+    width: 18px;
+    height: 18px;
+    border-radius: 7px;
+    border: 1px solid color-mix(in srgb, var(--mission-target-color) 70%, white 20%);
+    background:
+        radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.38), transparent 40%),
+        linear-gradient(180deg, color-mix(in srgb, var(--mission-target-color) 84%, white 16%), var(--mission-target-color));
+    box-shadow: 0 0 18px color-mix(in srgb, var(--mission-target-color) 20%, transparent);
+    transform: rotate(45deg);
+}
+
+.missionHudThreatIcons {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.missionHudThreatIcon {
+    width: 18px;
+    height: 12px;
+    border-radius: 999px 999px 6px 6px;
+    border: 1px solid rgba(180, 219, 255, 0.3);
+    background: linear-gradient(180deg, rgba(160, 203, 248, 0.42), rgba(82, 105, 142, 0.22));
+    opacity: 0.94;
+}
+
+.missionHudThreatIcon[data-tone='cleared'] {
+    background: rgba(255, 115, 115, 0.16);
+    border-color: rgba(255, 138, 138, 0.18);
+    opacity: 0.34;
+}
+
+.missionHudMetricValue {
+    margin-top: 12px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    line-height: 0.94;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: rgba(247, 250, 255, 0.98);
+}
+
+.missionHudProgressShell {
+    margin-top: 12px;
+    display: grid;
+    gap: 9px;
+}
+
+.missionHudProgressTrack {
+    height: 12px;
+    overflow: hidden;
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+        rgba(255, 255, 255, 0.06);
+    box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, 0.42),
+        inset 0 0 0 1px rgba(191, 219, 248, 0.06);
+}
+
+.missionHudProgressFill {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    transform-origin: left center;
+    transform: scaleX(0);
+    background: linear-gradient(90deg, rgba(136, 244, 215, 0.92), rgba(255, 224, 128, 0.92));
+    box-shadow: 0 0 20px rgba(135, 245, 214, 0.22);
+}
+
+.missionHudProgressValue {
+    justify-self: end;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    color: rgba(222, 239, 255, 0.9);
+}
+
+.missionHudStatus {
+    margin-top: 10px;
+    justify-self: start;
+    max-width: 100%;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(120, 156, 191, 0.22);
+    background: rgba(6, 13, 22, 0.68);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    line-height: 1.1;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(193, 214, 232, 0.9);
+}
+
+.missionHudStatus[data-tone='info'] {
+    color: rgba(194, 232, 255, 0.98);
+    border-color: rgba(105, 182, 232, 0.32);
+}
+
+.missionHudStatus[data-tone='success'] {
+    color: rgba(209, 255, 226, 0.98);
+    border-color: rgba(113, 214, 162, 0.34);
+}
+
+.missionHudStatus[data-tone='warning'] {
+    color: rgba(255, 234, 194, 0.98);
+    border-color: rgba(234, 182, 111, 0.34);
+}
+
+.missionHudStatus[data-tone='danger'] {
+    color: rgba(255, 206, 202, 0.98);
+    border-color: rgba(219, 109, 109, 0.34);
+}
+
+#botPanel {
+    position: relative;
+    width: 100%;
 }
 
 #botList {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     font-size: 12px;
 }
 
@@ -2025,6 +2307,8 @@ body.edit-mode-active #speedometerHud {
     pointer-events: auto;
 }
 
+body.world-map-open #leftHudStack,
+body.world-map-open #missionHud,
 body.world-map-open #botPanel,
 body.world-map-open #multiplayerPanel,
 body.world-map-open #miniMapHud {
@@ -2040,81 +2324,76 @@ body.race-intro-active #miniMapHud {
 
 .botRow {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-        'name stats'
-        'target stats'
-        'lives stats';
-    align-items: center;
-    column-gap: 10px;
-    row-gap: 3px;
-    padding: 6px 8px;
-    border-radius: 8px;
-    background: rgba(19, 35, 58, 0.5);
-    border: 1px solid rgba(137, 186, 238, 0.16);
+    gap: 8px;
+    padding: 10px 11px 9px;
+    border-radius: 16px;
+    background: linear-gradient(180deg, rgba(19, 35, 58, 0.52), rgba(13, 25, 42, 0.66));
+    border: 1px solid rgba(137, 186, 238, 0.18);
 }
 
 .botRespawning {
-    opacity: 0.78;
+    opacity: 0.7;
 }
 
 .botRowPlayer {
-    background: rgba(48, 38, 16, 0.58);
+    background: linear-gradient(180deg, rgba(60, 47, 20, 0.62), rgba(35, 27, 13, 0.7));
     border-color: rgba(255, 208, 117, 0.36);
 }
 
-.botRowPlayer .botName {
-    color: rgba(255, 236, 176, 0.98);
+.botRowOut {
+    opacity: 0.5;
+}
+
+.botMain,
+.botIdentity,
+.botSubline,
+.botLivesPips {
+    display: flex;
+    align-items: center;
+}
+
+.botMain {
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.botIdentity {
+    min-width: 0;
+    gap: 8px;
 }
 
 .botName {
-    grid-area: name;
     min-width: 0;
-    color: rgba(221, 240, 255, 0.96);
-    font-weight: 700;
-    letter-spacing: 0.4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.botTarget {
-    grid-area: target;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
     color: rgba(236, 246, 255, 0.96);
-}
-
-.botTargetLabel {
-    min-width: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 .botSwatch {
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
     border: 1px solid rgba(230, 242, 255, 0.72);
     box-shadow: 0 0 10px rgba(255, 255, 255, 0.19);
     flex: 0 0 auto;
 }
 
-.botLivesWrap {
-    grid-area: lives;
-    min-width: 0;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
+.botScore {
+    flex: 0 0 auto;
+    color: rgba(255, 248, 234, 0.98);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
 }
 
 .botLivesPips {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
+    gap: 5px;
 }
 
 .botLifePip {
@@ -2134,40 +2413,37 @@ body.race-intro-active #miniMapHud {
     border-color: rgba(191, 213, 238, 0.28);
 }
 
-.botLivesLabel {
-    color: rgba(221, 237, 255, 0.9);
+.botSubline {
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.botStateChip {
+    flex: 0 0 auto;
+    padding: 4px 7px 3px;
+    border-radius: 999px;
+    border: 1px solid rgba(155, 211, 255, 0.22);
+    background: rgba(20, 36, 55, 0.7);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
     font-weight: 700;
-    font-size: 11px;
-    letter-spacing: 0.24px;
-    min-width: 0;
-    white-space: nowrap;
+    letter-spacing: 0.1em;
+    color: rgba(214, 236, 255, 0.88);
 }
 
-.botStats {
-    grid-area: stats;
-    min-width: 46px;
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-end;
-    justify-content: center;
-    gap: 3px;
-}
-
-.botScore {
-    color: #ffffff;
-    font-weight: 800;
-    min-width: 0;
-    text-align: right;
-    line-height: 1;
+.botStateChip.is-out {
+    border-color: rgba(255, 148, 148, 0.22);
+    color: rgba(255, 208, 208, 0.82);
 }
 
 .botCollected {
+    flex: 0 0 auto;
     color: rgba(188, 215, 239, 0.92);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
     font-weight: 700;
+    letter-spacing: 0.06em;
     min-width: 0;
-    text-align: right;
-    letter-spacing: 0.2px;
-    line-height: 1;
 }
 
 #botPanel {
@@ -2254,33 +2530,6 @@ body.race-intro-active #miniMapHud {
     line-height: 1.35;
 }
 
-.leaderboardDetailsToggle {
-    border: 1px solid rgba(168, 211, 255, 0.64);
-    border-radius: 10px;
-    padding: 10px 14px;
-    background: linear-gradient(180deg, rgba(28, 63, 106, 0.74), rgba(18, 43, 76, 0.74));
-    color: rgba(234, 247, 255, 0.98);
-    font-family: 'Sora', sans-serif;
-    font-size: 11px;
-    font-weight: 800;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition:
-        transform 120ms ease,
-        filter 120ms ease;
-}
-
-.leaderboardDetailsToggle:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.08);
-}
-
-.leaderboardDetailsToggle:active {
-    transform: translateY(0);
-    filter: brightness(0.96);
-}
-
 .leaderboardKpiGrid {
     margin-top: 14px;
     display: grid;
@@ -2329,6 +2578,13 @@ body.race-intro-active #miniMapHud {
     color: rgba(206, 232, 255, 0.94);
     font-weight: 800;
     text-transform: uppercase;
+}
+
+.leaderboardSectionMeta {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.35;
+    color: rgba(171, 203, 229, 0.88);
 }
 
 .leaderboardTableHead {
@@ -2438,81 +2694,209 @@ body.race-intro-active #miniMapHud {
     line-height: 1.02;
 }
 
-#leaderboardDetailsPanel {
-    margin-top: 12px;
-    padding: 11px;
-    border: 1px solid rgba(136, 188, 240, 0.34);
-    border-radius: 12px;
-    background: linear-gradient(165deg, rgba(11, 25, 45, 0.72), rgba(7, 16, 31, 0.72));
+.leaderboardTopDriversCard {
+    margin-top: 14px;
+    border: 1px solid rgba(176, 212, 232, 0.4);
+    border-radius: 20px;
+    padding: clamp(14px, 2vw, 22px);
+    display: grid;
+    gap: 12px;
+    background:
+        linear-gradient(170deg, rgba(13, 26, 40, 0.84), rgba(8, 16, 26, 0.88)),
+        linear-gradient(120deg, rgba(146, 208, 242, 0.06), rgba(146, 208, 242, 0));
+    box-shadow:
+        0 18px 36px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.leaderboardTopDriversCard[hidden] {
+    display: none !important;
+}
+
+.leaderboardTopDriversHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.leaderboardTopDriversHeading {
+    min-width: 0;
+}
+
+.leaderboardTopDriversEyebrow {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: rgba(188, 220, 242, 0.92);
+}
+
+.leaderboardTopDriversTitle {
+    margin-top: 4px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(26px, 3vw, 42px);
+    font-weight: 800;
+    line-height: 0.96;
+    letter-spacing: 0.5px;
+    color: #ffe7a4;
+    text-transform: uppercase;
+}
+
+.leaderboardTopDriversActionBtn {
+    border: 1px solid rgba(157, 199, 224, 0.46);
+    border-radius: 10px;
+    min-height: 40px;
+    padding: 0 12px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(223, 236, 246, 0.96);
+    background: linear-gradient(180deg, rgba(22, 51, 77, 0.9), rgba(11, 28, 45, 0.92));
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.leaderboardTopDriversActionBtn:hover,
+.leaderboardTopDriversActionBtn:focus-visible {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    border-color: rgba(210, 232, 246, 0.88);
+}
+
+.leaderboardTopDriversActionBtn:disabled {
+    opacity: 0.56;
+    cursor: wait;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.leaderboardGlobalStatus {
+    color: rgba(191, 220, 247, 0.96);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.leaderboardGlobalStatus[hidden] {
+    display: none !important;
+}
+
+.leaderboardGlobalStatus[data-tone='muted'] {
+    color: rgba(172, 205, 224, 0.88);
+}
+
+.leaderboardGlobalStatus[data-tone='info'] {
+    color: rgba(189, 225, 245, 0.98);
+}
+
+.leaderboardGlobalStatus[data-tone='success'] {
+    color: rgba(170, 246, 204, 0.97);
+}
+
+.leaderboardGlobalStatus[data-tone='error'] {
+    color: rgba(255, 183, 183, 0.97);
+}
+
+.leaderboardGlobalList {
     display: flex;
     flex-direction: column;
     gap: 10px;
 }
 
-#leaderboardDetailsPanel[hidden] {
-    display: none;
+.leaderboardGlobalRow {
+    border: 1px solid rgba(132, 186, 239, 0.3);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: grid;
+    gap: 6px;
+    background: linear-gradient(160deg, rgba(15, 34, 61, 0.74), rgba(8, 19, 37, 0.78));
+    box-shadow: inset 0 0 0 1px rgba(229, 241, 255, 0.04);
 }
 
-.leaderboardDetailsBlock {
-    border: 1px solid rgba(150, 198, 246, 0.24);
-    border-radius: 10px;
-    padding: 9px 10px;
-    background: rgba(10, 23, 40, 0.62);
+.leaderboardGlobalRow:first-child {
+    border-color: rgba(255, 220, 122, 0.64);
+    background: linear-gradient(160deg, rgba(87, 71, 34, 0.58), rgba(35, 29, 14, 0.6));
 }
 
-.leaderboardDetailsLabel {
+.leaderboardGlobalRow.is-viewer {
+    border-color: rgba(148, 224, 255, 0.64);
+    box-shadow:
+        inset 0 0 0 1px rgba(175, 230, 255, 0.26),
+        0 0 20px rgba(83, 170, 246, 0.14);
+}
+
+.leaderboardGlobalDivider {
+    padding: 9px 12px;
+    border: 1px dashed rgba(255, 223, 145, 0.34);
+    border-radius: 12px;
+    color: rgba(255, 231, 176, 0.96);
+    font-family: 'Sora', sans-serif;
     font-size: 10px;
     font-weight: 800;
     letter-spacing: 1px;
-    color: rgba(188, 219, 246, 0.9);
     text-transform: uppercase;
+    background: rgba(64, 45, 16, 0.26);
 }
 
-#leaderboardScoringModel {
-    margin-top: 6px;
-    color: rgba(214, 236, 255, 0.94);
-    font-size: 13px;
-    line-height: 1.4;
+.leaderboardGlobalHead {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
 }
 
-#leaderboardBreakdownList {
-    margin-top: 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
+.leaderboardGlobalRank {
+    color: rgba(215, 233, 251, 0.95);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(22px, 2.4vw, 34px);
+    font-weight: 800;
+    text-align: right;
 }
 
-.leaderboardBreakdownRow {
-    border: 1px solid rgba(142, 190, 240, 0.2);
-    border-radius: 9px;
-    padding: 8px 9px;
-    background: rgba(12, 27, 48, 0.54);
+.leaderboardGlobalName {
+    min-width: 0;
+    color: #f1f8ff;
+    font-size: clamp(18px, 2vw, 28px);
+    font-weight: 800;
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-.leaderboardBreakdownHead {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
+.leaderboardGlobalScore {
+    color: #ffefc2;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(21px, 2.4vw, 34px);
+    font-weight: 800;
+    text-align: right;
+    line-height: 1;
+    letter-spacing: 0.35px;
 }
 
-.leaderboardBreakdownName {
-    color: rgba(233, 244, 255, 0.98);
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.leaderboardBreakdownScore {
-    color: #ffe8af;
-    font-size: 13px;
-    font-weight: 700;
-}
-
-.leaderboardBreakdownMeta {
+.leaderboardGlobalMeta,
+.leaderboardGlobalEmpty {
     margin-top: 4px;
-    color: rgba(191, 220, 247, 0.94);
-    font-size: 12px;
+    color: rgba(191, 220, 247, 0.9);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.28px;
     line-height: 1.35;
+}
+
+.leaderboardGlobalEmpty {
+    padding: 18px 16px;
+    border: 1px dashed rgba(147, 193, 229, 0.28);
+    border-radius: 14px;
+    background: rgba(9, 20, 32, 0.56);
 }
 
 .leaderboardActions {
@@ -2572,8 +2956,7 @@ body.race-intro-active #miniMapHud {
     filter: brightness(0.96);
 }
 
-.leaderboardBtn:focus-visible,
-.leaderboardDetailsToggle:focus-visible {
+.leaderboardBtn:focus-visible {
     outline: 2px solid rgba(203, 234, 255, 0.88);
     outline-offset: 2px;
 }
@@ -2916,18 +3299,11 @@ body.race-intro-active #miniMapHud {
 }
 
 #welcomeDonatePanelHost {
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: calc(100% + 8px);
-    z-index: 7;
-    display: block;
-    pointer-events: none;
+    display: grid;
 }
 
 #welcomeDonatePanelHost .donateInlinePanel {
-    pointer-events: auto;
-    max-height: min(56vh, 520px);
+    max-height: min(60vh, 560px);
     overflow: auto;
 }
 
@@ -3807,11 +4183,15 @@ body.race-intro-active #miniMapHud {
     color: rgba(173, 204, 233, 0.9);
 }
 
+body.edit-mode-active #leftHudStack,
+body.edit-mode-active #missionHud,
 body.edit-mode-active #botPanel {
     opacity: 0;
     pointer-events: none;
 }
 
+body.race-intro-active #leftHudStack,
+body.race-intro-active #missionHud,
 body.race-intro-active #botPanel {
     opacity: 0;
     transform: translateY(-12px);
@@ -4179,6 +4559,8 @@ body.race-intro-active #botPanel {
         --starter-controls-collapsed-top: clamp(220px, 33vh, 300px);
     }
 
+    #leftHudStack,
+    #missionHud,
     #botPanel,
     #miniMapHud {
         display: none;
@@ -4270,9 +4652,10 @@ body.race-intro-active #botPanel {
 }
 
 @media (max-width: 860px) {
-    #botPanel {
+    #leftHudStack {
         left: 10px;
         top: 10px;
+        width: min(304px, calc(100vw - 20px));
         transform: scale(0.88);
         transform-origin: top left;
     }
@@ -4297,12 +4680,17 @@ body.race-intro-active #botPanel {
         align-items: stretch;
     }
 
-    .leaderboardDetailsToggle {
-        align-self: flex-start;
-    }
-
     .leaderboardKpiGrid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .leaderboardTopDriversHeader {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .leaderboardTopDriversActionBtn {
+        align-self: flex-start;
     }
 
     .leaderboardTableHead {
@@ -4487,6 +4875,23 @@ body.race-intro-active #botPanel {
     .leaderboardBtn {
         font-size: 16px;
     }
+
+    .leaderboardGlobalHead {
+        grid-template-columns: 44px minmax(0, 1fr);
+    }
+
+    .leaderboardGlobalScore {
+        grid-column: 2;
+        justify-self: start;
+    }
+
+    .leaderboardTopDriversCard {
+        padding: 12px;
+    }
+
+    .leaderboardTopDriversTitle {
+        font-size: clamp(22px, 8vw, 34px);
+    }
 }
 
 /* Welcome Modal - Modern AAA Rebuild */
@@ -4495,10 +4900,11 @@ body.race-intro-active #botPanel {
     inset: 0;
     z-index: 12;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     padding: clamp(12px, 2vw, 28px);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     isolation: isolate;
     background:
         radial-gradient(circle at 24% 18%, rgba(118, 180, 226, 0.08), rgba(4, 8, 13, 0) 40%),
@@ -4556,7 +4962,8 @@ body.race-intro-active #botPanel {
     position: relative;
     z-index: 1;
     width: min(1220px, calc(100vw - 24px));
-    min-height: min(760px, calc(100vh - 36px));
+    min-height: min(760px, calc(var(--viewport-height) - 36px));
+    margin-block: auto;
     display: grid;
     grid-template-columns: minmax(320px, 0.84fr) minmax(0, 1.46fr);
     gap: clamp(10px, 1.8vw, 22px);
@@ -4677,34 +5084,6 @@ body.race-intro-active #botPanel {
     background: linear-gradient(96deg, rgba(17, 30, 43, 0.8), rgba(9, 18, 29, 0.82));
 }
 
-.welcomeVehicleInfo {
-    border: 1px solid rgba(165, 198, 219, 0.32);
-    border-radius: 12px;
-    padding: 10px 11px;
-    background: rgba(11, 21, 33, 0.72);
-}
-
-.welcomeVehicleInfoLabel {
-    display: block;
-    margin-bottom: 5px;
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1.3px;
-    text-transform: uppercase;
-    color: rgba(173, 202, 220, 0.9);
-}
-
-#welcomeSelectedColorName {
-    display: block;
-    font-family: 'Sora', sans-serif;
-    font-size: 14px;
-    font-weight: 800;
-    letter-spacing: 0.7px;
-    color: rgba(243, 249, 255, 0.98);
-    text-transform: uppercase;
-}
-
 .welcomeStartActions {
     position: relative;
     display: grid;
@@ -4712,8 +5091,322 @@ body.race-intro-active #botPanel {
     gap: 12px;
 }
 
+.welcomeAuthPanel {
+    border: 1px solid rgba(152, 194, 219, 0.42);
+    border-radius: 16px;
+    padding: 12px;
+    display: grid;
+    gap: 10px;
+    background:
+        linear-gradient(170deg, rgba(11, 24, 37, 0.88), rgba(7, 16, 27, 0.9)),
+        linear-gradient(120deg, rgba(124, 181, 221, 0.08), rgba(124, 181, 221, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.welcomeCommandDeck > .welcomeAuthPanel {
+    display: none;
+}
+
+.welcomeCommandDeck > .welcomeOnlineModeFlow {
+    display: none;
+}
+
+.welcomeAuthHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.welcomeAuthEyebrow,
+.welcomeAuthIdentityLabel {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(180, 210, 228, 0.96);
+}
+
+.welcomeAuthStatePill {
+    border: 1px solid rgba(143, 183, 207, 0.5);
+    border-radius: 999px;
+    min-height: 26px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: rgba(203, 226, 241, 0.96);
+    background: rgba(11, 24, 36, 0.82);
+}
+
+.welcomeAuthStatePill[data-tone='success'] {
+    color: #ebfff7;
+    border-color: rgba(142, 236, 184, 0.72);
+    background: linear-gradient(180deg, rgba(28, 106, 71, 0.8), rgba(13, 48, 31, 0.84));
+}
+
+.welcomeAuthStatePill[data-tone='error'] {
+    color: rgba(255, 220, 220, 0.98);
+    border-color: rgba(255, 159, 159, 0.72);
+    background: linear-gradient(180deg, rgba(93, 37, 37, 0.82), rgba(54, 20, 20, 0.88));
+}
+
+.welcomeAuthSignedOutView,
+.welcomeAuthSignedInView {
+    display: grid;
+    gap: 10px;
+}
+
+.welcomeAuthSignedOutView[hidden],
+.welcomeAuthSignedInView[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthModeTabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.welcomeAuthModeTab,
+.welcomeAuthSecondaryBtn {
+    border: 1px solid rgba(157, 199, 224, 0.46);
+    border-radius: 11px;
+    min-height: 42px;
+    padding: 0 11px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(223, 236, 246, 0.96);
+    background: linear-gradient(180deg, rgba(22, 51, 77, 0.9), rgba(11, 28, 45, 0.92));
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.welcomeAuthDangerBtn {
+    border: 1px solid rgba(241, 137, 137, 0.62);
+    border-radius: 11px;
+    min-height: 42px;
+    padding: 0 11px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 230, 230, 0.98);
+    background: linear-gradient(180deg, rgba(92, 31, 31, 0.9), rgba(49, 16, 16, 0.94));
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+    box-shadow:
+        0 8px 16px rgba(95, 28, 28, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.welcomeAuthModeTab[data-selected='true'] {
+    color: #ecfff7;
+    border-color: rgba(141, 236, 194, 0.88);
+    background: linear-gradient(180deg, rgba(30, 99, 70, 0.92), rgba(13, 46, 33, 0.95));
+    box-shadow: 0 10px 20px rgba(31, 119, 84, 0.24);
+}
+
+.welcomeAuthSecondaryBtn[data-open='true'] {
+    color: #ecfff7;
+    border-color: rgba(141, 236, 194, 0.74);
+    background: linear-gradient(180deg, rgba(26, 84, 59, 0.92), rgba(12, 40, 28, 0.95));
+    box-shadow: 0 10px 20px rgba(31, 119, 84, 0.18);
+}
+
+.welcomeAuthModeTab:hover,
+.welcomeAuthModeTab:focus-visible,
+.welcomeAuthSecondaryBtn:hover,
+.welcomeAuthSecondaryBtn:focus-visible,
+.welcomeAuthDangerBtn:hover,
+.welcomeAuthDangerBtn:focus-visible {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    border-color: rgba(210, 232, 246, 0.88);
+}
+
+.welcomeAuthModeTab:disabled,
+.welcomeAuthSecondaryBtn:disabled,
+.welcomeAuthDangerBtn:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthFields,
+.welcomeAuthField {
+    display: grid;
+    gap: 8px;
+}
+
+.welcomeAuthField[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthPasswordChangePanel {
+    display: grid;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid rgba(150, 190, 214, 0.3);
+    border-radius: 12px;
+    background:
+        linear-gradient(180deg, rgba(13, 27, 40, 0.84), rgba(8, 18, 29, 0.88)),
+        linear-gradient(120deg, rgba(124, 182, 219, 0.06), rgba(124, 182, 219, 0));
+}
+
+.welcomeAuthPasswordChangePanel[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthLabel {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.1px;
+    color: rgba(173, 204, 221, 0.94);
+    text-transform: uppercase;
+}
+
+.welcomeAuthInput {
+    border: 1px solid rgba(149, 190, 214, 0.46);
+    border-radius: 10px;
+    min-height: 44px;
+    padding: 0 11px;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.45px;
+    color: rgba(232, 242, 250, 0.98);
+    background: rgba(8, 19, 30, 0.82);
+}
+
+.welcomeAuthInput:focus-visible {
+    outline: none;
+    border-color: rgba(192, 223, 242, 0.92);
+    box-shadow: 0 0 0 2px rgba(124, 182, 219, 0.26);
+}
+
+.welcomeAuthInput:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+}
+
+.welcomeAuthActions {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+}
+
+.welcomeAuthInlineActions {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.welcomeAuthSubmitBtn {
+    border: 1px solid rgba(151, 222, 190, 0.7);
+    border-radius: 12px;
+    min-height: 48px;
+    padding: 0 14px;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #e9fff3;
+    background: linear-gradient(180deg, rgba(28, 106, 71, 0.9), rgba(13, 48, 31, 0.94));
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+    box-shadow:
+        0 8px 16px rgba(34, 133, 89, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.welcomeAuthSubmitBtn:hover,
+.welcomeAuthSubmitBtn:focus-visible {
+    transform: translateY(-1px);
+    filter: brightness(1.03);
+    border-color: rgba(214, 232, 246, 0.88);
+}
+
+.welcomeAuthSubmitBtn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthSignedInName {
+    font-family: 'Sora', sans-serif;
+    font-size: 16px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    color: rgba(237, 246, 252, 0.98);
+}
+
+.welcomeAuthSignedInEmail {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: rgba(186, 214, 232, 0.94);
+    overflow-wrap: anywhere;
+}
+
+.welcomeAuthStatus {
+    min-height: 18px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: rgba(176, 207, 224, 0.92);
+}
+
+.welcomeAuthStatus[data-tone='muted'] {
+    color: rgba(166, 198, 216, 0.9);
+}
+
+.welcomeAuthStatus[data-tone='info'] {
+    color: rgba(190, 224, 244, 0.96);
+}
+
+.welcomeAuthStatus[data-tone='success'] {
+    color: rgba(161, 244, 199, 0.97);
+}
+
+.welcomeAuthStatus[data-tone='error'] {
+    color: rgba(255, 178, 178, 0.96);
+}
+
 #welcomeStartBtn,
 #welcomeStartOnlineBtn,
+#welcomeLeaderboardBtn,
+#welcomeAccountBtn,
 #welcomeDonateBtn {
     position: relative;
     border: 1px solid rgba(175, 207, 225, 0.54);
@@ -4738,6 +5431,8 @@ body.race-intro-active #botPanel {
 
 #welcomeStartBtn::before,
 #welcomeStartOnlineBtn::before,
+#welcomeLeaderboardBtn::before,
+#welcomeAccountBtn::before,
 #welcomeDonateBtn::before {
     content: '';
     position: absolute;
@@ -4768,6 +5463,48 @@ body.race-intro-active #botPanel {
         inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 
+#welcomeStartOnlineBtn[data-open='true'] {
+    border-color: rgba(154, 223, 255, 0.88);
+    background: linear-gradient(180deg, rgba(33, 108, 167, 0.94), rgba(15, 53, 87, 0.97));
+    box-shadow:
+        0 10px 20px rgba(24, 95, 150, 0.28),
+        inset 0 1px 0 rgba(235, 247, 255, 0.18);
+}
+
+#welcomeLeaderboardBtn {
+    color: rgba(246, 242, 255, 0.98);
+    border-color: rgba(193, 183, 255, 0.68);
+    background: linear-gradient(180deg, rgba(76, 72, 142, 0.9), rgba(29, 26, 67, 0.95));
+    box-shadow:
+        0 8px 16px rgba(56, 50, 117, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+#welcomeAccountBtn {
+    color: rgba(236, 248, 255, 0.98);
+    border-color: rgba(133, 220, 242, 0.72);
+    background: linear-gradient(180deg, rgba(22, 109, 133, 0.9), rgba(10, 47, 61, 0.95));
+    box-shadow:
+        0 8px 16px rgba(15, 97, 118, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+#welcomeLeaderboardBtn[data-open='true'] {
+    border-color: rgba(255, 221, 144, 0.84);
+    background: linear-gradient(180deg, rgba(108, 80, 28, 0.92), rgba(56, 39, 13, 0.96));
+    box-shadow:
+        0 10px 20px rgba(92, 64, 18, 0.28),
+        inset 0 1px 0 rgba(255, 244, 216, 0.16);
+}
+
+#welcomeAccountBtn[data-open='true'] {
+    border-color: rgba(163, 241, 217, 0.82);
+    background: linear-gradient(180deg, rgba(27, 103, 90, 0.92), rgba(12, 49, 43, 0.96));
+    box-shadow:
+        0 10px 20px rgba(18, 88, 78, 0.26),
+        inset 0 1px 0 rgba(236, 255, 247, 0.16);
+}
+
 #welcomeDonateBtn {
     color: rgba(230, 246, 255, 0.99);
     border-color: rgba(124, 200, 242, 0.82);
@@ -4777,8 +5514,18 @@ body.race-intro-active #botPanel {
         inset 0 1px 0 rgba(219, 241, 255, 0.2);
 }
 
+#welcomeDonateBtn[data-open='true'] {
+    border-color: rgba(255, 214, 154, 0.84);
+    background: linear-gradient(180deg, rgba(120, 77, 33, 0.92), rgba(58, 35, 13, 0.96));
+    box-shadow:
+        0 10px 20px rgba(104, 63, 18, 0.28),
+        inset 0 1px 0 rgba(255, 240, 215, 0.16);
+}
+
 #welcomeStartBtn span,
 #welcomeStartOnlineBtn span,
+#welcomeLeaderboardBtn span,
+#welcomeAccountBtn span,
 #welcomeDonateBtn span {
     font-size: 18px;
     transform: translateY(-1px);
@@ -4786,6 +5533,8 @@ body.race-intro-active #botPanel {
 
 #welcomeStartBtn:hover,
 #welcomeStartOnlineBtn:hover,
+#welcomeLeaderboardBtn:hover,
+#welcomeAccountBtn:hover,
 #welcomeDonateBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.03);
@@ -4794,6 +5543,8 @@ body.race-intro-active #botPanel {
 
 #welcomeStartBtn:active,
 #welcomeStartOnlineBtn:active,
+#welcomeLeaderboardBtn:active,
+#welcomeAccountBtn:active,
 #welcomeDonateBtn:active {
     transform: translateY(0);
     filter: brightness(0.98);
@@ -4817,6 +5568,8 @@ body.race-intro-active #botPanel {
 
 #welcomeStartBtn:disabled,
 #welcomeStartOnlineBtn:disabled,
+#welcomeLeaderboardBtn:disabled,
+#welcomeAccountBtn:disabled,
 #welcomeDonateBtn:disabled {
     opacity: 0.5;
     cursor: wait;
@@ -4831,11 +5584,6 @@ body.race-intro-active #botPanel {
 
 #welcomeModal[data-launching='true'] .welcomeShell {
     pointer-events: none;
-}
-
-#welcomeModal[data-online-flow-open='true'] #welcomeDonateBtn,
-#welcomeModal[data-online-flow-open='true'] #welcomeDonatePanelHost {
-    display: none !important;
 }
 
 .welcomeLaunchOverlay {
@@ -4930,11 +5678,7 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeOnlineModeFlow[hidden] {
-    display: grid !important;
-    visibility: hidden;
-    opacity: 0;
-    pointer-events: none;
-    filter: saturate(0.9);
+    display: none !important;
 }
 
 .welcomeOnlineModeTitle {
@@ -5164,7 +5908,7 @@ body.race-intro-active #botPanel {
     position: relative;
     border: 1px solid rgba(166, 200, 221, 0.52);
     border-radius: 26px;
-    min-height: min(760px, calc(100vh - 36px));
+    min-height: min(760px, calc(var(--viewport-height) - 36px));
     overflow: hidden;
     background:
         radial-gradient(circle at 50% 76%, rgba(138, 201, 244, 0.18), rgba(9, 15, 23, 0) 45%),
@@ -5372,6 +6116,336 @@ body.race-intro-active #botPanel {
     pointer-events: none;
 }
 
+.welcomePreviewLeaderboardOverlay {
+    position: absolute;
+    inset: clamp(16px, 2.4vw, 28px);
+    z-index: 8;
+    display: grid;
+    align-items: center;
+    padding: clamp(12px, 2vw, 22px);
+    background: transparent;
+    backdrop-filter: none;
+    animation: welcomePreviewLeaderboardIn 220ms ease both;
+}
+
+.welcomePreviewLeaderboardOverlay[hidden] {
+    display: none;
+}
+
+.welcomePreviewAccountOverlay {
+    z-index: 9;
+}
+
+.welcomePreviewDonateOverlay {
+    z-index: 9;
+}
+
+.welcomePreviewOnlineOverlay {
+    z-index: 9;
+}
+
+.welcomePreviewLeaderboardCard {
+    width: min(100%, 720px);
+    justify-self: center;
+    border: 1px solid rgba(176, 212, 232, 0.54);
+    border-radius: 24px;
+    padding: clamp(16px, 2.3vw, 24px);
+    display: grid;
+    gap: 12px;
+    background:
+        linear-gradient(170deg, rgba(13, 26, 40, 0.95), rgba(8, 16, 26, 0.96)),
+        linear-gradient(120deg, rgba(146, 208, 242, 0.08), rgba(146, 208, 242, 0));
+    box-shadow:
+        0 28px 62px rgba(0, 0, 0, 0.44),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welcomePreviewLeaderboardHeader {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.welcomePreviewLeaderboardHeading {
+    min-width: 0;
+}
+
+.welcomePreviewLeaderboardEyebrow {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: rgba(188, 220, 242, 0.92);
+}
+
+.welcomePreviewLeaderboardTitle {
+    margin-top: 4px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(26px, 3vw, 40px);
+    font-weight: 800;
+    line-height: 0.96;
+    letter-spacing: 0.5px;
+    color: #ffe7a4;
+    text-transform: uppercase;
+}
+
+.welcomePreviewLeaderboardCaption {
+    margin-top: 6px;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    line-height: 1.4;
+    color: rgba(206, 227, 241, 0.88);
+}
+
+.welcomePreviewLeaderboardHeaderActions {
+    display: grid;
+    grid-auto-flow: column;
+    gap: 8px;
+}
+
+.welcomePreviewLeaderboardActionBtn {
+    border: 1px solid rgba(157, 199, 224, 0.46);
+    border-radius: 10px;
+    min-height: 40px;
+    padding: 0 12px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(223, 236, 246, 0.96);
+    background: linear-gradient(180deg, rgba(22, 51, 77, 0.9), rgba(11, 28, 45, 0.92));
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        filter 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.welcomePreviewLeaderboardActionBtn.is-close {
+    border-color: rgba(241, 196, 137, 0.56);
+    color: rgba(255, 241, 216, 0.98);
+    background: linear-gradient(180deg, rgba(92, 66, 31, 0.88), rgba(50, 34, 15, 0.94));
+}
+
+.welcomePreviewLeaderboardActionBtn:hover,
+.welcomePreviewLeaderboardActionBtn:focus-visible {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+    border-color: rgba(210, 232, 246, 0.88);
+}
+
+.welcomePreviewLeaderboardActionBtn:disabled {
+    opacity: 0.56;
+    cursor: wait;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomePreviewLeaderboardStatus {
+    min-height: 18px;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: rgba(186, 220, 240, 0.9);
+}
+
+.welcomePreviewLeaderboardStatus[data-tone='muted'] {
+    color: rgba(172, 205, 224, 0.88);
+}
+
+.welcomePreviewLeaderboardStatus[data-tone='info'] {
+    color: rgba(189, 225, 245, 0.98);
+}
+
+.welcomePreviewLeaderboardStatus[data-tone='success'] {
+    color: rgba(170, 246, 204, 0.97);
+}
+
+.welcomePreviewLeaderboardStatus[data-tone='error'] {
+    color: rgba(255, 183, 183, 0.97);
+}
+
+.welcomePreviewLeaderboardList {
+    display: grid;
+    gap: 8px;
+}
+
+.welcomePreviewAccountCard {
+    width: min(100%, 560px);
+}
+
+.welcomePreviewAccountTitle {
+    color: rgba(223, 244, 255, 0.98);
+}
+
+.welcomePreviewAccountBody {
+    display: grid;
+}
+
+.welcomePreviewAccountBody .welcomeAuthPanel {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.welcomePreviewDonateCard {
+    width: min(100%, 560px);
+}
+
+.welcomePreviewDonateTitle {
+    color: rgba(255, 232, 194, 0.98);
+}
+
+.welcomePreviewDonateBody {
+    display: grid;
+}
+
+.welcomePreviewDonateBody .donateInlinePanel {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.welcomePreviewDonateBody .donateInlineHeader {
+    display: none;
+}
+
+.welcomePreviewOnlineCard {
+    width: min(100%, 560px);
+}
+
+.welcomePreviewOnlineTitle {
+    color: rgba(217, 238, 255, 0.98);
+}
+
+.welcomePreviewOnlineBody {
+    display: grid;
+}
+
+.welcomePreviewOnlineBody .welcomeOnlineModeFlow {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.welcomePreviewOnlineBody .welcomeOnlineModeTitle {
+    display: none;
+}
+
+.welcomePreviewLeaderboardRow {
+    border: 1px solid rgba(132, 186, 239, 0.28);
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: grid;
+    gap: 5px;
+    background: linear-gradient(160deg, rgba(15, 34, 61, 0.74), rgba(8, 19, 37, 0.78));
+    box-shadow: inset 0 0 0 1px rgba(229, 241, 255, 0.04);
+}
+
+.welcomePreviewLeaderboardRow.is-first {
+    border-color: rgba(255, 220, 122, 0.64);
+    background: linear-gradient(160deg, rgba(87, 71, 34, 0.58), rgba(35, 29, 14, 0.6));
+}
+
+.welcomePreviewLeaderboardRow.is-viewer {
+    border-color: rgba(148, 224, 255, 0.68);
+    box-shadow:
+        inset 0 0 0 1px rgba(175, 230, 255, 0.26),
+        0 0 20px rgba(83, 170, 246, 0.12);
+}
+
+.welcomePreviewLeaderboardDivider {
+    padding: 9px 12px;
+    border: 1px dashed rgba(255, 223, 145, 0.34);
+    border-radius: 12px;
+    color: rgba(255, 231, 176, 0.96);
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: rgba(64, 45, 16, 0.26);
+}
+
+.welcomePreviewLeaderboardHead {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.welcomePreviewLeaderboardRank {
+    color: rgba(215, 233, 251, 0.95);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(22px, 2.4vw, 34px);
+    font-weight: 800;
+    text-align: right;
+    letter-spacing: 0.4px;
+}
+
+.welcomePreviewLeaderboardName {
+    min-width: 0;
+    color: #f1f8ff;
+    font-family: 'Sora', sans-serif;
+    font-size: clamp(18px, 2vw, 28px);
+    font-weight: 800;
+    line-height: 1.05;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.welcomePreviewLeaderboardScore {
+    color: #ffefc2;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(21px, 2.4vw, 34px);
+    font-weight: 800;
+    text-align: right;
+    line-height: 1;
+    letter-spacing: 0.35px;
+}
+
+.welcomePreviewLeaderboardMeta,
+.welcomePreviewLeaderboardEmpty {
+    color: rgba(188, 219, 243, 0.88);
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.28px;
+    line-height: 1.35;
+}
+
+.welcomePreviewLeaderboardEmpty {
+    padding: 18px 16px;
+    border: 1px dashed rgba(147, 193, 229, 0.28);
+    border-radius: 14px;
+    background: rgba(9, 20, 32, 0.56);
+}
+
+.welcomeShowroomBay[data-leaderboard-open='true'] #welcomeCarCanvas,
+.welcomeShowroomBay[data-leaderboard-open='true'] .welcomePreviewSweep,
+.welcomeShowroomBay[data-leaderboard-open='true'] .welcomeBayRings {
+    opacity: 1;
+    filter: none;
+}
+
+.welcomeShowroomBay[data-leaderboard-open='true'] .welcomeVehicleNav {
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
 .welcomeVehicleNav {
     position: absolute;
     z-index: 5;
@@ -5513,8 +6587,14 @@ body.race-intro-active #botPanel {
         gap: 8px;
     }
 
+    .welcomeAuthModeTabs {
+        grid-template-columns: 1fr;
+    }
+
     #welcomeStartBtn,
     #welcomeStartOnlineBtn,
+    #welcomeLeaderboardBtn,
+#welcomeAccountBtn,
     #welcomeDonateBtn {
         min-height: 54px;
         padding: 0 14px;
@@ -5523,6 +6603,8 @@ body.race-intro-active #botPanel {
 
     #welcomeStartBtn span,
     #welcomeStartOnlineBtn span,
+    #welcomeLeaderboardBtn span,
+#welcomeAccountBtn span,
     #welcomeDonateBtn span {
         font-size: 16px;
     }
@@ -5547,6 +6629,35 @@ body.race-intro-active #botPanel {
     .welcomeShowroomBay {
         border-radius: 16px;
         min-height: clamp(260px, 42vh, 360px);
+    }
+
+    .welcomePreviewLeaderboardOverlay {
+        inset: 10px;
+        padding: 10px;
+    }
+
+    .welcomePreviewLeaderboardCard {
+        padding: 12px;
+        gap: 10px;
+    }
+
+    .welcomePreviewLeaderboardHeader {
+        grid-template-columns: 1fr;
+        display: grid;
+    }
+
+    .welcomePreviewLeaderboardHeaderActions {
+        grid-auto-flow: row;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .welcomePreviewLeaderboardHead {
+        grid-template-columns: 52px minmax(0, 1fr);
+    }
+
+    .welcomePreviewLeaderboardScore {
+        grid-column: 2;
+        text-align: left;
     }
 
     .welcomePreviewLoading {
@@ -5592,10 +6703,6 @@ body.race-intro-active #botPanel {
 
     .welcomeVehicleNavNext {
         right: 8px;
-    }
-
-    #welcomeSelectedColorName {
-        font-size: 12px;
     }
 
     .welcomeLaunchCard {

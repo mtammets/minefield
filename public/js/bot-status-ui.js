@@ -1,4 +1,4 @@
-export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
+export function createBotStatusController({ toCssHex } = {}) {
     const listEl = document.getElementById('botList');
     if (!listEl) {
         return {
@@ -15,10 +15,8 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
             }
 
             if (!entries.length) {
-                if (lastRenderSignature !== '__empty__') {
-                    listEl.textContent = 'No bots available';
-                    lastRenderSignature = '__empty__';
-                }
+                listEl.innerHTML = '';
+                lastRenderSignature = '__empty__';
                 return;
             }
 
@@ -28,7 +26,6 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                     return [
                         bot.id || bot.collectorId || bot.name || '-',
                         bot.targetColorHex ?? '-',
-                        bot.targetLabel || '-',
                         bot.showSwatch === false ? 0 : 1,
                         bot.isPlayer ? 1 : 0,
                         bot.respawning ? 1 : 0,
@@ -48,12 +45,6 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                 .map((entry) => {
                     const bot = entry || {};
                     const targetHex = bot.targetColorHex ?? 0x6b84a5;
-                    const targetName =
-                        typeof bot.targetLabel === 'string'
-                            ? bot.targetLabel
-                            : bot.targetColorHex == null
-                              ? '-'
-                              : colorNameFromHex(targetHex);
                     const showSwatch = bot.showSwatch !== false && bot.targetColorHex != null;
                     const livesRemaining = Math.max(0, Math.floor(Number(bot.livesRemaining) || 0));
                     const maxLives = Math.max(
@@ -64,44 +55,35 @@ export function createBotStatusController({ toCssHex, colorNameFromHex } = {}) {
                     const respawning = Boolean(bot.respawning);
                     const respawnMsRemaining = Math.max(0, Number(bot.respawnMsRemaining) || 0);
                     const respawnSeconds = Math.max(0, Math.ceil(respawnMsRemaining / 1000));
-                    const statusLabel = respawning
-                        ? respawnSeconds > 0
-                            ? `RESPAWN ${respawnSeconds}s`
-                            : 'RESPAWN'
-                        : clampedLives > 0
-                          ? `LIVES ${clampedLives}/${maxLives}`
-                          : 'OUT';
                     const livesPips = Array.from({ length: maxLives }, (_, index) => {
                         const active = index < clampedLives;
                         return `<span class="botLifePip ${active ? 'active' : 'empty'}" aria-hidden="true"></span>`;
                     }).join('');
-                    const rowClasses = `botRow${respawning ? ' botRespawning' : ''}${bot.isPlayer ? ' botRowPlayer' : ''}`;
+                    const rowClasses = `botRow${respawning ? ' botRespawning' : ''}${bot.isPlayer ? ' botRowPlayer' : ''}${clampedLives <= 0 ? ' botRowOut' : ''}`;
                     const score = Math.max(0, Math.floor(Number(bot.score) || 0));
                     const collectedCount = Math.max(0, Math.floor(Number(bot.collectedCount) || 0));
                     const displayName = escapeHtml(bot.name || 'Bot');
-                    const displayTargetName = escapeHtml(targetName);
-                    const displayStatusLabel = escapeHtml(statusLabel);
-                    const swatchColor = sanitizeCssColor(toCssHex(targetHex));
+                    const swatchColor = sanitizeCssColor(toCssHex?.(targetHex) || '');
+                    const stateChip = respawning
+                        ? `<span class="botStateChip">${respawnSeconds}s</span>`
+                        : clampedLives <= 0
+                          ? '<span class="botStateChip is-out">OUT</span>'
+                          : '';
                     return (
                         `<div class="${rowClasses}">` +
+                        '<div class="botMain">' +
+                        '<div class="botIdentity">' +
+                        `${showSwatch ? `<span class="botSwatch" style="background:${swatchColor}"></span>` : ''}` +
                         `<span class="botName">${displayName}</span>` +
-                        `<span class="botTarget">` +
-                        `${
-                            showSwatch
-                                ? `<span class="botSwatch" style="background:${swatchColor}"></span>`
-                                : ''
-                        }` +
-                        `<span class="botTargetLabel">${displayTargetName}</span>` +
-                        `</span>` +
-                        `<span class="botLivesWrap">` +
-                        `<span class="botLivesPips">${livesPips}</span>` +
-                        `<span class="botLivesLabel">${displayStatusLabel}</span>` +
-                        `</span>` +
-                        `<span class="botStats">` +
+                        `${stateChip}` +
+                        '</div>' +
                         `<span class="botScore">${score}</span>` +
+                        '</div>' +
+                        '<div class="botSubline">' +
+                        `<span class="botLivesPips">${livesPips}</span>` +
                         `<span class="botCollected">x${collectedCount}</span>` +
-                        `</span>` +
-                        `</div>`
+                        '</div>' +
+                        '</div>'
                     );
                 })
                 .join('');

@@ -33,6 +33,7 @@ import {
     setPlayerRoofMenuModeFromUv,
     getPlayerRoofMenuMode,
     setPlayerCarBodyColor,
+    setPlayerCarAppearance,
     getPlayerCarEditableParts,
     setPlayerCarPartVisibility,
     setAllPlayerCarPartsVisibility,
@@ -89,8 +90,11 @@ import {
     readPersistedGraphicsQualityMode,
     persistGraphicsQualityMode,
     resolvePlayerCarColorHex,
-    getCarColorPresetIndex,
-    readPersistedPlayerCarColorHex,
+    resolvePlayerCarSkinId,
+    getCarSkinPresetIndex,
+    getCarSkinPresetById,
+    readPersistedPlayerCarSkinId,
+    persistPlayerCarSkinId,
     persistPlayerCarColorHex,
 } from './player-persistence.js';
 import { readPersistedCrashDamageTuning, persistCrashDamageTuning } from './crash-damage-tuning.js';
@@ -111,7 +115,10 @@ import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
 import { createMapUiController } from './map-ui.js';
 import { createAudioSystem } from './audio-system.js';
+import { createAuthController } from './auth-controller.js';
+import { createGlobalLeaderboardController } from './global-leaderboard.js';
 import { createPickupScoringSystem } from './scoring-system.js';
+import { createBotsMissionDirector, getBotsMissionMaxBotCount } from './bots-mission-director.js';
 import { createScorePopupController } from './score-popup-ui.js';
 import { createGroundLayerDebugController } from './ground-layer-debug-ui.js';
 import { createVehicleWeaponSystem } from './vehicle-weapon-system.js';
@@ -171,7 +178,9 @@ const PLAYER_SPAWN_CLEARANCE = 3.4;
 const PLAYER_SPAWN_BOT_CLEARANCE = 14;
 const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5]);
 const crashParts = getPlayerCarCrashParts();
-const selectedCarColorHex = resolvePlayerCarColorHex(readPersistedPlayerCarColorHex());
+const selectedCarSkinId = resolvePlayerCarSkinId(readPersistedPlayerCarSkinId());
+const selectedCarSkinPreset = getCarSkinPresetById(selectedCarSkinId);
+const selectedCarColorHex = resolvePlayerCarColorHex(selectedCarSkinPreset.bodyColor);
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
     GRAPHICS_QUALITY_MODES.balanced
 );
@@ -180,6 +189,7 @@ const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persisted
     : GRAPHICS_QUALITY_MODES.balanced;
 const runtimeState = createGameRuntimeState({
     selectedCarColorHex,
+    selectedCarSkinId,
     batteryMax: BATTERY_MAX,
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
@@ -193,7 +203,10 @@ runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
 const performanceDiagnosticsController = createNoopPerformanceDiagnosticsController();
 
-setPlayerCarBodyColor(runtimeState.selectedCarColorHex);
+setPlayerCarAppearance({
+    skinId: runtimeState.selectedCarSkinId,
+    colorHex: runtimeState.selectedCarColorHex,
+});
 setPlayerTopSpeedLimitKph(
     readPersistedPlayerTopSpeedKph({
         getPlayerTopSpeedLimit,
@@ -213,10 +226,11 @@ const {
     toCssHex,
     colorNameFromHex,
     statusDefaultText: STATUS_DEFAULT_TEXT,
-    resolvePlayerCarColorHex,
-    getCarColorPresetIndex,
+    resolvePlayerCarSkinId,
+    getCarSkinPresetIndex,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
+    getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
     getGameSessionController: () => runtimeState.gameSessionController,
     getInputController: () => runtimeState.inputController,
     getGameMode: () => runtimeState.gameMode,
@@ -224,8 +238,45 @@ const {
     getMineInventorySnapshot: () =>
         runtimeState.mineController?.getLocalInventorySnapshot?.() || null,
     onPrepareStart: prepareRuntimeForSessionStart,
+    onAuthSubmit(mode, credentials) {
+        if (mode === 'sign-up') {
+            return runtimeState.authController?.signUp?.(credentials);
+        }
+        return runtimeState.authController?.signIn?.(credentials);
+    },
+    onAuthSignOut() {
+        return runtimeState.authController?.signOut?.();
+    },
+    onAuthChangePassword(credentials) {
+        return runtimeState.authController?.changePassword?.(credentials);
+    },
+    onAuthDeleteAccount() {
+        return runtimeState.authController?.deleteAccount?.();
+    },
+    onRefreshGlobalLeaderboard() {
+        return runtimeState.globalLeaderboardController?.refresh?.();
+    },
+    getAuthState: () => runtimeState.authController?.getState?.() || null,
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
 });
+runtimeState.authController = createAuthController({
+    onStateChanged(state) {
+        welcomeModalUi.setAuthState?.(state);
+        runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
+    },
+});
+welcomeModalUi.setAuthState?.(runtimeState.authController.getState?.());
+runtimeState.globalLeaderboardController = createGlobalLeaderboardController({
+    onStateChanged(state) {
+        finalScoreboardUi.setGlobalLeaderboard?.(state);
+        welcomeModalUi.setGlobalLeaderboard?.(state);
+    },
+    getAccessToken: () => runtimeState.authController?.getAccessToken?.() || '',
+    getAuthState: () => runtimeState.authController?.getState?.() || null,
+});
+welcomeModalUi.setGlobalLeaderboard?.(runtimeState.globalLeaderboardController.getState?.());
+void runtimeState.authController.initialize().catch(() => {});
+void runtimeState.globalLeaderboardController.initialize();
 
 async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null, options = null) {
     const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
@@ -1145,8 +1196,6 @@ const raceIntroController = createRaceIntroController({
 });
 const starsController = addStars(scene, camera);
 const SHOW_ONLY_LOCAL_SCORE_POPUPS = true;
-const SCORE_AUDIT_PEAK_COMBO_MIN = 1;
-const SCORE_AUDIT_PEAK_CHAIN_MIN = 1;
 const FAR_MINE_KILL_UI_DEFER_DISTANCE_SQ = BOT_MINE_DEBRIS_MID_DISTANCE_SQ;
 const DEFERRED_MINE_KILL_UI_QUEUE_MAX = 24;
 const DEFERRED_MINE_KILL_UI_TASKS_PER_FRAME = 1;
@@ -1180,7 +1229,6 @@ function resolveCollectorWorldPosition(collectorId = 'player') {
 function spawnScorePopup({
     collectorId = 'player',
     pointsAwarded = 0,
-    scoring = null,
     sourceLabel = '',
 } = {}) {
     const awarded = Math.max(0, Math.round(Number(pointsAwarded) || 0));
@@ -1194,10 +1242,6 @@ function spawnScorePopup({
     runtimeState.scorePopupController?.spawn?.({
         collectorId,
         pointsAwarded: awarded,
-        comboCount: Math.max(0, Math.round(Number(scoring?.comboCount) || 0)),
-        comboMultiplier: Math.max(1, Number(scoring?.comboMultiplier) || 1),
-        riskBonus: Math.max(0, Number(scoring?.riskBonus) || 0),
-        endgameBonus: Math.max(0, Number(scoring?.endgameBonus) || 0),
         sourceLabel,
         resolveWorldPosition: () => resolveCollectorWorldPosition(collectorId),
         worldPosition: resolveCollectorWorldPosition(collectorId),
@@ -1338,26 +1382,170 @@ function buildPickupStatusContext(pointsAwarded, scoring) {
     return {
         batteryPercent: Math.round(runtimeState.playerBattery),
         pointsAwarded: Math.max(0, Math.round(Number(pointsAwarded) || 0)),
-        comboCount: Math.max(0, Math.round(Number(scoring?.comboCount) || 0)),
-        comboMultiplier: Math.max(1, Number(scoring?.comboMultiplier) || 1),
-        riskBonus: Math.max(0, Number(scoring?.riskBonus) || 0),
-        endgameBonus: Math.max(0, Number(scoring?.endgameBonus) || 0),
+        sourceLabel:
+            typeof scoring?.label === 'string' && scoring.label.trim() ? scoring.label.trim() : 'Pickup',
     };
 }
 
-function buildMinePopupScoring(scoring = null) {
-    if (!scoring || typeof scoring !== 'object') {
+function getObjectiveRoundProgress(options = null) {
+    if (runtimeState.gameMode === 'bots') {
+        const missionProgress = runtimeState.botsMissionDirector?.getScoreProgress?.(options);
+        if (Number.isFinite(missionProgress)) {
+            return THREE.MathUtils.clamp(Number(missionProgress) || 0, 0, 1);
+        }
+    }
+    return THREE.MathUtils.clamp(
+        runtimeState.totalCollectedCount / Math.max(1, ROUND_TOTAL_PICKUPS),
+        0,
+        1
+    );
+}
+
+function buildCurrentPlayerHudState() {
+    if (runtimeState.gameMode !== 'bots') {
         return null;
     }
     return {
-        comboCount: Math.max(0, Math.round(Number(scoring.comboCount ?? scoring.chainCount) || 0)),
-        comboMultiplier: Math.max(
-            1,
-            Number(scoring.comboMultiplier ?? scoring.chainMultiplier) || 1
-        ),
-        riskBonus: Math.max(0, Number(scoring.riskBonus) || 0),
-        endgameBonus: Math.max(0, Number(scoring.endgameBonus) || 0),
+        name: 'YOU',
+        targetLabel: 'PLAYER',
+        showSwatch: false,
+        score: Math.max(0, Math.round(Number(runtimeState.playerScore) || 0)),
+        collectedCount: Math.max(0, Math.round(Number(runtimeState.playerCollectedCount) || 0)),
+        livesRemaining: Math.max(0, Math.round(Number(runtimeState.playerCarsRemaining) || 0)),
+        maxLives: PLAYER_CAR_POOL_SIZE,
+        respawning: Boolean(runtimeState.isCarDestroyed && runtimeState.playerCarsRemaining > 0),
+        respawnMsRemaining: 0,
+        isPlayer: true,
     };
+}
+
+function buildBotHudStateWithScores() {
+    const botEntries = runtimeState.botTrafficSystem?.getHudState?.() || EMPTY_ARRAY;
+    return botEntries.map((bot) => ({
+        ...bot,
+        score: Math.max(
+            0,
+            Math.round(
+                Number(bot?.score) ||
+                    Number(runtimeState.scoringSystem?.getCollectorScore?.(bot?.collectorId || '') || 0)
+            )
+        ),
+    }));
+}
+
+function renderBotsHud() {
+    botStatusUi.render(buildBotHudStateWithScores(), buildCurrentPlayerHudState());
+}
+
+function primeCollectiblesForMissionCollectors() {
+    const collectors = [{ id: 'player', position: car.position }];
+    const botCollectors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
+    for (let i = 0; i < botCollectors.length; i += 1) {
+        collectors.push(botCollectors[i]);
+    }
+    runtimeState.collectibleSystem?.primeForCollectors?.(collectors);
+}
+
+function resetMissionCollectorChains() {
+    runtimeState.scoringSystem?.resetCollectorCombo?.('player');
+    runtimeState.scoringSystem?.resetCollectorMineChain?.('player');
+    const botEntries = runtimeState.botTrafficSystem?.getHudState?.() || EMPTY_ARRAY;
+    for (let i = 0; i < botEntries.length; i += 1) {
+        const collectorId =
+            typeof botEntries[i]?.collectorId === 'string' ? botEntries[i].collectorId : '';
+        if (!collectorId) {
+            continue;
+        }
+        runtimeState.scoringSystem?.resetCollectorCombo?.(collectorId);
+        runtimeState.scoringSystem?.resetCollectorMineChain?.(collectorId);
+    }
+}
+
+function prepareBotsMissionEnvironment(mission = null) {
+    if (!mission || typeof mission !== 'object') {
+        return;
+    }
+
+    clearDeferredMineKillUiTasks();
+    runtimeState.gameSessionController?.clearPendingRespawn?.();
+    runtimeState.gameSessionController?.clearDriveKeys?.();
+    runtimeState.scorePopupController?.clear?.();
+    runtimeState.crashDebrisController?.clearDebris?.();
+    runtimeState.crashDebrisController?.resetPlayerDamageState?.();
+    runtimeState.mineController?.resetRoundInventory?.();
+    runtimeState.mineController?.clearAll?.();
+    runtimeState.weaponSystem?.setTriggerHeld?.(false);
+    runtimeState.weaponSystem?.resetRound?.();
+
+    const nextSpawnState = resolveRandomPlayerSpawnState();
+    if (nextSpawnState?.position) {
+        playerSpawnState.position.copy(nextSpawnState.position);
+        if (Number.isFinite(nextSpawnState.rotationY)) {
+            playerSpawnState.rotationY = nextSpawnState.rotationY;
+        }
+    }
+
+    runtimeState.isCarDestroyed = false;
+    car.visible = true;
+    car.position.copy(playerSpawnState.position);
+    car.position.y = getGroundHeightAt(car.position.x, car.position.z) + PLAYER_RIDE_HEIGHT;
+    car.rotation.set(0, playerSpawnState.rotationY, 0);
+    chargingZoneController.reset();
+    chargingProgressHudController.reset();
+    skidMarkController.reset?.();
+    runtimeState.playerBattery = BATTERY_MAX;
+    setPlayerBatteryLevel(1);
+    setPlayerBatteryDepleted(false);
+    runtimeState.isBatteryDepleted = false;
+    runtimeState.gameSessionController?.setBatteryDepletedState?.(false, { showStatus: false });
+    initializePlayerPhysics(car);
+    runtimeState.physicsAccumulator = 0;
+    runtimeState.collectibleSystem?.reset?.({
+        seedOffset: Math.floor(Math.random() * 0x7fffffff),
+        finiteTotalPickups: mission.pickupPool,
+        maxActivePickups: mission.maxActivePickups,
+    });
+    runtimeState.collectibleSystem?.setEnabled?.(true);
+    runtimeState.botTrafficSystem?.setEnabled?.(true);
+    runtimeState.botTrafficSystem?.reset?.({
+        sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
+        activeBotCount: mission.botCount,
+        resetCollectedCount: false,
+        resetLives: true,
+        respawnProtectionMs: 0,
+    });
+    runtimeState.pickupRoundFinished = false;
+    primeCollectiblesForMissionCollectors();
+    resetMissionCollectorChains();
+    renderBotsHud();
+    runtimeState.weaponSystem?.grantWeapon?.();
+}
+
+function setBotsMissionTransitionLocked(nextLocked = true) {
+    const locked = Boolean(nextLocked);
+    runtimeState.gameSessionController?.clearDriveKeys?.();
+    runtimeState.collectibleSystem?.setEnabled?.(!locked);
+    runtimeState.botTrafficSystem?.setEnabled?.(!locked && runtimeState.gameMode === 'bots');
+    runtimeState.weaponSystem?.setTriggerHeld?.(false);
+}
+
+function finalizeBotsCampaign(result = {}) {
+    runtimeState.gameSessionController?.clearDriveKeys?.();
+    runtimeState.weaponSystem?.setTriggerHeld?.(false);
+    runtimeState.botTrafficSystem?.setEnabled?.(runtimeState.gameMode === 'bots');
+    renderBotsHud();
+    runtimeState.gameSessionController?.finalizePickupRound?.(
+        Math.max(0, Math.round(Number(result?.totalPickups) || 0)),
+        Math.max(0, Math.round(Number(result?.totalCollected) || 0)),
+        {
+            titleText: result?.titleText || '',
+            summaryText: result?.summaryText || '',
+            finishLabel: result?.finishLabel || '',
+            finishReason: result?.finishReason || '',
+            totalScore: Math.max(0, Math.round(Number(result?.totalScore) || 0)),
+            deferUiFrames: 2,
+        }
+    );
 }
 
 function resolveMineOwnerCollectorId(ownerId = '') {
@@ -1417,12 +1605,6 @@ function ensureCollectorScoreAudit(collectorId = 'player') {
         mineKillPoints: 0,
         autoCollectedCount: 0,
         autoCollectedPoints: 0,
-        bestPickupCombo: 0,
-        bestMineChain: 0,
-        riskPickupCount: 0,
-        endgamePickupCount: 0,
-        endgameMineKillCount: 0,
-        antiFarmMineKillCount: 0,
     };
     runtimeState.scoreAuditByCollectorId.set(collectorKey, entry);
     return entry;
@@ -1440,16 +1622,6 @@ function recordPickupScoreAudit({
     const entry = ensureCollectorScoreAudit(collectorId);
     entry.pickupCount += 1;
     entry.pickupPoints += points;
-    entry.bestPickupCombo = Math.max(
-        Math.max(0, Math.round(Number(entry.bestPickupCombo) || 0)),
-        Math.max(SCORE_AUDIT_PEAK_COMBO_MIN, Math.round(Number(scoring?.comboCount) || 0))
-    );
-    if (Number(scoring?.riskBonus) > 0.08) {
-        entry.riskPickupCount += 1;
-    }
-    if (Number(scoring?.endgameBonus) > 0.05) {
-        entry.endgamePickupCount += 1;
-    }
 }
 
 function recordMineKillScoreAudit({
@@ -1464,19 +1636,6 @@ function recordMineKillScoreAudit({
     const entry = ensureCollectorScoreAudit(collectorId);
     entry.mineKillCount += 1;
     entry.mineKillPoints += points;
-    entry.bestMineChain = Math.max(
-        Math.max(0, Math.round(Number(entry.bestMineChain) || 0)),
-        Math.max(
-            SCORE_AUDIT_PEAK_CHAIN_MIN,
-            Math.round(Number(scoring?.chainCount ?? scoring?.comboCount) || 0)
-        )
-    );
-    if (Number(scoring?.endgameBonus) > 0.01) {
-        entry.endgameMineKillCount += 1;
-    }
-    if (Number(scoring?.antiFarmMultiplier) > 0 && Number(scoring?.antiFarmMultiplier) < 0.999) {
-        entry.antiFarmMineKillCount += 1;
-    }
 }
 
 function recordMineDeploymentAudit({ collectorId = 'player', mineId = '' } = {}) {
@@ -1555,12 +1714,6 @@ function getCollectorScoreAuditSnapshot(collectorId = 'player') {
         mineKillPoints: Math.max(0, Math.round(Number(entry.mineKillPoints) || 0)),
         autoCollectedCount: Math.max(0, Math.round(Number(entry.autoCollectedCount) || 0)),
         autoCollectedPoints: Math.max(0, Math.round(Number(entry.autoCollectedPoints) || 0)),
-        bestPickupCombo: Math.max(0, Math.round(Number(entry.bestPickupCombo) || 0)),
-        bestMineChain: Math.max(0, Math.round(Number(entry.bestMineChain) || 0)),
-        riskPickupCount: Math.max(0, Math.round(Number(entry.riskPickupCount) || 0)),
-        endgamePickupCount: Math.max(0, Math.round(Number(entry.endgamePickupCount) || 0)),
-        endgameMineKillCount: Math.max(0, Math.round(Number(entry.endgameMineKillCount) || 0)),
-        antiFarmMineKillCount: Math.max(0, Math.round(Number(entry.antiFarmMineKillCount) || 0)),
     };
 }
 
@@ -1836,11 +1989,7 @@ function awardLocalMineKillScore({ ownerCollectorId = '', targetCollectorId = ''
         return null;
     }
     const targetId = typeof targetCollectorId === 'string' ? targetCollectorId.trim() : '';
-    const roundProgress = THREE.MathUtils.clamp(
-        runtimeState.totalCollectedCount / Math.max(1, ROUND_TOTAL_PICKUPS),
-        0,
-        1
-    );
+    const roundProgress = getObjectiveRoundProgress();
     const mineScoreEvent = runtimeState.scoringSystem?.awardMineKill?.({
         collectorId,
         targetId: targetId || '__target__',
@@ -1924,10 +2073,9 @@ function handleVehicleWeaponBotDestroyed({
         spawnScorePopup({
             collectorId: 'player',
             pointsAwarded,
-            scoring: buildMinePopupScoring(mineScoreEvent?.scoring || null),
-            sourceLabel: 'precision fire',
+            sourceLabel: 'BOT KO',
         });
-        objectiveUi.showInfo(`${resolvedTargetName} neutralized: +${pointsAwarded} pts.`, 1450);
+        objectiveUi.showInfo(`${resolvedTargetName} out: +${pointsAwarded} pts.`, 1450);
         return;
     }
 
@@ -2007,16 +2155,11 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                                 Math.round(Number(response?.pointsAwarded) || 0)
                             ),
                             totalScore: runtimeState.totalScore,
-                            comboCount: Math.max(
-                                0,
-                                Math.round(Number(response?.scoring?.comboCount) || 0)
-                            ),
                         });
                         spawnScorePopup({
                             collectorId: 'player',
                             pointsAwarded: response.pointsAwarded,
-                            scoring: response.scoring,
-                            sourceLabel: 'online',
+                            sourceLabel: 'PICKUP',
                         });
                         runtimeState.audioController?.onPickupCollected?.({
                             collectorId: 'player',
@@ -2035,11 +2178,9 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
 
             confirmCollection?.();
             const nextTotalCollected = runtimeState.totalCollectedCount + 1;
-            const roundProgress = THREE.MathUtils.clamp(
-                nextTotalCollected / Math.max(1, ROUND_TOTAL_PICKUPS),
-                0,
-                1
-            );
+            const roundProgress = getObjectiveRoundProgress({
+                additionalPlayerPickups: 1,
+            });
             const scoreEvent = awardLocalPickupScore({
                 collectorId: 'player',
                 speedKph: Math.abs(getVehicleState()?.speed || 0),
@@ -2057,27 +2198,28 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                 totalScore: runtimeState.totalScore,
                 playerScore: runtimeState.playerScore,
                 totalCollectedCount: runtimeState.totalCollectedCount,
-                comboCount: Math.max(0, Math.round(Number(scoreEvent?.scoring?.comboCount) || 0)),
             });
             spawnScorePopup({
                 collectorId: 'player',
                 pointsAwarded: scoreEvent?.pointsAwarded || 0,
-                scoring: scoreEvent?.scoring || null,
+                sourceLabel: 'PICKUP',
             });
             objectiveUi.flashCorrect(
                 pickupColorHex,
                 buildPickupStatusContext(scoreEvent?.pointsAwarded || 0, scoreEvent?.scoring)
             );
+            runtimeState.botsMissionDirector?.handlePickupCollected?.({
+                collectorId: 'player',
+            });
+            if (runtimeState.gameMode === 'bots') {
+                renderBotsHud();
+            }
             return;
         }
         if (runtimeState.gameMode === 'bots') {
             confirmCollection?.();
             const nextTotalCollected = runtimeState.totalCollectedCount + 1;
-            const roundProgress = THREE.MathUtils.clamp(
-                nextTotalCollected / Math.max(1, ROUND_TOTAL_PICKUPS),
-                0,
-                1
-            );
+            const roundProgress = getObjectiveRoundProgress();
             const scoreEvent = awardLocalPickupScore({
                 collectorId,
                 speedKph: Math.abs(
@@ -2092,13 +2234,16 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                 pointsAwarded: Math.max(0, Math.round(Number(scoreEvent?.pointsAwarded) || 0)),
                 totalScore: runtimeState.totalScore,
                 totalCollectedCount: runtimeState.totalCollectedCount,
-                comboCount: Math.max(0, Math.round(Number(scoreEvent?.scoring?.comboCount) || 0)),
             });
             spawnScorePopup({
                 collectorId,
                 pointsAwarded: scoreEvent?.pointsAwarded || 0,
-                scoring: scoreEvent?.scoring || null,
+                sourceLabel: 'PICKUP',
             });
+            runtimeState.botsMissionDirector?.handlePickupCollected?.({
+                collectorId,
+            });
+            renderBotsHud();
         }
     },
     onExhausted: ({ totalPickups, collectedPickups }) => {
@@ -2114,6 +2259,13 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             totalScore: runtimeState.totalScore,
             gameMode: runtimeState.gameMode,
         });
+        if (runtimeState.gameMode === 'bots') {
+            runtimeState.botsMissionDirector?.handlePickupsExhausted?.({
+                totalPickups,
+                collectedPickups,
+            });
+            return;
+        }
         runtimeState.gameSessionController.finalizePickupRound(totalPickups, collectedPickups, {
             totalScore: runtimeState.totalScore,
         });
@@ -2133,7 +2285,7 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
 });
 runtimeState.collectibleSystem = collectibleSystem;
 runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
-    botCount: 1,
+    botCount: getBotsMissionMaxBotCount(),
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
     getGroundHeightAt,
     cityMapLayout,
@@ -2145,6 +2297,8 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
             respawnAtMs: Number.isFinite(botEvent?.respawnAtMs) ? botEvent.respawnAtMs : 0,
             position: serializeEventPosition(botEvent?.position),
         });
+        runtimeState.botsMissionDirector?.handleBotDestroyed?.(botEvent);
+        renderBotsHud();
     },
     onBotRespawn(botEvent = null) {
         recordPerformanceDiagnosticEvent('bot_respawned', {
@@ -2157,6 +2311,7 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
             ),
             position: serializeEventPosition(botEvent?.position),
         });
+        renderBotsHud();
     },
 });
 runtimeState.weaponSystem = createVehicleWeaponSystem({
@@ -2374,10 +2529,9 @@ runtimeState.mineController = createMineSystemController({
         spawnScorePopup({
             collectorId: 'player',
             pointsAwarded,
-            scoring: buildMinePopupScoring(ownerScoring),
-            sourceLabel: 'mine kill',
+            sourceLabel: 'MINE KILL',
         });
-        objectiveUi.showInfo(`Mine kill: +${pointsAwarded} pts.`, 1400);
+        objectiveUi.showInfo(`Mine kill +${pointsAwarded} pts.`, 1400);
     },
     onLocalMineHit({ position, ownerName }) {
         if (runtimeState.isCarDestroyed || runtimeState.pickupRoundFinished) {
@@ -2463,8 +2617,7 @@ runtimeState.mineController = createMineSystemController({
                 const popupPayload = {
                     collectorId: ownerCollectorId,
                     pointsAwarded,
-                    scoring: buildMinePopupScoring(mineScoreEvent?.scoring || null),
-                    sourceLabel: 'mine kill',
+                    sourceLabel: 'MINE KILL',
                 };
                 if (shouldDeferMineKillUi) {
                     queueDeferredMineKillUiTask(
@@ -2481,7 +2634,7 @@ runtimeState.mineController = createMineSystemController({
                 }
             }
             if (ownerCollectorId === 'player' && pointsAwarded > 0) {
-                const statusMessage = `Mine kill on ${target.label || target.id}: +${pointsAwarded} pts.`;
+                const statusMessage = `${target.label || target.id} out: +${pointsAwarded} pts.`;
                 if (shouldDeferMineKillUi) {
                     queueDeferredMineKillUiTask(
                         () => {
@@ -2528,8 +2681,11 @@ runtimeState.multiplayerController = createMultiplayerController({
     getGroundHeightAt,
     applyNetworkCollisionImpulse: applyNetworkVehicleCollisionImpulse,
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
+    getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
+    getAuthAccessToken: () => runtimeState.authController?.getAccessToken?.() || '',
+    getAuthState: () => runtimeState.authController?.getState?.() || null,
     objectiveUi,
     onMineSnapshot(mineSnapshots) {
         runtimeState.mineController?.applyRoomMineSnapshot?.(mineSnapshots);
@@ -2627,7 +2783,6 @@ runtimeState.multiplayerController = createMultiplayerController({
                 spawnScorePopup({
                     collectorId: entryId,
                     pointsAwarded: delta,
-                    sourceLabel: 'online',
                 });
             }
         }
@@ -2659,6 +2814,9 @@ runtimeState.multiplayerController = createMultiplayerController({
             );
         }
     },
+    onLeaveRoom() {
+        runtimeState.inputController?.returnToWelcome?.();
+    },
 });
 
 runtimeState.gameSessionController = createGameSessionController({
@@ -2675,8 +2833,12 @@ runtimeState.gameSessionController = createGameSessionController({
     setPlayerBatteryLevel,
     setPlayerBatteryDepleted,
     setPlayerCarBodyColor,
+    setPlayerCarAppearance,
     resolvePlayerCarColorHex,
+    resolvePlayerCarSkinId,
+    getCarSkinPresetById,
     persistPlayerCarColorHex,
+    persistPlayerCarSkinId,
     objectiveUi,
     controlsHelpUi,
     botStatusUi,
@@ -2762,6 +2924,8 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     onRoundFinalized(event = null) {
         clearDeferredMineKillUiTasks();
+        runtimeState.botsMissionDirector?.clear?.();
+        objectiveUi.clearMissionState?.();
         recordPerformanceDiagnosticEvent('round_finalized', {
             gameMode: runtimeState.gameMode,
             finishReason: typeof event?.finishReason === 'string' ? event.finishReason : '',
@@ -2775,6 +2939,18 @@ runtimeState.gameSessionController = createGameSessionController({
             bonusPickupsAwarded: Math.max(0, Math.round(Number(event?.bonusPickupsAwarded) || 0)),
             scoreboardEntries: Math.max(0, Math.round(Number(event?.scoreboardEntries) || 0)),
         });
+        const leaderboardSubmission = resolveLocalLeaderboardSubmission({
+            event,
+            selectedCarSkinId: runtimeState.selectedCarSkinId,
+            gameMode: runtimeState.gameMode,
+            fallbackScore: runtimeState.playerScore,
+            fallbackCollectedCount: runtimeState.playerCollectedCount,
+        });
+        if (leaderboardSubmission) {
+            void runtimeState.globalLeaderboardController?.submitRoundResult?.(
+                leaderboardSubmission
+            );
+        }
     },
     onPlayerRespawned(event = null) {
         recordPerformanceDiagnosticEvent('player_respawned', {
@@ -2796,6 +2972,12 @@ runtimeState.gameSessionController = createGameSessionController({
             position: serializeEventPosition(event?.position),
             collision: sanitizeSerializable(event?.collision, null),
         });
+        if (
+            runtimeState.gameMode === 'bots' &&
+            Math.max(0, Math.round(Number(event?.carsRemaining) || 0)) <= 0
+        ) {
+            runtimeState.botsMissionDirector?.handlePlayerOutOfCars?.(event);
+        }
     },
     getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,
     setPlayerCarsRemaining(value) {
@@ -2823,6 +3005,10 @@ runtimeState.gameSessionController = createGameSessionController({
     setSelectedCarColorHex(value) {
         runtimeState.selectedCarColorHex = value >>> 0;
     },
+    getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
+    setSelectedCarSkinId(value) {
+        runtimeState.selectedCarSkinId = resolvePlayerCarSkinId(value);
+    },
     getGameMode: () => runtimeState.gameMode,
     setGameMode(mode) {
         runtimeState.gameMode = mode === 'online' ? 'online' : 'bots';
@@ -2833,10 +3019,35 @@ runtimeState.gameSessionController = createGameSessionController({
     startOnlineRoomFlow(startContext) {
         runtimeState.multiplayerController?.startOnlineRoomFlow?.(startContext);
     },
+    prepareBotsSession() {
+        runtimeState.botsMissionDirector?.startCampaign?.({
+            shouldStartCountdown: false,
+        });
+    },
     clearScorePopups() {
         runtimeState.scorePopupController?.clear?.();
     },
     audioController: runtimeState.audioController,
+});
+
+runtimeState.botsMissionDirector = createBotsMissionDirector({
+    objectiveUi,
+    getGameMode: () => runtimeState.gameMode,
+    prepareMission(mission) {
+        prepareBotsMissionEnvironment(mission);
+    },
+    setMissionTransitionLocked(nextLocked) {
+        setBotsMissionTransitionLocked(nextLocked);
+    },
+    startMissionCountdown() {
+        runtimeState.gameSessionController?.startRaceIntroSequence?.();
+    },
+    finalizeCampaign(result) {
+        finalizeBotsCampaign(result);
+    },
+    getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
+    getPlayerScore: () => runtimeState.playerScore,
+    getTotalScore: () => runtimeState.totalScore,
 });
 
 installRuntimeGraphicsRecoveryGuards();
@@ -3389,22 +3600,10 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsWorldMapOpen: () => runtimeState.isWorldMapOpen,
 });
 
-const initialPlayerHudState =
-    runtimeState.gameMode === 'bots'
-        ? {
-              name: 'YOU',
-              targetLabel: 'PLAYER',
-              showSwatch: false,
-              score: runtimeState.playerScore,
-              collectedCount: runtimeState.playerCollectedCount,
-              livesRemaining: runtimeState.playerCarsRemaining,
-              maxLives: PLAYER_CAR_POOL_SIZE,
-              respawning: false,
-              respawnMsRemaining: 0,
-              isPlayer: true,
-          }
-        : null;
-botStatusUi.render(runtimeState.botTrafficSystem.getHudState(), initialPlayerHudState);
+runtimeState.botTrafficSystem.setActiveBotCount?.(0);
+runtimeState.botTrafficSystem.setEnabled?.(false);
+objectiveUi.clearMissionState?.();
+renderBotsHud();
 initializePlayerPhysics(car);
 runtimeState.crashDebrisController.resetPlayerDamageState();
 setPlayerBatteryLevel(1);
@@ -3414,5 +3613,47 @@ if (welcomeModalUi.isAvailable()) {
 }
 
 runtimeState.multiplayerController.initialize();
+runtimeState.multiplayerController.handleAuthenticationStateChanged?.(
+    runtimeState.authController?.getState?.() || null
+);
 runtimeState.inputController.initialize();
 runtimeState.gameLoopController.start();
+
+function resolveLocalLeaderboardSubmission({
+    event = null,
+    selectedCarSkinId = '',
+    gameMode = 'bots',
+    fallbackScore = 0,
+    fallbackCollectedCount = 0,
+} = {}) {
+    const scoreboard = Array.isArray(event?.scoreboard) ? event.scoreboard : [];
+    const selfEntry =
+        scoreboard.find((entry) => entry?.isSelf === true) ||
+        scoreboard.find((entry) => {
+            const collectorId =
+                typeof entry?.collectorId === 'string'
+                    ? entry.collectorId.trim().toLowerCase()
+                    : '';
+            return collectorId === 'player';
+        }) ||
+        scoreboard.find((entry) => {
+            const name = typeof entry?.name === 'string' ? entry.name.trim().toLowerCase() : '';
+            return name === 'you';
+        }) ||
+        null;
+
+    return {
+        playerName: typeof selfEntry?.name === 'string' ? selfEntry.name : '',
+        score: Math.max(0, Math.round(Number(selfEntry?.score) || Number(fallbackScore) || 0)),
+        collectedCount: Math.max(
+            0,
+            Math.round(Number(selfEntry?.collectedCount) || Number(fallbackCollectedCount) || 0)
+        ),
+        totalPickups: Math.max(0, Math.round(Number(event?.totalPickups) || 0)),
+        totalScore: Math.max(0, Math.round(Number(event?.totalScore) || 0)),
+        finishReason: typeof event?.finishReason === 'string' ? event.finishReason : '',
+        winnerLabel: typeof event?.winnerLabel === 'string' ? event.winnerLabel : '',
+        carSkinId: typeof selectedCarSkinId === 'string' ? selectedCarSkinId : '',
+        gameMode: typeof gameMode === 'string' ? gameMode : 'bots',
+    };
+}

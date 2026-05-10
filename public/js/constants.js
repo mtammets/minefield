@@ -1,4 +1,15 @@
+import {
+    CAR_SKIN_PRESETS,
+    DEFAULT_PLAYER_CAR_SKIN_ID,
+    DEFAULT_PLAYER_CAR_COLOR_HEX,
+} from './car-skins.js';
+
 export const MAX_PHYSICS_STEPS_PER_FRAME = 6;
+export {
+    CAR_SKIN_PRESETS,
+    DEFAULT_PLAYER_CAR_SKIN_ID,
+    DEFAULT_PLAYER_CAR_COLOR_HEX,
+} from './car-skins.js';
 
 export const COLOR_NAMES = {
     [0x7cf9ff]: 'Neo Turquoise',
@@ -8,20 +19,20 @@ export const COLOR_NAMES = {
 };
 
 export const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
+export const PLAYER_CAR_SKIN_STORAGE_KEY = 'silentdrift-player-car-skin-id';
 export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
 export const GRAPHICS_QUALITY_MODE_STORAGE_KEY = 'silentdrift-graphics-quality-mode';
 export const PLAYER_TOP_SPEED_LIMIT_STEP_KPH = 5;
 export const PLAYER_TOP_SPEED_LIMIT_MIN_KPH = 50;
 export const PLAYER_TOP_SPEED_LIMIT_MAX_KPH = 160;
-export const CAR_COLOR_PRESETS = [
-    { hex: 0x2d67a6, name: 'Cobalt Blue' },
-    { hex: 0xd34545, name: 'Racing Red' },
-    { hex: 0xff9f3f, name: 'Sunset Orange' },
-    { hex: 0x3ca86f, name: 'Neon Green' },
-    { hex: 0x8c9bb0, name: 'Titanium Gray' },
-    { hex: 0xe4edf6, name: 'Arctic White' },
-];
-export const DEFAULT_PLAYER_CAR_COLOR_HEX = CAR_COLOR_PRESETS[0].hex;
+export const CAR_COLOR_PRESETS = Object.freeze(
+    CAR_SKIN_PRESETS.map((preset) =>
+        Object.freeze({
+            hex: preset.bodyColor >>> 0,
+            name: preset.name,
+        })
+    )
+);
 
 export const DEBRIS_GRAVITY = 26;
 export const DEBRIS_DRAG = 2.2;

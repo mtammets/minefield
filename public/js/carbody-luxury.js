@@ -1,5 +1,10 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { PLAYER_TOP_SPEED_LIMIT_MIN_KPH, PLAYER_TOP_SPEED_LIMIT_MAX_KPH } from './constants.js';
+import {
+    DEFAULT_PLAYER_CAR_SKIN_ID,
+    getCarSkinPresetById,
+    resolvePlayerCarSkinId,
+} from './car-skins.js';
 
 const ACCENT_LED_COLOR = 0x64f4ff; // Cool neon turquoise
 const ACCENT_LED_SECONDARY_COLOR = 0xff4f7f; // Warm neon red-pink
@@ -23,6 +28,236 @@ const TAILLIGHT_BRAKE_DISTANCE_FACTOR = 1.08;
 const TAILLIGHT_RUNNING_EMISSIVE = 0.62;
 const TAILLIGHT_BRAKE_EMISSIVE = 2.45;
 const WIRELESS_CHARGE_GLOW_COLOR = 0x88eeff;
+const CAR_SKIN_TEXTURE_CACHE = new Map();
+const CAR_SKIN_BODY_TEXTURE_CACHE = new Map();
+const DEFAULT_SKIN_MATERIAL = 'gloss-paint';
+const BODY_FINISH_PROFILES = Object.freeze({
+    'gloss-paint': Object.freeze({
+        panelMetalness: 1,
+        panelRoughness: 0.17,
+        panelClearcoat: 1,
+        panelClearcoatRoughness: 0.05,
+        panelReflectivity: 0.9,
+        panelSheen: 0.04,
+        panelSheenRoughness: 0.45,
+        panelSheenColorSource: 'stripe',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.3,
+        panelIridescenceThicknessRange: Object.freeze([120, 220]),
+        panelEmissiveScale: 0.95,
+        decalMetalness: 0.22,
+        decalRoughness: 0.22,
+        decalOpacity: 0.98,
+        topPulseScale: 1,
+        sidePulseScale: 1,
+        frontPulseScale: 1,
+        rearPulseScale: 1,
+        railPulseScale: 1,
+        railMetalness: 0.78,
+        railRoughness: 0.2,
+        railColorScalar: 0.42,
+    }),
+    'neon-lacquer': Object.freeze({
+        panelMetalness: 0.98,
+        panelRoughness: 0.14,
+        panelClearcoat: 1,
+        panelClearcoatRoughness: 0.04,
+        panelReflectivity: 0.96,
+        panelSheen: 0.08,
+        panelSheenRoughness: 0.34,
+        panelSheenColorSource: 'glow',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.3,
+        panelIridescenceThicknessRange: Object.freeze([120, 220]),
+        panelEmissiveScale: 1.08,
+        decalMetalness: 0.18,
+        decalRoughness: 0.2,
+        decalOpacity: 0.98,
+        topPulseScale: 1.12,
+        sidePulseScale: 1.08,
+        frontPulseScale: 1.02,
+        rearPulseScale: 1.06,
+        railPulseScale: 1.2,
+        railMetalness: 0.82,
+        railRoughness: 0.16,
+        railColorScalar: 0.46,
+    }),
+    'satin-stealth': Object.freeze({
+        panelMetalness: 0.7,
+        panelRoughness: 0.28,
+        panelClearcoat: 0.42,
+        panelClearcoatRoughness: 0.24,
+        panelReflectivity: 0.62,
+        panelSheen: 0.05,
+        panelSheenRoughness: 0.58,
+        panelSheenColorSource: 'accentSecondary',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.3,
+        panelIridescenceThicknessRange: Object.freeze([120, 220]),
+        panelEmissiveScale: 0.84,
+        decalMetalness: 0.08,
+        decalRoughness: 0.42,
+        decalOpacity: 0.86,
+        topPulseScale: 0.84,
+        sidePulseScale: 0.82,
+        frontPulseScale: 0.86,
+        rearPulseScale: 0.9,
+        railPulseScale: 0.8,
+        railMetalness: 0.58,
+        railRoughness: 0.34,
+        railColorScalar: 0.32,
+    }),
+    'ceramic-pearl': Object.freeze({
+        panelMetalness: 0.8,
+        panelRoughness: 0.1,
+        panelClearcoat: 1,
+        panelClearcoatRoughness: 0.03,
+        panelReflectivity: 0.98,
+        panelSheen: 0.22,
+        panelSheenRoughness: 0.2,
+        panelSheenColorSource: 'stripe',
+        panelIridescence: 0.12,
+        panelIridescenceIOR: 1.34,
+        panelIridescenceThicknessRange: Object.freeze([150, 280]),
+        panelEmissiveScale: 1,
+        decalMetalness: 0.14,
+        decalRoughness: 0.18,
+        decalOpacity: 0.94,
+        topPulseScale: 1.02,
+        sidePulseScale: 0.96,
+        frontPulseScale: 0.98,
+        rearPulseScale: 1,
+        railPulseScale: 1.04,
+        railMetalness: 0.8,
+        railRoughness: 0.14,
+        railColorScalar: 0.44,
+    }),
+    'matte-camo': Object.freeze({
+        panelMetalness: 0.42,
+        panelRoughness: 0.56,
+        panelClearcoat: 0.16,
+        panelClearcoatRoughness: 0.44,
+        panelReflectivity: 0.32,
+        panelSheen: 0,
+        panelSheenRoughness: 1,
+        panelSheenColorSource: 'accentSecondary',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.3,
+        panelIridescenceThicknessRange: Object.freeze([120, 220]),
+        panelEmissiveScale: 0.62,
+        decalMetalness: 0.04,
+        decalRoughness: 0.66,
+        decalOpacity: 0.84,
+        topPulseScale: 0.72,
+        sidePulseScale: 0.72,
+        frontPulseScale: 0.76,
+        rearPulseScale: 0.78,
+        railPulseScale: 0.68,
+        railMetalness: 0.42,
+        railRoughness: 0.48,
+        railColorScalar: 0.26,
+    }),
+    'forged-carbon': Object.freeze({
+        panelMetalness: 0.94,
+        panelRoughness: 0.32,
+        panelClearcoat: 0.88,
+        panelClearcoatRoughness: 0.14,
+        panelReflectivity: 0.86,
+        panelSheen: 0.14,
+        panelSheenRoughness: 0.36,
+        panelSheenColorSource: 'accentColor',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.32,
+        panelIridescenceThicknessRange: Object.freeze([140, 240]),
+        panelEmissiveScale: 0.88,
+        decalMetalness: 0.32,
+        decalRoughness: 0.3,
+        decalOpacity: 0.9,
+        topPulseScale: 0.94,
+        sidePulseScale: 0.9,
+        frontPulseScale: 0.92,
+        rearPulseScale: 0.94,
+        railPulseScale: 1.12,
+        railMetalness: 0.88,
+        railRoughness: 0.24,
+        railColorScalar: 0.38,
+    }),
+    'brushed-metal': Object.freeze({
+        panelMetalness: 1,
+        panelRoughness: 0.18,
+        panelClearcoat: 0.62,
+        panelClearcoatRoughness: 0.16,
+        panelReflectivity: 1,
+        panelSheen: 0.08,
+        panelSheenRoughness: 0.28,
+        panelSheenColorSource: 'stripe',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.32,
+        panelIridescenceThicknessRange: Object.freeze([140, 240]),
+        panelEmissiveScale: 0.82,
+        decalMetalness: 0.36,
+        decalRoughness: 0.22,
+        decalOpacity: 0.88,
+        topPulseScale: 0.9,
+        sidePulseScale: 0.88,
+        frontPulseScale: 0.9,
+        rearPulseScale: 0.92,
+        railPulseScale: 0.98,
+        railMetalness: 0.9,
+        railRoughness: 0.18,
+        railColorScalar: 0.4,
+    }),
+    'anodized-iridescent': Object.freeze({
+        panelMetalness: 1,
+        panelRoughness: 0.11,
+        panelClearcoat: 1,
+        panelClearcoatRoughness: 0.04,
+        panelReflectivity: 1,
+        panelSheen: 0.16,
+        panelSheenRoughness: 0.18,
+        panelSheenColorSource: 'glow',
+        panelIridescence: 0.95,
+        panelIridescenceIOR: 1.48,
+        panelIridescenceThicknessRange: Object.freeze([180, 420]),
+        panelEmissiveScale: 1.04,
+        decalMetalness: 0.22,
+        decalRoughness: 0.16,
+        decalOpacity: 0.94,
+        topPulseScale: 1.16,
+        sidePulseScale: 1.1,
+        frontPulseScale: 1.06,
+        rearPulseScale: 1.08,
+        railPulseScale: 1.22,
+        railMetalness: 0.86,
+        railRoughness: 0.14,
+        railColorScalar: 0.5,
+    }),
+    'industrial-coat': Object.freeze({
+        panelMetalness: 0.82,
+        panelRoughness: 0.24,
+        panelClearcoat: 0.46,
+        panelClearcoatRoughness: 0.2,
+        panelReflectivity: 0.7,
+        panelSheen: 0.04,
+        panelSheenRoughness: 0.42,
+        panelSheenColorSource: 'accentSecondary',
+        panelIridescence: 0,
+        panelIridescenceIOR: 1.3,
+        panelIridescenceThicknessRange: Object.freeze([120, 220]),
+        panelEmissiveScale: 0.8,
+        decalMetalness: 0.18,
+        decalRoughness: 0.28,
+        decalOpacity: 0.92,
+        topPulseScale: 0.92,
+        sidePulseScale: 0.9,
+        frontPulseScale: 0.94,
+        rearPulseScale: 0.96,
+        railPulseScale: 1,
+        railMetalness: 0.78,
+        railRoughness: 0.22,
+        railColorScalar: 0.34,
+    }),
+});
 
 // Helper for creating tuned physical materials.
 function createMaterial({
@@ -88,6 +323,7 @@ function createRoundedBoxGeometry(width, height, depth, cornerRadius = 0, corner
 function addLuxuryBody(car, bodyConfig = {}) {
     const {
         bodyColor = 0x2d67a6,
+        skinId = DEFAULT_PLAYER_CAR_SKIN_ID,
         bodyDimensions = DEFAULT_BODY_DIMENSIONS,
         wheelPositions = DEFAULT_WHEEL_POSITIONS,
         displayName = 'MAREK',
@@ -141,6 +377,8 @@ function addLuxuryBody(car, bodyConfig = {}) {
         panel.castShadow = true;
         panel.receiveShadow = true;
         bodyShellGroup.add(panel);
+        panelMaterial.userData.baseEmissiveIntensity = emissiveIntensity;
+        panelMaterial.userData.basePanelRoughness = roughness;
         bodyPanelMaterials.push(panelMaterial);
 
         bodyPanels.push({
@@ -167,6 +405,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
         emissiveIntensity: 0.32,
         roughness: 0.17,
     });
+    const skinController = createBodySkinController(bodyShellGroup, bodyDimensions);
     const wirelessChargeMarker = addUnderbodyWirelessChargeMarker(bodyShellGroup, bodyDimensions);
     const roofBrandingController = addVoltlineRoofBranding(
         roofAssemblyGroup,
@@ -184,6 +423,16 @@ function addLuxuryBody(car, bodyConfig = {}) {
         );
     }
 
+    const currentAppearance = {
+        skinId: resolvePlayerCarSkinId(skinId),
+        colorHex: normalizeBodyColorHex(bodyColor, DEFAULT_PLAYER_CAR_SKIN_ID),
+    };
+
+    applyAppearance({
+        skinId: currentAppearance.skinId,
+        colorHex: currentAppearance.colorHex,
+    });
+
     return {
         bodyDimensions,
         wheelPositions,
@@ -197,6 +446,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
         update(vehicleState, dt) {
             roofBrandingController?.update?.(vehicleState, dt);
             wirelessChargeMarker?.update?.(vehicleState, dt);
+            skinController?.update?.(vehicleState, dt);
         },
         setBatteryLevel(levelNormalized) {
             roofBrandingController?.setBatteryLevel?.(levelNormalized);
@@ -214,12 +464,52 @@ function addLuxuryBody(car, bodyConfig = {}) {
             return roofBrandingController?.getMode?.() || null;
         },
         setBodyColor(colorHex) {
-            const color = new THREE.Color(colorHex);
-            for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
-                bodyPanelMaterials[i].color.copy(color);
-            }
+            applyAppearance({ colorHex });
+        },
+        setSkin(nextSkinId) {
+            applyAppearance({ skinId: nextSkinId });
+        },
+        setAppearance(appearance = null) {
+            applyAppearance(appearance);
         },
     };
+
+    function applyAppearance(appearance = null) {
+        const nextSkinPreset = getCarSkinPresetById(appearance?.skinId ?? currentAppearance.skinId);
+        const finishProfile = getSkinFinishProfile(nextSkinPreset);
+        const bodyTexture = getCarSkinBodyTexture(nextSkinPreset);
+        const shouldUsePresetColor =
+            appearance == null ||
+            typeof appearance !== 'object' ||
+            !Object.prototype.hasOwnProperty.call(appearance, 'colorHex');
+        const nextColorHex = shouldUsePresetColor
+            ? appearance && typeof appearance === 'object' && 'skinId' in appearance
+                ? nextSkinPreset.bodyColor >>> 0
+                : currentAppearance.colorHex
+            : normalizeBodyColorHex(appearance.colorHex, nextSkinPreset.id);
+        const nextColor = new THREE.Color(nextColorHex);
+        const bodyEmissive = new THREE.Color(nextSkinPreset.accentColorSecondary).multiplyScalar(
+            0.14
+        );
+
+        currentAppearance.skinId = nextSkinPreset.id;
+        currentAppearance.colorHex = nextColorHex;
+
+        for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
+            applySkinFinishToBodyMaterial(
+                bodyPanelMaterials[i],
+                finishProfile,
+                nextSkinPreset,
+                nextColor,
+                bodyEmissive,
+                bodyTexture
+            );
+        }
+
+        skinController?.applySkin?.(nextSkinPreset, nextColorHex);
+        wirelessChargeMarker?.setTheme?.(nextSkinPreset);
+        roofBrandingController?.setTheme?.(nextSkinPreset);
+    }
 }
 
 function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
@@ -235,15 +525,16 @@ function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
     const coreRadius = innerRadius * 0.55;
     const markerBaseThickness = 0.012;
 
+    const basePlateMaterial = new THREE.MeshStandardMaterial({
+        color: 0x0b1624,
+        emissive: 0x12324a,
+        emissiveIntensity: 0.2,
+        metalness: 0.62,
+        roughness: 0.38,
+    });
     const basePlate = new THREE.Mesh(
         new THREE.CylinderGeometry(outerRadius * 1.02, outerRadius * 1.06, markerBaseThickness, 56),
-        new THREE.MeshStandardMaterial({
-            color: 0x0b1624,
-            emissive: 0x12324a,
-            emissiveIntensity: 0.2,
-            metalness: 0.62,
-            roughness: 0.38,
-        })
+        basePlateMaterial
     );
     basePlate.rotation.x = Math.PI * 0.5;
     basePlate.position.z = -markerBaseThickness * 0.5;
@@ -326,6 +617,7 @@ function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
     const glowState = { phase: Math.random() * Math.PI * 2 };
     let chargingBlend = 0;
 
+    applyTheme();
     applyGlow(0.5, 0);
     return {
         update(vehicleState = {}, deltaTime = 1 / 60) {
@@ -345,7 +637,20 @@ function addUnderbodyWirelessChargeMarker(parent, bodyDimensions) {
             const pulse = 0.5 + 0.5 * Math.sin(glowState.phase);
             applyGlow(pulse, chargingBlend);
         },
+        setTheme(skinPreset = null) {
+            applyTheme(skinPreset);
+        },
     };
+
+    function applyTheme(skinPreset = null) {
+        const themeColor = new THREE.Color(skinPreset?.glowColor ?? WIRELESS_CHARGE_GLOW_COLOR);
+        haloMaterial.color.copy(themeColor);
+        ringMaterial.color.copy(themeColor);
+        chargeSweepMaterial.color.copy(themeColor);
+        basePlateMaterial.emissive.copy(themeColor).multiplyScalar(0.14);
+        coreDisk.material.emissive.copy(themeColor);
+        symbol.material.color.copy(themeColor);
+    }
 
     function applyGlow(pulse, chargingLevel) {
         const chargedPulse = 0.5 + 0.5 * Math.sin(glowState.phase * (1.7 + chargingLevel * 1.8));
@@ -560,6 +865,8 @@ function addVoltlineRoofBranding(
         lastVehicleState: {},
     };
 
+    applyTheme();
+
     function setActiveModeByIndex(nextIndex) {
         const modeCount = modeOrder.length;
         const wrappedIndex = ((nextIndex % modeCount) + modeCount) % modeCount;
@@ -716,7 +1023,20 @@ function addVoltlineRoofBranding(
         getMode() {
             return brandState.activeMode;
         },
+        setTheme(skinPreset = null) {
+            applyTheme(skinPreset);
+        },
     };
+
+    function applyTheme(skinPreset = null) {
+        const accentColor = new THREE.Color(skinPreset?.accentColor ?? 0x9ceaff);
+        const stripeColor = new THREE.Color(skinPreset?.stripeColor ?? 0xc3f2ff);
+        const secondaryColor = new THREE.Color(skinPreset?.accentColorSecondary ?? 0x314258);
+        logoPlateMaterial.emissive.copy(accentColor);
+        shimmerMaterial.color.copy(stripeColor);
+        badgeBase.material.emissive.copy(secondaryColor).multiplyScalar(0.42);
+        trim.material.emissive.copy(accentColor).multiplyScalar(0.18);
+    }
 }
 
 function addPlayerNameDisplay(parent, playerName, bodyDimensions) {
@@ -764,6 +1084,1544 @@ function addPlayerNameDisplay(parent, playerName, bodyDimensions) {
     badgeGroup.add(wordmark);
 
     return badgeGroup;
+}
+
+function createBodySkinController(parent, bodyDimensions) {
+    const overlayGroup = new THREE.Group();
+    overlayGroup.name = 'body_skin_overlay_group';
+    parent.add(overlayGroup);
+
+    const topMaterial = createSkinDecalMaterial();
+    const sideLeftMaterial = createSkinDecalMaterial();
+    const sideRightMaterial = createSkinDecalMaterial();
+    const frontMaterial = createSkinDecalMaterial();
+    const rearMaterial = createSkinDecalMaterial();
+    const railLeftMaterial = createMaterial({
+        color: 0x2a465c,
+        emissive: 0x63d8ff,
+        emissiveIntensity: 0.48,
+        metalness: 0.78,
+        roughness: 0.2,
+        clearcoat: 1,
+        clearcoatRoughness: 0.03,
+    });
+    const railRightMaterial = railLeftMaterial.clone();
+
+    const bodyCenterY = 0.56;
+    const bodyCenterZ = 0.06;
+    const topY = bodyCenterY + bodyDimensions.height * 0.5 + 0.009;
+    const sideY = bodyCenterY + 0.02;
+    const sideX = bodyDimensions.width * 0.5 + 0.008;
+    const noseZ = bodyCenterZ + bodyDimensions.depth * 0.5 + 0.006;
+    const tailZ = bodyCenterZ - bodyDimensions.depth * 0.5 - 0.006;
+
+    const topDecal = new THREE.Mesh(
+        new THREE.PlaneGeometry(bodyDimensions.width * 0.82, bodyDimensions.depth * 0.88),
+        topMaterial
+    );
+    topDecal.rotation.x = -Math.PI * 0.5;
+    topDecal.position.set(0, topY, bodyCenterZ);
+    overlayGroup.add(topDecal);
+
+    const sideGeometry = new THREE.PlaneGeometry(
+        bodyDimensions.depth * 0.82,
+        bodyDimensions.height * 0.46
+    );
+    const leftSideDecal = new THREE.Mesh(sideGeometry, sideLeftMaterial);
+    leftSideDecal.rotation.y = Math.PI * 0.5;
+    leftSideDecal.position.set(-sideX, sideY, bodyCenterZ);
+    overlayGroup.add(leftSideDecal);
+
+    const rightSideDecal = new THREE.Mesh(sideGeometry.clone(), sideRightMaterial);
+    rightSideDecal.rotation.y = -Math.PI * 0.5;
+    rightSideDecal.position.set(sideX, sideY, bodyCenterZ);
+    overlayGroup.add(rightSideDecal);
+
+    const frontDecal = new THREE.Mesh(
+        new THREE.PlaneGeometry(bodyDimensions.width * 0.74, bodyDimensions.height * 0.28),
+        frontMaterial
+    );
+    frontDecal.position.set(0, bodyCenterY + 0.01, noseZ);
+    overlayGroup.add(frontDecal);
+
+    const rearDecal = new THREE.Mesh(
+        new THREE.PlaneGeometry(bodyDimensions.width * 0.74, bodyDimensions.height * 0.24),
+        rearMaterial
+    );
+    rearDecal.rotation.y = Math.PI;
+    rearDecal.position.set(0, bodyCenterY + 0.02, tailZ);
+    overlayGroup.add(rearDecal);
+
+    const railGeometry = new THREE.BoxGeometry(0.03, 0.018, bodyDimensions.depth * 0.82);
+    const leftRail = new THREE.Mesh(railGeometry, railLeftMaterial);
+    leftRail.position.set(-(bodyDimensions.width * 0.5 + 0.022), topY - 0.028, bodyCenterZ);
+    overlayGroup.add(leftRail);
+
+    const rightRail = new THREE.Mesh(railGeometry.clone(), railRightMaterial);
+    rightRail.position.set(bodyDimensions.width * 0.5 + 0.022, topY - 0.028, bodyCenterZ);
+    overlayGroup.add(rightRail);
+
+    const skinState = {
+        phase: Math.random() * Math.PI * 2,
+        skinId: DEFAULT_PLAYER_CAR_SKIN_ID,
+        finishProfile: getSkinFinishProfile(getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID)),
+    };
+
+    applySkin(getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID));
+
+    return {
+        applySkin,
+        update(vehicleState = {}, deltaTime = 1 / 60) {
+            const dt = Math.min(deltaTime || 1 / 60, 0.05);
+            const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.speed || 0) / 58, 0, 1);
+            const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.throttle || 0), 0, 1);
+            const steerRatio = THREE.MathUtils.clamp(Math.abs(vehicleState.steerInput || 0), 0, 1);
+            const activity = THREE.MathUtils.clamp(
+                speedRatio * 0.58 + throttleRatio * 0.28 + steerRatio * 0.22,
+                0,
+                1.3
+            );
+            skinState.phase += dt * (2.6 + activity * 3.8);
+            const pulse = 0.5 + 0.5 * Math.sin(skinState.phase);
+            const secondaryPulse = 0.5 + 0.5 * Math.sin(skinState.phase * 1.6 + 0.55);
+            const finishProfile = skinState.finishProfile;
+
+            topMaterial.emissiveIntensity =
+                (0.52 + pulse * 0.26 + activity * 0.2) * finishProfile.topPulseScale;
+            sideLeftMaterial.emissiveIntensity =
+                (0.34 + secondaryPulse * 0.18 + activity * 0.22) * finishProfile.sidePulseScale;
+            sideRightMaterial.emissiveIntensity = sideLeftMaterial.emissiveIntensity;
+            frontMaterial.emissiveIntensity =
+                (0.46 + secondaryPulse * 0.18 + activity * 0.16) * finishProfile.frontPulseScale;
+            rearMaterial.emissiveIntensity =
+                (0.5 + pulse * 0.22 + activity * 0.18) * finishProfile.rearPulseScale;
+            railLeftMaterial.emissiveIntensity =
+                (0.42 + pulse * 0.24 + activity * 0.3) * finishProfile.railPulseScale;
+            railRightMaterial.emissiveIntensity = railLeftMaterial.emissiveIntensity;
+        },
+    };
+
+    function applySkin(skinPreset = null) {
+        const preset =
+            skinPreset && typeof skinPreset === 'object'
+                ? skinPreset
+                : getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID);
+        const finishProfile = getSkinFinishProfile(preset);
+        const topTexture = getCarSkinTexture(preset, 'top');
+        const sideTexture = getCarSkinTexture(preset, 'side');
+        const frontTexture = getCarSkinTexture(preset, 'front');
+        const rearTexture = getCarSkinTexture(preset, 'rear');
+        const accentColor = new THREE.Color(preset.accentColor);
+        const stripeColor = new THREE.Color(preset.stripeColor);
+        const glowColor = new THREE.Color(preset.glowColor);
+
+        skinState.skinId = preset.id;
+        skinState.finishProfile = finishProfile;
+
+        applySkinTexture(topMaterial, topTexture, accentColor, finishProfile, 'top');
+        applySkinTexture(sideLeftMaterial, sideTexture, accentColor, finishProfile, 'side');
+        applySkinTexture(sideRightMaterial, sideTexture, accentColor, finishProfile, 'side');
+        applySkinTexture(frontMaterial, frontTexture, stripeColor, finishProfile, 'front');
+        applySkinTexture(rearMaterial, rearTexture, stripeColor, finishProfile, 'rear');
+        railLeftMaterial.color.copy(glowColor).multiplyScalar(finishProfile.railColorScalar);
+        railLeftMaterial.emissive.copy(glowColor);
+        railLeftMaterial.metalness = finishProfile.railMetalness;
+        railLeftMaterial.roughness = finishProfile.railRoughness;
+        railRightMaterial.color.copy(glowColor).multiplyScalar(finishProfile.railColorScalar);
+        railRightMaterial.emissive.copy(glowColor);
+        railRightMaterial.metalness = finishProfile.railMetalness;
+        railRightMaterial.roughness = finishProfile.railRoughness;
+    }
+}
+
+function createSkinDecalMaterial() {
+    return new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        transparent: true,
+        alphaTest: 0.08,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: 0.45,
+        metalness: 0.16,
+        roughness: 0.24,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+    });
+}
+
+function applySkinTexture(material, texture, emissiveColor, finishProfile, surface = 'side') {
+    material.map = texture;
+    material.emissiveMap = texture;
+    material.emissive.copy(emissiveColor);
+    material.metalness = finishProfile.decalMetalness;
+    material.roughness = finishProfile.decalRoughness;
+    material.opacity =
+        surface === 'front' || surface === 'rear'
+            ? Math.min(1, finishProfile.decalOpacity + 0.04)
+            : finishProfile.decalOpacity;
+    material.needsUpdate = true;
+}
+
+function getCarSkinTexture(skinPreset, surface = 'top') {
+    const cacheKey = `${skinPreset.id}:${surface}`;
+    if (CAR_SKIN_TEXTURE_CACHE.has(cacheKey)) {
+        return CAR_SKIN_TEXTURE_CACHE.get(cacheKey);
+    }
+
+    const texture = createCarSkinTexture(skinPreset, surface);
+    CAR_SKIN_TEXTURE_CACHE.set(cacheKey, texture);
+    return texture;
+}
+
+function getCarSkinBodyTexture(skinPreset) {
+    const cacheKey = `${skinPreset.id}:body`;
+    if (CAR_SKIN_BODY_TEXTURE_CACHE.has(cacheKey)) {
+        return CAR_SKIN_BODY_TEXTURE_CACHE.get(cacheKey);
+    }
+
+    const texture = createCarSkinBodyTexture(skinPreset);
+    CAR_SKIN_BODY_TEXTURE_CACHE.set(cacheKey, texture);
+    return texture;
+}
+
+function createCarSkinBodyTexture(skinPreset) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawSkinMaterialBase(ctx, canvas.width, canvas.height, skinPreset, 'body');
+    drawBodyTextureOverlay(ctx, canvas.width, canvas.height, skinPreset);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(1.35, 1.1);
+    texture.anisotropy = 8;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function createCarSkinTexture(skinPreset, surface = 'top') {
+    const dimensionsBySurface = {
+        top: { width: 1024, height: 1024 },
+        side: { width: 1024, height: 480 },
+        front: { width: 640, height: 320 },
+        rear: { width: 640, height: 320 },
+    };
+    const dimensions = dimensionsBySurface[surface] || dimensionsBySurface.top;
+    const canvas = document.createElement('canvas');
+    canvas.width = dimensions.width;
+    canvas.height = dimensions.height;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawSkinMaterialBase(ctx, canvas.width, canvas.height, skinPreset, surface);
+    drawUniversalSkinHighlights(ctx, canvas.width, canvas.height, skinPreset, surface);
+
+    switch (skinPreset.pattern) {
+        case 'chevron-burst':
+            drawChevronBurstSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'solar-sweep':
+            drawSolarSweepSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'circuit-bloom':
+            drawCircuitBloomSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'stealth-grid':
+            drawStealthGridSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'prism-veil':
+            drawPrismVeilSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'digital-camo':
+            drawDigitalCamoSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'carbon-weave':
+            drawCarbonWeaveSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'brushed-stream':
+            drawBrushedStreamSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'anodized-flow':
+            drawAnodizedFlowSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'hazard-strike':
+            drawHazardStrikeSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+        case 'twin-stripe':
+        default:
+            drawTwinStripeSkin(ctx, canvas.width, canvas.height, skinPreset, surface);
+            break;
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function drawSkinMaterialBase(ctx, width, height, skinPreset, surface) {
+    const materialKey =
+        skinPreset && typeof skinPreset.material === 'string'
+            ? skinPreset.material
+            : DEFAULT_SKIN_MATERIAL;
+    ctx.save();
+
+    if (materialKey === 'forged-carbon') {
+        const baseGradient = ctx.createLinearGradient(0, 0, width, height);
+        baseGradient.addColorStop(0, rgbaFromHex(skinPreset.accentColorSecondary, 0.88));
+        baseGradient.addColorStop(0.45, rgbaFromHex(skinPreset.bodyColor, 0.92));
+        baseGradient.addColorStop(1, rgbaFromHex(0x05070b, 0.96));
+        ctx.fillStyle = baseGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const tile = surface === 'top' ? 54 : 36;
+        for (let y = -tile; y <= height + tile; y += tile) {
+            for (let x = -tile; x <= width + tile; x += tile) {
+                const alpha = ((x + y) / tile) % 2 === 0 ? 0.16 : 0.08;
+                fillSkinPolygon(
+                    ctx,
+                    [
+                        [x, y + tile * 0.18],
+                        [x + tile * 0.62, y],
+                        [x + tile, y + tile * 0.32],
+                        [x + tile * 0.38, y + tile * 0.5],
+                    ],
+                    rgbaFromHex(skinPreset.stripeColor, alpha)
+                );
+                fillSkinPolygon(
+                    ctx,
+                    [
+                        [x + tile * 0.16, y + tile * 0.54],
+                        [x + tile * 0.78, y + tile * 0.34],
+                        [x + tile * 1.06, y + tile * 0.84],
+                        [x + tile * 0.42, y + tile],
+                    ],
+                    rgbaFromHex(skinPreset.accentColor, alpha * 0.78)
+                );
+            }
+        }
+        ctx.restore();
+        return;
+    }
+
+    if (materialKey === 'brushed-metal') {
+        const baseGradient = ctx.createLinearGradient(0, 0, width, height);
+        baseGradient.addColorStop(0, rgbaFromHex(skinPreset.stripeColor, 0.88));
+        baseGradient.addColorStop(0.28, rgbaFromHex(skinPreset.bodyColor, 0.94));
+        baseGradient.addColorStop(0.72, rgbaFromHex(skinPreset.accentColorSecondary, 0.8));
+        baseGradient.addColorStop(1, rgbaFromHex(skinPreset.bodyColor, 0.92));
+        ctx.fillStyle = baseGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const brushRandom = createSeededRandom(hashString(`${skinPreset.id}:${surface}:brush`));
+        const streakCount = surface === 'top' ? 180 : 110;
+        for (let i = 0; i < streakCount; i += 1) {
+            const y = brushRandom() * height;
+            const lineAlpha = 0.028 + brushRandom() * 0.042;
+            const lineWidth = 1 + brushRandom() * 2.4;
+            ctx.fillStyle = rgbaFromHex(
+                brushRandom() > 0.42 ? skinPreset.stripeColor : skinPreset.accentColor,
+                lineAlpha
+            );
+            ctx.fillRect(-width * 0.08, y, width * 1.16, lineWidth);
+        }
+        ctx.restore();
+        return;
+    }
+
+    if (materialKey === 'anodized-iridescent') {
+        const baseGradient = ctx.createLinearGradient(0, 0, width, height);
+        baseGradient.addColorStop(0, rgbaFromHex(0x2b1344, 0.94));
+        baseGradient.addColorStop(0.22, rgbaFromHex(skinPreset.bodyColor, 0.88));
+        baseGradient.addColorStop(0.46, rgbaFromHex(0x1bc7e8, 0.42));
+        baseGradient.addColorStop(0.7, rgbaFromHex(0xff8ad7, 0.38));
+        baseGradient.addColorStop(1, rgbaFromHex(0xf5bf63, 0.34));
+        ctx.fillStyle = baseGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        const bloomGradient = ctx.createRadialGradient(
+            width * 0.26,
+            height * 0.24,
+            0,
+            width * 0.26,
+            height * 0.24,
+            width * 0.7
+        );
+        bloomGradient.addColorStop(0, rgbaFromHex(0xffffff, 0.2));
+        bloomGradient.addColorStop(0.36, rgbaFromHex(skinPreset.glowColor, 0.14));
+        bloomGradient.addColorStop(1, rgbaFromHex(skinPreset.accentColorSecondary, 0));
+        ctx.fillStyle = bloomGradient;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+        return;
+    }
+
+    if (materialKey === 'matte-camo') {
+        const baseGradient = ctx.createLinearGradient(0, 0, width, height);
+        baseGradient.addColorStop(0, rgbaFromHex(skinPreset.bodyColor, 0.9));
+        baseGradient.addColorStop(0.54, rgbaFromHex(skinPreset.accentColorSecondary, 0.82));
+        baseGradient.addColorStop(1, rgbaFromHex(skinPreset.bodyColor, 0.94));
+        ctx.fillStyle = baseGradient;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+        return;
+    }
+
+    if (materialKey === 'industrial-coat') {
+        const baseGradient = ctx.createLinearGradient(0, 0, width, height);
+        baseGradient.addColorStop(0, rgbaFromHex(skinPreset.bodyColor, 0.9));
+        baseGradient.addColorStop(0.54, rgbaFromHex(skinPreset.accentColorSecondary, 0.88));
+        baseGradient.addColorStop(1, rgbaFromHex(skinPreset.bodyColor, 0.94));
+        ctx.fillStyle = baseGradient;
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.strokeStyle = rgbaFromHex(skinPreset.stripeColor, 0.08);
+        ctx.lineWidth = 2;
+        for (let x = width * 0.12; x < width; x += width * 0.14) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x - width * 0.06, height);
+            ctx.stroke();
+        }
+        ctx.restore();
+        return;
+    }
+
+    const defaultGradient = ctx.createLinearGradient(0, 0, width, height);
+    defaultGradient.addColorStop(0, rgbaFromHex(skinPreset.bodyColor, 0.9));
+    defaultGradient.addColorStop(0.5, rgbaFromHex(skinPreset.accentColorSecondary, 0.52));
+    defaultGradient.addColorStop(1, rgbaFromHex(skinPreset.bodyColor, 0.94));
+    ctx.fillStyle = defaultGradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+}
+
+function drawBodyTextureOverlay(ctx, width, height, skinPreset) {
+    switch (skinPreset.pattern) {
+        case 'digital-camo':
+            drawBodyDigitalCamoOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'carbon-weave':
+            drawBodyCarbonWeaveOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'brushed-stream':
+            drawBodyBrushedMetalOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'anodized-flow':
+            drawBodyAnodizedOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'hazard-strike':
+            drawBodyHazardOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'circuit-bloom':
+            drawBodyCircuitOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'stealth-grid':
+            drawBodyStealthOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'prism-veil':
+            drawBodyPrismOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'solar-sweep':
+            drawBodySolarOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'chevron-burst':
+            drawBodyChevronOverlay(ctx, width, height, skinPreset);
+            break;
+        case 'twin-stripe':
+        default:
+            drawBodyStripeOverlay(ctx, width, height, skinPreset);
+            break;
+    }
+}
+
+function drawUniversalSkinHighlights(ctx, width, height, skinPreset, surface) {
+    ctx.save();
+    const sweepGradient = ctx.createLinearGradient(0, 0, width, height);
+    sweepGradient.addColorStop(0, rgbaFromHex(skinPreset.accentColorSecondary, 0.06));
+    sweepGradient.addColorStop(0.48, 'rgba(255,255,255,0)');
+    sweepGradient.addColorStop(
+        1,
+        rgbaFromHex(skinPreset.accentColor, surface === 'top' ? 0.1 : 0.06)
+    );
+    ctx.fillStyle = sweepGradient;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = rgbaFromHex(skinPreset.stripeColor, 0.08);
+    ctx.lineWidth = surface === 'top' ? 4 : 3;
+    for (let i = 0; i < 4; i += 1) {
+        const offset = (i + 1) * (surface === 'top' ? height * 0.14 : width * 0.18);
+        ctx.beginPath();
+        if (surface === 'top') {
+            ctx.moveTo(width * 0.08, offset);
+            ctx.lineTo(width * 0.92, offset - height * 0.05);
+        } else {
+            ctx.moveTo(offset, height * 0.12);
+            ctx.lineTo(offset - width * 0.08, height * 0.88);
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+function drawTwinStripeSkin(ctx, width, height, skinPreset, surface) {
+    if (surface === 'top') {
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.3,
+            height * 0.08,
+            width * 0.12,
+            height * 0.82,
+            width * 0.06,
+            rgbaFromHex(skinPreset.stripeColor, 0.92)
+        );
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.58,
+            height * 0.08,
+            width * 0.12,
+            height * 0.82,
+            width * 0.06,
+            rgbaFromHex(skinPreset.stripeColor, 0.92)
+        );
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.465,
+            height * 0.12,
+            width * 0.07,
+            height * 0.74,
+            width * 0.035,
+            rgbaFromHex(skinPreset.accentColor, 0.78)
+        );
+        fillSkinTriangle(
+            ctx,
+            [
+                [width * 0.42, height * 0.12],
+                [width * 0.58, height * 0.12],
+                [width * 0.5, height * 0.02],
+            ],
+            rgbaFromHex(skinPreset.accentColor, 0.9)
+        );
+        return;
+    }
+    if (surface === 'side') {
+        fillSkinPolygon(
+            ctx,
+            [
+                [width * 0.08, height * 0.7],
+                [width * 0.36, height * 0.34],
+                [width * 0.82, height * 0.34],
+                [width * 0.92, height * 0.46],
+                [width * 0.42, height * 0.58],
+                [width * 0.16, height * 0.82],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.9)
+        );
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.18,
+            height * 0.54,
+            width * 0.52,
+            height * 0.08,
+            height * 0.04,
+            rgbaFromHex(skinPreset.accentColor, 0.72)
+        );
+        return;
+    }
+    if (surface === 'front') {
+        fillSkinTriangle(
+            ctx,
+            [
+                [width * 0.28, height * 0.86],
+                [width * 0.5, height * 0.16],
+                [width * 0.72, height * 0.86],
+            ],
+            rgbaFromHex(skinPreset.accentColor, 0.9)
+        );
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.12,
+            height * 0.68,
+            width * 0.76,
+            height * 0.08,
+            height * 0.04,
+            rgbaFromHex(skinPreset.stripeColor, 0.78)
+        );
+        return;
+    }
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.14,
+        height * 0.26,
+        width * 0.2,
+        height * 0.48,
+        height * 0.18,
+        rgbaFromHex(skinPreset.stripeColor, 0.84)
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.66,
+        height * 0.26,
+        width * 0.2,
+        height * 0.48,
+        height * 0.18,
+        rgbaFromHex(skinPreset.stripeColor, 0.84)
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.4,
+        height * 0.38,
+        width * 0.2,
+        height * 0.24,
+        height * 0.12,
+        rgbaFromHex(skinPreset.accentColor, 0.72)
+    );
+}
+
+function drawChevronBurstSkin(ctx, width, height, skinPreset, surface) {
+    if (surface === 'top') {
+        fillSkinPolygon(
+            ctx,
+            [
+                [width * 0.18, height * 0.88],
+                [width * 0.42, height * 0.14],
+                [width * 0.5, height * 0.24],
+                [width * 0.58, height * 0.14],
+                [width * 0.82, height * 0.88],
+                [width * 0.66, height * 0.88],
+                [width * 0.5, height * 0.38],
+                [width * 0.34, height * 0.88],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.9)
+        );
+        fillSkinTriangle(
+            ctx,
+            [
+                [width * 0.44, height * 0.02],
+                [width * 0.56, height * 0.02],
+                [width * 0.5, height * 0.18],
+            ],
+            rgbaFromHex(skinPreset.accentColor, 0.92)
+        );
+        return;
+    }
+    if (surface === 'side') {
+        fillSkinPolygon(
+            ctx,
+            [
+                [width * 0.14, height * 0.74],
+                [width * 0.42, height * 0.22],
+                [width * 0.68, height * 0.3],
+                [width * 0.88, height * 0.22],
+                [width * 0.56, height * 0.82],
+                [width * 0.32, height * 0.82],
+            ],
+            rgbaFromHex(skinPreset.accentColor, 0.88)
+        );
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.18,
+            height * 0.58,
+            width * 0.56,
+            height * 0.08,
+            height * 0.04,
+            rgbaFromHex(skinPreset.stripeColor, 0.82)
+        );
+        return;
+    }
+    fillSkinTriangle(
+        ctx,
+        [
+            [width * 0.16, height * 0.78],
+            [width * 0.5, height * 0.12],
+            [width * 0.84, height * 0.78],
+        ],
+        rgbaFromHex(skinPreset.stripeColor, 0.88)
+    );
+    fillSkinTriangle(
+        ctx,
+        [
+            [width * 0.32, height * 0.82],
+            [width * 0.5, height * 0.28],
+            [width * 0.68, height * 0.82],
+        ],
+        rgbaFromHex(skinPreset.accentColor, 0.76)
+    );
+}
+
+function drawSolarSweepSkin(ctx, width, height, skinPreset, surface) {
+    const bandGradient = ctx.createLinearGradient(0, height * 0.2, width, height * 0.8);
+    bandGradient.addColorStop(0, rgbaFromHex(skinPreset.stripeColor, 0.86));
+    bandGradient.addColorStop(0.42, rgbaFromHex(skinPreset.accentColor, 0.9));
+    bandGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.12));
+    ctx.fillStyle = bandGradient;
+    if (surface === 'top') {
+        ctx.beginPath();
+        ctx.moveTo(width * 0.12, height * 0.76);
+        ctx.bezierCurveTo(
+            width * 0.26,
+            height * 0.38,
+            width * 0.5,
+            height * 0.22,
+            width * 0.84,
+            height * 0.06
+        );
+        ctx.lineTo(width * 0.9, height * 0.2);
+        ctx.bezierCurveTo(
+            width * 0.6,
+            height * 0.36,
+            width * 0.36,
+            height * 0.52,
+            width * 0.2,
+            height * 0.88
+        );
+        ctx.closePath();
+        ctx.fill();
+        fillSkinRoundedRect(
+            ctx,
+            width * 0.18,
+            height * 0.8,
+            width * 0.64,
+            height * 0.06,
+            height * 0.03,
+            rgbaFromHex(skinPreset.stripeColor, 0.72)
+        );
+        return;
+    }
+    if (surface === 'side') {
+        ctx.beginPath();
+        ctx.moveTo(width * 0.06, height * 0.74);
+        ctx.quadraticCurveTo(width * 0.42, height * 0.18, width * 0.94, height * 0.32);
+        ctx.lineTo(width * 0.88, height * 0.52);
+        ctx.quadraticCurveTo(width * 0.48, height * 0.42, width * 0.18, height * 0.86);
+        ctx.closePath();
+        ctx.fill();
+        return;
+    }
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.14,
+        height * 0.52,
+        width * 0.72,
+        height * 0.1,
+        height * 0.05,
+        rgbaFromHex(skinPreset.stripeColor, 0.78)
+    );
+    fillSkinTriangle(
+        ctx,
+        [
+            [width * 0.42, height * 0.18],
+            [width * 0.58, height * 0.18],
+            [width * 0.5, height * 0.04],
+        ],
+        rgbaFromHex(skinPreset.accentColor, 0.9)
+    );
+}
+
+function drawCircuitBloomSkin(ctx, width, height, skinPreset, surface) {
+    ctx.strokeStyle = rgbaFromHex(skinPreset.stripeColor, 0.86);
+    ctx.fillStyle = rgbaFromHex(skinPreset.accentColor, 0.82);
+    ctx.lineWidth = surface === 'top' ? 18 : 14;
+    ctx.lineCap = 'round';
+    const segments =
+        surface === 'top'
+            ? [
+                  [width * 0.5, height * 0.08, width * 0.5, height * 0.92],
+                  [width * 0.5, height * 0.24, width * 0.26, height * 0.24],
+                  [width * 0.5, height * 0.48, width * 0.74, height * 0.48],
+                  [width * 0.5, height * 0.72, width * 0.32, height * 0.72],
+              ]
+            : [
+                  [width * 0.12, height * 0.68, width * 0.86, height * 0.68],
+                  [width * 0.36, height * 0.68, width * 0.36, height * 0.26],
+                  [width * 0.62, height * 0.68, width * 0.62, height * 0.4],
+              ];
+    for (let i = 0; i < segments.length; i += 1) {
+        const segment = segments[i];
+        ctx.beginPath();
+        ctx.moveTo(segment[0], segment[1]);
+        ctx.lineTo(segment[2], segment[3]);
+        ctx.stroke();
+    }
+    const nodes =
+        surface === 'top'
+            ? [
+                  [width * 0.5, height * 0.08],
+                  [width * 0.26, height * 0.24],
+                  [width * 0.74, height * 0.48],
+                  [width * 0.32, height * 0.72],
+                  [width * 0.5, height * 0.92],
+              ]
+            : [
+                  [width * 0.12, height * 0.68],
+                  [width * 0.36, height * 0.26],
+                  [width * 0.62, height * 0.4],
+                  [width * 0.86, height * 0.68],
+              ];
+    for (let i = 0; i < nodes.length; i += 1) {
+        fillSkinCircle(
+            ctx,
+            nodes[i][0],
+            nodes[i][1],
+            surface === 'top' ? 22 : 18,
+            rgbaFromHex(skinPreset.accentColor, 0.88)
+        );
+    }
+}
+
+function drawStealthGridSkin(ctx, width, height, skinPreset, surface) {
+    ctx.fillStyle = rgbaFromHex(skinPreset.stripeColor, 0.18);
+    const cellWidth = surface === 'top' ? width * 0.16 : width * 0.14;
+    const cellHeight = surface === 'top' ? height * 0.12 : height * 0.18;
+    for (let y = 0.08; y <= 0.78; y += 0.16) {
+        for (let x = 0.08; x <= 0.74; x += 0.18) {
+            fillSkinRoundedRect(
+                ctx,
+                width * x,
+                height * y,
+                cellWidth,
+                cellHeight,
+                Math.min(cellWidth, cellHeight) * 0.18,
+                rgbaFromHex(skinPreset.stripeColor, x > 0.42 ? 0.18 : 0.1)
+            );
+        }
+    }
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.08, height * 0.82],
+            [width * 0.42, height * 0.18],
+            [width * 0.78, height * 0.18],
+            [width * 0.5, height * 0.82],
+        ],
+        rgbaFromHex(skinPreset.accentColor, 0.7)
+    );
+}
+
+function drawPrismVeilSkin(ctx, width, height, skinPreset, surface) {
+    const prismGradient = ctx.createLinearGradient(0, 0, width, height);
+    prismGradient.addColorStop(0, rgbaFromHex(skinPreset.accentColor, 0.86));
+    prismGradient.addColorStop(0.44, rgbaFromHex(skinPreset.stripeColor, 0.94));
+    prismGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.86));
+    ctx.fillStyle = prismGradient;
+    if (surface === 'top') {
+        fillSkinPolygon(
+            ctx,
+            [
+                [width * 0.14, height * 0.9],
+                [width * 0.34, height * 0.14],
+                [width * 0.62, height * 0.06],
+                [width * 0.88, height * 0.78],
+                [width * 0.66, height * 0.94],
+                [width * 0.4, height * 0.82],
+            ],
+            prismGradient
+        );
+        fillSkinTriangle(
+            ctx,
+            [
+                [width * 0.62, height * 0.12],
+                [width * 0.82, height * 0.32],
+                [width * 0.72, height * 0.52],
+            ],
+            rgbaFromHex(0xffa8df, 0.76)
+        );
+        return;
+    }
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.08, height * 0.76],
+            [width * 0.32, height * 0.22],
+            [width * 0.56, height * 0.38],
+            [width * 0.84, height * 0.14],
+            [width * 0.94, height * 0.34],
+            [width * 0.42, height * 0.88],
+        ],
+        prismGradient
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.18,
+        height * 0.62,
+        width * 0.52,
+        height * 0.08,
+        height * 0.04,
+        rgbaFromHex(0xffa8df, 0.56)
+    );
+}
+
+function drawDigitalCamoSkin(ctx, width, height, skinPreset, surface) {
+    const random = createSeededRandom(hashString(`${skinPreset.id}:${surface}:camo`));
+    const patchCount = surface === 'top' ? 34 : 24;
+    const palette = [
+        rgbaFromHex(skinPreset.bodyColor, 0.38),
+        rgbaFromHex(skinPreset.accentColorSecondary, 0.72),
+        rgbaFromHex(skinPreset.accentColor, 0.34),
+        rgbaFromHex(skinPreset.stripeColor, 0.28),
+    ];
+    for (let i = 0; i < patchCount; i += 1) {
+        const centerX = random() * width;
+        const centerY = random() * height;
+        const radiusX = width * (0.08 + random() * 0.18);
+        const radiusY = height * (0.08 + random() * 0.18);
+        const points = [];
+        const corners = 5 + Math.floor(random() * 4);
+        for (let step = 0; step < corners; step += 1) {
+            const angle = (step / corners) * Math.PI * 2;
+            const scale = 0.72 + random() * 0.52;
+            points.push([
+                centerX + Math.cos(angle) * radiusX * scale,
+                centerY + Math.sin(angle) * radiusY * scale,
+            ]);
+        }
+        fillSkinPolygon(ctx, points, palette[i % palette.length]);
+    }
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.12,
+        height * 0.66,
+        width * 0.76,
+        height * 0.09,
+        height * 0.045,
+        rgbaFromHex(skinPreset.stripeColor, 0.48)
+    );
+}
+
+function drawCarbonWeaveSkin(ctx, width, height, skinPreset, surface) {
+    const bandWidth = surface === 'top' ? width * 0.12 : width * 0.14;
+    for (let offset = -height; offset < width + height; offset += bandWidth * 0.72) {
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset, 0],
+                [offset + bandWidth, 0],
+                [offset + bandWidth - height * 0.12, height],
+                [offset - height * 0.12, height],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.06)
+        );
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset - bandWidth * 0.3, 0],
+                [offset + bandWidth * 0.24, 0],
+                [offset + bandWidth * 0.54 - height * 0.12, height],
+                [offset - bandWidth * 0.04 - height * 0.12, height],
+            ],
+            rgbaFromHex(skinPreset.accentColor, 0.05)
+        );
+    }
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.18,
+        height * 0.18,
+        width * 0.64,
+        height * 0.08,
+        height * 0.04,
+        rgbaFromHex(skinPreset.glowColor, 0.18)
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.14,
+        height * 0.72,
+        width * 0.72,
+        height * 0.06,
+        height * 0.03,
+        rgbaFromHex(skinPreset.stripeColor, 0.24)
+    );
+}
+
+function drawBrushedStreamSkin(ctx, width, height, skinPreset, surface) {
+    const ribbonGradient = ctx.createLinearGradient(width * 0.12, 0, width * 0.86, height);
+    ribbonGradient.addColorStop(0, rgbaFromHex(skinPreset.stripeColor, 0.9));
+    ribbonGradient.addColorStop(0.4, rgbaFromHex(0xffffff, 0.88));
+    ribbonGradient.addColorStop(0.7, rgbaFromHex(skinPreset.accentColor, 0.7));
+    ribbonGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.16));
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.08, height * 0.84],
+            [width * 0.26, height * 0.18],
+            [width * 0.62, height * 0.08],
+            [width * 0.9, height * 0.34],
+            [width * 0.62, height * 0.72],
+            [width * 0.24, height * 0.88],
+        ],
+        ribbonGradient
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.16,
+        height * 0.52,
+        width * 0.68,
+        height * 0.06,
+        height * 0.03,
+        rgbaFromHex(skinPreset.accentColorSecondary, 0.36)
+    );
+}
+
+function drawAnodizedFlowSkin(ctx, width, height, skinPreset, surface) {
+    const ribbonA = ctx.createLinearGradient(0, height * 0.2, width, height * 0.7);
+    ribbonA.addColorStop(0, rgbaFromHex(0x7c5cff, 0.7));
+    ribbonA.addColorStop(0.32, rgbaFromHex(0x67f6ff, 0.76));
+    ribbonA.addColorStop(0.7, rgbaFromHex(0xff8bd7, 0.7));
+    ribbonA.addColorStop(1, rgbaFromHex(0xffcb69, 0.5));
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.beginPath();
+    ctx.moveTo(width * 0.1, height * 0.88);
+    ctx.bezierCurveTo(
+        width * 0.24,
+        height * 0.34,
+        width * 0.54,
+        height * 0.12,
+        width * 0.9,
+        height * 0.3
+    );
+    ctx.lineTo(width * 0.9, height * 0.46);
+    ctx.bezierCurveTo(
+        width * 0.58,
+        height * 0.28,
+        width * 0.3,
+        height * 0.44,
+        width * 0.16,
+        height * 0.92
+    );
+    ctx.closePath();
+    ctx.fillStyle = ribbonA;
+    ctx.fill();
+
+    fillSkinCircle(
+        ctx,
+        width * 0.72,
+        height * 0.24,
+        Math.min(width, height) * 0.12,
+        rgbaFromHex(0xffffff, 0.14)
+    );
+    fillSkinCircle(
+        ctx,
+        width * 0.28,
+        height * 0.68,
+        Math.min(width, height) * 0.1,
+        rgbaFromHex(skinPreset.glowColor, 0.12)
+    );
+    ctx.restore();
+}
+
+function drawHazardStrikeSkin(ctx, width, height, skinPreset, surface) {
+    const stripeWidth = surface === 'top' ? width * 0.16 : width * 0.12;
+    for (let offset = -height; offset < width + height; offset += stripeWidth * 1.35) {
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset, 0],
+                [offset + stripeWidth, 0],
+                [offset + stripeWidth - height * 0.18, height],
+                [offset - height * 0.18, height],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.86)
+        );
+    }
+
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.08,
+        height * 0.68,
+        width * 0.84,
+        height * 0.12,
+        height * 0.04,
+        rgbaFromHex(skinPreset.accentColor, 0.74)
+    );
+    fillSkinTriangle(
+        ctx,
+        [
+            [width * 0.42, height * 0.16],
+            [width * 0.58, height * 0.16],
+            [width * 0.5, height * 0.02],
+        ],
+        rgbaFromHex(skinPreset.accentColor, 0.88)
+    );
+}
+
+function drawBodyStripeOverlay(ctx, width, height, skinPreset) {
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.28,
+        0,
+        width * 0.08,
+        height,
+        width * 0.02,
+        rgbaFromHex(skinPreset.stripeColor, 0.42)
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.64,
+        0,
+        width * 0.08,
+        height,
+        width * 0.02,
+        rgbaFromHex(skinPreset.stripeColor, 0.42)
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.46,
+        0,
+        width * 0.035,
+        height,
+        width * 0.012,
+        rgbaFromHex(skinPreset.accentColor, 0.28)
+    );
+}
+
+function drawBodyChevronOverlay(ctx, width, height, skinPreset) {
+    const stripeWidth = width * 0.14;
+    for (let offset = -height; offset < width + height; offset += stripeWidth * 1.4) {
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset, 0],
+                [offset + stripeWidth, 0],
+                [offset + stripeWidth - height * 0.24, height],
+                [offset - height * 0.24, height],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.2)
+        );
+    }
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.16, height * 0.88],
+            [width * 0.4, height * 0.12],
+            [width * 0.5, height * 0.26],
+            [width * 0.6, height * 0.12],
+            [width * 0.84, height * 0.88],
+            [width * 0.7, height * 0.88],
+            [width * 0.5, height * 0.42],
+            [width * 0.3, height * 0.88],
+        ],
+        rgbaFromHex(skinPreset.accentColor, 0.36)
+    );
+}
+
+function drawBodySolarOverlay(ctx, width, height, skinPreset) {
+    const ribbonGradient = ctx.createLinearGradient(0, height * 0.18, width, height * 0.74);
+    ribbonGradient.addColorStop(0, rgbaFromHex(skinPreset.stripeColor, 0.3));
+    ribbonGradient.addColorStop(0.45, rgbaFromHex(skinPreset.accentColor, 0.46));
+    ribbonGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.12));
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.06, height * 0.9],
+            [width * 0.22, height * 0.4],
+            [width * 0.48, height * 0.18],
+            [width * 0.86, height * 0.02],
+            [width * 0.92, height * 0.16],
+            [width * 0.58, height * 0.36],
+            [width * 0.34, height * 0.6],
+            [width * 0.16, height * 0.96],
+        ],
+        ribbonGradient
+    );
+}
+
+function drawBodyCircuitOverlay(ctx, width, height, skinPreset) {
+    ctx.save();
+    ctx.strokeStyle = rgbaFromHex(skinPreset.stripeColor, 0.26);
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    const segments = [
+        [width * 0.2, height * 0.18, width * 0.2, height * 0.78],
+        [width * 0.2, height * 0.32, width * 0.54, height * 0.32],
+        [width * 0.54, height * 0.32, width * 0.54, height * 0.6],
+        [width * 0.54, height * 0.6, width * 0.82, height * 0.6],
+    ];
+    for (let i = 0; i < segments.length; i += 1) {
+        const segment = segments[i];
+        ctx.beginPath();
+        ctx.moveTo(segment[0], segment[1]);
+        ctx.lineTo(segment[2], segment[3]);
+        ctx.stroke();
+    }
+    ctx.restore();
+    fillSkinCircle(
+        ctx,
+        width * 0.2,
+        height * 0.18,
+        width * 0.026,
+        rgbaFromHex(skinPreset.accentColor, 0.4)
+    );
+    fillSkinCircle(
+        ctx,
+        width * 0.54,
+        height * 0.32,
+        width * 0.022,
+        rgbaFromHex(skinPreset.accentColor, 0.38)
+    );
+    fillSkinCircle(
+        ctx,
+        width * 0.82,
+        height * 0.6,
+        width * 0.028,
+        rgbaFromHex(skinPreset.glowColor, 0.36)
+    );
+}
+
+function drawBodyStealthOverlay(ctx, width, height, skinPreset) {
+    const cellWidth = width * 0.12;
+    const cellHeight = height * 0.16;
+    for (let y = 0.08; y <= 0.82; y += 0.18) {
+        for (let x = 0.06; x <= 0.82; x += 0.14) {
+            fillSkinRoundedRect(
+                ctx,
+                width * x,
+                height * y,
+                cellWidth,
+                cellHeight,
+                Math.min(cellWidth, cellHeight) * 0.14,
+                rgbaFromHex(skinPreset.stripeColor, x > 0.46 ? 0.08 : 0.14)
+            );
+        }
+    }
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.12, height * 0.82],
+            [width * 0.42, height * 0.18],
+            [width * 0.78, height * 0.18],
+            [width * 0.56, height * 0.82],
+        ],
+        rgbaFromHex(skinPreset.accentColor, 0.24)
+    );
+}
+
+function drawBodyPrismOverlay(ctx, width, height, skinPreset) {
+    const prismGradient = ctx.createLinearGradient(0, 0, width, height);
+    prismGradient.addColorStop(0, rgbaFromHex(skinPreset.accentColor, 0.3));
+    prismGradient.addColorStop(0.45, rgbaFromHex(skinPreset.stripeColor, 0.24));
+    prismGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.28));
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.08, height * 0.88],
+            [width * 0.3, height * 0.14],
+            [width * 0.58, height * 0.08],
+            [width * 0.9, height * 0.76],
+            [width * 0.7, height * 0.94],
+            [width * 0.38, height * 0.82],
+        ],
+        prismGradient
+    );
+    fillSkinTriangle(
+        ctx,
+        [
+            [width * 0.62, height * 0.16],
+            [width * 0.82, height * 0.3],
+            [width * 0.72, height * 0.54],
+        ],
+        rgbaFromHex(0xffa8df, 0.26)
+    );
+}
+
+function drawBodyDigitalCamoOverlay(ctx, width, height, skinPreset) {
+    const random = createSeededRandom(hashString(`${skinPreset.id}:body:camo`));
+    const patchCount = 40;
+    const palette = [
+        rgbaFromHex(skinPreset.bodyColor, 0.28),
+        rgbaFromHex(skinPreset.accentColorSecondary, 0.56),
+        rgbaFromHex(skinPreset.accentColor, 0.22),
+        rgbaFromHex(skinPreset.stripeColor, 0.18),
+    ];
+    for (let i = 0; i < patchCount; i += 1) {
+        const centerX = random() * width;
+        const centerY = random() * height;
+        const sizeX = width * (0.06 + random() * 0.12);
+        const sizeY = height * (0.06 + random() * 0.18);
+        fillSkinPolygon(
+            ctx,
+            [
+                [centerX - sizeX * 0.6, centerY - sizeY * 0.4],
+                [centerX + sizeX * 0.2, centerY - sizeY * 0.72],
+                [centerX + sizeX * 0.74, centerY - sizeY * 0.1],
+                [centerX + sizeX * 0.4, centerY + sizeY * 0.46],
+                [centerX - sizeX * 0.4, centerY + sizeY * 0.7],
+                [centerX - sizeX * 0.76, centerY + sizeY * 0.1],
+            ],
+            palette[i % palette.length]
+        );
+    }
+}
+
+function drawBodyCarbonWeaveOverlay(ctx, width, height, skinPreset) {
+    const bandWidth = width * 0.08;
+    for (let offset = -height; offset < width + height; offset += bandWidth * 0.68) {
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset, 0],
+                [offset + bandWidth, 0],
+                [offset + bandWidth - height * 0.16, height],
+                [offset - height * 0.16, height],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.05)
+        );
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset - bandWidth * 0.42, 0],
+                [offset + bandWidth * 0.2, 0],
+                [offset + bandWidth * 0.54 - height * 0.16, height],
+                [offset - bandWidth * 0.08 - height * 0.16, height],
+            ],
+            rgbaFromHex(skinPreset.accentColor, 0.04)
+        );
+    }
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.18,
+        height * 0.14,
+        width * 0.64,
+        height * 0.04,
+        height * 0.02,
+        rgbaFromHex(skinPreset.glowColor, 0.14)
+    );
+}
+
+function drawBodyBrushedMetalOverlay(ctx, width, height, skinPreset) {
+    const random = createSeededRandom(hashString(`${skinPreset.id}:body:brush`));
+    for (let i = 0; i < 220; i += 1) {
+        const y = random() * height;
+        const lineAlpha = 0.018 + random() * 0.028;
+        const lineWidth = 1 + random() * 2.2;
+        ctx.fillStyle = rgbaFromHex(
+            random() > 0.54 ? skinPreset.stripeColor : skinPreset.accentColor,
+            lineAlpha
+        );
+        ctx.fillRect(-width * 0.04, y, width * 1.08, lineWidth);
+    }
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.12, height * 0.86],
+            [width * 0.28, height * 0.22],
+            [width * 0.72, height * 0.1],
+            [width * 0.9, height * 0.4],
+            [width * 0.58, height * 0.76],
+            [width * 0.2, height * 0.9],
+        ],
+        rgbaFromHex(0xffffff, 0.12)
+    );
+}
+
+function drawBodyAnodizedOverlay(ctx, width, height, skinPreset) {
+    const ribbonA = ctx.createLinearGradient(0, height * 0.16, width, height * 0.74);
+    ribbonA.addColorStop(0, rgbaFromHex(0x7a5eff, 0.28));
+    ribbonA.addColorStop(0.34, rgbaFromHex(0x67f6ff, 0.34));
+    ribbonA.addColorStop(0.7, rgbaFromHex(0xff8bd7, 0.28));
+    ribbonA.addColorStop(1, rgbaFromHex(0xffcb69, 0.22));
+    fillSkinPolygon(
+        ctx,
+        [
+            [width * 0.08, height * 0.9],
+            [width * 0.24, height * 0.32],
+            [width * 0.5, height * 0.12],
+            [width * 0.86, height * 0.24],
+            [width * 0.92, height * 0.42],
+            [width * 0.68, height * 0.62],
+            [width * 0.34, height * 0.82],
+            [width * 0.14, height * 0.96],
+        ],
+        ribbonA
+    );
+    fillSkinCircle(ctx, width * 0.76, height * 0.24, width * 0.06, rgbaFromHex(0xffffff, 0.1));
+    fillSkinCircle(
+        ctx,
+        width * 0.24,
+        height * 0.72,
+        width * 0.08,
+        rgbaFromHex(skinPreset.glowColor, 0.08)
+    );
+}
+
+function drawBodyHazardOverlay(ctx, width, height, skinPreset) {
+    const stripeWidth = width * 0.1;
+    for (let offset = -height; offset < width + height; offset += stripeWidth * 1.22) {
+        fillSkinPolygon(
+            ctx,
+            [
+                [offset, 0],
+                [offset + stripeWidth, 0],
+                [offset + stripeWidth - height * 0.18, height],
+                [offset - height * 0.18, height],
+            ],
+            rgbaFromHex(skinPreset.stripeColor, 0.26)
+        );
+    }
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.12,
+        height * 0.12,
+        width * 0.76,
+        height * 0.08,
+        height * 0.04,
+        rgbaFromHex(skinPreset.accentColor, 0.24)
+    );
+    fillSkinRoundedRect(
+        ctx,
+        width * 0.12,
+        height * 0.74,
+        width * 0.76,
+        height * 0.08,
+        height * 0.04,
+        rgbaFromHex(skinPreset.accentColor, 0.24)
+    );
+}
+
+function fillSkinRoundedRect(ctx, x, y, width, height, radius, fillStyle) {
+    ctx.save();
+    ctx.fillStyle = fillStyle;
+    drawSkinRoundedRectPath(ctx, x, y, width, height, radius);
+    ctx.fill();
+    ctx.restore();
+}
+
+function fillSkinTriangle(ctx, points, fillStyle) {
+    fillSkinPolygon(ctx, points, fillStyle);
+}
+
+function fillSkinPolygon(ctx, points, fillStyle) {
+    if (!Array.isArray(points) || points.length < 3) {
+        return;
+    }
+    ctx.save();
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i += 1) {
+        ctx.lineTo(points[i][0], points[i][1]);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+}
+
+function fillSkinCircle(ctx, x, y, radius, fillStyle) {
+    ctx.save();
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+
+function drawSkinRoundedRectPath(ctx, x, y, width, height, radius) {
+    const clampedRadius = Math.max(0, Math.min(radius, Math.min(width, height) * 0.5));
+    ctx.beginPath();
+    ctx.moveTo(x + clampedRadius, y);
+    ctx.lineTo(x + width - clampedRadius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + clampedRadius);
+    ctx.lineTo(x + width, y + height - clampedRadius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - clampedRadius, y + height);
+    ctx.lineTo(x + clampedRadius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - clampedRadius);
+    ctx.lineTo(x, y + clampedRadius);
+    ctx.quadraticCurveTo(x, y, x + clampedRadius, y);
+    ctx.closePath();
+}
+
+function getSkinFinishProfile(skinPreset = null) {
+    const materialKey =
+        skinPreset && typeof skinPreset.material === 'string'
+            ? skinPreset.material
+            : DEFAULT_SKIN_MATERIAL;
+    return BODY_FINISH_PROFILES[materialKey] || BODY_FINISH_PROFILES[DEFAULT_SKIN_MATERIAL];
+}
+
+function applySkinFinishToBodyMaterial(
+    material,
+    finishProfile,
+    skinPreset,
+    bodyColor,
+    bodyEmissive,
+    bodyTexture = null
+) {
+    const baseEmissiveIntensity = Number(material?.userData?.baseEmissiveIntensity) || 0.3;
+    material.color.setHex(bodyTexture ? 0xffffff : bodyColor.getHex());
+    material.map = bodyTexture;
+    material.emissive.copy(bodyEmissive);
+    material.emissiveMap = null;
+    material.emissiveIntensity = baseEmissiveIntensity * finishProfile.panelEmissiveScale;
+    material.metalness = finishProfile.panelMetalness;
+    material.roughness = finishProfile.panelRoughness;
+    material.clearcoat = finishProfile.panelClearcoat;
+    material.clearcoatRoughness = finishProfile.panelClearcoatRoughness;
+    material.reflectivity = finishProfile.panelReflectivity;
+    material.sheen = finishProfile.panelSheen;
+    material.sheenRoughness = finishProfile.panelSheenRoughness;
+    material.sheenColor.copy(
+        resolveSkinFinishColor(finishProfile.panelSheenColorSource, skinPreset)
+    );
+    material.iridescence = finishProfile.panelIridescence;
+    material.iridescenceIOR = finishProfile.panelIridescenceIOR;
+    material.iridescenceThicknessRange = [...finishProfile.panelIridescenceThicknessRange];
+    material.needsUpdate = true;
+}
+
+function resolveSkinFinishColor(source, skinPreset) {
+    switch (source) {
+        case 'glow':
+            return new THREE.Color(skinPreset.glowColor);
+        case 'accentSecondary':
+            return new THREE.Color(skinPreset.accentColorSecondary);
+        case 'accentColor':
+            return new THREE.Color(skinPreset.accentColor);
+        case 'stripe':
+        default:
+            return new THREE.Color(skinPreset.stripeColor);
+    }
+}
+
+function hashString(value = '') {
+    let hash = 2166136261;
+    const input = String(value);
+    for (let i = 0; i < input.length; i += 1) {
+        hash ^= input.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function createSeededRandom(seed = 1) {
+    let state = (Math.floor(seed) || 1) >>> 0;
+    return function nextRandom() {
+        state += 0x6d2b79f5;
+        let value = state;
+        value = Math.imul(value ^ (value >>> 15), value | 1);
+        value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+        return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function rgbaFromHex(colorHex, alpha = 1) {
+    const r = (colorHex >>> 16) & 255;
+    const g = (colorHex >>> 8) & 255;
+    const b = colorHex & 255;
+    const clampedAlpha = Math.max(0, Math.min(1, Number(alpha) || 0));
+    return `rgba(${r}, ${g}, ${b}, ${clampedAlpha})`;
+}
+
+function normalizeBodyColorHex(colorHex, fallbackSkinId = DEFAULT_PLAYER_CAR_SKIN_ID) {
+    const fallbackColorHex = getCarSkinPresetById(fallbackSkinId).bodyColor >>> 0;
+    const numeric = Number(colorHex);
+    if (!Number.isFinite(numeric)) {
+        return fallbackColorHex;
+    }
+    return Math.max(0, Math.min(0xffffff, Math.round(numeric))) >>> 0;
 }
 
 function createRoofShimmerTexture() {

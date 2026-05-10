@@ -34,8 +34,29 @@
                         <button id="welcomeStartBtn" type="button">
                             PLAY WITH BOTS <span aria-hidden="true">→</span>
                         </button>
-                        <button id="welcomeStartOnlineBtn" type="button">
+                        <button
+                            id="welcomeStartOnlineBtn"
+                            type="button"
+                            aria-controls="welcomePreviewOnlineOverlay"
+                            aria-expanded="false"
+                        >
                             PLAY ONLINE <span aria-hidden="true">↗</span>
+                        </button>
+                        <button
+                            id="welcomeLeaderboardBtn"
+                            type="button"
+                            aria-controls="welcomePreviewLeaderboardOverlay"
+                            aria-expanded="false"
+                        >
+                            VIEW LEADERBOARD <span aria-hidden="true">RANKS</span>
+                        </button>
+                        <button
+                            id="welcomeAccountBtn"
+                            type="button"
+                            aria-controls="welcomePreviewAccountOverlay"
+                            aria-expanded="false"
+                        >
+                            ACCOUNT <span aria-hidden="true">PROFILE</span>
                         </button>
                         <button
                             id="welcomeDonateBtn"
@@ -45,8 +66,209 @@
                         >
                             SUPPORT THE GAME <span aria-hidden="true">❤</span>
                         </button>
-                        <div id="welcomeDonatePanelHost" class="donateInlineHost"></div>
                     </div>
+                    <section id="welcomeAuthPanel" class="welcomeAuthPanel" aria-label="Account">
+                        <div class="welcomeAuthHeader">
+                            <div class="welcomeAuthEyebrow">ACCOUNT ACCESS</div>
+                            <div
+                                id="welcomeAuthStatePill"
+                                class="welcomeAuthStatePill"
+                                data-tone="muted"
+                            >
+                                GUEST
+                            </div>
+                        </div>
+                        <div id="welcomeAuthSignedOutView" class="welcomeAuthSignedOutView">
+                            <div class="welcomeAuthModeTabs" role="tablist" aria-label="Account mode">
+                                <button
+                                    id="welcomeAuthSignInTab"
+                                    class="welcomeAuthModeTab"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected="true"
+                                    data-selected="true"
+                                >
+                                    SIGN IN
+                                </button>
+                                <button
+                                    id="welcomeAuthSignUpTab"
+                                    class="welcomeAuthModeTab"
+                                    type="button"
+                                    role="tab"
+                                    aria-selected="false"
+                                    data-selected="false"
+                                >
+                                    CREATE ACCOUNT
+                                </button>
+                            </div>
+                            <div class="welcomeAuthFields">
+                                <div id="welcomeAuthDisplayNameField" class="welcomeAuthField" hidden>
+                                    <label
+                                        class="welcomeAuthLabel"
+                                        for="welcomeAuthDisplayNameInput"
+                                    >
+                                        DISPLAY NAME
+                                    </label>
+                                    <input
+                                        id="welcomeAuthDisplayNameInput"
+                                        class="welcomeAuthInput"
+                                        type="text"
+                                        maxlength="18"
+                                        autocomplete="nickname"
+                                        placeholder="Driver"
+                                    />
+                                </div>
+                                <div class="welcomeAuthField">
+                                    <label class="welcomeAuthLabel" for="welcomeAuthEmailInput">
+                                        EMAIL
+                                    </label>
+                                    <input
+                                        id="welcomeAuthEmailInput"
+                                        class="welcomeAuthInput"
+                                        type="email"
+                                        maxlength="320"
+                                        autocomplete="email"
+                                        inputmode="email"
+                                        placeholder="driver@example.com"
+                                    />
+                                </div>
+                                <div class="welcomeAuthField">
+                                    <label class="welcomeAuthLabel" for="welcomeAuthPasswordInput">
+                                        PASSWORD
+                                    </label>
+                                    <input
+                                        id="welcomeAuthPasswordInput"
+                                        class="welcomeAuthInput"
+                                        type="password"
+                                        maxlength="256"
+                                        autocomplete="current-password"
+                                        placeholder="At least 6 characters"
+                                    />
+                                </div>
+                                <div id="welcomeAuthConfirmField" class="welcomeAuthField" hidden>
+                                    <label
+                                        class="welcomeAuthLabel"
+                                        for="welcomeAuthConfirmPasswordInput"
+                                    >
+                                        CONFIRM PASSWORD
+                                    </label>
+                                    <input
+                                        id="welcomeAuthConfirmPasswordInput"
+                                        class="welcomeAuthInput"
+                                        type="password"
+                                        maxlength="256"
+                                        autocomplete="new-password"
+                                        placeholder="Repeat your password"
+                                    />
+                                </div>
+                            </div>
+                            <div class="welcomeAuthActions">
+                                <button
+                                    id="welcomeAuthSubmitBtn"
+                                    class="welcomeAuthSubmitBtn"
+                                    type="button"
+                                >
+                                    SIGN IN
+                                </button>
+                            </div>
+                        </div>
+                        <div id="welcomeAuthSignedInView" class="welcomeAuthSignedInView" hidden>
+                            <div class="welcomeAuthIdentityLabel">SIGNED IN AS</div>
+                            <div id="welcomeAuthSignedInName" class="welcomeAuthSignedInName">
+                                Driver
+                            </div>
+                            <div id="welcomeAuthSignedInEmail" class="welcomeAuthSignedInEmail">
+                                driver@example.com
+                            </div>
+                            <div class="welcomeAuthActions">
+                                <button
+                                    id="welcomeAuthChangePasswordToggleBtn"
+                                    class="welcomeAuthSecondaryBtn"
+                                    type="button"
+                                >
+                                    CHANGE PASSWORD
+                                </button>
+                                <button
+                                    id="welcomeAuthSignOutBtn"
+                                    class="welcomeAuthSecondaryBtn"
+                                    type="button"
+                                >
+                                    LOG OUT
+                                </button>
+                                <button
+                                    id="welcomeAuthDeleteAccountBtn"
+                                    class="welcomeAuthDangerBtn"
+                                    type="button"
+                                >
+                                    DELETE ACCOUNT
+                                </button>
+                            </div>
+                            <div
+                                id="welcomeAuthPasswordChangePanel"
+                                class="welcomeAuthPasswordChangePanel"
+                                hidden
+                            >
+                                <div class="welcomeAuthFields">
+                                    <div class="welcomeAuthField">
+                                        <label
+                                            class="welcomeAuthLabel"
+                                            for="welcomeAuthNewPasswordInput"
+                                        >
+                                            NEW PASSWORD
+                                        </label>
+                                        <input
+                                            id="welcomeAuthNewPasswordInput"
+                                            class="welcomeAuthInput"
+                                            type="password"
+                                            maxlength="256"
+                                            autocomplete="new-password"
+                                            placeholder="At least 6 characters"
+                                        />
+                                    </div>
+                                    <div class="welcomeAuthField">
+                                        <label
+                                            class="welcomeAuthLabel"
+                                            for="welcomeAuthConfirmNewPasswordInput"
+                                        >
+                                            CONFIRM NEW PASSWORD
+                                        </label>
+                                        <input
+                                            id="welcomeAuthConfirmNewPasswordInput"
+                                            class="welcomeAuthInput"
+                                            type="password"
+                                            maxlength="256"
+                                            autocomplete="new-password"
+                                            placeholder="Repeat your new password"
+                                        />
+                                    </div>
+                                </div>
+                                <div class="welcomeAuthActions welcomeAuthInlineActions">
+                                    <button
+                                        id="welcomeAuthPasswordChangeSubmitBtn"
+                                        class="welcomeAuthSubmitBtn"
+                                        type="button"
+                                    >
+                                        UPDATE PASSWORD
+                                    </button>
+                                    <button
+                                        id="welcomeAuthPasswordChangeCancelBtn"
+                                        class="welcomeAuthSecondaryBtn"
+                                        type="button"
+                                    >
+                                        CANCEL
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div
+                            id="welcomeAuthStatus"
+                            class="welcomeAuthStatus"
+                            data-tone="muted"
+                            aria-live="polite"
+                        >
+                            Create an account or sign in to unlock online rooms and score sync.
+                        </div>
+                    </section>
                     <div id="welcomeOnlineModeFlow" class="welcomeOnlineModeFlow" hidden>
                         <div class="welcomeOnlineModeTitle">ONLINE SESSION</div>
                         <label class="welcomeOnlineModeLabel" for="welcomeOnlineNameInput">
@@ -180,6 +402,165 @@
                     ></canvas>
                     <div class="welcomePreviewSweep" aria-hidden="true"></div>
                     <div class="welcomeBayRings" aria-hidden="true"></div>
+                    <div
+                        id="welcomePreviewLeaderboardOverlay"
+                        class="welcomePreviewLeaderboardOverlay"
+                        hidden
+                    >
+                        <section
+                            class="welcomePreviewLeaderboardCard"
+                            role="dialog"
+                            aria-labelledby="welcomePreviewLeaderboardTitle"
+                        >
+                            <div class="welcomePreviewLeaderboardHeader">
+                                <div class="welcomePreviewLeaderboardHeading">
+                                    <div class="welcomePreviewLeaderboardEyebrow">
+                                        GLOBAL PLAYER LEADERBOARD
+                                    </div>
+                                    <div
+                                        id="welcomePreviewLeaderboardTitle"
+                                        class="welcomePreviewLeaderboardTitle"
+                                    >
+                                        Top Drivers
+                                    </div>
+                                </div>
+                                <div class="welcomePreviewLeaderboardHeaderActions">
+                                    <button
+                                        id="welcomePreviewLeaderboardRefreshBtn"
+                                        class="welcomePreviewLeaderboardActionBtn"
+                                        type="button"
+                                    >
+                                        REFRESH
+                                    </button>
+                                    <button
+                                        id="welcomePreviewLeaderboardCloseBtn"
+                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        type="button"
+                                    >
+                                        CLOSE
+                                    </button>
+                                </div>
+                            </div>
+                            <div
+                                id="welcomePreviewLeaderboardStatus"
+                                class="welcomePreviewLeaderboardStatus"
+                                data-tone="muted"
+                            >
+                                Loading global player leaderboard...
+                            </div>
+                            <div
+                                id="welcomePreviewLeaderboardList"
+                                class="welcomePreviewLeaderboardList"
+                            ></div>
+                        </section>
+                    </div>
+                    <div
+                        id="welcomePreviewAccountOverlay"
+                        class="welcomePreviewLeaderboardOverlay welcomePreviewAccountOverlay"
+                        hidden
+                    >
+                        <section
+                            class="welcomePreviewLeaderboardCard welcomePreviewAccountCard"
+                            role="dialog"
+                            aria-labelledby="welcomePreviewAccountTitle"
+                        >
+                            <div class="welcomePreviewLeaderboardHeader">
+                                <div class="welcomePreviewLeaderboardHeading">
+                                    <div class="welcomePreviewLeaderboardEyebrow">PLAYER PROFILE</div>
+                                    <div
+                                        id="welcomePreviewAccountTitle"
+                                        class="welcomePreviewLeaderboardTitle welcomePreviewAccountTitle"
+                                    >
+                                        Account
+                                    </div>
+                                </div>
+                                <div class="welcomePreviewLeaderboardHeaderActions">
+                                    <button
+                                        id="welcomePreviewAccountCloseBtn"
+                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        type="button"
+                                    >
+                                        CLOSE
+                                    </button>
+                                </div>
+                            </div>
+                            <div
+                                id="welcomePreviewAccountBody"
+                                class="welcomePreviewAccountBody"
+                            ></div>
+                        </section>
+                    </div>
+                    <div
+                        id="welcomePreviewDonateOverlay"
+                        class="welcomePreviewLeaderboardOverlay welcomePreviewDonateOverlay"
+                        hidden
+                    >
+                        <section
+                            class="welcomePreviewLeaderboardCard welcomePreviewDonateCard"
+                            role="dialog"
+                            aria-labelledby="welcomePreviewDonateTitle"
+                        >
+                            <div class="welcomePreviewLeaderboardHeader">
+                                <div class="welcomePreviewLeaderboardHeading">
+                                    <div class="welcomePreviewLeaderboardEyebrow">PLAYER SUPPORT</div>
+                                    <div
+                                        id="welcomePreviewDonateTitle"
+                                        class="welcomePreviewLeaderboardTitle welcomePreviewDonateTitle"
+                                    >
+                                        Support the Game
+                                    </div>
+                                </div>
+                                <div class="welcomePreviewLeaderboardHeaderActions">
+                                    <button
+                                        id="welcomePreviewDonateCloseBtn"
+                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        type="button"
+                                    >
+                                        CLOSE
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="welcomePreviewDonateBody">
+                                <div id="welcomeDonatePanelHost" class="donateInlineHost"></div>
+                            </div>
+                        </section>
+                    </div>
+                    <div
+                        id="welcomePreviewOnlineOverlay"
+                        class="welcomePreviewLeaderboardOverlay welcomePreviewOnlineOverlay"
+                        hidden
+                    >
+                        <section
+                            class="welcomePreviewLeaderboardCard welcomePreviewOnlineCard"
+                            role="dialog"
+                            aria-labelledby="welcomePreviewOnlineTitle"
+                        >
+                            <div class="welcomePreviewLeaderboardHeader">
+                                <div class="welcomePreviewLeaderboardHeading">
+                                    <div class="welcomePreviewLeaderboardEyebrow">MULTIPLAYER SESSION</div>
+                                    <div
+                                        id="welcomePreviewOnlineTitle"
+                                        class="welcomePreviewLeaderboardTitle welcomePreviewOnlineTitle"
+                                    >
+                                        Play Online
+                                    </div>
+                                </div>
+                                <div class="welcomePreviewLeaderboardHeaderActions">
+                                    <button
+                                        id="welcomePreviewOnlineCloseBtn"
+                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        type="button"
+                                    >
+                                        CLOSE
+                                    </button>
+                                </div>
+                            </div>
+                            <div
+                                id="welcomePreviewOnlineBody"
+                                class="welcomePreviewOnlineBody"
+                            ></div>
+                        </section>
+                    </div>
                 </section>
             </div>
             <div id="welcomeLaunchOverlay" class="welcomeLaunchOverlay" hidden>
@@ -203,8 +584,39 @@
                 </div>
             </div>
         </div>
-        <div id="botPanel" aria-label="AI bots">
-            <div id="botList"></div>
+        <div id="leftHudStack" aria-hidden="false">
+            <aside id="missionHud" aria-label="Mission director">
+                <div class="missionHudTopbar">
+                    <div id="missionHudCounter" class="missionHudCounter">M1</div>
+                    <div id="missionHudTimeline" class="missionHudTimeline" aria-hidden="true"></div>
+                    <div class="missionHudTarget" aria-label="Target shard">
+                        <span id="missionHudTargetSwatch" class="missionHudTargetSwatch"></span>
+                    </div>
+                </div>
+                <div id="missionHudTitle" class="missionHudTitle">Contract loading...</div>
+                <div class="missionHudMetrics">
+                    <div class="missionHudMetric missionHudMetricPickup">
+                        <div class="missionHudMetricChrome">
+                            <span class="missionHudMetricGlyph missionHudMetricGlyphPickup"></span>
+                        </div>
+                        <div id="missionHudPrimary" class="missionHudMetricValue">0/8</div>
+                    </div>
+                    <div class="missionHudMetric missionHudMetricThreat">
+                        <div id="missionHudThreatIcons" class="missionHudThreatIcons" aria-hidden="true"></div>
+                        <div id="missionHudSecondary" class="missionHudMetricValue">1</div>
+                    </div>
+                </div>
+                <div class="missionHudProgressShell">
+                    <div class="missionHudProgressTrack" aria-hidden="true">
+                        <div id="missionHudProgressFill" class="missionHudProgressFill"></div>
+                    </div>
+                    <div id="missionHudProgress" class="missionHudProgressValue">0%</div>
+                </div>
+                <div id="missionHudStatus" class="missionHudStatus" data-tone="muted" hidden></div>
+            </aside>
+            <div id="botPanel" aria-label="AI bots">
+                <div id="botList"></div>
+            </div>
         </div>
         <aside id="miniMapHud" aria-label="Minimap">
             <canvas id="miniMapCanvas" width="280" height="280"></canvas>
@@ -223,15 +635,6 @@
                         <div id="leaderboardTitle">ROUND COMPLETE</div>
                         <div id="leaderboardSummary"></div>
                     </div>
-                    <button
-                        id="leaderboardDetailsToggle"
-                        class="leaderboardDetailsToggle"
-                        type="button"
-                        aria-controls="leaderboardDetailsPanel"
-                        aria-expanded="false"
-                    >
-                        SHOW DETAILS
-                    </button>
                 </div>
                 <div class="leaderboardKpiGrid" aria-label="Round summary">
                     <div class="leaderboardKpi">
@@ -251,26 +654,48 @@
                         <div id="leaderboardCollectedTotal" class="leaderboardKpiValue">0/0</div>
                     </div>
                 </div>
-                <div class="leaderboardSectionHeader">
-                    <div class="leaderboardSectionTitle">FINAL STANDINGS</div>
-                </div>
-                <div class="leaderboardTableHead" aria-hidden="true">
-                    <span>RANK</span>
-                    <span>DRIVER</span>
-                    <span>SCORE</span>
-                    <span>PICKUPS</span>
-                </div>
-                <div id="leaderboardList"></div>
-                <div id="leaderboardDetailsPanel" hidden>
-                    <div class="leaderboardDetailsBlock">
-                        <div class="leaderboardDetailsLabel">SCORING MODEL</div>
-                        <div id="leaderboardScoringModel" hidden></div>
+                <section id="leaderboardRoundPanel" hidden>
+                    <div class="leaderboardSectionHeader">
+                        <div>
+                            <div id="leaderboardSectionTitle" class="leaderboardSectionTitle">
+                                ROUND STANDINGS
+                            </div>
+                            <div id="leaderboardSectionMeta" class="leaderboardSectionMeta">
+                                Current round results. Bots can appear here.
+                            </div>
+                        </div>
                     </div>
-                    <div class="leaderboardDetailsBlock">
-                        <div class="leaderboardDetailsLabel">ROUND BREAKDOWN</div>
-                        <div id="leaderboardBreakdownList"></div>
+                    <div class="leaderboardTableHead" aria-hidden="true">
+                        <span>RANK</span>
+                        <span>DRIVER</span>
+                        <span>SCORE</span>
+                        <span>PICKUPS</span>
                     </div>
-                </div>
+                    <div id="leaderboardList"></div>
+                </section>
+                <section id="leaderboardGlobalPanel" class="leaderboardTopDriversCard" hidden>
+                    <div class="leaderboardTopDriversHeader">
+                        <div class="leaderboardTopDriversHeading">
+                            <div class="leaderboardTopDriversEyebrow">
+                                GLOBAL PLAYER LEADERBOARD
+                            </div>
+                            <div class="leaderboardTopDriversTitle">TOP DRIVERS</div>
+                        </div>
+                        <button
+                            id="leaderboardGlobalRefreshBtn"
+                            class="leaderboardTopDriversActionBtn"
+                            type="button"
+                        >
+                            REFRESH
+                        </button>
+                    </div>
+                    <div
+                        id="leaderboardGlobalStatusInline"
+                        class="leaderboardGlobalStatus"
+                        data-tone="muted"
+                    ></div>
+                    <div id="leaderboardGlobalListInline" class="leaderboardGlobalList"></div>
+                </section>
                 <div class="leaderboardActions">
                     <button id="leaderboardRestartBtn" class="leaderboardBtn restart" type="button">
                         NEW GAME

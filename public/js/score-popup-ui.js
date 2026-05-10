@@ -48,11 +48,8 @@ export function createScorePopupController() {
                 typeof payload?.collectorId === 'string' && payload.collectorId.trim()
                     ? payload.collectorId.trim()
                     : 'collector';
-            const comboCount = Math.max(0, Math.round(Number(payload?.comboCount) || 0));
-            const comboMultiplier = clampNumber(payload?.comboMultiplier, 1, 9, 1);
-            const riskBonus = clampNumber(payload?.riskBonus, 0, 1, 0);
-            const endgameBonus = clampNumber(payload?.endgameBonus, 0, 1, 0);
             const sourceLabel = normalizeSourceLabel(payload?.sourceLabel);
+            const variant = resolvePopupVariant(sourceLabel);
 
             const activeQueuedCount = queuedSpawns.length - queuedSpawnReadIndex;
             if (activeQueuedCount >= MAX_QUEUED_SPAWNS) {
@@ -62,11 +59,8 @@ export function createScorePopupController() {
                 dueFrame: frameTick + 1,
                 collectorId,
                 pointsAwarded,
-                comboCount,
-                comboMultiplier,
-                riskBonus,
-                endgameBonus,
                 sourceLabel,
+                variant,
                 durationSec: clampNumber(payload?.durationSec, 0.4, 2.4, POPUP_DURATION_SEC),
                 baseHeight: clampNumber(payload?.baseHeight, 1, 4.5, POPUP_WORLD_HEIGHT),
                 resolveWorldPosition:
@@ -154,9 +148,9 @@ export function createScorePopupController() {
         initializePopupPool();
         if (reusableElements.length > 0) {
             const probe = reusableElements[reusableElements.length - 1];
-            probe.root.className = 'scorePopup scorePopupCombo scorePopupRisk scorePopupEndgame';
+            probe.root.className = 'scorePopup scorePopupImpact';
             probe.primaryEl.textContent = '+0';
-            probe.metaEl.textContent = 'COMBO x1.00 | RISK +0% | END +0%';
+            probe.metaEl.textContent = 'MINE KILL';
             probe.metaEl.hidden = false;
             probe.root.hidden = false;
             // Force style/layout resolution once so the first real popup does less work.
@@ -213,32 +207,16 @@ export function createScorePopupController() {
         }
 
         element.root.className = 'scorePopup';
-        if (entry.comboCount > 1) {
-            element.root.classList.add('scorePopupCombo');
+        if (entry.variant === 'pickup') {
+            element.root.classList.add('scorePopupPickup');
         }
-        if (entry.riskBonus > 0.08) {
-            element.root.classList.add('scorePopupRisk');
-        }
-        if (entry.endgameBonus > 0.05) {
-            element.root.classList.add('scorePopupEndgame');
+        if (entry.variant === 'impact') {
+            element.root.classList.add('scorePopupImpact');
         }
         element.primaryEl.textContent = `+${entry.pointsAwarded}`;
 
-        const metaParts = [];
-        if (entry.comboCount > 1) {
-            metaParts.push(`COMBO x${entry.comboMultiplier.toFixed(2)}`);
-        }
-        if (entry.riskBonus > 0.08) {
-            metaParts.push(`RISK +${Math.round(entry.riskBonus * 100)}%`);
-        }
-        if (entry.endgameBonus > 0.05) {
-            metaParts.push(`END +${Math.round(entry.endgameBonus * 100)}%`);
-        }
         if (entry.sourceLabel) {
-            metaParts.push(entry.sourceLabel);
-        }
-        if (metaParts.length > 0) {
-            element.metaEl.textContent = metaParts.join(' | ');
+            element.metaEl.textContent = entry.sourceLabel;
             element.metaEl.hidden = false;
         } else {
             element.metaEl.textContent = '';
@@ -377,6 +355,17 @@ function normalizeSourceLabel(value) {
     }
     const normalized = value.trim().toUpperCase();
     return normalized.slice(0, 14);
+}
+
+function resolvePopupVariant(sourceLabel = '') {
+    const normalized = typeof sourceLabel === 'string' ? sourceLabel.trim().toUpperCase() : '';
+    if (!normalized) {
+        return 'pickup';
+    }
+    if (normalized.includes('MINE') || normalized.includes('KO') || normalized.includes('KILL')) {
+        return 'impact';
+    }
+    return 'pickup';
 }
 
 function clampNumber(value, min, max, fallback) {

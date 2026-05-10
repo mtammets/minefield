@@ -232,6 +232,8 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
     let enabled = true;
     let elapsedTime = 0;
     let lastSyncSignature = '';
+    let runtimeMaxActivePickups = resolvedMaxActivePickups;
+    let runtimeFiniteTotalPickups = resolvedFiniteTotalPickups;
 
     if (finiteMode) {
         rebuildFiniteQueueTemplate();
@@ -386,6 +388,24 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
                 if (Number.isFinite(nextSeedOffset)) {
                     runtimeSeedOffset = Math.floor(nextSeedOffset);
                 }
+                const nextMaxActivePickups = Number(resetOptions.maxActivePickups);
+                if (Number.isFinite(nextMaxActivePickups)) {
+                    runtimeMaxActivePickups = THREE.MathUtils.clamp(
+                        Math.floor(nextMaxActivePickups),
+                        1,
+                        64
+                    );
+                }
+                if (finiteMode) {
+                    const nextFiniteTotalPickups = Number(resetOptions.finiteTotalPickups);
+                    if (Number.isFinite(nextFiniteTotalPickups)) {
+                        runtimeFiniteTotalPickups = THREE.MathUtils.clamp(
+                            Math.floor(nextFiniteTotalPickups),
+                            0,
+                            400
+                        );
+                    }
+                }
             }
 
             elapsedTime = 0;
@@ -529,7 +549,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
 
         finiteQueueTemplate = buildFinitePickupQueue(
             worldBounds,
-            resolvedFiniteTotalPickups,
+            runtimeFiniteTotalPickups,
             runtimeSeedOffset
         );
         finiteSpawnQueue.length = 0;
@@ -743,7 +763,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
         }
 
         while (
-            pickups.size + pendingCollectedPickups.size < resolvedMaxActivePickups &&
+            pickups.size + pendingCollectedPickups.size < runtimeMaxActivePickups &&
             getRemainingFiniteSpawnCount() > 0
         ) {
             const queueItem = finiteSpawnQueue[finiteSpawnQueueReadIndex];
@@ -849,7 +869,7 @@ export function createCollectibleSystem(scene, worldBounds = null, options = {})
             singleType: resolvedSingleType,
             singleShapeIndex: resolvedSingleShapeIndex,
             elapsedTime,
-            maxActivePickups: resolvedMaxActivePickups,
+            maxActivePickups: runtimeMaxActivePickups,
             getGroundHeightAt,
         });
         lastSyncSignature = syncSignature;

@@ -168,7 +168,7 @@ const BOT_PENDING_MINE_DEBRIS_MAX_AGE_MS = 850;
 const BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE = 92;
 const BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE_SQ =
     BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE * BOT_PENDING_MINE_DEBRIS_CULL_DISTANCE;
-const BOT_LIVES_PER_ROUND = 10;
+const BOT_LIVES_PER_ROUND = 3;
 const BOT_RESPAWN_DELAY_MIN_MS = 3000;
 const BOT_RESPAWN_DELAY_MAX_MS = 4000;
 const BOT_RESPAWN_PROTECTION_MS = 1000;
@@ -183,8 +183,8 @@ const BOT_WEAPON_STAGE_CRITICAL = 0.24;
 const BOT_VX9_HUNTER_HOLD_DISTANCE = 18;
 const BOT_VX9_HUNTER_STRAFE_DISTANCE = 8;
 
-const BOT_BODY_COLORS = [0x6cb3ff];
-const BOT_NAMES = ['NOVA'];
+const BOT_BODY_COLORS = [0x6cb3ff, 0xff8a80, 0x7ff0c7, 0xffd36e, 0xc19cff, 0xff9ed1];
+const BOT_NAMES = ['NOVA', 'VEX', 'LYRA', 'RIFT', 'ONYX', 'KILO'];
 
 const forward2 = new THREE.Vector2();
 const right2 = new THREE.Vector2();
@@ -273,6 +273,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     const collisionSnapshotBuffer = [];
     const collectorDescriptorBuffer = [];
     const hudStateBuffer = [];
+    let activeBotCount = Math.max(0, Math.floor(botCount));
     const getBuildingLayer = () => {
         const cityScenery = scene?.getObjectByName?.('cityScenery') || null;
         return cityScenery?.userData?.buildingLayer || null;
@@ -316,6 +317,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             const buildingLayer = getBuildingLayer();
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
+                if (!bot.active) {
+                    continue;
+                }
                 if (bot.destroyed) {
                     tryRespawnBot(bot, nowMs);
                     continue;
@@ -346,7 +350,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             let snapshotCount = 0;
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
-                if (bot.destroyed || isBotSpawnProtected(bot, nowMs)) {
+                if (!bot.active || bot.destroyed || isBotSpawnProtected(bot, nowMs)) {
                     continue;
                 }
                 let snapshot = collisionSnapshotBuffer[snapshotCount];
@@ -386,7 +390,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             for (let i = 0; i < contacts.length; i += 1) {
                 const contact = contacts[i];
                 const bot = botsByCollectorId.get(contact.botId);
-                if (!bot || bot.destroyed) {
+                if (!bot || !bot.active || bot.destroyed) {
                     continue;
                 }
                 applyCollisionImpulseToBot(bot, contact);
@@ -401,7 +405,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             let descriptorCount = 0;
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
-                if (bot.destroyed) {
+                if (!bot.active || bot.destroyed) {
                     continue;
                 }
                 let descriptor = collectorDescriptorBuffer[descriptorCount];
@@ -433,7 +437,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 return null;
             }
             for (let i = 0; i < bots.length; i += 1) {
-                if (bots[i]?.vehicleWeaponHunter) {
+                if (bots[i]?.active && bots[i]?.vehicleWeaponHunter) {
                     return bots[i];
                 }
             }
@@ -444,7 +448,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 return 0;
             }
             const bot = botsByCollectorId.get(collectorId);
-            if (!bot || bot.destroyed) {
+            if (!bot || !bot.active || bot.destroyed) {
                 return 0;
             }
             return Math.abs(bot.state.speed || 0);
@@ -454,7 +458,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 return;
             }
             const bot = botsByCollectorId.get(collectorId);
-            if (bot && !bot.destroyed) {
+            if (bot && bot.active && !bot.destroyed) {
                 bot.collectedCount += 1;
             }
         },
@@ -464,13 +468,24 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 bot.targetColorHex = targetColorHex;
             });
         },
-        reset({ sharedTargetColorHex: nextTargetColorHex = resolvedSharedTargetColorHex } = {}) {
+        reset({
+            sharedTargetColorHex: nextTargetColorHex = resolvedSharedTargetColorHex,
+            activeBotCount: nextActiveBotCount = activeBotCount,
+            resetCollectedCount = true,
+            resetLives = true,
+            respawnProtectionMs = 0,
+        } = {}) {
             resolvedSharedTargetColorHex = nextTargetColorHex;
+            activeBotCount = clampActiveBotCount(nextActiveBotCount);
             clearDetachedDebris();
             const nowMs = Date.now();
             const placedBots = [];
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
+                if (i >= activeBotCount) {
+                    deactivateBot(bot, { resetCollectedCount, resetLives });
+                    continue;
+                }
                 resetBot(
                     bot,
                     i,
@@ -481,15 +496,70 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     getGroundHeightAt,
                     cityMapLayout,
                     {
-                        resetCollectedCount: true,
-                        resetLives: true,
+                        resetCollectedCount,
+                        resetLives,
                         nowMs,
-                        respawnProtectionMs: 0,
+                        respawnProtectionMs,
                     }
                 );
                 placedBots.push(bot);
             }
             applyEnabledVisibility();
+        },
+        setActiveBotCount(nextCount, options = {}) {
+            const previousCount = activeBotCount;
+            activeBotCount = clampActiveBotCount(nextCount);
+            const shouldReset = Boolean(options?.reset);
+            if (shouldReset) {
+                this.reset({
+                    sharedTargetColorHex:
+                        options?.sharedTargetColorHex ?? resolvedSharedTargetColorHex,
+                    activeBotCount,
+                    resetCollectedCount: options?.resetCollectedCount !== false,
+                    resetLives: options?.resetLives !== false,
+                    respawnProtectionMs: Number(options?.respawnProtectionMs) || 0,
+                });
+                return activeBotCount;
+            }
+
+            const nowMs = Date.now();
+            const placedBots = [];
+            for (let i = 0; i < bots.length; i += 1) {
+                const bot = bots[i];
+                if (i >= activeBotCount) {
+                    deactivateBot(bot, { resetCollectedCount: false, resetLives: false });
+                    continue;
+                }
+                if (!bot.active) {
+                    resetBot(
+                        bot,
+                        i,
+                        worldBounds,
+                        staticObstacles,
+                        placedBots,
+                        resolvedSharedTargetColorHex,
+                        getGroundHeightAt,
+                        cityMapLayout,
+                        {
+                            resetCollectedCount: false,
+                            resetLives: true,
+                            nowMs,
+                            respawnProtectionMs: BOT_RESPAWN_PROTECTION_MS,
+                        }
+                    );
+                }
+                placedBots.push(bot);
+            }
+            if (previousCount !== activeBotCount) {
+                applyEnabledVisibility();
+            }
+            return activeBotCount;
+        },
+        getActiveBotCount() {
+            return activeBotCount;
+        },
+        getBotPoolSize() {
+            return bots.length;
         },
         getHudState() {
             if (!enabled) {
@@ -500,6 +570,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             let hudCount = 0;
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
+                if (!bot.active) {
+                    continue;
+                }
                 let hudEntry = hudStateBuffer[hudCount];
                 if (!hudEntry) {
                     hudEntry = {};
@@ -551,7 +624,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 return false;
             }
             const bot = botsByCollectorId.get(collectorId);
-            if (!bot || bot.destroyed || isBotSpawnProtected(bot)) {
+            if (!bot || !bot.active || bot.destroyed || isBotSpawnProtected(bot)) {
                 return false;
             }
             const mineCrashContext = createMineCrashContext(context?.crashContext);
@@ -566,6 +639,9 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             const bot = botsByCollectorId.get(collectorId);
             if (!bot) {
                 return { ok: false, destroyed: false, reason: 'missing' };
+            }
+            if (!bot.active) {
+                return { ok: false, destroyed: false, reason: 'inactive' };
             }
             if (bot.destroyed) {
                 return { ok: false, destroyed: false, reason: 'destroyed' };
@@ -618,7 +694,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
 
             for (let i = 0; i < bots.length; i += 1) {
                 const bot = bots[i];
-                if (!bot || bot.destroyed || isBotSpawnProtected(bot)) {
+                if (!bot || !bot.active || bot.destroyed || isBotSpawnProtected(bot)) {
                     continue;
                 }
                 if (arePositionsSeparatedByUndergroundParking(origin, bot.car.position, 0.18)) {
@@ -657,7 +733,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     };
 
     function tryRespawnBot(bot, nowMs) {
-        if (!bot || !bot.destroyed || bot.livesRemaining <= 0) {
+        if (!bot || !bot.active || !bot.destroyed || bot.livesRemaining <= 0) {
             return;
         }
         if (!Number.isFinite(bot.respawnAtMs) || bot.respawnAtMs <= 0 || nowMs < bot.respawnAtMs) {
@@ -667,7 +743,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
         const placedBots = [];
         for (let i = 0; i < bots.length; i += 1) {
             const candidate = bots[i];
-            if (!candidate || candidate === bot || candidate.destroyed) {
+            if (!candidate || !candidate.active || candidate === bot || candidate.destroyed) {
                 continue;
             }
             placedBots.push(candidate);
@@ -707,11 +783,47 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     function applyEnabledVisibility() {
         for (let i = 0; i < bots.length; i += 1) {
             const bot = bots[i];
-            const botVisible = enabled && !bot.destroyed;
+            const botVisible = enabled && bot.active && !bot.destroyed;
             bot.car.visible = botVisible;
             if (bot.indicator?.root) {
                 bot.indicator.root.visible = botVisible;
             }
+        }
+    }
+
+    function clampActiveBotCount(value) {
+        if (!Number.isFinite(value)) {
+            return bots.length;
+        }
+        return THREE.MathUtils.clamp(Math.floor(value), 0, bots.length);
+    }
+
+    function deactivateBot(bot, options = {}) {
+        if (!bot) {
+            return;
+        }
+        bot.active = false;
+        bot.destroyed = false;
+        bot.respawnAtMs = 0;
+        bot.spawnProtectionEndsAtMs = 0;
+        bot.car.visible = false;
+        if (bot.indicator?.root) {
+            bot.indicator.root.visible = false;
+        }
+        bot.state.speed = 0;
+        bot.state.acceleration = 0;
+        bot.state.steerInput = 0;
+        bot.state.steerAngle = 0;
+        bot.state.throttle = 0;
+        bot.state.brake = 0;
+        bot.state.yawRate = 0;
+        bot.state.burnout = 0;
+        bot.state.velocity.set(0, 0);
+        if (options.resetCollectedCount) {
+            bot.collectedCount = 0;
+        }
+        if (options.resetLives) {
+            bot.livesRemaining = BOT_LIVES_PER_ROUND;
         }
     }
 
@@ -1422,6 +1534,7 @@ function resetBot(
         bot.indicator.root.visible = true;
     }
 
+    bot.active = true;
     bot.destroyed = false;
     bot.respawnAtMs = 0;
     bot.spawnProtectionEndsAtMs =
@@ -1579,6 +1692,7 @@ function createBot(
         onPartDetached,
         onDestroyed,
         lastDamageAtMs: 0,
+        active: true,
         destroyed: false,
         livesRemaining: BOT_LIVES_PER_ROUND,
         respawnAtMs: 0,
@@ -1810,7 +1924,7 @@ function updateBot(
 
         for (let i = 0; i < allBots.length; i += 1) {
             const other = allBots[i];
-            if (other === bot || other.destroyed) {
+            if (other === bot || !other.active || other.destroyed) {
                 continue;
             }
             addEntityAvoidance(
@@ -2849,7 +2963,7 @@ function destroyBot(bot) {
 }
 
 function isBotSpawnProtected(bot, nowMs = Date.now()) {
-    if (!bot || bot.destroyed) {
+    if (!bot || !bot.active || bot.destroyed) {
         return false;
     }
     return Number(bot.spawnProtectionEndsAtMs) > nowMs;

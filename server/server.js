@@ -8,8 +8,19 @@ const path = require('path');
 const Stripe = require('stripe');
 const { Server } = require('socket.io');
 const { createBillboardContentStore } = require('./billboard-content-store');
+const {
+    createLeaderboardStore,
+    ensureLeaderboardSchema,
+    sanitizeLeaderboardLimit,
+} = require('./leaderboard-store');
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
+const {
+    buildSupabasePublicConfig,
+    createSupabaseServiceClient,
+    resolveSupabaseConnectOrigin,
+    resolveSupabaseRuntimeConfig,
+} = require('./supabase-config');
 const {
     isSocketCorsOriginAllowed,
     isSocketOriginAllowed,
@@ -44,6 +55,8 @@ const ROOM_CODE_LENGTH = 6;
 const MAX_PLAYERS_PER_ROOM = 8;
 const MAX_ACTIVE_ROOMS = 500;
 const PLAYER_NAME_MAX_LENGTH = 18;
+const PLAYER_SKIN_ID_MAX_LENGTH = 32;
+const DEFAULT_PLAYER_SKIN_ID = 'midnight-comet';
 const STATE_UPDATE_MIN_INTERVAL_MS = 35;
 const COLLISION_RELAY_MIN_INTERVAL_MS = 60;
 const MAX_DETACHED_PART_IDS = 32;
@@ -100,10 +113,28 @@ const BILLBOARD_CONTENT_ADMIN_TOKEN = sanitizeAdminToken(
 const GA_MEASUREMENT_ID = sanitizeGaMeasurementId(
     process.env.GA_MEASUREMENT_ID || process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID || ''
 );
+const supabaseRuntimeConfig = resolveSupabaseRuntimeConfig(process.env);
+const supabaseServiceClient = createSupabaseServiceClient(supabaseRuntimeConfig);
+const leaderboardStore = createLeaderboardStore(supabaseRuntimeConfig);
+const SUPABASE_PUBLIC_CONFIG = buildSupabasePublicConfig(supabaseRuntimeConfig, {
+    leaderboardEnabled: leaderboardStore.isConfigured(),
+});
+const SUPABASE_CONNECT_ORIGIN = resolveSupabaseConnectOrigin(supabaseRuntimeConfig.url);
 
 const SOCKET_ALLOWED_ORIGINS = parseAllowedOriginList(
     process.env.SOCKET_ALLOWED_ORIGINS || process.env.CORS_ALLOWED_ORIGINS || ''
 );
+const HTTP_CONNECT_SRC_VALUES = [
+    "'self'",
+    'ws:',
+    'wss:',
+    'https://www.google-analytics.com',
+    'https://region1.google-analytics.com',
+    'https://stats.g.doubleclick.net',
+];
+if (SUPABASE_CONNECT_ORIGIN) {
+    HTTP_CONNECT_SRC_VALUES.push(SUPABASE_CONNECT_ORIGIN);
+}
 const HTTP_CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
     "script-src 'self' https://cdn.jsdelivr.net https://www.googletagmanager.com",
@@ -111,7 +142,7 @@ const HTTP_CONTENT_SECURITY_POLICY = [
     "img-src 'self' data: blob: https://www.google-analytics.com https://stats.g.doubleclick.net",
     "media-src 'self' data: blob:",
     "font-src 'self' data:",
-    "connect-src 'self' ws: wss: https://www.google-analytics.com https://region1.google-analytics.com https://stats.g.doubleclick.net",
+    `connect-src ${Array.from(new Set(HTTP_CONNECT_SRC_VALUES)).join(' ')}`,
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "object-src 'none'",
@@ -127,6 +158,12 @@ const HTTP_PERMISSIONS_POLICY = [
     'usb=()',
 ].join(', ');
 const HTTP_STRICT_TRANSPORT_SECURITY = 'max-age=31536000; includeSubDomains';
+const HTTP_LEADERBOARD_READ_WINDOW_MS = 10_000;
+const HTTP_LEADERBOARD_READ_MAX = 60;
+const HTTP_LEADERBOARD_SUBMIT_WINDOW_MS = 60_000;
+const HTTP_LEADERBOARD_SUBMIT_MAX = 12;
+const ONLINE_AUTH_REQUIRED_ERROR = 'Sign in is required for online rooms.';
+const ONLINE_AUTH_SERVER_ERROR = 'Online auth is not configured on this server.';
 
 const EVENT_RATE_LIMITS = {
     'mp:createRoom': { windowMs: 10_000, max: 8 },
@@ -265,7 +302,162 @@ app.get('/api/public-config', (req, res) => {
         analytics: {
             gaMeasurementId: GA_MEASUREMENT_ID || null,
         },
+        supabase: SUPABASE_PUBLIC_CONFIG,
     });
+});
+
+app.delete('/api/auth/account', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!supabaseServiceClient) {
+        res.status(503).json({
+            ok: false,
+            error: 'Account deletion is not configured on this server.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        if (!authIdentity?.userId) {
+            res.status(401).json({
+                ok: false,
+                error: 'Sign in before deleting the account.',
+            });
+            return;
+        }
+
+        const { error } = await supabaseServiceClient.auth.admin.deleteUser(authIdentity.userId);
+        if (error) {
+            throw error;
+        }
+
+        let deletedLeaderboardEntries = 0;
+        if (leaderboardStore.isConfigured()) {
+            try {
+                const cleanupResult = await leaderboardStore.deleteEntriesByUserId(
+                    authIdentity.userId
+                );
+                deletedLeaderboardEntries = Math.max(
+                    0,
+                    Math.round(Number(cleanupResult?.deletedCount) || 0)
+                );
+            } catch (cleanupError) {
+                console.warn('Leaderboard cleanup after account deletion failed:', cleanupError);
+            }
+        }
+
+        res.json({
+            ok: true,
+            deletedLeaderboardEntries,
+        });
+    } catch (error) {
+        console.error('Supabase account deletion failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not delete account right now.',
+        });
+    }
+});
+
+app.get('/api/leaderboard/global', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!leaderboardStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Supabase leaderboard is not configured on this server.',
+        });
+        return;
+    }
+    if (
+        !consumeHttpRequestQuota(
+            req,
+            'leaderboard-read',
+            HTTP_LEADERBOARD_READ_WINDOW_MS,
+            HTTP_LEADERBOARD_READ_MAX
+        )
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many leaderboard requests. Try again shortly.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        const leaderboardView = await leaderboardStore.readLeaderboardView({
+            topLimit: sanitizeLeaderboardLimit(req.query?.limit, 5),
+            viewerWindowRadius: sanitizeLeaderboardLimit(req.query?.window, 2),
+            viewerUserId: authIdentity?.userId || '',
+        });
+        res.json({
+            ok: true,
+            ...leaderboardView,
+        });
+    } catch (error) {
+        console.error('Supabase leaderboard read failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not load leaderboard.',
+        });
+    }
+});
+
+app.post('/api/leaderboard/round-result', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!leaderboardStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Supabase leaderboard is not configured on this server.',
+        });
+        return;
+    }
+    if (
+        !consumeHttpRequestQuota(
+            req,
+            'leaderboard-submit',
+            HTTP_LEADERBOARD_SUBMIT_WINDOW_MS,
+            HTTP_LEADERBOARD_SUBMIT_MAX
+        )
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many score submissions. Try again later.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        if (!authIdentity?.userId) {
+            res.status(401).json({
+                ok: false,
+                error: 'Sign in to sync scores to the global leaderboard.',
+            });
+            return;
+        }
+        const result = await leaderboardStore.submitRoundResult({
+            ...req.body,
+            userId: authIdentity.userId,
+        });
+        if (!result?.ok) {
+            res.status(400).json({
+                ok: false,
+                error: 'A valid round result is required.',
+            });
+            return;
+        }
+        res.status(201).json({
+            ok: true,
+            entry: result.entry,
+        });
+    } catch (error) {
+        console.error('Supabase leaderboard write failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not save round result.',
+        });
+    }
 });
 
 app.get('/api/room-code/:roomCode/availability', (req, res) => {
@@ -421,11 +613,12 @@ app.get('/api/donate/session-status', async (req, res) => {
 io.on('connection', (socket) => {
     socket.data.profile = createDefaultProfile(socket.id);
     socket.data.roomCode = null;
+    socket.data.authIdentity = null;
     socket.data.lastCollisionRelays = new Map();
     socket.data.lastEnvironmentStateAt = 0;
     socket.data.rateLimitStore = new Map();
 
-    socket.on('mp:createRoom', (payload, ack) => {
+    socket.on('mp:createRoom', async (payload, ack) => {
         if (!consumeInboundEventQuota(socket, 'mp:createRoom')) {
             safeAck(ack, {
                 ok: false,
@@ -434,7 +627,15 @@ io.on('connection', (socket) => {
             return;
         }
         try {
-            const profile = resolveProfile(payload?.profile, socket.data.profile, socket.id);
+            const authIdentity = await requireAuthenticatedSocket(socket, ack);
+            if (!authIdentity) {
+                return;
+            }
+            const profile = resolveProfile(
+                payload?.profile,
+                createAuthenticatedProfile(authIdentity, socket.id),
+                socket.id
+            );
             socket.data.profile = profile;
             leaveCurrentRoom(socket);
 
@@ -486,7 +687,7 @@ io.on('connection', (socket) => {
                 collectedPickupIds: new Map(),
                 roundState: createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT),
             };
-            room.players.set(socket.id, createRoomPlayer(socket.id, profile));
+            room.players.set(socket.id, createRoomPlayer(socket.id, profile, authIdentity));
             recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
             rooms.set(roomCode, room);
 
@@ -507,7 +708,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('mp:joinRoom', (payload, ack) => {
+    socket.on('mp:joinRoom', async (payload, ack) => {
         if (!consumeInboundEventQuota(socket, 'mp:joinRoom')) {
             safeAck(ack, {
                 ok: false,
@@ -516,6 +717,10 @@ io.on('connection', (socket) => {
             return;
         }
         try {
+            const authIdentity = await requireAuthenticatedSocket(socket, ack);
+            if (!authIdentity) {
+                return;
+            }
             const roomCode = sanitizeRoomCode(payload?.roomCode);
             if (!roomCode) {
                 safeAck(ack, {
@@ -542,11 +747,15 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const profile = resolveProfile(payload?.profile, socket.data.profile, socket.id);
+            const profile = resolveProfile(
+                payload?.profile,
+                createAuthenticatedProfile(authIdentity, socket.id),
+                socket.id
+            );
             socket.data.profile = profile;
             leaveCurrentRoom(socket);
 
-            room.players.set(socket.id, createRoomPlayer(socket.id, profile));
+            room.players.set(socket.id, createRoomPlayer(socket.id, profile, authIdentity));
             room.roundState =
                 room.roundState && typeof room.roundState === 'object'
                     ? room.roundState
@@ -612,6 +821,7 @@ io.on('connection', (socket) => {
 
         player.name = profile.name;
         player.colorHex = profile.colorHex;
+        player.skinId = profile.skinId;
         room.updatedAt = Date.now();
         emitRoomState(room);
     });
@@ -921,29 +1131,17 @@ io.on('connection', (socket) => {
             ownerScoring:
                 mineScoreApplied?.ok && mineScoreApplied.scoring
                     ? {
-                          chainCount: Math.max(
-                              1,
-                              Math.round(Number(mineScoreApplied.scoring.chainCount) || 1)
-                          ),
-                          chainMultiplier: clampFinite(
-                              mineScoreApplied.scoring.chainMultiplier,
-                              1,
-                              5,
-                              1
-                          ),
-                          endgameBonus: clampFinite(mineScoreApplied.scoring.endgameBonus, 0, 1, 0),
-                          antiFarmMultiplier: clampFinite(
-                              mineScoreApplied.scoring.antiFarmMultiplier,
+                          rule:
+                              typeof mineScoreApplied.scoring.rule === 'string'
+                                  ? mineScoreApplied.scoring.rule
+                                  : 'mine-kill',
+                          label:
+                              typeof mineScoreApplied.scoring.label === 'string'
+                                  ? mineScoreApplied.scoring.label
+                                  : 'Mine kill',
+                          basePoints: Math.max(
                               0,
-                              1,
-                              1
-                          ),
-                          repeatedTarget: Boolean(mineScoreApplied.scoring.repeatedTarget),
-                          roundProgress: clampFinite(
-                              mineScoreApplied.scoring.roundProgress,
-                              0,
-                              1,
-                              0
+                              Math.round(Number(mineScoreApplied.scoring.basePoints) || 0)
                           ),
                       }
                     : null,
@@ -1037,20 +1235,18 @@ io.on('connection', (socket) => {
             scoring:
                 scoreApplied.scoring && typeof scoreApplied.scoring === 'object'
                     ? {
-                          comboCount: Math.max(
-                              1,
-                              Math.round(Number(scoreApplied.scoring.comboCount) || 1)
+                          rule:
+                              typeof scoreApplied.scoring.rule === 'string'
+                                  ? scoreApplied.scoring.rule
+                                  : 'pickup',
+                          label:
+                              typeof scoreApplied.scoring.label === 'string'
+                                  ? scoreApplied.scoring.label
+                                  : 'Pickup',
+                          basePoints: Math.max(
+                              0,
+                              Math.round(Number(scoreApplied.scoring.basePoints) || 0)
                           ),
-                          comboMultiplier: clampFinite(
-                              scoreApplied.scoring.comboMultiplier,
-                              1,
-                              4,
-                              1
-                          ),
-                          riskBonus: clampFinite(scoreApplied.scoring.riskBonus, 0, 1, 0),
-                          endgameBonus: clampFinite(scoreApplied.scoring.endgameBonus, 0, 1, 0),
-                          speedKph: clampFinite(scoreApplied.scoring.speedKph, 0, 400, 0),
-                          roundProgress: clampFinite(scoreApplied.scoring.roundProgress, 0, 1, 0),
                       }
                     : null,
             roundState: serializeRoomRoundState(room.roundState),
@@ -1215,11 +1411,7 @@ io.on('connection', (socket) => {
             return;
         }
         if (nextDestroyed) {
-            player.scoreComboCount = 0;
-            player.lastScoredPickupAt = 0;
             player.lastPickupPoints = 0;
-            player.mineKillChainCount = 0;
-            player.lastMineKillAt = 0;
             player.lastMineKillPoints = 0;
             player.destroyedAt = now;
             player.allowStateSnapUntil = 0;
@@ -1278,18 +1470,64 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(PORT, () => {
-    const accessUrls = resolveServerAccessUrls(PORT);
-    console.log('Server is running on:');
-    accessUrls.forEach((url) => {
-        console.log(`- ${url}`);
+void startServer();
+
+async function startServer() {
+    await initializeSupabaseLeaderboardSchema();
+    server.listen(PORT, () => {
+        const accessUrls = resolveServerAccessUrls(PORT);
+        console.log('Server is running on:');
+        accessUrls.forEach((url) => {
+            console.log(`- ${url}`);
+        });
+        if (stripeClient && !STRIPE_WEBHOOK_SECRET) {
+            console.warn(
+                'Stripe webhook secret is not configured; donation verification falls back to polling.'
+            );
+        }
+        if (leaderboardStore.isConfigured()) {
+            console.log('Supabase leaderboard API is enabled.');
+        }
+        if (supabaseRuntimeConfig.publicEnabled && !supabaseServiceClient) {
+            console.warn('Supabase public auth is enabled, but server-side token validation is not.');
+        }
     });
-    if (stripeClient && !STRIPE_WEBHOOK_SECRET) {
-        console.warn(
-            'Stripe webhook secret is not configured; donation verification falls back to polling.'
-        );
+}
+
+async function initializeSupabaseLeaderboardSchema() {
+    if (!leaderboardStore.isConfigured()) {
+        return;
     }
-});
+    const bootstrapConnectionStrings = Array.from(
+        new Set(
+            [supabaseRuntimeConfig.dbUrl, supabaseRuntimeConfig.dbPoolerUrl].filter(
+                (value) => typeof value === 'string' && value.trim()
+            )
+        )
+    );
+    if (bootstrapConnectionStrings.length === 0) {
+        console.warn(
+            'Supabase leaderboard is enabled, but no DB connection string is available for automatic schema bootstrap.'
+        );
+        return;
+    }
+
+    let lastError = null;
+    for (let index = 0; index < bootstrapConnectionStrings.length; index += 1) {
+        try {
+            await ensureLeaderboardSchema({
+                connectionString: bootstrapConnectionStrings[index],
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Supabase leaderboard schema bootstrap failed:', lastError);
+    }
+}
 
 function resolveServerAccessUrls(port) {
     const portText = String(port);
@@ -1687,6 +1925,39 @@ function resolveSocketAddressKey(socket) {
         .slice(0, 96);
 }
 
+function consumeHttpRequestQuota(req, ruleKey, windowMs, maxCount) {
+    const now = Date.now();
+    pruneIpRateLimitStore(now);
+    const addressKey = resolveHttpRequestAddressKey(req);
+    if (!addressKey) {
+        return true;
+    }
+    return consumeRateLimit(
+        ipRateLimitStore,
+        `http:${ruleKey}:${addressKey}`,
+        now,
+        windowMs,
+        maxCount
+    );
+}
+
+function resolveHttpRequestAddressKey(req) {
+    const forwardedForHeader = req?.headers?.['x-forwarded-for'];
+    const forwardedFor =
+        typeof forwardedForHeader === 'string'
+            ? forwardedForHeader.split(',')[0]
+            : Array.isArray(forwardedForHeader)
+              ? forwardedForHeader[0]
+              : '';
+    const rawAddress = String(forwardedFor || req?.socket?.remoteAddress || '')
+        .trim()
+        .replace(/^::ffff:/, '');
+    if (!rawAddress) {
+        return '';
+    }
+    return rawAddress.replace(/[^\w\-.:]/g, '').slice(0, 96);
+}
+
 function pruneIpRateLimitStore(nowMs = Date.now()) {
     const now = Number.isFinite(nowMs) ? nowMs : Date.now();
     if (now - lastIpRateStorePruneAt < IP_RATE_STORE_PRUNE_INTERVAL_MS) {
@@ -1748,20 +2019,88 @@ function validateStateTransition({
     return { ok: true, usedSnap: false };
 }
 
-function createRoomPlayer(id, profile) {
+async function requireAuthenticatedSocket(socket, ack) {
+    const authIdentity = await resolveSocketAuthIdentity(socket);
+    if (authIdentity?.userId) {
+        return authIdentity;
+    }
+    safeAck(ack, {
+        ok: false,
+        error: supabaseServiceClient ? ONLINE_AUTH_REQUIRED_ERROR : ONLINE_AUTH_SERVER_ERROR,
+    });
+    return null;
+}
+
+async function resolveSocketAuthIdentity(socket) {
+    if (socket?.data?.authIdentity?.userId) {
+        return socket.data.authIdentity;
+    }
+    const accessToken = sanitizeSupabaseAccessToken(socket?.handshake?.auth?.accessToken);
+    if (!accessToken) {
+        return null;
+    }
+    const authIdentity = await resolveSupabaseIdentityFromAccessToken(accessToken);
+    if (authIdentity?.userId && socket?.data) {
+        socket.data.authIdentity = authIdentity;
+    }
+    return authIdentity;
+}
+
+async function resolveAuthenticatedRequestIdentity(req) {
+    const accessToken = extractBearerToken(req?.headers?.authorization);
+    if (!accessToken) {
+        return null;
+    }
+    return resolveSupabaseIdentityFromAccessToken(accessToken);
+}
+
+async function resolveSupabaseIdentityFromAccessToken(accessToken) {
+    const safeAccessToken = sanitizeSupabaseAccessToken(accessToken);
+    if (!supabaseServiceClient || !safeAccessToken) {
+        return null;
+    }
+
+    try {
+        const { data, error } = await supabaseServiceClient.auth.getUser(safeAccessToken);
+        if (error || !data?.user?.id) {
+            return null;
+        }
+        const email = sanitizeAuthEmail(data.user.email);
+        return {
+            userId: sanitizeSupabaseUserId(data.user.id),
+            email,
+            displayName: resolveAuthenticatedDisplayName(data.user, email),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function createAuthenticatedProfile(authIdentity = null, socketId = '') {
+    const fallbackProfile = createDefaultProfile(socketId);
+    if (!authIdentity || typeof authIdentity !== 'object') {
+        return fallbackProfile;
+    }
+    return {
+        ...fallbackProfile,
+        name: sanitizePlayerName(
+            authIdentity.displayName || resolveEmailName(authIdentity.email),
+            fallbackProfile.name
+        ),
+    };
+}
+
+function createRoomPlayer(id, profile, authIdentity = null) {
     return {
         id,
+        userId: sanitizeSupabaseUserId(authIdentity?.userId),
         name: profile.name,
         colorHex: profile.colorHex,
+        skinId: profile.skinId,
         collectedCount: 0,
         score: 0,
-        scoreComboCount: 0,
-        lastScoredPickupAt: 0,
         lastPickupPoints: 0,
-        mineKillChainCount: 0,
-        lastMineKillAt: 0,
         lastMineKillPoints: 0,
-        mineKillByTarget: Object.create(null),
         isDestroyed: false,
         joinedAt: Date.now(),
         previousState: null,
@@ -2005,6 +2344,7 @@ function serializeRoom(room) {
                 id: player.id,
                 name: player.name,
                 colorHex: player.colorHex,
+                skinId: player.skinId,
                 collectedCount,
                 score,
                 isDestroyed,
@@ -2119,7 +2459,55 @@ function createDefaultProfile(socketId) {
     return {
         name: `Player-${shortId}`,
         colorHex: 0x2d67a6,
+        skinId: DEFAULT_PLAYER_SKIN_ID,
     };
+}
+
+function extractBearerToken(headerValue) {
+    if (typeof headerValue !== 'string') {
+        return '';
+    }
+    const match = headerValue.trim().match(/^Bearer\s+(.+)$/iu);
+    return match?.[1] ? sanitizeSupabaseAccessToken(match[1]) : '';
+}
+
+function sanitizeSupabaseAccessToken(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return normalized.length >= 32 ? normalized.slice(0, 8192) : '';
+}
+
+function sanitizeSupabaseUserId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().slice(0, 128);
+    return /^[a-zA-Z0-9-]{6,128}$/u.test(normalized) ? normalized : '';
+}
+
+function sanitizeAuthEmail(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase().slice(0, 320);
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized) ? normalized : '';
+}
+
+function resolveEmailName(email) {
+    if (typeof email !== 'string' || !email.includes('@')) {
+        return '';
+    }
+    return email.split('@')[0] || '';
+}
+
+function resolveAuthenticatedDisplayName(user, email = '') {
+    const metadataName = sanitizePlayerName(user?.user_metadata?.display_name, '');
+    if (metadataName) {
+        return metadataName;
+    }
+    return sanitizePlayerName(resolveEmailName(email), '');
 }
 
 function resolveProfile(input, fallback, socketId) {
@@ -2127,6 +2515,7 @@ function resolveProfile(input, fallback, socketId) {
     return {
         name: sanitizePlayerName(input?.name, defaultProfile.name),
         colorHex: sanitizeColorHex(input?.colorHex, defaultProfile.colorHex),
+        skinId: sanitizePlayerSkinId(input?.skinId, defaultProfile.skinId),
     };
 }
 
@@ -2151,6 +2540,19 @@ function sanitizeColorHex(value, fallbackColor) {
     }
 
     return Math.max(0, Math.min(0xffffff, Math.round(numeric))) >>> 0;
+}
+
+function sanitizePlayerSkinId(value, fallbackSkinId) {
+    if (typeof value !== 'string') {
+        return fallbackSkinId;
+    }
+
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, PLAYER_SKIN_ID_MAX_LENGTH);
+    return normalized || fallbackSkinId;
 }
 
 function sanitizeRoomCode(value) {

@@ -47,7 +47,7 @@ test('applyPlayerPickupScore respects cooldown and finishes round', () => {
         nowMs: 1000,
     });
     assert.equal(first.ok, true);
-    assert.equal(first.pointsAwarded > 0, true);
+    assert.equal(first.pointsAwarded, 100);
     assert.equal(room.players.get('p1').collectedCount, 1);
     assert.equal(room.players.get('p1').score, first.playerScore);
     assert.equal(room.roundState.totalScore, room.players.get('p1').score);
@@ -67,8 +67,8 @@ test('applyPlayerPickupScore respects cooldown and finishes round', () => {
         nowMs: 1285,
     });
     assert.equal(second.ok, true);
-    assert.equal(second.pointsAwarded > 0, true);
-    assert.equal(second.playerScore > first.playerScore, true);
+    assert.equal(second.pointsAwarded, 100);
+    assert.equal(second.playerScore, 200);
     assert.equal(room.players.get('p1').collectedCount, 2);
     assert.equal(room.players.get('p1').score, second.playerScore);
     assert.equal(room.roundState.finished, true);
@@ -76,16 +76,13 @@ test('applyPlayerPickupScore respects cooldown and finishes round', () => {
     assert.equal(room.roundState.totalScore, second.playerScore);
 });
 
-test('applyPlayerMineKillScore applies chain and anti-farm penalties', () => {
+test('applyPlayerMineKillScore awards fixed points per elimination', () => {
     const room = {
         players: new Map([
             [
                 'owner',
                 {
                     score: 0,
-                    mineKillChainCount: 0,
-                    lastMineKillAt: 0,
-                    mineKillByTarget: Object.create(null),
                 },
             ],
             [
@@ -111,8 +108,8 @@ test('applyPlayerMineKillScore applies chain and anti-farm penalties', () => {
         nowMs: 1000,
     });
     assert.equal(first.ok, true);
-    assert.equal(first.pointsAwarded > 0, true);
-    assert.equal(first.scoring.chainCount, 1);
+    assert.equal(first.pointsAwarded, 300);
+    assert.equal(first.scoring.label, 'Mine kill');
 
     const secondChain = applyPlayerMineKillScore({
         room,
@@ -121,18 +118,16 @@ test('applyPlayerMineKillScore applies chain and anti-farm penalties', () => {
         nowMs: 4500,
     });
     assert.equal(secondChain.ok, true);
-    assert.equal(secondChain.scoring.chainCount, 2);
-    assert.equal(secondChain.pointsAwarded > first.pointsAwarded, true);
+    assert.equal(secondChain.pointsAwarded, 300);
 
-    const antiFarm = applyPlayerMineKillScore({
+    const repeatedTarget = applyPlayerMineKillScore({
         room,
         ownerPlayerId: 'owner',
         targetPlayerId: 'target-a',
         nowMs: 7000,
     });
-    assert.equal(antiFarm.ok, true);
-    assert.equal(antiFarm.scoring.repeatedTarget, true);
-    assert.equal(antiFarm.pointsAwarded < secondChain.pointsAwarded, true);
+    assert.equal(repeatedTarget.ok, true);
+    assert.equal(repeatedTarget.pointsAwarded, 300);
 });
 
 test('validateCollisionRelay accepts plausible contacts and rejects stale state', () => {

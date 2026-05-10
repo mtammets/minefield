@@ -814,22 +814,15 @@ export function createMineSystemController(options = {}) {
             ownerScoring:
                 snapshot?.ownerScoring && typeof snapshot.ownerScoring === 'object'
                     ? {
-                          chainCount: clampFinite(snapshot.ownerScoring.chainCount, 1, 64, 1),
-                          chainMultiplier: clampFinite(
-                              snapshot.ownerScoring.chainMultiplier,
-                              1,
-                              5,
-                              1
-                          ),
-                          endgameBonus: clampFinite(snapshot.ownerScoring.endgameBonus, 0, 1, 0),
-                          antiFarmMultiplier: clampFinite(
-                              snapshot.ownerScoring.antiFarmMultiplier,
-                              0,
-                              1,
-                              1
-                          ),
-                          repeatedTarget: Boolean(snapshot.ownerScoring.repeatedTarget),
-                          roundProgress: clampFinite(snapshot.ownerScoring.roundProgress, 0, 1, 0),
+                          rule:
+                              typeof snapshot.ownerScoring.rule === 'string'
+                                  ? snapshot.ownerScoring.rule
+                                  : 'mine-kill',
+                          label:
+                              typeof snapshot.ownerScoring.label === 'string'
+                                  ? snapshot.ownerScoring.label
+                                  : 'Mine kill',
+                          basePoints: clampFinite(snapshot.ownerScoring.basePoints, 0, 10_000, 0),
                       }
                     : null,
             fallbackPosition,

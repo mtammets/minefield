@@ -59,6 +59,7 @@ export function createInputController(options = {}) {
         return {
             initialize() {},
             dispose() {},
+            returnToWelcome() {},
             returnToWelcomeFromPauseMenu() {},
             isVehicleWeaponZoomHeld() {
                 return false;
@@ -91,7 +92,8 @@ export function createInputController(options = {}) {
     return {
         initialize,
         dispose,
-        returnToWelcomeFromPauseMenu,
+        returnToWelcome,
+        returnToWelcomeFromPauseMenu: returnToWelcome,
         isVehicleWeaponZoomHeld() {
             return vehicleWeaponZoomHeld && Boolean(getHasVehicleWeapon());
         },
@@ -626,7 +628,7 @@ export function createInputController(options = {}) {
         }
     }
 
-    function returnToWelcomeFromPauseMenu() {
+    function returnToWelcome() {
         releaseVehicleWeaponZoom();
         onStartNewGame();
         onShowWelcomeModal();

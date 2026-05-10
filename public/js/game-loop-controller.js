@@ -739,23 +739,6 @@ export function createGameLoopController(options = {}) {
                     measureStage('collectibles', () => {
                         collectibleSystem.updateForCollectors(collectorBuffer, frameDelta);
                     });
-                    if (botsEnabled) {
-                        gameSessionController?.maybeFinalizeOnBotElimination?.({
-                            totalPickups: roundTotalPickups,
-                            botHudState,
-                        });
-                    }
-                    const totalCollectedCount = readTotalCollectedCount();
-                    if (botsEnabled && totalCollectedCount >= roundTotalPickups) {
-                        gameSessionController.finalizePickupRound(
-                            roundTotalPickups,
-                            totalCollectedCount,
-                            {
-                                totalScore: readTotalScore(),
-                                deferUiFrames: 2,
-                            }
-                        );
-                    }
                     botHudUpdateTimer += frameDelta;
                     if (botHudUpdateTimer >= BOT_STATUS_UPDATE_INTERVAL_SEC) {
                         botHudUpdateTimer = 0;
