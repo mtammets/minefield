@@ -418,7 +418,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 descriptor.radius = BOT_VEHICLE_COLLISION_RADIUS;
                 descriptor.collisionRadius = BOT_VEHICLE_COLLISION_RADIUS;
                 descriptor.mineImmune = isBotSpawnProtected(bot, nowMs);
-                descriptor.isRoofWeaponHunter = Boolean(bot.roofWeaponHunter);
+                descriptor.isVehicleWeaponHunter = Boolean(bot.vehicleWeaponHunter);
                 descriptor.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
                     bot.car.position,
                     0.18
@@ -428,12 +428,12 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             collectorDescriptorBuffer.length = descriptorCount;
             return collectorDescriptorBuffer;
         },
-        getRoofWeaponHunter() {
+        getVehicleWeaponHunter() {
             if (!enabled) {
                 return null;
             }
             for (let i = 0; i < bots.length; i += 1) {
-                if (bots[i]?.roofWeaponHunter) {
+                if (bots[i]?.vehicleWeaponHunter) {
                     return bots[i];
                 }
             }
@@ -1514,7 +1514,7 @@ function createBot(
     const name = BOT_NAMES[index] || `BOT-${index + 1}`;
     const bodyColor = BOT_BODY_COLORS[index % BOT_BODY_COLORS.length];
     const collectorId = `bot-${index + 1}`;
-    const roofWeaponHunter = index === 0;
+    const vehicleWeaponHunter = index === 0;
 
     const carRig = createCarRig({
         bodyColor,
@@ -1583,7 +1583,7 @@ function createBot(
         livesRemaining: BOT_LIVES_PER_ROUND,
         respawnAtMs: 0,
         spawnProtectionEndsAtMs: 0,
-        roofWeaponHunter,
+        vehicleWeaponHunter,
         state,
         drift: {
             active: false,
@@ -1689,8 +1689,8 @@ function updateBot(
 ) {
     const damageDynamics = getBotDamageDynamics(bot.damageState);
     const roadFollowingEnabled = hasRoadNetwork(cityMapLayout);
-    const hunterDriveTarget = bot.roofWeaponHunter
-        ? resolveRoofWeaponHunterDriveTarget(bot, playerPosition, buildingLayer)
+    const hunterDriveTarget = bot.vehicleWeaponHunter
+        ? resolveVehicleWeaponHunterDriveTarget(bot, playerPosition, buildingLayer)
         : null;
     const targetPickup = hunterDriveTarget
         ? null
@@ -2068,14 +2068,22 @@ function updateBot(
     constrainToWorld(bot.car.position, bot.state, worldBounds);
     constrainToObstacles(bot, bot.car.position, bot.state, nearbyObstacles);
     constrainToPlayerVehicle(bot, playerPosition);
-    applySpecialDriveConstraintsForBot(bot.car.position, bot.state, botConstraintPreviousPositionScratch);
+    applySpecialDriveConstraintsForBot(
+        bot.car.position,
+        bot.state,
+        botConstraintPreviousPositionScratch
+    );
     bot.car.position.y = resolveBotGroundHeight(
         bot.car.position.x,
         bot.car.position.z,
         getGroundHeightAt,
         bot.car.position.y
     );
-    applySpecialDriveConstraintsForBot(bot.car.position, bot.state, botConstraintPreviousPositionScratch);
+    applySpecialDriveConstraintsForBot(
+        bot.car.position,
+        bot.state,
+        botConstraintPreviousPositionScratch
+    );
 
     bot.updateVisuals(bot.state, dt);
 }
@@ -3306,7 +3314,7 @@ function pickWanderTarget(worldBounds, cityMapLayout) {
     };
 }
 
-function resolveRoofWeaponHunterDriveTarget(bot, playerPosition, buildingLayer = null) {
+function resolveVehicleWeaponHunterDriveTarget(bot, playerPosition, buildingLayer = null) {
     const playerX = Number(playerPosition?.x);
     const playerY = Number(playerPosition?.y);
     const playerZ = Number(playerPosition?.z);

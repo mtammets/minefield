@@ -1,7 +1,7 @@
 import { createCarRig } from './car.js';
 import { createSkidMarkController } from './skidmarks.js';
 import { createCrashDebrisController } from './crash-debris-system.js';
-import { createReplicatedRoofWeaponVisualController } from './roof-weapon-system.js';
+import { createReplicatedVehicleWeaponVisualController } from './vehicle-weapon-system.js';
 import { isUndergroundParkingSpaceIsolatedPosition } from './environment/underground-parking.js';
 
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
@@ -1123,7 +1123,7 @@ export function createMultiplayerController(options = {}) {
             isCarDestroyed: () => remote.isDestroyed,
         });
         remote.crashDebrisController.initializeBodyPartBaselines();
-        remote.weaponController = createReplicatedRoofWeaponVisualController({
+        remote.weaponController = createReplicatedVehicleWeaponVisualController({
             scene,
             car: carRig.car,
         });

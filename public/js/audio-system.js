@@ -434,7 +434,7 @@ const MINE_DETONATION_OCCLUSION_MIN_GAIN = 0.38;
 const MINE_DETONATION_OCCLUSION_MIN_RATE = 0.93;
 const MINE_DETONATION_OCCLUSION_MAX_LOWPASS_HZ = 18000;
 const MINE_DETONATION_OCCLUSION_MIN_LOWPASS_HZ = 950;
-const ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG = Object.freeze({
+const VEHICLE_WEAPON_URBAN_SHOT_AUDIO_CONFIG = Object.freeze({
     refDistance: 7.5,
     maxDistance: 168,
     rolloffFactor: 1.28,
@@ -446,7 +446,7 @@ const ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG = Object.freeze({
     wetGain: 0.24,
     wetLowpassHz: 5400,
 });
-const ROOF_WEAPON_URBAN_IMPACT_AUDIO_CONFIG = Object.freeze({
+const VEHICLE_WEAPON_URBAN_IMPACT_AUDIO_CONFIG = Object.freeze({
     refDistance: 4.8,
     maxDistance: 116,
     rolloffFactor: 1.12,
@@ -458,7 +458,7 @@ const ROOF_WEAPON_URBAN_IMPACT_AUDIO_CONFIG = Object.freeze({
     wetGain: 0.3,
     wetLowpassHz: 4600,
 });
-const ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG = Object.freeze({
+const VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG = Object.freeze({
     offsetDistance: 1.48,
     lateralOffset: 0.24,
     verticalOffset: 0.34,
@@ -506,8 +506,8 @@ export function createAudioSystem({ camera = null } = {}) {
     let lorienGalleryImpulseBuffer = null;
     let ufoDiskoMusicInstance = null;
     let ufoDiskoMusicImpulseBuffer = null;
-    let roofWeaponNoiseBuffer = null;
-    let roofWeaponUrbanImpulseBuffer = null;
+    let vehicleWeaponNoiseBuffer = null;
+    let vehicleWeaponUrbanImpulseBuffer = null;
     const monumentRhythmState = {
         active: 0,
         bass: 0,
@@ -563,9 +563,9 @@ export function createAudioSystem({ camera = null } = {}) {
         onWorldMapVisibilityChanged,
         onRaceIntroStep,
         onRaceIntroGo,
-        onRoofWeaponPickup,
-        onRoofWeaponShot,
-        onRoofWeaponImpact,
+        onVehicleWeaponPickup,
+        onVehicleWeaponShot,
+        onVehicleWeaponImpact,
     };
 
     function initialize(options = {}) {
@@ -1717,14 +1717,14 @@ export function createAudioSystem({ camera = null } = {}) {
         });
     }
 
-    function onRoofWeaponPickup() {
+    function onVehicleWeaponPickup() {
         if (!isRealtimeAudioReady()) {
             return;
         }
-        playRoofWeaponPickupSynth();
+        playVehicleWeaponPickupSynth();
     }
 
-    function onRoofWeaponShot({
+    function onVehicleWeaponShot({
         locked = false,
         heat = 0,
         position = null,
@@ -1734,7 +1734,7 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!isRealtimeAudioReady()) {
             return;
         }
-        playRoofWeaponShotSynth({
+        playVehicleWeaponShotSynth({
             locked,
             heat,
             position,
@@ -1743,7 +1743,7 @@ export function createAudioSystem({ camera = null } = {}) {
         });
     }
 
-    function onRoofWeaponImpact({
+    function onVehicleWeaponImpact({
         hit = false,
         destroyed = false,
         position = null,
@@ -1755,13 +1755,13 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
         if (playerHit) {
-            playRoofWeaponIncomingCue({
+            playVehicleWeaponIncomingCue({
                 shotDirection,
                 impactPosition: position,
                 destroyed,
             });
         }
-        playRoofWeaponImpactSynth({
+        playVehicleWeaponImpactSynth({
             hit,
             destroyed,
             position,
@@ -1785,7 +1785,7 @@ export function createAudioSystem({ camera = null } = {}) {
         });
     }
 
-    function playRoofWeaponPickupSynth() {
+    function playVehicleWeaponPickupSynth() {
         const busNode = mixer?.buses?.effects;
         if (!context || !busNode) {
             return false;
@@ -1838,7 +1838,7 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
-    function playRoofWeaponShotSynth({
+    function playVehicleWeaponShotSynth({
         locked = false,
         heat = 0,
         position = null,
@@ -1850,7 +1850,7 @@ export function createAudioSystem({ camera = null } = {}) {
             return false;
         }
 
-        const noiseBuffer = getRoofWeaponNoiseBuffer();
+        const noiseBuffer = getVehicleWeaponNoiseBuffer();
         if (!noiseBuffer) {
             return false;
         }
@@ -1867,11 +1867,11 @@ export function createAudioSystem({ camera = null } = {}) {
         const airFilter = context.createBiquadFilter();
         airFilter.type = 'highpass';
         airFilter.frequency.setValueAtTime(hostile ? 280 : 240, now);
-        const spatialRoute = createRoofWeaponUrbanRoute({
+        const spatialRoute = createVehicleWeaponUrbanRoute({
             busNode,
             position,
             direction,
-            config: ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG,
+            config: VEHICLE_WEAPON_URBAN_SHOT_AUDIO_CONFIG,
         });
         outputGain.connect(airFilter);
         airFilter.connect(spatialRoute.input);
@@ -1957,13 +1957,17 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
-    function playRoofWeaponImpactSynth({ hit = false, destroyed = false, position = null } = {}) {
+    function playVehicleWeaponImpactSynth({
+        hit = false,
+        destroyed = false,
+        position = null,
+    } = {}) {
         const busNode = mixer?.buses?.effects;
         if (!context || !busNode) {
             return false;
         }
 
-        const noiseBuffer = getRoofWeaponNoiseBuffer();
+        const noiseBuffer = getVehicleWeaponNoiseBuffer();
         if (!noiseBuffer) {
             return false;
         }
@@ -1973,10 +1977,10 @@ export function createAudioSystem({ camera = null } = {}) {
         outputGain.gain.setValueAtTime(0.0001, now);
         outputGain.gain.linearRampToValueAtTime(destroyed ? 0.24 : hit ? 0.18 : 0.11, now + 0.002);
         outputGain.gain.exponentialRampToValueAtTime(0.0001, now + (destroyed ? 0.16 : 0.11));
-        const spatialRoute = createRoofWeaponUrbanRoute({
+        const spatialRoute = createVehicleWeaponUrbanRoute({
             busNode,
             position,
-            config: ROOF_WEAPON_URBAN_IMPACT_AUDIO_CONFIG,
+            config: VEHICLE_WEAPON_URBAN_IMPACT_AUDIO_CONFIG,
         });
         outputGain.connect(spatialRoute.input);
 
@@ -2025,34 +2029,37 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
-    function getRoofWeaponNoiseBuffer() {
-        if (!context) {
-            return null;
-        }
-        if (!roofWeaponNoiseBuffer || roofWeaponNoiseBuffer.sampleRate !== context.sampleRate) {
-            roofWeaponNoiseBuffer = createShortNoiseBuffer(context, 0.18);
-        }
-        return roofWeaponNoiseBuffer;
-    }
-
-    function getRoofWeaponUrbanImpulseBuffer() {
+    function getVehicleWeaponNoiseBuffer() {
         if (!context) {
             return null;
         }
         if (
-            !roofWeaponUrbanImpulseBuffer ||
-            roofWeaponUrbanImpulseBuffer.sampleRate !== context.sampleRate
+            !vehicleWeaponNoiseBuffer ||
+            vehicleWeaponNoiseBuffer.sampleRate !== context.sampleRate
         ) {
-            roofWeaponUrbanImpulseBuffer = createUrbanPlazaImpulseBuffer(context, 2.2, 2.3);
+            vehicleWeaponNoiseBuffer = createShortNoiseBuffer(context, 0.18);
         }
-        return roofWeaponUrbanImpulseBuffer;
+        return vehicleWeaponNoiseBuffer;
     }
 
-    function createRoofWeaponUrbanRoute({
+    function getVehicleWeaponUrbanImpulseBuffer() {
+        if (!context) {
+            return null;
+        }
+        if (
+            !vehicleWeaponUrbanImpulseBuffer ||
+            vehicleWeaponUrbanImpulseBuffer.sampleRate !== context.sampleRate
+        ) {
+            vehicleWeaponUrbanImpulseBuffer = createUrbanPlazaImpulseBuffer(context, 2.2, 2.3);
+        }
+        return vehicleWeaponUrbanImpulseBuffer;
+    }
+
+    function createVehicleWeaponUrbanRoute({
         busNode = null,
         position = null,
         direction = null,
-        config = ROOF_WEAPON_URBAN_SHOT_AUDIO_CONFIG,
+        config = VEHICLE_WEAPON_URBAN_SHOT_AUDIO_CONFIG,
     } = {}) {
         if (!context || !busNode) {
             return {
@@ -2131,7 +2138,7 @@ export function createAudioSystem({ camera = null } = {}) {
             now
         );
         const convolver = context.createConvolver();
-        convolver.buffer = getRoofWeaponUrbanImpulseBuffer();
+        convolver.buffer = getVehicleWeaponUrbanImpulseBuffer();
         const wetFilter = context.createBiquadFilter();
         wetFilter.type = 'lowpass';
         wetFilter.frequency.setValueAtTime(
@@ -2160,7 +2167,7 @@ export function createAudioSystem({ camera = null } = {}) {
         };
     }
 
-    function playRoofWeaponIncomingCue({
+    function playVehicleWeaponIncomingCue({
         shotDirection = null,
         impactPosition = null,
         destroyed = false,
@@ -2170,17 +2177,17 @@ export function createAudioSystem({ camera = null } = {}) {
             return false;
         }
 
-        const cuePosition = resolveRoofWeaponIncomingCuePosition(shotDirection, impactPosition);
-        const spatialRoute = createRoofWeaponUrbanRoute({
+        const cuePosition = resolveVehicleWeaponIncomingCuePosition(shotDirection, impactPosition);
+        const spatialRoute = createVehicleWeaponUrbanRoute({
             busNode,
             position: cuePosition,
-            config: ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG,
+            config: VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG,
         });
         if (!spatialRoute.input) {
             return false;
         }
 
-        const noiseBuffer = getRoofWeaponNoiseBuffer();
+        const noiseBuffer = getVehicleWeaponNoiseBuffer();
         if (!noiseBuffer) {
             spatialRoute.cleanup();
             return false;
@@ -2238,7 +2245,7 @@ export function createAudioSystem({ camera = null } = {}) {
         return true;
     }
 
-    function resolveRoofWeaponIncomingCuePosition(shotDirection = null, impactPosition = null) {
+    function resolveVehicleWeaponIncomingCuePosition(shotDirection = null, impactPosition = null) {
         const listenerPosition =
             runtime.playerPosition || camera?.position || impactPosition || null;
         if (!listenerPosition) {
@@ -2265,15 +2272,15 @@ export function createAudioSystem({ camera = null } = {}) {
         return {
             x:
                 (Number(listenerPosition.x) || 0) +
-                incomingX * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.offsetDistance +
-                lateralX * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.lateralOffset,
+                incomingX * VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG.offsetDistance +
+                lateralX * VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG.lateralOffset,
             y:
                 (Number(listenerPosition.y) || 0) +
-                ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.verticalOffset,
+                VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG.verticalOffset,
             z:
                 (Number(listenerPosition.z) || 0) +
-                incomingZ * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.offsetDistance +
-                lateralZ * ROOF_WEAPON_INCOMING_CUE_AUDIO_CONFIG.lateralOffset,
+                incomingZ * VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG.offsetDistance +
+                lateralZ * VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG.lateralOffset,
         };
     }
 
@@ -3819,9 +3826,9 @@ function createNoopAudioSystem() {
         onWorldMapVisibilityChanged() {},
         onRaceIntroStep() {},
         onRaceIntroGo() {},
-        onRoofWeaponPickup() {},
-        onRoofWeaponShot() {},
-        onRoofWeaponImpact() {},
+        onVehicleWeaponPickup() {},
+        onVehicleWeaponShot() {},
+        onVehicleWeaponImpact() {},
     };
 }
 

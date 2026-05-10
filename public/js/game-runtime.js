@@ -114,7 +114,7 @@ import { createAudioSystem } from './audio-system.js';
 import { createPickupScoringSystem } from './scoring-system.js';
 import { createScorePopupController } from './score-popup-ui.js';
 import { createGroundLayerDebugController } from './ground-layer-debug-ui.js';
-import { createRoofWeaponSystem } from './roof-weapon-system.js';
+import { createVehicleWeaponSystem } from './vehicle-weapon-system.js';
 import {
     createGraphicsQualityController,
     GRAPHICS_QUALITY_MODES,
@@ -1895,7 +1895,7 @@ function awardLocalPickupScore({ collectorId = 'player', speedKph = 0, roundProg
     return scoreEvent;
 }
 
-function handleRoofWeaponBotDestroyed({
+function handleVehicleWeaponBotDestroyed({
     targetCollectorId = '',
     targetName = '',
     position = null,
@@ -2159,7 +2159,7 @@ runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, stati
         });
     },
 });
-runtimeState.weaponSystem = createRoofWeaponSystem({
+runtimeState.weaponSystem = createVehicleWeaponSystem({
     scene,
     camera,
     car,
@@ -2182,7 +2182,7 @@ runtimeState.weaponSystem = createRoofWeaponSystem({
         runtimeState.multiplayerController?.reportWeaponShot?.(shotEvent);
     },
     onBotDestroyed(event = null) {
-        handleRoofWeaponBotDestroyed(event || null);
+        handleVehicleWeaponBotDestroyed(event || null);
     },
     onPlayerHit(event = null) {
         if (runtimeState.gameMode !== 'bots') {
@@ -2689,7 +2689,7 @@ runtimeState.gameSessionController = createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
-    roofWeaponSystem: runtimeState.weaponSystem,
+    vehicleWeaponSystem: runtimeState.weaponSystem,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getCollectorScore(collectorId) {
         return runtimeState.scoringSystem?.getCollectorScore?.(collectorId) || 0;
@@ -3253,13 +3253,13 @@ runtimeState.inputController = createInputController({
     onDeployMine(mode) {
         return runtimeState.mineController?.deployMine?.(mode);
     },
-    onGrantRoofWeapon() {
+    onGrantVehicleWeapon() {
         return runtimeState.weaponSystem?.grantWeapon?.() || false;
     },
-    getHasRoofWeapon() {
+    getHasVehicleWeapon() {
         return Boolean(runtimeState.weaponSystem?.hasWeapon?.());
     },
-    onSetRoofWeaponTrigger(nextHeld) {
+    onSetVehicleWeaponTrigger(nextHeld) {
         runtimeState.weaponSystem?.setTriggerHeld?.(nextHeld);
     },
     toggleWorldMap(forceOpen) {
@@ -3314,7 +3314,7 @@ runtimeState.gameLoopController = createGameLoopController({
     objectiveUi,
     botStatusUi,
     collectibleSystem,
-    roofWeaponSystem: runtimeState.weaponSystem,
+    vehicleWeaponSystem: runtimeState.weaponSystem,
     multiplayerController: runtimeState.multiplayerController,
     mineSystemController: runtimeState.mineController,
     scorePopupController: runtimeState.scorePopupController,
@@ -3383,8 +3383,8 @@ runtimeState.gameLoopController = createGameLoopController({
     getGameMode: () => runtimeState.gameMode,
     getIsWelcomeModalVisible: () => runtimeState.isWelcomeModalVisible,
     getLocalPlayerId: () => runtimeState.multiplayerController?.getSelfId?.() || '',
-    getIsRoofWeaponZoomActive: () =>
-        Boolean(runtimeState.inputController?.isRoofWeaponZoomHeld?.()),
+    getIsVehicleWeaponZoomActive: () =>
+        Boolean(runtimeState.inputController?.isVehicleWeaponZoomHeld?.()),
     getWorldMapDriveLockMode: () => runtimeState.worldMapDriveLockMode,
     getIsWorldMapOpen: () => runtimeState.isWorldMapOpen,
 });

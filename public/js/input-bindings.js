@@ -28,7 +28,7 @@ export const ACTION_IDS = Object.freeze({
     cameraView7: 'camera_view_7',
     cameraView8: 'camera_view_8',
     cameraCinematicToggle: 'camera_cinematic_toggle',
-    roofWeaponZoom: 'roof_weapon_zoom',
+    vehicleWeaponZoom: 'vehicle_weapon_zoom',
     editModeToggle: 'edit_mode_toggle',
     editModeResetView: 'edit_mode_reset_view',
 });
@@ -63,7 +63,7 @@ export const DEFAULT_KEY_BINDINGS = Object.freeze({
     [ACTION_IDS.cameraView7]: Object.freeze(['meta+7', 'alt+7']),
     [ACTION_IDS.cameraView8]: Object.freeze(['meta+8', 'alt+8']),
     [ACTION_IDS.cameraCinematicToggle]: Object.freeze(['meta+c', 'alt+c']),
-    [ACTION_IDS.roofWeaponZoom]: Object.freeze(['b']),
+    [ACTION_IDS.vehicleWeaponZoom]: Object.freeze(['b']),
     [ACTION_IDS.editModeToggle]: Object.freeze(['e']),
     [ACTION_IDS.editModeResetView]: Object.freeze(['r']),
 });

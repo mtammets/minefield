@@ -44,7 +44,7 @@ const CONTROL_LAYOUTS = Object.freeze({
             ]),
         },
         {
-            title: 'Roof Weapon',
+            title: 'Vehicle Weapon',
             rows: Object.freeze([
                 {
                     label: 'Throw Mine / VX-9',
@@ -53,7 +53,7 @@ const CONTROL_LAYOUTS = Object.freeze({
                 },
                 {
                     label: 'Aim Zoom',
-                    actionId: ACTION_IDS.roofWeaponZoom,
+                    actionId: ACTION_IDS.vehicleWeaponZoom,
                     hint: 'Hold to tighten VX-9 aim',
                 },
             ]),
@@ -117,7 +117,7 @@ const CONTROL_LAYOUTS = Object.freeze({
             ]),
         },
         {
-            title: 'Roof Weapon',
+            title: 'Vehicle Weapon',
             rows: Object.freeze([
                 {
                     label: 'Throw Mine / VX-9',
@@ -126,7 +126,7 @@ const CONTROL_LAYOUTS = Object.freeze({
                 },
                 {
                     label: 'Aim Zoom',
-                    actionId: ACTION_IDS.roofWeaponZoom,
+                    actionId: ACTION_IDS.vehicleWeaponZoom,
                     hint: 'Hold to tighten VX-9 aim',
                 },
             ]),

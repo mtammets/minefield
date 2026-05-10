@@ -32,9 +32,9 @@ export function createInputController(options = {}) {
         onShowWelcomeModal = () => {},
         onRecoverVehicle = () => null,
         onDeployMine = () => null,
-        onGrantRoofWeapon = () => false,
-        getHasRoofWeapon = () => false,
-        onSetRoofWeaponTrigger = () => {},
+        onGrantVehicleWeapon = () => false,
+        getHasVehicleWeapon = () => false,
+        onSetVehicleWeaponTrigger = () => {},
         toggleWorldMap = () => ({ open: false, message: null }),
         isWorldMapVisible = () => false,
         getInputContext = () => INPUT_CONTEXTS.gameplay,
@@ -60,7 +60,7 @@ export function createInputController(options = {}) {
             initialize() {},
             dispose() {},
             returnToWelcomeFromPauseMenu() {},
-            isRoofWeaponZoomHeld() {
+            isVehicleWeaponZoomHeld() {
                 return false;
             },
         };
@@ -76,7 +76,7 @@ export function createInputController(options = {}) {
     let fullscreenCursorHideTimeout = null;
     let lastFullscreenPointerX = null;
     let lastFullscreenPointerY = null;
-    let roofWeaponZoomHeld = false;
+    let vehicleWeaponZoomHeld = false;
 
     const onKeyDown = (event) => handleKey(event, true);
     const onKeyUp = (event) => handleKey(event, false);
@@ -84,16 +84,16 @@ export function createInputController(options = {}) {
     const onFullscreenCursorActivity = (event) => handleFullscreenCursorActivity(event);
     const onWindowPointerUp = (event) => handleWindowPointerUp(event);
     const onWindowBlur = () => {
-        releaseRoofWeaponTrigger();
-        releaseRoofWeaponZoom();
+        releaseVehicleWeaponTrigger();
+        releaseVehicleWeaponZoom();
     };
 
     return {
         initialize,
         dispose,
         returnToWelcomeFromPauseMenu,
-        isRoofWeaponZoomHeld() {
-            return roofWeaponZoomHeld && Boolean(getHasRoofWeapon());
+        isVehicleWeaponZoomHeld() {
+            return vehicleWeaponZoomHeld && Boolean(getHasVehicleWeapon());
         },
     };
 
@@ -126,8 +126,8 @@ export function createInputController(options = {}) {
         window.removeEventListener('pointercancel', onWindowPointerUp);
         window.removeEventListener('blur', onWindowBlur);
         renderer.domElement.removeEventListener('pointerdown', handleGameCanvasPointerDown);
-        releaseRoofWeaponTrigger();
-        releaseRoofWeaponZoom();
+        releaseVehicleWeaponTrigger();
+        releaseVehicleWeaponZoom();
         clearFullscreenCursorHideTimeout();
         showFullscreenCursor();
     }
@@ -135,23 +135,23 @@ export function createInputController(options = {}) {
     function handleKey(event, isKeyDown) {
         const key = normalizeKeyboardKey(event?.key || '');
         const matchesAction = (actionId) => actionMatchesEvent(actionId, event, keyBindings, key);
-        const roofWeaponGrantShortcut = key === '+' || event?.code === 'NumpadAdd';
+        const vehicleWeaponGrantShortcut = key === '+' || event?.code === 'NumpadAdd';
         const reportAction = (actionId) => {
             if (!isKeyDown || event.repeat) {
                 return;
             }
             onRegisterControlAction(actionId);
         };
-        const roofWeaponBoundThrowAction =
-            matchesAction(ACTION_IDS.mineThrow) && Boolean(getHasRoofWeapon());
-        const roofWeaponZoomAction = matchesAction(ACTION_IDS.roofWeaponZoom);
+        const vehicleWeaponBoundThrowAction =
+            matchesAction(ACTION_IDS.mineThrow) && Boolean(getHasVehicleWeapon());
+        const vehicleWeaponZoomAction = matchesAction(ACTION_IDS.vehicleWeaponZoom);
 
-        if (roofWeaponBoundThrowAction && !isKeyDown) {
-            onSetRoofWeaponTrigger(false);
+        if (vehicleWeaponBoundThrowAction && !isKeyDown) {
+            onSetVehicleWeaponTrigger(false);
             return;
         }
-        if (roofWeaponZoomAction && !isKeyDown) {
-            setRoofWeaponZoomHeld(false);
+        if (vehicleWeaponZoomAction && !isKeyDown) {
+            setVehicleWeaponZoomHeld(false);
             return;
         }
 
@@ -176,8 +176,8 @@ export function createInputController(options = {}) {
                 matchesAction(ACTION_IDS.roofModeBattery) ||
                 matchesAction(ACTION_IDS.roofModeNavigation) ||
                 matchesAction(ACTION_IDS.roofModeChassis) ||
-                matchesAction(ACTION_IDS.roofWeaponZoom) ||
-                roofWeaponGrantShortcut ||
+                matchesAction(ACTION_IDS.vehicleWeaponZoom) ||
+                vehicleWeaponGrantShortcut ||
                 matchesAction(ACTION_IDS.mineDrop) ||
                 matchesAction(ACTION_IDS.mineThrow) ||
                 matchesAction(ACTION_IDS.graphicsCycle))
@@ -219,7 +219,7 @@ export function createInputController(options = {}) {
                 lastEscapeKeyDownAtMs = performance.now();
             }
             if (isKeyDown && !finalScoreboardUi.isVisible()) {
-                setRoofWeaponZoomHeld(false);
+                setVehicleWeaponZoomHeld(false);
                 const nextPausedState = !getIsGamePaused();
                 onSetPauseState(nextPausedState);
                 if (document.fullscreenElement) {
@@ -300,12 +300,12 @@ export function createInputController(options = {}) {
             return;
         }
 
-        if (roofWeaponGrantShortcut) {
+        if (vehicleWeaponGrantShortcut) {
             if (!isKeyDown || isRaceIntroDriveLocked) {
                 return;
             }
             event.preventDefault();
-            onGrantRoofWeapon();
+            onGrantVehicleWeapon();
             return;
         }
 
@@ -322,12 +322,12 @@ export function createInputController(options = {}) {
         }
 
         if (matchesAction(ACTION_IDS.mineThrow)) {
-            if (roofWeaponBoundThrowAction) {
+            if (vehicleWeaponBoundThrowAction) {
                 if (isRaceIntroDriveLocked) {
-                    onSetRoofWeaponTrigger(false);
+                    onSetVehicleWeaponTrigger(false);
                     return;
                 }
-                onSetRoofWeaponTrigger(isKeyDown);
+                onSetVehicleWeaponTrigger(isKeyDown);
                 reportAction(ACTION_IDS.mineThrow);
                 return;
             }
@@ -342,14 +342,14 @@ export function createInputController(options = {}) {
             return;
         }
 
-        if (roofWeaponZoomAction) {
-            if (isRaceIntroDriveLocked || !getHasRoofWeapon()) {
-                setRoofWeaponZoomHeld(false);
+        if (vehicleWeaponZoomAction) {
+            if (isRaceIntroDriveLocked || !getHasVehicleWeapon()) {
+                setVehicleWeaponZoomHeld(false);
                 return;
             }
             event.preventDefault();
-            setRoofWeaponZoomHeld(isKeyDown);
-            reportAction(ACTION_IDS.roofWeaponZoom);
+            setVehicleWeaponZoomHeld(isKeyDown);
+            reportAction(ACTION_IDS.vehicleWeaponZoom);
             return;
         }
 
@@ -505,7 +505,7 @@ export function createInputController(options = {}) {
         if (clickUrl) {
             openSceneClickUrl(clickUrl);
             event.preventDefault();
-            releaseRoofWeaponTrigger();
+            releaseVehicleWeaponTrigger();
             return;
         }
     }
@@ -514,19 +514,19 @@ export function createInputController(options = {}) {
         if (event?.button != null && event.button !== 0) {
             return;
         }
-        releaseRoofWeaponTrigger();
+        releaseVehicleWeaponTrigger();
     }
 
-    function releaseRoofWeaponTrigger() {
-        onSetRoofWeaponTrigger(false);
+    function releaseVehicleWeaponTrigger() {
+        onSetVehicleWeaponTrigger(false);
     }
 
-    function setRoofWeaponZoomHeld(nextHeld) {
-        roofWeaponZoomHeld = Boolean(nextHeld);
+    function setVehicleWeaponZoomHeld(nextHeld) {
+        vehicleWeaponZoomHeld = Boolean(nextHeld);
     }
 
-    function releaseRoofWeaponZoom() {
-        setRoofWeaponZoomHeld(false);
+    function releaseVehicleWeaponZoom() {
+        setVehicleWeaponZoomHeld(false);
     }
 
     function resolveSceneClickUrl(pointerNdc) {
@@ -627,7 +627,7 @@ export function createInputController(options = {}) {
     }
 
     function returnToWelcomeFromPauseMenu() {
-        releaseRoofWeaponZoom();
+        releaseVehicleWeaponZoom();
         onStartNewGame();
         onShowWelcomeModal();
 

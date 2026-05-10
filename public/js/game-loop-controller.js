@@ -42,7 +42,7 @@ export function createGameLoopController(options = {}) {
         objectiveUi,
         botStatusUi,
         collectibleSystem,
-        roofWeaponSystem = null,
+        vehicleWeaponSystem = null,
         multiplayerController,
         mineSystemController,
         mapUiController,
@@ -93,7 +93,7 @@ export function createGameLoopController(options = {}) {
         getGameMode,
         getIsWelcomeModalVisible,
         getLocalPlayerId,
-        getIsRoofWeaponZoomActive,
+        getIsVehicleWeaponZoomActive,
         getWorldMapDriveLockMode,
         getIsWorldMapOpen,
     } = options;
@@ -119,8 +119,10 @@ export function createGameLoopController(options = {}) {
         typeof getIsBatteryDepleted === 'function' ? getIsBatteryDepleted : () => false;
     const readPlayerCollectedCount =
         typeof getPlayerCollectedCount === 'function' ? getPlayerCollectedCount : () => 0;
-    const readRoofWeaponZoomActive =
-        typeof getIsRoofWeaponZoomActive === 'function' ? getIsRoofWeaponZoomActive : () => false;
+    const readVehicleWeaponZoomActive =
+        typeof getIsVehicleWeaponZoomActive === 'function'
+            ? getIsVehicleWeaponZoomActive
+            : () => false;
     const readPlayerScore = typeof getPlayerScore === 'function' ? getPlayerScore : () => 0;
     const readPlayerCarsRemaining =
         typeof getPlayerCarsRemaining === 'function' ? getPlayerCarsRemaining : () => 0;
@@ -698,8 +700,8 @@ export function createGameLoopController(options = {}) {
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
                 updateCamera(car, cameraSpeed, frameDelta, {
                     vehicleState: visualState,
-                    roofWeaponZoomActive:
-                        readRoofWeaponZoomActive() &&
+                    vehicleWeaponZoomActive:
+                        readVehicleWeaponZoomActive() &&
                         !worldMapOpen &&
                         !gamePaused &&
                         !isEditModeActive &&
@@ -836,11 +838,11 @@ export function createGameLoopController(options = {}) {
             mapUiController?.update?.(frameDelta, mapFrameState);
         });
 
-        measureStage('roofWeapon', () => {
-            roofWeaponSystem?.update?.(frameDelta, {
+        measureStage('vehicleWeapon', () => {
+            vehicleWeaponSystem?.update?.(frameDelta, {
                 vehicleState: getVehicleState(),
-                roofWeaponZoomActive:
-                    readRoofWeaponZoomActive() &&
+                vehicleWeaponZoomActive:
+                    readVehicleWeaponZoomActive() &&
                     !worldMapOpen &&
                     !gamePaused &&
                     !isEditModeActive &&

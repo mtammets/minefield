@@ -19,12 +19,12 @@ let cinematicBlend = 0;
 let cinematicIdleTime = 0;
 let cinematicExitBoostTimer = 0;
 let cinematicWasActive = false;
-let roofWeaponZoomBlend = 0;
+let vehicleWeaponZoomBlend = 0;
 const AUTO_CINEMATIC_IDLE_SEC = 5;
 const CINEMATIC_LOOP_DURATION_SEC = 18;
-const ROOF_WEAPON_ZOOM_IN_SPEED = 11.5;
-const ROOF_WEAPON_ZOOM_OUT_SPEED = 8.5;
-const ROOF_WEAPON_ZOOM_LOOK_SPEED = 17.5;
+const VEHICLE_WEAPON_ZOOM_IN_SPEED = 11.5;
+const VEHICLE_WEAPON_ZOOM_OUT_SPEED = 8.5;
+const VEHICLE_WEAPON_ZOOM_LOOK_SPEED = 17.5;
 const CINEMATIC_LOOP_TRACK = Object.freeze([
     { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
     { t: 0.22, radius: 10.1, height: 5.5, fov: 71, lookAhead: 2.2, lookHeight: 1.02 },
@@ -45,8 +45,8 @@ const baseTargetPosition = new THREE.Vector3();
 const baseLookTarget = new THREE.Vector3();
 const cinematicTargetPosition = new THREE.Vector3();
 const cinematicLookAtTarget = new THREE.Vector3();
-const roofWeaponZoomDirection = new THREE.Vector3();
-const roofWeaponZoomTargetPosition = new THREE.Vector3();
+const vehicleWeaponZoomDirection = new THREE.Vector3();
+const vehicleWeaponZoomTargetPosition = new THREE.Vector3();
 const roofCamLocalPosition = new THREE.Vector3(0.24, 1.92, 1.42);
 const roofScreenLookLocal = new THREE.Vector3(0, 0.72, 0.14);
 const roofCamWorldPosition = new THREE.Vector3();
@@ -174,14 +174,15 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     }
     cinematicWasActive = cinematicMode;
 
-    const roofWeaponZoomActive = Boolean(options.roofWeaponZoomActive) && !cinematicMode;
-    roofWeaponZoomBlend = THREE.MathUtils.lerp(
-        roofWeaponZoomBlend,
-        roofWeaponZoomActive ? 1 : 0,
+    const vehicleWeaponZoomActive = Boolean(options.vehicleWeaponZoomActive) && !cinematicMode;
+    vehicleWeaponZoomBlend = THREE.MathUtils.lerp(
+        vehicleWeaponZoomBlend,
+        vehicleWeaponZoomActive ? 1 : 0,
         1 -
             Math.exp(
-                -(roofWeaponZoomActive ? ROOF_WEAPON_ZOOM_IN_SPEED : ROOF_WEAPON_ZOOM_OUT_SPEED) *
-                    dt
+                -(vehicleWeaponZoomActive
+                    ? VEHICLE_WEAPON_ZOOM_IN_SPEED
+                    : VEHICLE_WEAPON_ZOOM_OUT_SPEED) * dt
             )
     );
 
@@ -297,27 +298,27 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     let finalLookBlend = THREE.MathUtils.lerp(lookBlend, cinematicShot.lookBlend, cinematicBlend);
     let finalFov = THREE.MathUtils.lerp(targetFov, cinematicShot.targetFov, cinematicBlend);
 
-    if (roofWeaponZoomBlend > 0.001) {
-        roofWeaponZoomTargetPosition.copy(targetPosition);
-        roofWeaponZoomDirection.subVectors(lookTarget, targetPosition);
-        const zoomDistance = roofWeaponZoomDirection.length();
+    if (vehicleWeaponZoomBlend > 0.001) {
+        vehicleWeaponZoomTargetPosition.copy(targetPosition);
+        vehicleWeaponZoomDirection.subVectors(lookTarget, targetPosition);
+        const zoomDistance = vehicleWeaponZoomDirection.length();
         if (zoomDistance > 0.0001) {
-            roofWeaponZoomDirection.multiplyScalar(1 / zoomDistance);
-            roofWeaponZoomTargetPosition.addScaledVector(
-                roofWeaponZoomDirection,
-                resolveRoofWeaponZoomPullDistance(zoomDistance)
+            vehicleWeaponZoomDirection.multiplyScalar(1 / zoomDistance);
+            vehicleWeaponZoomTargetPosition.addScaledVector(
+                vehicleWeaponZoomDirection,
+                resolveVehicleWeaponZoomPullDistance(zoomDistance)
             );
-            targetPosition.lerp(roofWeaponZoomTargetPosition, roofWeaponZoomBlend);
+            targetPosition.lerp(vehicleWeaponZoomTargetPosition, vehicleWeaponZoomBlend);
         }
         finalFov = THREE.MathUtils.lerp(
             finalFov,
-            resolveRoofWeaponZoomFov(finalFov),
-            roofWeaponZoomBlend
+            resolveVehicleWeaponZoomFov(finalFov),
+            vehicleWeaponZoomBlend
         );
         finalLookBlend = THREE.MathUtils.lerp(
             finalLookBlend,
-            1 - Math.exp(-ROOF_WEAPON_ZOOM_LOOK_SPEED * dt),
-            roofWeaponZoomBlend
+            1 - Math.exp(-VEHICLE_WEAPON_ZOOM_LOOK_SPEED * dt),
+            vehicleWeaponZoomBlend
         );
     }
 
@@ -351,7 +352,7 @@ export function getCameraViewMode() {
 export function resetCameraTrackingState() {
     hasCameraState = false;
     smoothedTurnBias = 0;
-    roofWeaponZoomBlend = 0;
+    vehicleWeaponZoomBlend = 0;
     cinematicOrbitProgress = 0;
     cinematicLoopProgress = 0;
     cinematicBlend = 0;
@@ -466,7 +467,7 @@ function findClosestCinematicTrackProgress(radius, height) {
     return closestProgress;
 }
 
-function resolveRoofWeaponZoomFov(baseFov) {
+function resolveVehicleWeaponZoomFov(baseFov) {
     switch (cameraViewMode) {
         case 7:
             return 16.5;
@@ -477,7 +478,7 @@ function resolveRoofWeaponZoomFov(baseFov) {
     }
 }
 
-function resolveRoofWeaponZoomPullDistance(zoomDistance) {
+function resolveVehicleWeaponZoomPullDistance(zoomDistance) {
     switch (cameraViewMode) {
         case 7:
             return Math.min(zoomDistance * 0.24, 0.96);

@@ -50,7 +50,7 @@ export function createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
-    roofWeaponSystem = null,
+    vehicleWeaponSystem = null,
     getBotTrafficSystem,
     getCollectorScore = () => 0,
     getCollectorRoundStats = () => null,
@@ -399,8 +399,8 @@ export function createGameSessionController({
         chargingZoneController.reset();
         chargingProgressHudController.reset();
         crashDebrisController.resetPlayerDamageState();
-        roofWeaponSystem?.setTriggerHeld?.(false);
-        roofWeaponSystem?.grantWeapon?.();
+        vehicleWeaponSystem?.setTriggerHeld?.(false);
+        vehicleWeaponSystem?.grantWeapon?.();
         setPlayerBattery(BATTERY_MAX);
         setPlayerBatteryLevel(getPlayerBattery() / BATTERY_MAX);
         setBatteryDepletedState(false, { showStatus: false });
@@ -770,7 +770,7 @@ export function createGameSessionController({
         chargingZoneController.reset();
         chargingProgressHudController.reset();
         collectibleSystem.setEnabled(false);
-        roofWeaponSystem?.onPlayerDestroyed?.();
+        vehicleWeaponSystem?.onPlayerDestroyed?.();
         car.visible = false;
         clearDriveKeys();
 
@@ -873,7 +873,7 @@ export function createGameSessionController({
         chargingZoneController.reset();
         chargingProgressHudController.reset();
         skidMarkController.reset();
-        roofWeaponSystem?.resetRound?.();
+        vehicleWeaponSystem?.resetRound?.();
 
         refreshPlayerSpawnState();
         car.visible = true;
@@ -904,7 +904,7 @@ export function createGameSessionController({
         initializePlayerPhysics(car);
         setPhysicsAccumulator(0);
         lastVehicleRecoverAt = -Number.POSITIVE_INFINITY;
-        roofWeaponSystem?.grantWeapon?.();
+        vehicleWeaponSystem?.grantWeapon?.();
     }
 
     function setSelectedPlayerCarColor(colorHex, options = {}) {

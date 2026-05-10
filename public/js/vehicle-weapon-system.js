@@ -213,7 +213,7 @@ const reticleTexture = createReticleTexture();
 const pickupWordmarkTexture = createPickupWordmarkTexture();
 const bulletMarkTexture = createBulletMarkTexture();
 
-export function createRoofWeaponSystem({
+export function createVehicleWeaponSystem({
     scene,
     camera,
     car,
@@ -237,14 +237,14 @@ export function createRoofWeaponSystem({
     const roofLayout = getLorienVelmoreRoofLiftLayout();
     const parkingLayout = UNDERGROUND_PARKING_LAYOUT;
     const effectRoot = new THREE.Group();
-    effectRoot.name = 'lorienRoofWeaponEffects';
+    effectRoot.name = 'lorienVehicleWeaponEffects';
     scene.add(effectRoot);
 
     const pickupEntries = [
         createPickupEntry({
             id: 'roof',
             surfaceY: roofLayout.roofSurfaceY,
-            rootName: 'lorien_roof_weapon_pickup',
+            rootName: 'lorien_vehicle_weapon_pickup',
             anchor: new THREE.Vector3(
                 roofLayout.centerX,
                 roofLayout.roofSurfaceY + 0.92,
@@ -573,7 +573,7 @@ export function createRoofWeaponSystem({
         const gameMode = frameState.gameMode === 'online' ? 'online' : getGameMode();
         const multiplayerPickupSyncActive =
             gameMode === 'online' && Boolean(getIsMultiplayerActive?.());
-        const roofWeaponActive =
+        const vehicleWeaponActive =
             state.hasWeapon &&
             controlsEnabled &&
             !frameState.welcomeVisible &&
@@ -583,10 +583,10 @@ export function createRoofWeaponSystem({
             !frameState.carDestroyed &&
             !frameState.pickupRoundFinished;
 
-        if (!roofWeaponActive) {
+        if (!vehicleWeaponActive) {
             state.triggerHeld = false;
         }
-        state.zoomActive = Boolean(frameState.roofWeaponZoomActive) && roofWeaponActive;
+        state.zoomActive = Boolean(frameState.vehicleWeaponZoomActive) && vehicleWeaponActive;
 
         updatePickupRespawns(dt);
         updatePickups(dt);
@@ -608,11 +608,11 @@ export function createRoofWeaponSystem({
             state.hasReplicationTarget = false;
         }
         state.replicationLocked = Boolean(aimState?.lockedTarget);
-        updateHudTracking(dt, aimState, roofWeaponActive);
+        updateHudTracking(dt, aimState, vehicleWeaponActive);
 
-        updateWeaponMount(dt, weaponMotionState, aimState, roofWeaponActive);
+        updateWeaponMount(dt, weaponMotionState, aimState, vehicleWeaponActive);
 
-        if (roofWeaponActive && state.triggerHeld) {
+        if (vehicleWeaponActive && state.triggerHeld) {
             state.fireCooldown -= dt;
             let firedThisFrame = 0;
             while (state.fireCooldown <= 0 && firedThisFrame < 3) {
@@ -624,7 +624,7 @@ export function createRoofWeaponSystem({
             state.fireCooldown = Math.max(0, state.fireCooldown - dt * 0.6);
         }
 
-        const targetHeat = roofWeaponActive && state.triggerHeld ? 1 : 0;
+        const targetHeat = vehicleWeaponActive && state.triggerHeld ? 1 : 0;
         const heatRate =
             targetHeat > state.heat ? WEAPON_HEAT_RISE * 60 * dt : WEAPON_HEAT_FALL * dt;
         state.heat = THREE.MathUtils.lerp(
@@ -641,7 +641,7 @@ export function createRoofWeaponSystem({
         updateHunterWeapon(dt, frameState);
         updateEffects(dt);
         syncHud({
-            visible: roofWeaponActive,
+            visible: vehicleWeaponActive,
             hasWeapon: state.hasWeapon,
             triggerHeld: state.triggerHeld,
             locked: Boolean(aimState.lockedTarget),
@@ -659,7 +659,7 @@ export function createRoofWeaponSystem({
             available: true,
             respawnTimer: 0,
             phaseOffset: Math.random() * Math.PI * 2,
-            pickup: createRoofPickup(anchor, rootName),
+            pickup: createWeaponPickup(anchor, rootName),
         };
     }
 
@@ -830,7 +830,7 @@ export function createRoofWeaponSystem({
         mount.root.visible = true;
         resetHudPosition();
         onStatus('VX-9 online. Auto-lock engaged. Hold T to fire.', 2600);
-        getAudioController()?.onRoofWeaponPickup?.();
+        getAudioController()?.onVehicleWeaponPickup?.();
     }
 
     function resolveWeaponMotionState(vehicleState) {
@@ -991,13 +991,7 @@ export function createRoofWeaponSystem({
             if (!Number.isFinite(weaponDistance) || weaponDistance < 4) {
                 continue;
             }
-            if (
-                arePositionsSeparatedByUndergroundParking(
-                    weaponLockOrigin,
-                    samplePoint,
-                    0.18
-                )
-            ) {
+            if (arePositionsSeparatedByUndergroundParking(weaponLockOrigin, samplePoint, 0.18)) {
                 continue;
             }
 
@@ -1044,8 +1038,7 @@ export function createRoofWeaponSystem({
                 result.centerVisible = true;
             }
 
-            const sampleScore =
-                screenDistanceSq + index * AUTO_LOCK_SAMPLE_SCORE_PRIORITY_STEP;
+            const sampleScore = screenDistanceSq + index * AUTO_LOCK_SAMPLE_SCORE_PRIORITY_STEP;
             if (sampleScore >= bestSampleScore) {
                 continue;
             }
@@ -1175,7 +1168,11 @@ export function createRoofWeaponSystem({
         };
     }
 
-    function resolveAutoLockTarget(botTrafficSystem, motionState, hudProfile = DEFAULT_HUD_PROFILE) {
+    function resolveAutoLockTarget(
+        botTrafficSystem,
+        motionState,
+        hudProfile = DEFAULT_HUD_PROFILE
+    ) {
         const staticObstacles = getWeaponTraceObstacles();
         const descriptors = botTrafficSystem?.getCollectorDescriptors?.();
         if (!Array.isArray(descriptors) || descriptors.length <= 0) {
@@ -1224,8 +1221,7 @@ export function createRoofWeaponSystem({
                 ? resolveWeaponLockBodyCenterPoint(descriptor, radius, weaponTempVectorA)
                 : weaponTempVectorA.set(
                       Number(descriptor.position.x) || 0,
-                      (Number(descriptor.position.y) || 0) +
-                          Math.max(0.88, radius * 0.58 + 0.28),
+                      (Number(descriptor.position.y) || 0) + Math.max(0.88, radius * 0.58 + 0.28),
                       Number(descriptor.position.z) || 0
                   );
             if (!isTargetWithinWeaponTraverse(targetPoint, weaponLocalOrigin)) {
@@ -1307,7 +1303,9 @@ export function createRoofWeaponSystem({
             state.hudY = targetY;
             return;
         }
-        const trackingSpeed = state.zoomActive ? HUD_TRACKING_SNAP_SPEED * 3.2 : HUD_TRACKING_SNAP_SPEED;
+        const trackingSpeed = state.zoomActive
+            ? HUD_TRACKING_SNAP_SPEED * 3.2
+            : HUD_TRACKING_SNAP_SPEED;
         const alpha = 1 - Math.exp(-trackingSpeed * dt);
         state.hudX = THREE.MathUtils.lerp(state.hudX, targetX, alpha);
         state.hudY = THREE.MathUtils.lerp(state.hudY, targetY, alpha);
@@ -1438,7 +1436,7 @@ export function createRoofWeaponSystem({
             gameMode,
             speed: projectileSpeed,
         });
-        getAudioController()?.onRoofWeaponShot?.({
+        getAudioController()?.onVehicleWeaponShot?.({
             locked: Boolean(aimState.lockedTarget),
             heat: state.heat,
             position: weaponMuzzleWorldPosition.clone(),
@@ -1457,7 +1455,7 @@ export function createRoofWeaponSystem({
 
     function updateHunterWeapon(dt, frameState = {}) {
         const botTrafficSystem = getBotTrafficSystem();
-        const hunterBot = botTrafficSystem?.getRoofWeaponHunter?.() || null;
+        const hunterBot = botTrafficSystem?.getVehicleWeaponHunter?.() || null;
         if (!hunterBot?.car) {
             if (hunterState.mount?.root) {
                 hunterState.mount.root.visible = false;
@@ -1953,7 +1951,7 @@ export function createRoofWeaponSystem({
             obstacleNormal,
             gameMode: 'bots',
         });
-        getAudioController()?.onRoofWeaponShot?.({
+        getAudioController()?.onVehicleWeaponShot?.({
             locked: Boolean(aimState.locked),
             heat: hunterState.heat,
             position: aimState.muzzlePosition.clone(),
@@ -2331,7 +2329,7 @@ export function createRoofWeaponSystem({
                     0.18
                 )
             ) {
-                getAudioController()?.onRoofWeaponImpact?.({
+                getAudioController()?.onVehicleWeaponImpact?.({
                     hit: false,
                     destroyed: false,
                     position: projectile.impactPoint,
@@ -2346,7 +2344,7 @@ export function createRoofWeaponSystem({
                 position: projectile.impactPoint.clone(),
                 shotDirection: projectile.direction.clone(),
             });
-            getAudioController()?.onRoofWeaponImpact?.({
+            getAudioController()?.onVehicleWeaponImpact?.({
                 hit: true,
                 destroyed: Boolean(hitResult?.destroyed),
                 position: projectile.impactPoint,
@@ -2362,7 +2360,7 @@ export function createRoofWeaponSystem({
             projectile.targetKind !== 'bot' ||
             !projectile.targetCollectorId
         ) {
-            getAudioController()?.onRoofWeaponImpact?.({
+            getAudioController()?.onVehicleWeaponImpact?.({
                 hit: Boolean(projectile.targetKind),
                 destroyed: false,
                 position: projectile.impactPoint,
@@ -2374,7 +2372,7 @@ export function createRoofWeaponSystem({
 
         const botTrafficSystem = getBotTrafficSystem();
         if (!botTrafficSystem?.triggerWeaponHit) {
-            getAudioController()?.onRoofWeaponImpact?.({
+            getAudioController()?.onVehicleWeaponImpact?.({
                 hit: Boolean(projectile.targetCollectorId),
                 destroyed: false,
                 position: projectile.impactPoint,
@@ -2401,7 +2399,7 @@ export function createRoofWeaponSystem({
             hitPoint: projectile.impactPoint,
             shotDirection: projectile.direction,
         });
-        getAudioController()?.onRoofWeaponImpact?.({
+        getAudioController()?.onVehicleWeaponImpact?.({
             hit: Boolean(projectile.targetCollectorId),
             destroyed: Boolean(hitResult?.destroyed),
             position: projectile.impactPoint,
@@ -2473,7 +2471,7 @@ export function createRoofWeaponSystem({
     }
 }
 
-function createRoofPickup(anchor, rootName = 'vx9_pickup') {
+function createWeaponPickup(anchor, rootName = 'vx9_pickup') {
     const root = new THREE.Group();
     root.name = rootName;
     root.position.copy(anchor);
@@ -2604,7 +2602,7 @@ function createRoofPickup(anchor, rootName = 'vx9_pickup') {
 
 function createWeaponMount() {
     const root = new THREE.Group();
-    root.name = 'lorien_roof_weapon_mount';
+    root.name = 'lorien_vehicle_weapon_mount';
 
     const pitchPivot = new THREE.Group();
     root.add(pitchPivot);
@@ -3015,20 +3013,20 @@ function segmentImpactAabbXZ({
 }
 
 function ensureWeaponHud() {
-    let root = document.getElementById('roofWeaponHud');
+    let root = document.getElementById('vehicleWeaponHud');
     if (!root) {
         root = document.createElement('div');
-        root.id = 'roofWeaponHud';
+        root.id = 'vehicleWeaponHud';
         root.hidden = true;
         root.setAttribute('aria-hidden', 'true');
         root.innerHTML = `
-            <div class="roofWeaponHudReticle">
-                <div class="roofWeaponHudCore"></div>
-                <div class="roofWeaponHudRing"></div>
-                <div class="roofWeaponHudArc roofWeaponHudArc--a"></div>
-                <div class="roofWeaponHudArc roofWeaponHudArc--b"></div>
-                <div class="roofWeaponHudCross roofWeaponHudCross--h"></div>
-                <div class="roofWeaponHudCross roofWeaponHudCross--v"></div>
+            <div class="vehicleWeaponHudReticle">
+                <div class="vehicleWeaponHudCore"></div>
+                <div class="vehicleWeaponHudRing"></div>
+                <div class="vehicleWeaponHudArc vehicleWeaponHudArc--a"></div>
+                <div class="vehicleWeaponHudArc vehicleWeaponHudArc--b"></div>
+                <div class="vehicleWeaponHudCross vehicleWeaponHudCross--h"></div>
+                <div class="vehicleWeaponHudCross vehicleWeaponHudCross--v"></div>
             </div>
         `;
         document.body.append(root);
@@ -3160,13 +3158,13 @@ function createPickupWordmarkTexture() {
     return texture;
 }
 
-export function createReplicatedRoofWeaponVisualController({ scene, car } = {}) {
+export function createReplicatedVehicleWeaponVisualController({ scene, car } = {}) {
     if (!scene || !car) {
-        return createNoopReplicatedRoofWeaponVisualController();
+        return createNoopReplicatedVehicleWeaponVisualController();
     }
 
     const effectRoot = new THREE.Group();
-    effectRoot.name = 'replicatedRoofWeaponEffects';
+    effectRoot.name = 'replicatedVehicleWeaponEffects';
     scene.add(effectRoot);
 
     const mountParent = car.getObjectByName('body_shell_group') || car;
@@ -3298,11 +3296,8 @@ export function createReplicatedRoofWeaponVisualController({ scene, car } = {}) 
                 0,
                 1 -
                     Math.exp(
-                        -(
-                            projectileState.triggerHeld
-                                ? WEAPON_RECOIL_RISE
-                                : WEAPON_RECOIL_FALL
-                        ) * dt
+                        -(projectileState.triggerHeld ? WEAPON_RECOIL_RISE : WEAPON_RECOIL_FALL) *
+                            dt
                     )
             );
 
@@ -3354,7 +3349,9 @@ export function createReplicatedRoofWeaponVisualController({ scene, car } = {}) 
         } else {
             mount.muzzleAnchor.getWorldPosition(muzzlePosition);
             fallbackLookDirection.set(0, 0, -1).applyQuaternion(car.quaternion).normalize();
-            fallbackLookPoint.copy(muzzlePosition).addScaledVector(fallbackLookDirection, CAMERA_AIM_RANGE);
+            fallbackLookPoint
+                .copy(muzzlePosition)
+                .addScaledVector(fallbackLookDirection, CAMERA_AIM_RANGE);
             mount.pitchPivot.lookAt(fallbackLookPoint);
         }
 
@@ -3715,7 +3712,7 @@ function createNoopWeaponSystem() {
     };
 }
 
-function createNoopReplicatedRoofWeaponVisualController() {
+function createNoopReplicatedVehicleWeaponVisualController() {
     return {
         applyReplicationState() {},
         playShot() {
