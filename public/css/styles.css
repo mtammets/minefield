@@ -7276,6 +7276,104 @@ body.edit-mode-active .audioControlPanel {
     border-color: rgba(234, 247, 255, 0.72);
 }
 
+.appToastLayer {
+    position: fixed;
+    top: max(16px, env(safe-area-inset-top, 0px) + 10px);
+    right: max(16px, env(safe-area-inset-right, 0px) + 10px);
+    z-index: 40;
+    width: min(360px, calc(100vw - 24px));
+    display: grid;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.appToast {
+    border: 1px solid rgba(169, 205, 228, 0.48);
+    border-radius: 16px;
+    padding: 12px 14px;
+    display: grid;
+    gap: 7px;
+    background:
+        linear-gradient(180deg, rgba(10, 24, 38, 0.96), rgba(6, 15, 26, 0.98)),
+        linear-gradient(120deg, rgba(124, 182, 219, 0.08), rgba(124, 182, 219, 0));
+    box-shadow:
+        0 18px 36px rgba(0, 0, 0, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transform: translateY(-10px) scale(0.98);
+    opacity: 0;
+    filter: blur(6px);
+    transition:
+        transform 180ms ease,
+        opacity 180ms ease,
+        filter 180ms ease,
+        border-color 180ms ease;
+}
+
+.appToast[data-state='visible'] {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    filter: blur(0);
+}
+
+.appToastBadge {
+    justify-self: start;
+    border: 1px solid rgba(176, 210, 231, 0.42);
+    border-radius: 999px;
+    min-height: 24px;
+    padding: 0 10px;
+    display: inline-flex;
+    align-items: center;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: rgba(227, 240, 248, 0.96);
+    background: rgba(17, 44, 66, 0.74);
+}
+
+.appToastMessage {
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.45;
+    letter-spacing: 0.2px;
+    color: rgba(225, 239, 248, 0.98);
+    text-wrap: balance;
+}
+
+.appToast[data-tone='success'] {
+    border-color: rgba(145, 234, 188, 0.54);
+}
+
+.appToast[data-tone='success'] .appToastBadge {
+    border-color: rgba(145, 234, 188, 0.52);
+    color: rgba(236, 255, 245, 0.98);
+    background: rgba(20, 77, 52, 0.82);
+}
+
+.appToast[data-tone='error'] {
+    border-color: rgba(242, 151, 151, 0.52);
+}
+
+.appToast[data-tone='error'] .appToastBadge {
+    border-color: rgba(242, 151, 151, 0.5);
+    color: rgba(255, 235, 235, 0.98);
+    background: rgba(94, 28, 28, 0.82);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .appToast {
+        transition: opacity 120ms ease;
+        transform: none;
+        filter: none;
+    }
+
+    .appToast[data-state='visible'] {
+        transform: none;
+    }
+}
+
 @media (max-width: 720px) {
     .cookieConsentCard {
         border-radius: 12px;
@@ -7300,5 +7398,11 @@ body.edit-mode-active .audioControlPanel {
     .cookieConsentLink {
         width: 100%;
         margin-left: 0;
+    }
+
+    .appToastLayer {
+        left: 12px;
+        right: 12px;
+        width: auto;
     }
 }

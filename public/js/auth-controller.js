@@ -10,7 +10,7 @@ const PROFILE_IMAGE_OUTPUT_SIZE_PX = 512;
 const PROFILE_IMAGE_OUTPUT_QUALITY = 0.86;
 const PROFILE_IMAGE_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-export function createAuthController({ onStateChanged = null } = {}) {
+export function createAuthController({ onStateChanged = null, onToast = null } = {}) {
     const listeners = new Set();
     let state = createInitialAuthState();
     let initializePromise = null;
@@ -79,6 +79,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
                     statusText: 'Signed in. Online rooms and score sync are unlocked.',
                     statusTone: 'success',
                 });
+                notifyToast('Signed in. Online rooms and score sync are unlocked.', 'success');
                 return {
                     ok: true,
                 };
@@ -144,6 +145,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
                         statusText: 'Account created. You are now signed in.',
                         statusTone: 'success',
                     });
+                    notifyToast('Account created. You are now signed in.', 'success');
                     return {
                         ok: true,
                         requiresEmailConfirmation: false,
@@ -163,6 +165,11 @@ export function createAuthController({ onStateChanged = null } = {}) {
                     statusText: 'Account created. Check your email and confirm before signing in.',
                     statusTone: 'info',
                 });
+                notifyToast(
+                    'Account created. Check your email and confirm the account before signing in.',
+                    'info',
+                    5200
+                );
                 return {
                     ok: true,
                     requiresEmailConfirmation: true,
@@ -175,6 +182,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
             await initializeInternalSafe();
             if (!supabaseClient) {
                 applySignedOutState('Signed out.');
+                notifyToast('Signed out.', 'info');
                 return {
                     ok: true,
                 };
@@ -193,6 +201,7 @@ export function createAuthController({ onStateChanged = null } = {}) {
                     throw error;
                 }
                 applySignedOutState('Signed out. Sign in to create or join online rooms.');
+                notifyToast('Signed out.', 'info');
                 return {
                     ok: true,
                 };
@@ -740,6 +749,22 @@ export function createAuthController({ onStateChanged = null } = {}) {
         listeners.forEach((listener) => {
             listener(snapshot);
         });
+    }
+
+    function notifyToast(message, tone = 'info', durationMs = undefined) {
+        const text = typeof message === 'string' ? message.trim() : '';
+        if (!text || typeof onToast !== 'function') {
+            return;
+        }
+        try {
+            onToast({
+                message: text,
+                tone,
+                durationMs,
+            });
+        } catch {
+            // Toast callbacks must not interrupt auth state updates.
+        }
     }
 
     async function removeStoredProfileImages(paths = []) {

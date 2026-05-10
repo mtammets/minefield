@@ -6,6 +6,7 @@ import { createDonateUiController } from './donate-ui.js';
 import { createControlsHelpController } from './controls-ui.js';
 import { createSpeedometerController } from './speedometer-ui.js';
 import { createObjectiveHudController } from './objective-hud-ui.js';
+import { createToastController } from './toast-ui.js';
 
 export function createRuntimeUiControllers({
     toCssHex,
@@ -110,6 +111,7 @@ export function createRuntimeUiControllers({
     });
     donateUi.initialize();
     const speedometerUi = createSpeedometerController();
+    const toastUi = createToastController();
 
     return {
         objectiveUi,
@@ -120,5 +122,6 @@ export function createRuntimeUiControllers({
         welcomeModalUi,
         donateUi,
         speedometerUi,
+        toastUi,
     };
 }

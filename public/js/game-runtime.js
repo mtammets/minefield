@@ -222,6 +222,7 @@ const {
     pauseMenuUi,
     welcomeModalUi,
     speedometerUi,
+    toastUi,
 } = createRuntimeUiControllers({
     toCssHex,
     colorNameFromHex,
@@ -266,6 +267,15 @@ const {
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
 });
 runtimeState.authController = createAuthController({
+    onToast(toast) {
+        if (!toast?.message) {
+            return;
+        }
+        toastUi?.show?.(toast.message, {
+            tone: toast.tone,
+            durationMs: toast.durationMs,
+        });
+    },
     onStateChanged(state) {
         welcomeModalUi.setAuthState?.(state);
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
