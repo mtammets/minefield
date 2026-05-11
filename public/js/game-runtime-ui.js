@@ -22,6 +22,7 @@ export function createRuntimeUiControllers({
     getGameMode = () => 'bots',
     getIsInOnlineRoom = () => false,
     getMineInventorySnapshot = () => null,
+    getCombatLoadoutSnapshot = () => null,
     onPrepareStart,
     onAuthSubmit = null,
     onAuthSignOut = null,
@@ -40,6 +41,7 @@ export function createRuntimeUiControllers({
         getGameMode,
         getIsInOnlineRoom,
         getMineInventorySnapshot,
+        getCombatLoadoutSnapshot,
     });
 
     const botStatusUi = createBotStatusController({

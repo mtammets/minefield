@@ -39,8 +39,14 @@ const CONTROL_LAYOUTS = Object.freeze({
                     actionId: ACTION_IDS.mineDrop,
                 },
                 {
-                    label: 'Throw Mine',
+                    label: 'Use Hood Tool',
                     actionId: ACTION_IDS.mineThrow,
+                    hint: 'Throws mine by default',
+                },
+                {
+                    label: 'Swap Hood Tool',
+                    actionId: ACTION_IDS.combatModeToggle,
+                    hint: 'Switch mine / VX-9 when online',
                 },
             ]),
         },
@@ -48,9 +54,14 @@ const CONTROL_LAYOUTS = Object.freeze({
             title: 'Vehicle Weapon',
             rows: Object.freeze([
                 {
-                    label: 'Throw Mine / VX-9',
+                    label: 'Use Hood Tool',
                     actionId: ACTION_IDS.mineThrow,
-                    hint: 'VX-9 pickup turns T into auto-fire',
+                    hint: 'Fires VX-9 when weapon mode is active',
+                },
+                {
+                    label: 'Swap Hood Tool',
+                    actionId: ACTION_IDS.combatModeToggle,
+                    hint: 'Mine and VX-9 share the hood mount',
                 },
                 {
                     label: 'Aim Zoom',
@@ -113,8 +124,14 @@ const CONTROL_LAYOUTS = Object.freeze({
                     actionId: ACTION_IDS.mineDrop,
                 },
                 {
-                    label: 'Throw Mine',
+                    label: 'Use Hood Tool',
                     actionId: ACTION_IDS.mineThrow,
+                    hint: 'Throws mine by default',
+                },
+                {
+                    label: 'Swap Hood Tool',
+                    actionId: ACTION_IDS.combatModeToggle,
+                    hint: 'Switch mine / VX-9 when online',
                 },
             ]),
         },
@@ -122,9 +139,14 @@ const CONTROL_LAYOUTS = Object.freeze({
             title: 'Vehicle Weapon',
             rows: Object.freeze([
                 {
-                    label: 'Throw Mine / VX-9',
+                    label: 'Use Hood Tool',
                     actionId: ACTION_IDS.mineThrow,
-                    hint: 'VX-9 pickup turns T into auto-fire',
+                    hint: 'Fires VX-9 when weapon mode is active',
+                },
+                {
+                    label: 'Swap Hood Tool',
+                    actionId: ACTION_IDS.combatModeToggle,
+                    hint: 'Mine and VX-9 share the hood mount',
                 },
                 {
                     label: 'Aim Zoom',
@@ -155,12 +177,13 @@ export function createControlsHelpController({
     getIsInOnlineRoom = () => false,
     getGameMode = () => 'bots',
     getMineInventorySnapshot = () => null,
+    getCombatLoadoutSnapshot = () => null,
     keyBindings = null,
 } = {}) {
     const welcomeHostEl = document.getElementById('welcomeControlsPanel');
     const pauseHostEl = document.getElementById('pauseControlsPanel');
     const gameplayStarterHud = null;
-    const gameplayMineHud = mountGameplayMineHud();
+    const gameplayMineHud = mountGameplayMineHud(keyBindings);
     if (!welcomeHostEl && !pauseHostEl && !gameplayStarterHud && !gameplayMineHud) {
         return createNoopController();
     }
@@ -192,6 +215,7 @@ export function createControlsHelpController({
         toggleGameplayOverlay,
         setGameplayOverlayVisible,
         refreshMineInventory,
+        refreshCombatLoadout,
         isGameplayOverlayVisible() {
             return Boolean(gameplayStarterHud?.isVisible?.());
         },
@@ -208,7 +232,7 @@ export function createControlsHelpController({
 
     function notifyGameplayRoundStart() {
         gameplayStarterHud?.notifyRoundStart?.();
-        gameplayMineHud?.notifyRoundStart?.(getMineInventorySnapshot());
+        gameplayMineHud?.notifyRoundStart?.(getMineInventorySnapshot(), getCombatLoadoutSnapshot());
     }
 
     function toggleGameplayOverlay() {
@@ -225,6 +249,10 @@ export function createControlsHelpController({
 
     function refreshMineInventory() {
         gameplayMineHud?.updateInventory?.(getMineInventorySnapshot());
+    }
+
+    function refreshCombatLoadout() {
+        gameplayMineHud?.updateCombatLoadout?.(getCombatLoadoutSnapshot());
     }
 
     function refreshContext() {
@@ -263,6 +291,7 @@ export function createControlsHelpController({
             gameplayVisible: state.gameplayVisible,
             gameMode: state.gameMode,
             mineInventory: getMineInventorySnapshot(),
+            combatLoadout: getCombatLoadoutSnapshot(),
         });
     }
 }
@@ -944,7 +973,16 @@ function normalizeMineInventorySnapshot(snapshot = null) {
     };
 }
 
-function mountGameplayMineHud() {
+function normalizeCombatLoadoutSnapshot(snapshot = null) {
+    const hasWeapon = Boolean(snapshot?.hasWeapon);
+    const activeMode = hasWeapon && snapshot?.mode === 'weapon' ? 'weapon' : 'mine';
+    return {
+        hasWeapon,
+        activeMode,
+    };
+}
+
+function mountGameplayMineHud(keyBindings = null) {
     if (typeof document === 'undefined' || !document.body) {
         return null;
     }
@@ -956,6 +994,19 @@ function mountGameplayMineHud() {
     rootEl.hidden = true;
     rootEl.innerHTML = `
         <div class="starterMineRackShell">
+            <div class="starterMineRackModeStrip" aria-hidden="true">
+                <div class="starterMineRackModeMeta">
+                    <span class="starterMineRackModeEyebrow">Hood tool</span>
+                    <span class="starterMineRackModeValue" data-combat-mode-value>MINE</span>
+                </div>
+                <div class="starterMineRackModeAction">
+                    <span class="starterMineRackModeActionLabel" data-combat-mode-switch-label>LOCKED</span>
+                    <span class="starterMineRackModeKey" data-combat-mode-key>${resolvePrimaryKeyLabel(
+                        ACTION_IDS.combatModeToggle
+                    )}</span>
+                </div>
+            </div>
+            <div class="starterMineRackModeHint" data-combat-mode-hint>T throws mine</div>
             <div class="starterMineRackHeader" aria-hidden="true">
                 <div class="starterMineRackCountWrap">
                     <span class="starterMineRackCount" data-mine-rack-count>${MINE_MAX_PER_OWNER}</span>
@@ -978,16 +1029,23 @@ function mountGameplayMineHud() {
     const countEl = rootEl.querySelector('[data-mine-rack-count]');
     const cooldownTextEl = rootEl.querySelector('[data-mine-rack-cooldown-text]');
     const cooldownFillEl = rootEl.querySelector('[data-mine-rack-cooldown-fill]');
+    const combatModeValueEl = rootEl.querySelector('[data-combat-mode-value]');
+    const combatModeHintEl = rootEl.querySelector('[data-combat-mode-hint]');
+    const combatModeSwitchLabelEl = rootEl.querySelector('[data-combat-mode-switch-label]');
+    const combatModeKeyEl = rootEl.querySelector('[data-combat-mode-key]');
     const chargeEls = [];
     const spentPulseTimers = new Map();
+    let modePulseTimer = 0;
     const state = {
         activeSession: false,
         available: false,
+        combatMode: 'mine',
         capacity: MINE_MAX_PER_OWNER,
         cooldownDurationMs: 0,
         cooldownReadyAtMs: 0,
         cooldownTickHandle: null,
         gameplayVisible: false,
+        hasWeapon: false,
         remainingCount: MINE_MAX_PER_OWNER,
         visible: false,
     };
@@ -1010,30 +1068,51 @@ function mountGameplayMineHud() {
     }
 
     applyInventorySnapshot(normalizeMineInventorySnapshot(null));
+    applyCombatLoadoutSnapshot(normalizeCombatLoadoutSnapshot(null), {
+        animateSwitch: false,
+    });
 
     return {
-        applyState({ gameplayVisible = false, gameMode = 'bots', mineInventory = null } = {}) {
+        applyState({
+            gameplayVisible = false,
+            gameMode = 'bots',
+            mineInventory = null,
+            combatLoadout = null,
+        } = {}) {
             const normalizedMode = normalizeGameMode(gameMode);
             state.gameplayVisible = Boolean(gameplayVisible);
             state.available = normalizedMode === 'online' || normalizedMode === 'bots';
             rootEl.dataset.mode = normalizedMode;
             applyInventorySnapshot(normalizeMineInventorySnapshot(mineInventory));
+            applyCombatLoadoutSnapshot(normalizeCombatLoadoutSnapshot(combatLoadout), {
+                animateSwitch: false,
+            });
             syncVisibility();
         },
-        notifyRoundStart(mineInventory = null) {
+        notifyRoundStart(mineInventory = null, combatLoadout = null) {
             state.activeSession = true;
             applyInventorySnapshot(normalizeMineInventorySnapshot(mineInventory), {
                 animateSpent: false,
+            });
+            applyCombatLoadoutSnapshot(normalizeCombatLoadoutSnapshot(combatLoadout), {
+                animateSwitch: false,
             });
             syncVisibility();
         },
         updateInventory(mineInventory = null) {
             applyInventorySnapshot(normalizeMineInventorySnapshot(mineInventory));
         },
+        updateCombatLoadout(combatLoadout = null) {
+            applyCombatLoadoutSnapshot(normalizeCombatLoadoutSnapshot(combatLoadout));
+        },
         dispose() {
             stopCooldownTicker();
             for (const timer of spentPulseTimers.values()) {
                 window.clearTimeout(timer);
+            }
+            if (modePulseTimer) {
+                window.clearTimeout(modePulseTimer);
+                modePulseTimer = 0;
             }
             rootEl.remove();
         },
@@ -1095,6 +1174,39 @@ function mountGameplayMineHud() {
         syncCooldownTicker();
     }
 
+    function applyCombatLoadoutSnapshot(snapshot, options = {}) {
+        const animateSwitch = options.animateSwitch !== false;
+        const previousMode = state.combatMode;
+        state.combatMode = snapshot.activeMode;
+        state.hasWeapon = snapshot.hasWeapon;
+        rootEl.dataset.combatMode = snapshot.activeMode;
+        rootEl.dataset.weaponOnline = snapshot.hasWeapon ? 'true' : 'false';
+        if (combatModeValueEl) {
+            combatModeValueEl.textContent = snapshot.activeMode === 'weapon' ? 'VX-9' : 'MINE';
+        }
+        if (combatModeHintEl) {
+            combatModeHintEl.textContent =
+                snapshot.activeMode === 'weapon' ? 'T fires VX-9' : 'T throws mine';
+        }
+        if (combatModeSwitchLabelEl) {
+            combatModeSwitchLabelEl.textContent = snapshot.hasWeapon ? 'SWAP' : 'LOCKED';
+        }
+        if (combatModeKeyEl) {
+            combatModeKeyEl.textContent = resolvePrimaryKeyLabel(
+                ACTION_IDS.combatModeToggle,
+                keyBindings
+            );
+        }
+        if (
+            animateSwitch &&
+            state.visible &&
+            state.activeSession &&
+            previousMode !== snapshot.activeMode
+        ) {
+            pulseModeSwitch();
+        }
+    }
+
     function pulseSpentCharge(index) {
         const chargeEl = chargeEls[index];
         if (!chargeEl) {
@@ -1109,6 +1221,19 @@ function mountGameplayMineHud() {
             spentPulseTimers.delete(index);
         }, 380);
         spentPulseTimers.set(index, timer);
+    }
+
+    function pulseModeSwitch() {
+        rootEl.classList.remove('is-mode-switching');
+        void rootEl.offsetWidth;
+        rootEl.classList.add('is-mode-switching');
+        if (modePulseTimer) {
+            window.clearTimeout(modePulseTimer);
+        }
+        modePulseTimer = window.setTimeout(() => {
+            rootEl.classList.remove('is-mode-switching');
+            modePulseTimer = 0;
+        }, 520);
     }
 
     function syncCooldownTicker() {
@@ -1236,6 +1361,7 @@ function createNoopController() {
         },
         setGameplayOverlayVisible() {},
         refreshMineInventory() {},
+        refreshCombatLoadout() {},
         isGameplayOverlayVisible() {
             return false;
         },

@@ -207,6 +207,7 @@ export function createMultiplayerController(options = {}) {
             snapshot.collisionRadius = MP_COLLISION_RADIUS;
             snapshot.mass = MP_COLLISION_MASS;
             snapshot.authoritativeNetworkCollision = true;
+            snapshot.speedKph = Math.abs(Number(remote.visualState?.speed) || 0);
             snapshot.velocityX = clampNumber(remote.visualState?.velocity?.x, -400, 400, 0);
             snapshot.velocityZ = clampNumber(remote.visualState?.velocity?.y, -400, 400, 0);
             snapshot.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
@@ -778,6 +779,7 @@ export function createMultiplayerController(options = {}) {
             inputRight: Boolean(inputState.right),
             inputHandbrake: Boolean(inputState.handbrake),
             weaponHasWeapon: Boolean(weaponState?.hasWeapon),
+            weaponMode: weaponState?.mode === 'weapon' ? 'weapon' : 'mine',
             weaponTriggerHeld: Boolean(weaponState?.triggerHeld),
             weaponHeat: clampNumber(weaponState?.heat, 0, 1, 0),
             weaponLocked: Boolean(weaponState?.locked),
@@ -1337,6 +1339,7 @@ export function createMultiplayerController(options = {}) {
                 state.weaponHasWeapon != null
                     ? Boolean(state.weaponHasWeapon)
                     : remote.isDestroyed === false,
+            mode: state.weaponMode === 'weapon' ? 'weapon' : 'mine',
             triggerHeld: Boolean(state.weaponTriggerHeld),
             heat: clampNumber(state.weaponHeat, 0, 1, 0),
             locked: Boolean(state.weaponLocked),

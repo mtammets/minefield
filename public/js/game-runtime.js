@@ -247,6 +247,7 @@ const {
     getIsInOnlineRoom: () => Boolean(runtimeState.multiplayerController?.isInRoom?.()),
     getMineInventorySnapshot: () =>
         runtimeState.mineController?.getLocalInventorySnapshot?.() || null,
+    getCombatLoadoutSnapshot: () => runtimeState.weaponSystem?.getCombatLoadoutSnapshot?.() || null,
     onPrepareStart: prepareRuntimeForSessionStart,
     onAuthSubmit(mode, credentials) {
         if (mode === 'sign-up') {
@@ -2308,6 +2309,9 @@ runtimeState.weaponSystem = createVehicleWeaponSystem({
     onStatus(messageText, timeoutMs = 2000) {
         objectiveUi.showInfo(messageText, timeoutMs);
     },
+    onCombatLoadoutChanged() {
+        controlsHelpUi?.refreshCombatLoadout?.();
+    },
     onShotFired(shotEvent = null) {
         runtimeState.multiplayerController?.reportWeaponShot?.(shotEvent);
     },
@@ -3473,6 +3477,12 @@ runtimeState.inputController = createInputController({
     },
     getHasVehicleWeapon() {
         return Boolean(runtimeState.weaponSystem?.hasWeapon?.());
+    },
+    getVehicleCombatMode() {
+        return runtimeState.weaponSystem?.getCombatMode?.() || 'mine';
+    },
+    onToggleVehicleCombatMode() {
+        return runtimeState.weaponSystem?.toggleCombatMode?.() || null;
     },
     onSetVehicleWeaponTrigger(nextHeld) {
         runtimeState.weaponSystem?.setTriggerHeld?.(nextHeld);

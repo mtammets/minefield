@@ -14,6 +14,7 @@ test('sanitizeAudioPrefs clamps values and falls back safely', () => {
     const sanitized = sanitizeAudioPrefs({
         masterVolume: 2,
         vehiclesVolume: -1,
+        botVehiclesVolume: '0.63',
         effectsVolume: '0.45',
         ambienceVolume: null,
         musicVolume: 0.2,
@@ -24,6 +25,7 @@ test('sanitizeAudioPrefs clamps values and falls back safely', () => {
     assert.deepEqual(sanitized, {
         masterVolume: 1,
         vehiclesVolume: 0,
+        botVehiclesVolume: 0.63,
         effectsVolume: 0.45,
         ambienceVolume: 0,
         musicVolume: 0.2,
@@ -51,6 +53,7 @@ test('audio prefs store persists sanitized defaults for deploys', async () => {
     const savedConfig = await store.writePrefs({
         masterVolume: 0.61,
         vehiclesVolume: 0.92,
+        botVehiclesVolume: 0.44,
         effectsVolume: 0.88,
         ambienceVolume: 0.73,
         musicVolume: 0.14,
@@ -59,6 +62,7 @@ test('audio prefs store persists sanitized defaults for deploys', async () => {
     });
 
     assert.equal(savedConfig.prefs.masterVolume, 0.61);
+    assert.equal(savedConfig.prefs.botVehiclesVolume, 0.44);
     assert.match(savedConfig.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
 
     const rawFile = JSON.parse(await fs.readFile(prefsFilePath, 'utf8'));

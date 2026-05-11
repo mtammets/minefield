@@ -38,6 +38,8 @@ export function createInputController(options = {}) {
         onDeployMine = () => null,
         onGrantVehicleWeapon = () => false,
         getHasVehicleWeapon = () => false,
+        getVehicleCombatMode = () => 'mine',
+        onToggleVehicleCombatMode = () => null,
         onSetVehicleWeaponTrigger = () => {},
         toggleWorldMap = () => ({ open: false, message: null }),
         isWorldMapVisible = () => false,
@@ -99,7 +101,7 @@ export function createInputController(options = {}) {
         returnToWelcome,
         returnToWelcomeFromPauseMenu: returnToWelcome,
         isVehicleWeaponZoomHeld() {
-            return vehicleWeaponZoomHeld && Boolean(getHasVehicleWeapon());
+            return vehicleWeaponZoomHeld && isWeaponModeActive();
         },
     };
 
@@ -142,21 +144,22 @@ export function createInputController(options = {}) {
         const key = normalizeKeyboardKey(event?.key || '');
         const matchesAction = (actionId) => actionMatchesEvent(actionId, event, keyBindings, key);
         const vehicleWeaponGrantShortcut = key === '+' || event?.code === 'NumpadAdd';
+        const rawThrowAction = matchesAction(ACTION_IDS.mineThrow);
+        const rawVehicleWeaponZoomAction = matchesAction(ACTION_IDS.vehicleWeaponZoom);
         const reportAction = (actionId) => {
             if (!isKeyDown || event.repeat) {
                 return;
             }
             onRegisterControlAction(actionId);
         };
-        const vehicleWeaponBoundThrowAction =
-            matchesAction(ACTION_IDS.mineThrow) && Boolean(getHasVehicleWeapon());
-        const vehicleWeaponZoomAction = matchesAction(ACTION_IDS.vehicleWeaponZoom);
+        const vehicleWeaponBoundThrowAction = rawThrowAction && isWeaponModeActive();
+        const vehicleWeaponZoomAction = rawVehicleWeaponZoomAction && isWeaponModeActive();
 
         if (vehicleWeaponBoundThrowAction && !isKeyDown) {
             onSetVehicleWeaponTrigger(false);
             return;
         }
-        if (vehicleWeaponZoomAction && !isKeyDown) {
+        if (rawVehicleWeaponZoomAction && !isKeyDown) {
             setVehicleWeaponZoomHeld(false);
             return;
         }
@@ -183,6 +186,7 @@ export function createInputController(options = {}) {
                 matchesAction(ACTION_IDS.roofModeBattery) ||
                 matchesAction(ACTION_IDS.roofModeNavigation) ||
                 matchesAction(ACTION_IDS.roofModeChassis) ||
+                matchesAction(ACTION_IDS.combatModeToggle) ||
                 matchesAction(ACTION_IDS.vehicleWeaponZoom) ||
                 vehicleWeaponGrantShortcut ||
                 matchesAction(ACTION_IDS.mineDrop) ||
@@ -368,6 +372,21 @@ export function createInputController(options = {}) {
             }
             event.preventDefault();
             onGrantVehicleWeapon();
+            return;
+        }
+
+        if (matchesAction(ACTION_IDS.combatModeToggle)) {
+            if (!isKeyDown || isRaceIntroDriveLocked) {
+                return;
+            }
+            event.preventDefault();
+            releaseVehicleWeaponTrigger();
+            releaseVehicleWeaponZoom();
+            const result = onToggleVehicleCombatMode();
+            if (result?.message) {
+                onShowObjectiveInfo(result.message, result.timeoutMs || 1800);
+            }
+            reportAction(ACTION_IDS.combatModeToggle);
             return;
         }
 
@@ -589,6 +608,10 @@ export function createInputController(options = {}) {
 
     function releaseVehicleWeaponZoom() {
         setVehicleWeaponZoomHeld(false);
+    }
+
+    function isWeaponModeActive() {
+        return Boolean(getHasVehicleWeapon()) && getVehicleCombatMode() === 'weapon';
     }
 
     function resolveSceneClickUrl(pointerNdc) {

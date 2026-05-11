@@ -1397,6 +1397,7 @@ io.on('connection', (socket) => {
 
         if (player.lastState && typeof player.lastState === 'object') {
             player.lastState.weaponHasWeapon = true;
+            player.lastState.weaponMode = 'weapon';
             player.lastState.weaponTriggerHeld = false;
             player.lastState.weaponLocked = false;
             player.lastState.weaponHasTarget = false;
@@ -2760,6 +2761,9 @@ function sanitizePlayerState(payload, fallback) {
     const inputRight = Boolean(payload?.inputRight);
     const inputHandbrake = Boolean(payload?.inputHandbrake);
     const weaponHasWeapon = Boolean(payload?.weaponHasWeapon);
+    const rawWeaponMode =
+        typeof payload?.weaponMode === 'string' ? payload.weaponMode : fallback?.weaponMode;
+    const weaponMode = weaponHasWeapon && rawWeaponMode === 'weapon' ? 'weapon' : 'mine';
     const weaponTriggerHeld = weaponHasWeapon && Boolean(payload?.weaponTriggerHeld);
     const weaponHeat = clampFinite(payload?.weaponHeat, 0, 1, fallback?.weaponHeat ?? 0);
     const weaponLocked = weaponHasWeapon && Boolean(payload?.weaponLocked);
@@ -2799,6 +2803,7 @@ function sanitizePlayerState(payload, fallback) {
         inputRight,
         inputHandbrake,
         weaponHasWeapon,
+        weaponMode,
         weaponTriggerHeld,
         weaponHeat: roundTo(weaponHeat, 4),
         weaponLocked,

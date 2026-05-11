@@ -20,6 +20,7 @@ const UFO_DISKO_STORE_MUSIC_SOUND_ID = 'ufoDiskoNebulaStore01';
 const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
     vehiclesVolume: 1,
+    botVehiclesVolume: 1,
     effectsVolume: 1,
     ambienceVolume: 1,
     musicVolume: 0.08,
@@ -286,6 +287,7 @@ const LOOP_SOUND_IDS = Object.freeze(
             Boolean(SOUND_DEFINITIONS[soundId]?.loop) && soundId !== MONUMENT_MUSIC_SOUND_ID
     )
 );
+const EMPTY_ARRAY = Object.freeze([]);
 const CORE_GAMEPLAY_SOUND_IDS = Object.freeze([
     'countdownBeep01',
     'countdownGo01',
@@ -309,6 +311,7 @@ const VARIANT_GROUPS = Object.freeze({
 });
 
 const LOOP_RATE_DEFAULT = 1;
+const BOT_TRAFFIC_LAYER_GAIN_SCALE = 0.68;
 
 const MIXER_SLIDERS = Object.freeze([
     {
@@ -318,6 +321,10 @@ const MIXER_SLIDERS = Object.freeze([
     {
         key: 'vehiclesVolume',
         label: 'Vehicles',
+    },
+    {
+        key: 'botVehiclesVolume',
+        label: 'Bots',
     },
     {
         key: 'effectsVolume',
@@ -475,6 +482,49 @@ const VEHICLE_WEAPON_INCOMING_CUE_AUDIO_CONFIG = Object.freeze({
     wetGain: 0.08,
     wetLowpassHz: 7200,
 });
+const BOT_TRAFFIC_ENGINE_SOUND_IDS = Object.freeze([
+    'engineIdleLoop01',
+    'engineLowLoop01',
+    'engineMidLoop01',
+    'engineHighLoop01',
+]);
+const BOT_TRAFFIC_AUDIO_CONFIG = Object.freeze({
+    refDistance: 6.4,
+    maxDistance: 138,
+    rolloffFactor: 1.12,
+    fullPresenceDistance: 14,
+    audibleDistance: 92,
+    cullDistance: 152,
+    nearCutoffHz: 11200,
+    farCutoffHz: 1280,
+    nearWetLowpassHz: 5400,
+    farWetLowpassHz: 1500,
+    nearSourceGain: 0.92,
+    farSourceGain: 0.24,
+    nearDryGain: 0.82,
+    farDryGain: 0.16,
+    nearWetGain: 0.1,
+    farWetGain: 0.28,
+    nearDelaySec: 0.072,
+    farDelaySec: 0.146,
+    nearFeedback: 0.2,
+    farFeedback: 0.36,
+    delaySendNear: 0.05,
+    delaySendFar: 0.18,
+    reverbSendNear: 0.1,
+    reverbSendFar: 0.28,
+    verticalOffset: 0.72,
+    speedFloorKph: 2,
+    speedCeilingKph: 34,
+    releaseAfterMs: 440,
+});
+const BOT_TRAFFIC_OCCLUSION_MIN_GAIN = 0.18;
+const BOT_TRAFFIC_OCCLUSION_MIN_WET_GAIN = 0.56;
+const BOT_TRAFFIC_OCCLUSION_MIN_CUTOFF_HZ = 840;
+const BOT_TRAFFIC_OCCLUSION_MIN_WET_CUTOFF_HZ = 720;
+const BOT_TRAFFIC_UNDERGROUND_MISMATCH_GAIN = 0.12;
+const BOT_TRAFFIC_UNDERGROUND_MISMATCH_WET_GAIN = 0.42;
+const BOT_TRAFFIC_APPROACH_RATE_RANGE = 0.035;
 
 export function createAudioSystem({ camera = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -487,6 +537,7 @@ export function createAudioSystem({ camera = null } = {}) {
     const buffers = new Map();
     const failedBuffers = new Set();
     const loopInstances = new Map();
+    const botTrafficInstances = new Map();
     const pendingLoads = new Map();
     const readyStreamSounds = new Set();
     const failedStreamSounds = new Set();
@@ -575,6 +626,7 @@ export function createAudioSystem({ camera = null } = {}) {
         onWorldMapVisibilityChanged,
         onRaceIntroStep,
         onRaceIntroGo,
+        onVehicleCombatModeSwitch,
         onVehicleWeaponPickup,
         onVehicleWeaponShot,
         onVehicleWeaponImpact,
@@ -626,6 +678,10 @@ export function createAudioSystem({ camera = null } = {}) {
             disposeLoopInstance(instance);
         }
         loopInstances.clear();
+        for (const instance of botTrafficInstances.values()) {
+            disposeBotTrafficInstance(instance);
+        }
+        botTrafficInstances.clear();
         disposeLorienGalleryVideoInstance();
         disposeMonumentMusicInstance();
         disposeUfoDiskoMusicInstance();
@@ -723,6 +779,7 @@ export function createAudioSystem({ camera = null } = {}) {
 
         const masterGain = context.createGain();
         const vehiclesGain = context.createGain();
+        const botVehiclesGain = context.createGain();
         const effectsGain = context.createGain();
         const ambienceGain = context.createGain();
         const musicGain = context.createGain();
@@ -742,6 +799,7 @@ export function createAudioSystem({ camera = null } = {}) {
         limiter.attack.setValueAtTime(0.001, context.currentTime);
         limiter.release.setValueAtTime(0.12, context.currentTime);
 
+        botVehiclesGain.connect(vehiclesGain);
         vehiclesGain.connect(masterGain);
         effectsGain.connect(masterGain);
         ambienceGain.connect(masterGain);
@@ -755,6 +813,7 @@ export function createAudioSystem({ camera = null } = {}) {
             masterGain,
             buses: {
                 vehicles: vehiclesGain,
+                botVehicles: botVehiclesGain,
                 effects: effectsGain,
                 ambience: ambienceGain,
                 music: musicGain,
@@ -1140,6 +1199,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const masterTarget = prefs.muted ? 0 : prefs.masterVolume;
         mixer.masterGain.gain.setTargetAtTime(masterTarget, now, 0.03);
         mixer.buses.vehicles.gain.setTargetAtTime(prefs.vehiclesVolume, now, 0.03);
+        mixer.buses.botVehicles.gain.setTargetAtTime(prefs.botVehiclesVolume, now, 0.03);
         mixer.buses.effects.gain.setTargetAtTime(prefs.effectsVolume, now, 0.03);
         mixer.buses.ambience.gain.setTargetAtTime(prefs.ambienceVolume, now, 0.03);
         mixer.buses.music.gain.setTargetAtTime(prefs.musicVolume, now, 0.03);
@@ -1445,6 +1505,11 @@ export function createAudioSystem({ camera = null } = {}) {
         const batteryDepleted = Boolean(frameState.isBatteryDepleted);
         const isChargingActive = Boolean(frameState.isChargingActive);
         const chargingLevel = clampNumber(frameState.chargingLevel, 0, 1, 0);
+        const trafficDescriptors = Array.isArray(frameState.trafficDescriptors)
+            ? frameState.trafficDescriptors
+            : Array.isArray(frameState.botDescriptors)
+              ? frameState.botDescriptors
+              : EMPTY_ARRAY;
 
         const driveAudioEnabled =
             !isPaused &&
@@ -1552,6 +1617,14 @@ export function createAudioSystem({ camera = null } = {}) {
         // Reserved loop: prepared for future per-mine beeper routing.
         updateLoopLayer('mineBeepLoop01', 0, 1);
 
+        updateAudioListenerFromCamera(context, camera);
+        updateBotTrafficAudio({
+            trafficDescriptors,
+            driveAudioEnabled,
+            gameMode: frameState.gameMode,
+            undergroundParkingIsolationActive,
+        });
+
         if (runtime.lastChargingActive !== isChargingActive) {
             runtime.lastChargingActive = isChargingActive;
             if (isChargingActive) {
@@ -1576,8 +1649,6 @@ export function createAudioSystem({ camera = null } = {}) {
                 onBatteryRestored();
             }
         }
-
-        updateAudioListenerFromCamera(context, camera);
         updateLorienGalleryVideoAudio({
             isPaused,
             welcomeVisible,
@@ -1857,6 +1928,24 @@ export function createAudioSystem({ camera = null } = {}) {
         });
     }
 
+    function onVehicleCombatModeSwitch({ mode = 'mine' } = {}) {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
+        playVehicleCombatModeSwitchSynth({
+            mode,
+        });
+        playOneShot(mode === 'weapon' ? 'uiToggleOn01' : 'uiToggleOff01', {
+            gain: mode === 'weapon' ? 0.62 : 0.56,
+            rateScale: mode === 'weapon' ? randomRange(0.98, 1.05) : randomRange(0.94, 1.01),
+        });
+        playOneShot('uiConfirm01', {
+            gain: mode === 'weapon' ? 0.24 : 0.18,
+            whenOffsetSec: mode === 'weapon' ? 0.028 : 0.018,
+            rateScale: mode === 'weapon' ? randomRange(1.1, 1.2) : randomRange(0.88, 0.96),
+        });
+    }
+
     function onVehicleWeaponPickup() {
         if (!isRealtimeAudioReady()) {
             return;
@@ -1975,6 +2064,60 @@ export function createAudioSystem({ camera = null } = {}) {
         toneB.start(now + 0.04);
         safeStopSource(toneA, now + 0.28);
         safeStopSource(toneB, now + 0.34);
+        return true;
+    }
+
+    function playVehicleCombatModeSwitchSynth({ mode = 'mine' } = {}) {
+        const busNode = mixer?.buses?.effects;
+        if (!context || !busNode) {
+            return false;
+        }
+
+        const switchToWeapon = mode === 'weapon';
+        const now = context.currentTime;
+        const outputGain = context.createGain();
+        outputGain.gain.setValueAtTime(0.0001, now);
+        outputGain.gain.linearRampToValueAtTime(switchToWeapon ? 0.18 : 0.12, now + 0.012);
+        outputGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+        outputGain.connect(busNode);
+
+        const toneA = context.createOscillator();
+        const toneAGain = context.createGain();
+        toneA.type = switchToWeapon ? 'triangle' : 'sine';
+        toneA.frequency.setValueAtTime(switchToWeapon ? 540 : 880, now);
+        toneA.frequency.exponentialRampToValueAtTime(switchToWeapon ? 1220 : 420, now + 0.14);
+        toneAGain.gain.setValueAtTime(0.0001, now);
+        toneAGain.gain.linearRampToValueAtTime(switchToWeapon ? 0.14 : 0.1, now + 0.016);
+        toneAGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+
+        const toneB = context.createOscillator();
+        const toneBGain = context.createGain();
+        toneB.type = 'sine';
+        toneB.frequency.setValueAtTime(switchToWeapon ? 920 : 510, now + 0.016);
+        toneB.frequency.exponentialRampToValueAtTime(switchToWeapon ? 1680 : 280, now + 0.2);
+        toneBGain.gain.setValueAtTime(0.0001, now + 0.01);
+        toneBGain.gain.linearRampToValueAtTime(switchToWeapon ? 0.08 : 0.06, now + 0.04);
+        toneBGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
+
+        toneA.connect(toneAGain);
+        toneAGain.connect(outputGain);
+        toneB.connect(toneBGain);
+        toneBGain.connect(outputGain);
+
+        const cleanup = once(() => {
+            safeDisconnect(toneA);
+            safeDisconnect(toneAGain);
+            safeDisconnect(toneB);
+            safeDisconnect(toneBGain);
+            safeDisconnect(outputGain);
+        });
+
+        toneA.onended = cleanup;
+        toneB.onended = cleanup;
+        toneA.start(now);
+        toneB.start(now + 0.012);
+        safeStopSource(toneA, now + 0.18);
+        safeStopSource(toneB, now + 0.24);
         return true;
     }
 
@@ -2563,6 +2706,538 @@ export function createAudioSystem({ camera = null } = {}) {
         safeStopSource(instance.source);
         safeDisconnect(instance.source);
         safeDisconnect(instance.gain);
+    }
+
+    function updateBotTrafficAudio({
+        trafficDescriptors = EMPTY_ARRAY,
+        driveAudioEnabled = false,
+        gameMode = 'bots',
+        undergroundParkingIsolationActive = false,
+    } = {}) {
+        if (!context) {
+            return;
+        }
+
+        const listenerPosition = camera?.position || runtime.playerPosition || null;
+        const now = context.currentTime;
+        const nowMs = performance.now();
+        const activeBotIds = new Set();
+        const shouldRenderBots =
+            driveAudioEnabled &&
+            (gameMode === 'bots' || gameMode === 'online') &&
+            listenerPosition &&
+            Array.isArray(trafficDescriptors) &&
+            trafficDescriptors.length > 0;
+
+        if (shouldRenderBots) {
+            const { forwardX, forwardZ } = resolveCameraPlanarForward(camera);
+            for (let i = 0; i < trafficDescriptors.length; i += 1) {
+                const descriptor = trafficDescriptors[i];
+                const trafficId = typeof descriptor?.id === 'string' ? descriptor.id : '';
+                const position = isFiniteVector3Like(descriptor?.position)
+                    ? descriptor.position
+                    : Number.isFinite(descriptor?.x) &&
+                        Number.isFinite(descriptor?.y) &&
+                        Number.isFinite(descriptor?.z)
+                      ? {
+                            x: descriptor.x,
+                            y: descriptor.y,
+                            z: descriptor.z,
+                        }
+                      : null;
+                if (!trafficId || !position) {
+                    continue;
+                }
+
+                const x = Number(position.x) || 0;
+                const y = (Number(position.y) || 0) + BOT_TRAFFIC_AUDIO_CONFIG.verticalOffset;
+                const z = Number(position.z) || 0;
+                const dx = x - (Number(listenerPosition.x) || 0);
+                const dy = y - (Number(listenerPosition.y) || 0);
+                const dz = z - (Number(listenerPosition.z) || 0);
+                const distance = Math.hypot(dx, dz, dy * 0.72);
+                if (
+                    !Number.isFinite(distance) ||
+                    distance > BOT_TRAFFIC_AUDIO_CONFIG.cullDistance
+                ) {
+                    continue;
+                }
+
+                const instance = ensureBotTrafficInstance(trafficId, { x, y, z });
+                if (!instance) {
+                    continue;
+                }
+
+                activeBotIds.add(trafficId);
+                instance.missingSinceMs = null;
+                updateBotTrafficInstance(instance, descriptor, {
+                    x,
+                    y,
+                    z,
+                    dx,
+                    dy,
+                    dz,
+                    distance,
+                    forwardX,
+                    forwardZ,
+                    undergroundParkingIsolationActive,
+                    now,
+                });
+            }
+        }
+
+        for (const [botId, instance] of botTrafficInstances.entries()) {
+            if (activeBotIds.has(botId)) {
+                continue;
+            }
+            if (!Number.isFinite(instance.missingSinceMs)) {
+                instance.missingSinceMs = nowMs;
+            }
+            fadeOutBotTrafficInstance(instance, now);
+            if (nowMs - instance.missingSinceMs >= BOT_TRAFFIC_AUDIO_CONFIG.releaseAfterMs) {
+                disposeBotTrafficInstance(instance);
+                botTrafficInstances.delete(botId);
+            }
+        }
+    }
+
+    function ensureBotTrafficInstance(botId, initialPosition = null) {
+        if (!isRealtimeAudioReady() || !context || !mixer?.buses?.botVehicles || !botId) {
+            return null;
+        }
+        if (botTrafficInstances.has(botId)) {
+            return botTrafficInstances.get(botId);
+        }
+
+        const layerBuffers = {};
+        for (let i = 0; i < BOT_TRAFFIC_ENGINE_SOUND_IDS.length; i += 1) {
+            const soundId = BOT_TRAFFIC_ENGINE_SOUND_IDS[i];
+            const buffer = buffers.get(soundId);
+            if (!buffer) {
+                void loadBuffer(soundId);
+                return null;
+            }
+            layerBuffers[soundId] = buffer;
+        }
+
+        const now = context.currentTime;
+        const sourceGain = context.createGain();
+        sourceGain.gain.setValueAtTime(0, now);
+
+        const toneFilter = context.createBiquadFilter();
+        toneFilter.type = 'lowpass';
+        toneFilter.frequency.setValueAtTime(BOT_TRAFFIC_AUDIO_CONFIG.farCutoffHz, now);
+        toneFilter.Q.setValueAtTime(0.72, now);
+
+        const panner = context.createPanner();
+        panner.panningModel = 'HRTF';
+        panner.distanceModel = 'inverse';
+        panner.refDistance = BOT_TRAFFIC_AUDIO_CONFIG.refDistance;
+        panner.maxDistance = BOT_TRAFFIC_AUDIO_CONFIG.maxDistance;
+        panner.rolloffFactor = BOT_TRAFFIC_AUDIO_CONFIG.rolloffFactor;
+        panner.coneInnerAngle = 360;
+        panner.coneOuterAngle = 360;
+        panner.coneOuterGain = 1;
+        setPannerPosition(
+            panner,
+            Number(initialPosition?.x) || 0,
+            Number(initialPosition?.y) || 0,
+            Number(initialPosition?.z) || 0,
+            now
+        );
+
+        const dryGain = context.createGain();
+        dryGain.gain.setValueAtTime(0, now);
+
+        const delaySend = context.createGain();
+        delaySend.gain.setValueAtTime(0, now);
+        const delay = context.createDelay(0.75);
+        delay.delayTime.setValueAtTime(BOT_TRAFFIC_AUDIO_CONFIG.farDelaySec, now);
+        const delayFeedback = context.createGain();
+        delayFeedback.gain.setValueAtTime(BOT_TRAFFIC_AUDIO_CONFIG.farFeedback, now);
+
+        const reverbSend = context.createGain();
+        reverbSend.gain.setValueAtTime(0, now);
+        const convolver = context.createConvolver();
+        convolver.buffer = getVehicleWeaponUrbanImpulseBuffer();
+
+        const wetFilter = context.createBiquadFilter();
+        wetFilter.type = 'lowpass';
+        wetFilter.frequency.setValueAtTime(BOT_TRAFFIC_AUDIO_CONFIG.farWetLowpassHz, now);
+
+        const wetGain = context.createGain();
+        wetGain.gain.setValueAtTime(0, now);
+
+        sourceGain.connect(toneFilter);
+        toneFilter.connect(panner);
+        panner.connect(dryGain);
+        dryGain.connect(mixer.buses.botVehicles);
+        panner.connect(delaySend);
+        delaySend.connect(delay);
+        delay.connect(delayFeedback);
+        delayFeedback.connect(delay);
+        delay.connect(wetFilter);
+        panner.connect(reverbSend);
+        reverbSend.connect(convolver);
+        convolver.connect(wetFilter);
+        wetFilter.connect(wetGain);
+        wetGain.connect(mixer.buses.botVehicles);
+
+        const layers = {};
+        for (let i = 0; i < BOT_TRAFFIC_ENGINE_SOUND_IDS.length; i += 1) {
+            const soundId = BOT_TRAFFIC_ENGINE_SOUND_IDS[i];
+            const buffer = layerBuffers[soundId];
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            source.loop = true;
+
+            const gain = context.createGain();
+            gain.gain.setValueAtTime(0, now);
+
+            source.connect(gain);
+            gain.connect(sourceGain);
+
+            const duration = Number(buffer.duration);
+            const startOffset =
+                Number.isFinite(duration) && duration > 0.3
+                    ? randomRange(0, Math.max(0.01, duration - 0.18))
+                    : 0;
+            source.start(now, startOffset);
+
+            layers[soundId] = {
+                source,
+                gain,
+                baseGain: SOUND_DEFINITIONS[soundId]?.gain || 1,
+            };
+        }
+
+        const instance = {
+            botId,
+            sourceGain,
+            toneFilter,
+            panner,
+            dryGain,
+            delaySend,
+            delay,
+            delayFeedback,
+            reverbSend,
+            convolver,
+            wetFilter,
+            wetGain,
+            layers,
+            missingSinceMs: null,
+        };
+        botTrafficInstances.set(botId, instance);
+        return instance;
+    }
+
+    function updateBotTrafficInstance(instance, descriptor, state = {}) {
+        if (!context || !instance) {
+            return;
+        }
+
+        const now = Number.isFinite(state.now) ? state.now : context.currentTime;
+        const x = Number(state.x) || 0;
+        const y = Number(state.y) || 0;
+        const z = Number(state.z) || 0;
+        const dx = Number(state.dx) || 0;
+        const dy = Number(state.dy) || 0;
+        const dz = Number(state.dz) || 0;
+        const distance = Math.max(0, Number(state.distance) || 0);
+        const forwardX = Number(state.forwardX) || 0;
+        const forwardZ = Number(state.forwardZ) || -1;
+        const speedKph = Math.abs(Number(descriptor?.speedKph) || 0);
+        const speedNorm = clampNumber(
+            (speedKph - BOT_TRAFFIC_AUDIO_CONFIG.speedFloorKph) /
+                Math.max(
+                    1,
+                    BOT_TRAFFIC_AUDIO_CONFIG.speedCeilingKph -
+                        BOT_TRAFFIC_AUDIO_CONFIG.speedFloorKph
+                ),
+            0,
+            1,
+            0
+        );
+        const nearMix =
+            1 -
+            clampNumber(
+                (distance - BOT_TRAFFIC_AUDIO_CONFIG.fullPresenceDistance) /
+                    Math.max(
+                        1,
+                        BOT_TRAFFIC_AUDIO_CONFIG.audibleDistance -
+                            BOT_TRAFFIC_AUDIO_CONFIG.fullPresenceDistance
+                    ),
+                0,
+                1,
+                0
+            );
+        const distance2d = Math.hypot(dx, dz);
+        const sourceDirX = distance2d > 0.0001 ? dx / distance2d : 0;
+        const sourceDirZ = distance2d > 0.0001 ? dz / distance2d : -1;
+        const sideMix = clampNumber(
+            Math.abs(forwardX * sourceDirZ - forwardZ * sourceDirX),
+            0,
+            1,
+            0
+        );
+        const echoMix = clampNumber(distance / BOT_TRAFFIC_AUDIO_CONFIG.audibleDistance, 0, 1, 0);
+
+        let orientationX = Number(descriptor?.velocityX) || 0;
+        let orientationZ = Number(descriptor?.velocityZ) || 0;
+        let travelMagnitude = Math.hypot(orientationX, orientationZ);
+        if (travelMagnitude <= 0.12) {
+            orientationX = -Math.sin(Number(descriptor?.heading) || 0);
+            orientationZ = -Math.cos(Number(descriptor?.heading) || 0);
+            travelMagnitude = Math.hypot(orientationX, orientationZ);
+        }
+        if (travelMagnitude > 0.0001) {
+            orientationX /= travelMagnitude;
+            orientationZ /= travelMagnitude;
+        } else {
+            orientationX = 0;
+            orientationZ = -1;
+        }
+
+        if (
+            typeof instance.panner.orientationX !== 'undefined' &&
+            typeof instance.panner.orientationY !== 'undefined' &&
+            typeof instance.panner.orientationZ !== 'undefined'
+        ) {
+            setAudioParamValue(instance.panner.orientationX, orientationX, now);
+            setAudioParamValue(instance.panner.orientationY, 0, now);
+            setAudioParamValue(instance.panner.orientationZ, orientationZ, now);
+        }
+
+        setPannerPosition(instance.panner, x, y, z, now);
+
+        const occlusion = resolveWorldAudioOcclusion({ x, y, z });
+        const occlusionGain = lerpNumber(1, BOT_TRAFFIC_OCCLUSION_MIN_GAIN, occlusion);
+        const occlusionWetGain = lerpNumber(1, BOT_TRAFFIC_OCCLUSION_MIN_WET_GAIN, occlusion);
+        const undergroundMismatch =
+            Boolean(descriptor?.undergroundParkingIsolated) !==
+            Boolean(state.undergroundParkingIsolationActive);
+        const isolationGain = undergroundMismatch ? BOT_TRAFFIC_UNDERGROUND_MISMATCH_GAIN : 1;
+        const isolationWetGain = undergroundMismatch
+            ? BOT_TRAFFIC_UNDERGROUND_MISMATCH_WET_GAIN
+            : 1;
+        const approachVelocityMs =
+            distance2d > 0.0001
+                ? -(
+                      (Number(descriptor?.velocityX) || 0) * sourceDirX +
+                      (Number(descriptor?.velocityZ) || 0) * sourceDirZ
+                  )
+                : 0;
+        const approachRateOffset =
+            clampNumber(approachVelocityMs / 18, -1, 1, 0) * BOT_TRAFFIC_APPROACH_RATE_RANGE;
+
+        instance.sourceGain.gain.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.farSourceGain,
+                BOT_TRAFFIC_AUDIO_CONFIG.nearSourceGain,
+                nearMix
+            ) *
+                (0.56 + speedNorm * 0.44) *
+                occlusionGain *
+                isolationGain,
+            now,
+            0.16
+        );
+        instance.dryGain.gain.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.farDryGain,
+                BOT_TRAFFIC_AUDIO_CONFIG.nearDryGain,
+                nearMix
+            ) *
+                (1 + sideMix * nearMix * 0.16) *
+                occlusionGain *
+                isolationGain,
+            now,
+            0.16
+        );
+        instance.wetGain.gain.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.farWetGain,
+                BOT_TRAFFIC_AUDIO_CONFIG.nearWetGain,
+                nearMix
+            ) *
+                (0.84 + echoMix * 0.3) *
+                occlusionWetGain *
+                isolationWetGain,
+            now,
+            0.2
+        );
+        instance.delaySend.gain.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.delaySendFar,
+                BOT_TRAFFIC_AUDIO_CONFIG.delaySendNear,
+                nearMix
+            ) *
+                (0.88 + echoMix * 0.22) *
+                occlusionWetGain *
+                isolationWetGain,
+            now,
+            0.18
+        );
+        instance.reverbSend.gain.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.reverbSendFar,
+                BOT_TRAFFIC_AUDIO_CONFIG.reverbSendNear,
+                nearMix
+            ) *
+                (0.92 + echoMix * 0.18) *
+                occlusionWetGain *
+                isolationWetGain,
+            now,
+            0.22
+        );
+        instance.toneFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                lerpNumber(
+                    BOT_TRAFFIC_AUDIO_CONFIG.farCutoffHz,
+                    BOT_TRAFFIC_AUDIO_CONFIG.nearCutoffHz + sideMix * 1200,
+                    nearMix
+                ),
+                BOT_TRAFFIC_OCCLUSION_MIN_CUTOFF_HZ,
+                occlusion
+            ) * (undergroundMismatch ? 0.72 : 1),
+            now,
+            0.18
+        );
+        instance.toneFilter.Q.setTargetAtTime(lerpNumber(0.62, 1.12, nearMix), now, 0.16);
+        instance.wetFilter.frequency.setTargetAtTime(
+            lerpNumber(
+                lerpNumber(
+                    BOT_TRAFFIC_AUDIO_CONFIG.farWetLowpassHz,
+                    BOT_TRAFFIC_AUDIO_CONFIG.nearWetLowpassHz,
+                    nearMix
+                ),
+                BOT_TRAFFIC_OCCLUSION_MIN_WET_CUTOFF_HZ,
+                occlusion
+            ) * (undergroundMismatch ? 0.84 : 1),
+            now,
+            0.22
+        );
+        instance.delay.delayTime.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.farDelaySec,
+                BOT_TRAFFIC_AUDIO_CONFIG.nearDelaySec,
+                nearMix
+            ),
+            now,
+            0.18
+        );
+        instance.delayFeedback.gain.setTargetAtTime(
+            lerpNumber(
+                BOT_TRAFFIC_AUDIO_CONFIG.farFeedback,
+                BOT_TRAFFIC_AUDIO_CONFIG.nearFeedback,
+                nearMix
+            ),
+            now,
+            0.22
+        );
+
+        const idleLayerGain =
+            clampNumber(1.04 - speedNorm * 1.74, 0, 1, 0) * (0.78 + nearMix * 0.22);
+        const lowLayerGain = bellCurve(speedNorm, 0.26, 0.32) * 0.96;
+        const midLayerGain = bellCurve(speedNorm, 0.58, 0.3) * 0.94;
+        const highLayerGain =
+            clampNumber((speedNorm - 0.36) / 0.64, 0, 1, 0) * (0.5 + speedNorm * 0.5);
+
+        updateBotTrafficLayer(
+            instance,
+            'engineIdleLoop01',
+            idleLayerGain,
+            0.88 + speedNorm * 0.18 + approachRateOffset * 0.35,
+            now
+        );
+        updateBotTrafficLayer(
+            instance,
+            'engineLowLoop01',
+            lowLayerGain,
+            0.92 + speedNorm * 0.28 + approachRateOffset * 0.72,
+            now
+        );
+        updateBotTrafficLayer(
+            instance,
+            'engineMidLoop01',
+            midLayerGain,
+            0.98 + speedNorm * 0.36 + approachRateOffset,
+            now
+        );
+        updateBotTrafficLayer(
+            instance,
+            'engineHighLoop01',
+            highLayerGain,
+            1.04 + speedNorm * 0.44 + approachRateOffset * 1.18,
+            now
+        );
+    }
+
+    function updateBotTrafficLayer(
+        instance,
+        soundId,
+        layerGain,
+        playbackRate,
+        now = context?.currentTime || 0
+    ) {
+        const layer = instance?.layers?.[soundId];
+        if (!layer || !context) {
+            return;
+        }
+        layer.gain.gain.setTargetAtTime(
+            clampNumber(layerGain, 0, 1, 0) * layer.baseGain * BOT_TRAFFIC_LAYER_GAIN_SCALE,
+            now,
+            0.12
+        );
+        layer.source.playbackRate.setTargetAtTime(
+            clampNumber(playbackRate, 0.55, 2.2, 1),
+            now,
+            0.12
+        );
+    }
+
+    function fadeOutBotTrafficInstance(instance, now = context?.currentTime || 0) {
+        if (!instance || !context) {
+            return;
+        }
+        instance.sourceGain.gain.setTargetAtTime(0, now, 0.12);
+        instance.dryGain.gain.setTargetAtTime(0, now, 0.12);
+        instance.wetGain.gain.setTargetAtTime(0, now, 0.16);
+        instance.delaySend.gain.setTargetAtTime(0, now, 0.14);
+        instance.reverbSend.gain.setTargetAtTime(0, now, 0.16);
+        for (let i = 0; i < BOT_TRAFFIC_ENGINE_SOUND_IDS.length; i += 1) {
+            const layer = instance.layers?.[BOT_TRAFFIC_ENGINE_SOUND_IDS[i]];
+            if (!layer) {
+                continue;
+            }
+            layer.gain.gain.setTargetAtTime(0, now, 0.1);
+        }
+    }
+
+    function disposeBotTrafficInstance(instance) {
+        if (!instance) {
+            return;
+        }
+        for (let i = 0; i < BOT_TRAFFIC_ENGINE_SOUND_IDS.length; i += 1) {
+            const layer = instance.layers?.[BOT_TRAFFIC_ENGINE_SOUND_IDS[i]];
+            if (!layer) {
+                continue;
+            }
+            safeStopSource(layer.source);
+            safeDisconnect(layer.source);
+            safeDisconnect(layer.gain);
+        }
+        safeDisconnect(instance.sourceGain);
+        safeDisconnect(instance.toneFilter);
+        safeDisconnect(instance.panner);
+        safeDisconnect(instance.dryGain);
+        safeDisconnect(instance.delaySend);
+        safeDisconnect(instance.delay);
+        safeDisconnect(instance.delayFeedback);
+        safeDisconnect(instance.reverbSend);
+        safeDisconnect(instance.convolver);
+        safeDisconnect(instance.wetFilter);
+        safeDisconnect(instance.wetGain);
     }
 
     function updateMonumentMusic(frameState = {}) {
@@ -3862,6 +4537,29 @@ function serializeAudioPrefs(prefs) {
     return JSON.stringify(sanitizeAudioPrefs(prefs, DEFAULT_AUDIO_PREFS));
 }
 
+function resolveCameraPlanarForward(camera) {
+    const matrix = camera?.matrixWorld?.elements;
+    let forwardX = 0;
+    let forwardZ = -1;
+    if (Array.isArray(matrix) || ArrayBuffer.isView(matrix)) {
+        if (matrix.length >= 16) {
+            forwardX = -(Number(matrix[8]) || 0);
+            forwardZ = -(Number(matrix[10]) || -1);
+        }
+    }
+    const length = Math.hypot(forwardX, forwardZ);
+    if (length <= 0.0001) {
+        return {
+            forwardX: 0,
+            forwardZ: -1,
+        };
+    }
+    return {
+        forwardX: forwardX / length,
+        forwardZ: forwardZ / length,
+    };
+}
+
 function updateAudioListenerFromCamera(context, camera) {
     if (!context || !camera || !camera.position) {
         return;
@@ -3992,6 +4690,7 @@ function createNoopAudioSystem() {
         onWorldMapVisibilityChanged() {},
         onRaceIntroStep() {},
         onRaceIntroGo() {},
+        onVehicleCombatModeSwitch() {},
         onVehicleWeaponPickup() {},
         onVehicleWeaponShot() {},
         onVehicleWeaponImpact() {},

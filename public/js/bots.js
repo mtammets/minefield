@@ -413,6 +413,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                 descriptor.heading = bot.car.rotation.y;
                 descriptor.colorHex = bot.bodyColor;
                 descriptor.speedKph = Math.abs(bot.state.speed || 0);
+                descriptor.velocityX = bot.state.velocity.x;
+                descriptor.velocityZ = bot.state.velocity.y;
                 descriptor.radius = BOT_VEHICLE_COLLISION_RADIUS;
                 descriptor.collisionRadius = BOT_VEHICLE_COLLISION_RADIUS;
                 descriptor.mineImmune = isBotSpawnProtected(bot, nowMs);
@@ -594,10 +596,7 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
             if (!bot || bot.active) {
                 return false;
             }
-            const delayMs = Math.max(
-                0,
-                Math.round(Number(options?.delayMs) || 0)
-            );
+            const delayMs = Math.max(0, Math.round(Number(options?.delayMs) || 0));
             const respawnProtectionMs = Math.max(
                 0,
                 Math.round(Number(options?.respawnProtectionMs) || BOT_RESPAWN_PROTECTION_MS)

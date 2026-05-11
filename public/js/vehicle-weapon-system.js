@@ -78,9 +78,15 @@ const WEAPON_LOCK_BODY_CENTER_Y = 0.72;
 const WEAPON_LOCK_TARGET_LATERAL_OFFSET = 0.94;
 const WEAPON_LOCK_TARGET_TOP_Y = 1.08;
 const WEAPON_LOCK_TARGET_LOW_Y = 0.38;
+const COMBAT_MODE_MINE = 'mine';
+const COMBAT_MODE_WEAPON = 'weapon';
+const MODE_BLEND_LERP_SPEED = 11.5;
+const MODE_SWITCH_PULSE_DECAY = 7.8;
+const MODE_SWITCH_RING_SPIN_SPEED = 4.8;
 const RETICLE_DEFAULT_COLOR = new THREE.Color(0x6fe6ff);
 const RETICLE_HOT_COLOR = new THREE.Color(0xffc88a);
 const RETICLE_LOCK_COLOR = new THREE.Color(0xff856f);
+const MINE_HOLO_COLOR = new THREE.Color(0x7ad8ff);
 const WEAPON_METAL_COLOR = new THREE.Color(0x101923);
 const WEAPON_EDGE_COLOR = new THREE.Color(0x7be9ff);
 const WEAPON_HOT_COLOR = new THREE.Color(0xff9259);
@@ -142,6 +148,7 @@ const weaponSceneImpactNormal = new THREE.Vector3();
 const weaponSceneImpactFallbackNormal = new THREE.Vector3();
 const weaponSceneImpactNormalMatrix = new THREE.Matrix3();
 const weaponTempColor = new THREE.Color();
+const weaponModeColor = new THREE.Color();
 const weaponHudProjection = new THREE.Vector3();
 const weaponTraceObstacleBuffer = [];
 const lorienDoorTraceObstacleBuffer = [];
@@ -195,6 +202,7 @@ export function createVehicleWeaponSystem({
     getAudioController = () => null,
     reportWeaponPickupCollected = () => false,
     onStatus = () => {},
+    onCombatLoadoutChanged = () => {},
     onBotDestroyed = () => {},
     onPlayerHit = () => ({ destroyed: false }),
     onShotFired = () => {},
@@ -273,6 +281,7 @@ export function createVehicleWeaponSystem({
 
     const state = {
         hasWeapon: false,
+        activeMode: COMBAT_MODE_MINE,
         triggerHeld: false,
         recoil: 0,
         heat: 0,
@@ -280,6 +289,8 @@ export function createVehicleWeaponSystem({
         hoverPhase: Math.random() * Math.PI * 2,
         lockPulse: Math.random() * Math.PI * 2,
         shotSequence: 0,
+        modeBlend: 0,
+        switchPulse: 0,
         currentLock: null,
         zoomActive: false,
         replicationTargetPoint: new THREE.Vector3(),
@@ -446,7 +457,10 @@ export function createVehicleWeaponSystem({
     return {
         update,
         setTriggerHeld(nextHeld) {
-            state.triggerHeld = Boolean(nextHeld) && state.hasWeapon;
+            state.triggerHeld =
+                Boolean(nextHeld) &&
+                state.hasWeapon &&
+                resolveActiveCombatMode() === COMBAT_MODE_WEAPON;
         },
         grantWeapon() {
             if (state.hasWeapon) {
@@ -456,17 +470,40 @@ export function createVehicleWeaponSystem({
             activateWeapon();
             return true;
         },
+        toggleCombatMode() {
+            if (!state.hasWeapon) {
+                return {
+                    ok: false,
+                    mode: COMBAT_MODE_MINE,
+                    message: 'VX-9 pickup required before switching hood tools.',
+                    timeoutMs: 1600,
+                };
+            }
+            const nextMode =
+                resolveActiveCombatMode() === COMBAT_MODE_WEAPON
+                    ? COMBAT_MODE_MINE
+                    : COMBAT_MODE_WEAPON;
+            return setCombatMode(nextMode, {
+                announce: true,
+                playAudio: true,
+                pulseSwitch: true,
+            });
+        },
         resetRound() {
             state.triggerHeld = false;
             state.recoil = 0;
             state.heat = 0;
             state.fireCooldown = 0;
+            state.activeMode = COMBAT_MODE_MINE;
+            state.modeBlend = 0;
+            state.switchPulse = 0;
             state.currentLock = null;
             state.hasAimFocusPoint = false;
             state.hasReplicationTarget = false;
             state.pendingPickupId = '';
             resetPickupEntries();
             hideWeapon();
+            notifyCombatLoadoutChanged();
             resetHunterWeaponState();
             clearEffects();
             syncHud({
@@ -483,6 +520,9 @@ export function createVehicleWeaponSystem({
             state.recoil = 0;
             state.heat = 0;
             state.fireCooldown = 0;
+            state.activeMode = COMBAT_MODE_MINE;
+            state.modeBlend = 0;
+            state.switchPulse = 0;
             state.currentLock = null;
             state.hasAimFocusPoint = false;
             state.hasReplicationTarget = false;
@@ -490,6 +530,7 @@ export function createVehicleWeaponSystem({
             if (state.hasWeapon) {
                 hideWeapon();
             }
+            notifyCombatLoadoutChanged();
             resetHunterWeaponState();
             syncHud({
                 visible: false,
@@ -503,8 +544,19 @@ export function createVehicleWeaponSystem({
         hasWeapon() {
             return state.hasWeapon;
         },
+        getCombatMode() {
+            return resolveActiveCombatMode();
+        },
+        getCombatLoadoutSnapshot() {
+            return {
+                hasWeapon: state.hasWeapon,
+                mode: resolveActiveCombatMode(),
+            };
+        },
         getCurrentAimFocusPoint() {
-            return state.hasWeapon && state.hasAimFocusPoint ? state.aimFocusPoint : null;
+            return resolveActiveCombatMode() === COMBAT_MODE_WEAPON && state.hasAimFocusPoint
+                ? state.aimFocusPoint
+                : null;
         },
         getCurrentLockPoint() {
             return state.currentLock?.point || null;
@@ -513,12 +565,15 @@ export function createVehicleWeaponSystem({
             applyPickupStateSnapshot(pickupSnapshots);
         },
         getReplicationState() {
+            const weaponModeActive =
+                state.hasWeapon && resolveActiveCombatMode() === COMBAT_MODE_WEAPON;
             return {
                 hasWeapon: state.hasWeapon,
-                triggerHeld: state.hasWeapon && state.triggerHeld,
+                mode: resolveActiveCombatMode(),
+                triggerHeld: weaponModeActive && state.triggerHeld,
                 heat: state.heat,
-                locked: state.replicationLocked,
-                hasTarget: state.hasWeapon && state.hasReplicationTarget,
+                locked: weaponModeActive && state.replicationLocked,
+                hasTarget: weaponModeActive && state.hasReplicationTarget,
                 targetX: state.replicationTargetPoint.x,
                 targetY: state.replicationTargetPoint.y,
                 targetZ: state.replicationTargetPoint.z,
@@ -530,6 +585,16 @@ export function createVehicleWeaponSystem({
         const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.05);
         state.hoverPhase += dt * 2.2;
         state.lockPulse += dt * 6.8;
+        state.modeBlend = THREE.MathUtils.lerp(
+            state.modeBlend,
+            resolveActiveCombatMode() === COMBAT_MODE_WEAPON ? 1 : 0,
+            1 - Math.exp(-MODE_BLEND_LERP_SPEED * dt)
+        );
+        state.switchPulse = THREE.MathUtils.lerp(
+            state.switchPulse,
+            0,
+            1 - Math.exp(-MODE_SWITCH_PULSE_DECAY * dt)
+        );
         hunterState.motionPhase += dt * 2.4;
 
         const controlsEnabled = frameState.controlsEnabled !== false;
@@ -540,13 +605,20 @@ export function createVehicleWeaponSystem({
         const gameMode = frameState.gameMode === 'online' ? 'online' : getGameMode();
         const multiplayerPickupSyncActive =
             gameMode === 'online' && Boolean(getIsMultiplayerActive?.());
+        const activeCombatMode = resolveActiveCombatMode();
+        const weaponModeActive = state.hasWeapon && activeCombatMode === COMBAT_MODE_WEAPON;
         const vehicleWeaponActive =
-            state.hasWeapon &&
+            weaponModeActive &&
             controlsEnabled &&
             !frameState.welcomeVisible &&
             !frameState.paused &&
             !frameState.editModeActive &&
             !frameState.raceIntroActive &&
+            !frameState.carDestroyed &&
+            !frameState.pickupRoundFinished;
+        const mountVisible =
+            !frameState.welcomeVisible &&
+            !frameState.editModeActive &&
             !frameState.carDestroyed &&
             !frameState.pickupRoundFinished;
 
@@ -562,8 +634,9 @@ export function createVehicleWeaponSystem({
         const weaponMotionState = resolveWeaponMotionState(vehicleState);
         applyWeaponBasePoseToMount(mount, weaponMotionState);
         const aimState = resolveAimState(gameMode);
-        state.currentLock = aimState.lockedTarget;
+        state.currentLock = weaponModeActive ? aimState.lockedTarget : null;
         if (
+            weaponModeActive &&
             aimState?.targetPoint &&
             Number.isFinite(aimState.targetPoint.x) &&
             Number.isFinite(aimState.targetPoint.y) &&
@@ -575,6 +648,7 @@ export function createVehicleWeaponSystem({
             state.hasReplicationTarget = false;
         }
         if (
+            weaponModeActive &&
             aimState?.focusPoint &&
             Number.isFinite(aimState.focusPoint.x) &&
             Number.isFinite(aimState.focusPoint.y) &&
@@ -585,8 +659,11 @@ export function createVehicleWeaponSystem({
         } else {
             state.hasAimFocusPoint = false;
         }
-        state.replicationLocked = Boolean(aimState?.lockedTarget);
-        updateWeaponMount(dt, weaponMotionState, aimState, vehicleWeaponActive);
+        state.replicationLocked = weaponModeActive && Boolean(aimState?.lockedTarget);
+        updateWeaponMount(dt, weaponMotionState, aimState, {
+            mountVisible,
+            weaponModeActive,
+        });
 
         if (vehicleWeaponActive && state.triggerHeld) {
             state.fireCooldown -= dt;
@@ -600,7 +677,7 @@ export function createVehicleWeaponSystem({
             state.fireCooldown = Math.max(0, state.fireCooldown - dt * 0.6);
         }
 
-        const targetHeat = vehicleWeaponActive && state.triggerHeld ? 1 : 0;
+        const targetHeat = weaponModeActive && state.triggerHeld ? 1 : 0;
         const heatRate =
             targetHeat > state.heat ? WEAPON_HEAT_RISE * 60 * dt : WEAPON_HEAT_FALL * dt;
         state.heat = THREE.MathUtils.lerp(
@@ -618,9 +695,9 @@ export function createVehicleWeaponSystem({
         updateEffects(dt);
         syncHud({
             visible: vehicleWeaponActive,
-            hasWeapon: state.hasWeapon,
+            hasWeapon: weaponModeActive,
             triggerHeld: state.triggerHeld,
-            locked: Boolean(aimState.lockedTarget),
+            locked: weaponModeActive && Boolean(aimState.lockedTarget),
             zoomed: state.zoomActive,
             heat: state.heat,
         });
@@ -804,9 +881,68 @@ export function createVehicleWeaponSystem({
         state.hasAimFocusPoint = false;
         state.hasReplicationTarget = false;
         state.pendingPickupId = '';
-        mount.root.visible = true;
-        onStatus('VX-9 online. Auto-lock engaged. Hold T to fire.', 2600);
+        setCombatMode(COMBAT_MODE_WEAPON, {
+            announce: false,
+            playAudio: false,
+            pulseSwitch: true,
+        });
+        onStatus('VX-9 online. R swaps hood tools. Hold T to fire.', 2600);
         getAudioController()?.onVehicleWeaponPickup?.();
+    }
+
+    function resolveActiveCombatMode() {
+        if (!state.hasWeapon) {
+            return COMBAT_MODE_MINE;
+        }
+        return state.activeMode === COMBAT_MODE_WEAPON ? COMBAT_MODE_WEAPON : COMBAT_MODE_MINE;
+    }
+
+    function setCombatMode(
+        nextMode = COMBAT_MODE_MINE,
+        { announce = false, playAudio = false, pulseSwitch = false } = {}
+    ) {
+        const resolvedMode =
+            state.hasWeapon && nextMode === COMBAT_MODE_WEAPON
+                ? COMBAT_MODE_WEAPON
+                : COMBAT_MODE_MINE;
+        const previousMode = resolveActiveCombatMode();
+        state.activeMode = resolvedMode;
+        state.triggerHeld = false;
+        state.zoomActive = false;
+        state.currentLock = null;
+        state.replicationLocked = false;
+        state.hasAimFocusPoint = false;
+        state.hasReplicationTarget = false;
+        if (pulseSwitch && previousMode !== resolvedMode) {
+            state.switchPulse = 1;
+        }
+        notifyCombatLoadoutChanged();
+        if (playAudio && previousMode !== resolvedMode) {
+            getAudioController()?.onVehicleCombatModeSwitch?.({
+                mode: resolvedMode,
+            });
+        }
+        if (announce && previousMode !== resolvedMode) {
+            onStatus(
+                resolvedMode === COMBAT_MODE_WEAPON
+                    ? 'VX-9 armed. Hold T to fire.'
+                    : 'Mine mode armed. Press T to throw.',
+                1800
+            );
+        }
+        return {
+            ok: true,
+            mode: resolvedMode,
+            message: null,
+            timeoutMs: 1300,
+        };
+    }
+
+    function notifyCombatLoadoutChanged() {
+        onCombatLoadoutChanged?.({
+            hasWeapon: state.hasWeapon,
+            mode: resolveActiveCombatMode(),
+        });
     }
 
     function resolveWeaponMotionState(vehicleState) {
@@ -1040,7 +1176,10 @@ export function createVehicleWeaponSystem({
     function resolveAimState(gameMode = 'bots') {
         resolveFreeAimState();
         const botTrafficSystem = gameMode === 'bots' ? getBotTrafficSystem() : null;
-        const lockedTarget = state.hasWeapon ? resolveAutoLockTarget(botTrafficSystem) : null;
+        const lockedTarget =
+            state.hasWeapon && resolveActiveCombatMode() === COMBAT_MODE_WEAPON
+                ? resolveAutoLockTarget(botTrafficSystem)
+                : null;
         if (lockedTarget?.point) {
             weaponAimPoint.copy(lockedTarget.point);
             weaponAimFocusPoint.copy(lockedTarget.point);
@@ -1140,19 +1279,24 @@ export function createVehicleWeaponSystem({
         return bestTarget;
     }
 
-    function updateWeaponMount(dt, motionState, aimState, isActive) {
-        mount.root.visible = state.hasWeapon;
-        if (!state.hasWeapon) {
+    function updateWeaponMount(
+        dt,
+        motionState,
+        aimState,
+        { mountVisible = false, weaponModeActive = false } = {}
+    ) {
+        mount.root.visible = mountVisible;
+        if (!mountVisible) {
             return;
         }
 
         applyWeaponBasePoseToMount(mount, motionState);
         mount.pitchPivot.lookAt(aimState.targetPoint);
 
-        targetReticleColor.copy(RETICLE_DEFAULT_COLOR);
-        if (aimState.lockedTarget) {
+        targetReticleColor.copy(weaponModeActive ? RETICLE_DEFAULT_COLOR : MINE_HOLO_COLOR);
+        if (weaponModeActive && aimState.lockedTarget) {
             targetReticleColor.copy(state.triggerHeld ? RETICLE_LOCK_COLOR : RETICLE_HOT_COLOR);
-        } else if (state.triggerHeld) {
+        } else if (weaponModeActive && state.triggerHeld) {
             targetReticleColor.copy(RETICLE_HOT_COLOR);
         }
         reticleColor.lerp(targetReticleColor, 1 - Math.exp(-12 * dt));
@@ -1163,7 +1307,7 @@ export function createVehicleWeaponSystem({
             0.65 +
             state.heat * 1.2 +
             pulse * 0.22 +
-            (aimState.lockedTarget ? 0.35 + lockPulse * 0.28 : 0);
+            (weaponModeActive && aimState.lockedTarget ? 0.35 + lockPulse * 0.28 : 0);
 
         for (let i = 0; i < mount.glowMaterials.length; i += 1) {
             const material = mount.glowMaterials[i];
@@ -1181,10 +1325,10 @@ export function createVehicleWeaponSystem({
             material.opacity =
                 0.28 +
                 pulse * 0.12 +
-                (aimState.lockedTarget ? 0.2 + lockPulse * 0.16 : 0) +
+                (weaponModeActive && aimState.lockedTarget ? 0.2 + lockPulse * 0.16 : 0) +
                 state.heat * 0.08;
         }
-        const hotBlend = THREE.MathUtils.clamp(state.heat * 0.8, 0, 1);
+        const hotBlend = weaponModeActive ? THREE.MathUtils.clamp(state.heat * 0.8, 0, 1) : 0;
         for (let i = 0; i < mount.metalMaterials.length; i += 1) {
             const material = mount.metalMaterials[i];
             weaponTempColor.copy(WEAPON_METAL_COLOR).lerp(WEAPON_HOT_COLOR, hotBlend * 0.24);
@@ -1193,16 +1337,80 @@ export function createVehicleWeaponSystem({
             material.emissiveIntensity = 0.14 + state.heat * 0.4;
         }
 
-        mount.holoReticle.visible = !state.zoomActive;
-        mount.holoHalo.visible = !state.zoomActive;
-        const sightScale = isActive ? 1 : 0.9;
-        const lockScale = aimState.lockedTarget ? 1 + lockPulse * 0.12 : 1;
+        mount.holoReticle.visible = weaponModeActive && !state.zoomActive;
+        mount.holoHalo.visible = weaponModeActive && !state.zoomActive;
+        const sightScale = weaponModeActive ? 1 : 0.92;
+        const lockScale = weaponModeActive && aimState.lockedTarget ? 1 + lockPulse * 0.12 : 1;
         mount.holoReticle.scale.setScalar(sightScale * lockScale);
         mount.holoHalo.scale.setScalar(0.92 + pulse * 0.14 + state.heat * 0.08);
+        applyMountModePresentation(mount, {
+            dt,
+            modeBlend: state.modeBlend,
+            switchPulse: state.switchPulse,
+            hoverPhase: state.hoverPhase,
+            pulse,
+            weaponModeActive,
+            modeColor: reticleColor,
+        });
+    }
+
+    function applyMountModePresentation(
+        targetMount,
+        {
+            dt = 1 / 60,
+            modeBlend = 0,
+            switchPulse = 0,
+            hoverPhase = 0,
+            pulse = 0,
+            weaponModeActive = false,
+            modeColor = RETICLE_DEFAULT_COLOR,
+        } = {}
+    ) {
+        const weaponPresence = THREE.MathUtils.smoothstep(modeBlend, 0.06, 0.94);
+        const minePresence = 1 - weaponPresence;
+        const presentationPulse = 0.5 + 0.5 * Math.sin(hoverPhase * 1.7 + 0.4);
+
+        targetMount.weaponVisual.visible = weaponPresence > 0.01;
+        targetMount.mineVisual.visible = minePresence > 0.01;
+        targetMount.weaponVisual.position.y =
+            0.03 + (1 - weaponPresence) * 0.18 + switchPulse * 0.04;
+        targetMount.mineVisual.position.y =
+            0.06 + weaponPresence * 0.14 + presentationPulse * 0.015;
+        targetMount.weaponVisual.rotation.y = minePresence * -0.12 + switchPulse * 0.24;
+        targetMount.mineVisual.rotation.y += dt * (0.7 + switchPulse * 8);
+        targetMount.weaponVisual.scale.setScalar(0.74 + weaponPresence * 0.3 + switchPulse * 0.08);
+        targetMount.mineVisual.scale.setScalar(0.74 + minePresence * 0.28 + switchPulse * 0.08);
+
+        setMaterialArrayOpacity(targetMount.weaponModeMaterials, weaponPresence);
+        setMaterialArrayOpacity(targetMount.mineModeMaterials, minePresence);
+
+        weaponModeColor
+            .copy(MINE_HOLO_COLOR)
+            .lerp(modeColor, THREE.MathUtils.clamp(weaponPresence * 0.9 + 0.1, 0, 1));
+        targetMount.modeRingMaterial.color.copy(weaponModeColor);
+        targetMount.modeSweepMaterial.color.copy(weaponModeColor);
+        targetMount.modeBurstMaterial.color.copy(weaponModeColor);
+        targetMount.modeRingMaterial.opacity = 0.18 + pulse * 0.1 + switchPulse * 0.34;
+        targetMount.modeSweepMaterial.opacity = 0.1 + switchPulse * 0.26;
+        targetMount.modeBurstMaterial.opacity = switchPulse * 0.42;
+        targetMount.modeRing.rotation.z +=
+            dt *
+            (MODE_SWITCH_RING_SPIN_SPEED + switchPulse * 10) *
+            (weaponPresence >= 0.5 ? 1 : -1);
+        targetMount.modeSweep.rotation.z -=
+            dt * (MODE_SWITCH_RING_SPIN_SPEED * 0.62 + switchPulse * 7.4);
+        targetMount.modeBurst.rotation.z += dt * (3.6 + switchPulse * 12);
+        targetMount.modeRing.scale.setScalar(0.92 + pulse * 0.05 + switchPulse * 0.44);
+        targetMount.modeSweep.scale.setScalar(0.82 + switchPulse * 0.64);
+        targetMount.modeBurst.scale.setScalar(0.7 + switchPulse * 1.4);
+        targetMount.mineReticle.visible = !weaponModeActive;
+        targetMount.mineHalo.visible = !weaponModeActive;
+        targetMount.mineReticle.scale.setScalar(0.88 + minePresence * 0.12 + switchPulse * 0.12);
+        targetMount.mineHalo.scale.setScalar(0.98 + pulse * 0.1 + switchPulse * 0.18);
     }
 
     function fireShot(gameMode, aimState) {
-        if (!state.hasWeapon) {
+        if (!state.hasWeapon || resolveActiveCombatMode() !== COMBAT_MODE_WEAPON) {
             return;
         }
 
@@ -2275,9 +2483,10 @@ export function createVehicleWeaponSystem({
 
     function hideWeapon() {
         state.hasWeapon = false;
+        state.activeMode = COMBAT_MODE_MINE;
+        state.modeBlend = 0;
         state.hasAimFocusPoint = false;
         state.hasReplicationTarget = false;
-        mount.root.visible = false;
     }
 
     function despawnPickup(respawn = true) {
@@ -2449,6 +2658,42 @@ function createWeaponMount() {
     const metalMaterials = [];
     const glowMaterials = [];
     const holoMaterials = [];
+    const weaponModeMaterials = [];
+    const mineModeMaterials = [];
+
+    const projectorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x172231,
+        emissive: 0x20384f,
+        emissiveIntensity: 0.16,
+        metalness: 0.88,
+        roughness: 0.2,
+    });
+    metalMaterials.push(projectorMaterial);
+    const projectorBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.22, 0.12, 20),
+        projectorMaterial
+    );
+    projectorBase.position.set(0, -0.02, 0.24);
+    weaponGroup.add(projectorBase);
+
+    const projectorCapMaterial = new THREE.MeshStandardMaterial({
+        color: 0x223447,
+        emissive: 0x4cccf4,
+        emissiveIntensity: 0.18,
+        metalness: 0.64,
+        roughness: 0.18,
+    });
+    metalMaterials.push(projectorCapMaterial);
+    glowMaterials.push(projectorCapMaterial);
+    const projectorCap = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.13, 0.15, 0.05, 20),
+        projectorCapMaterial
+    );
+    projectorCap.position.set(0, 0.05, 0.18);
+    weaponGroup.add(projectorCap);
+
+    const weaponVisual = new THREE.Group();
+    weaponGroup.add(weaponVisual);
 
     const baseMaterial = new THREE.MeshStandardMaterial({
         color: WEAPON_METAL_COLOR,
@@ -2456,32 +2701,30 @@ function createWeaponMount() {
         emissiveIntensity: 0.14,
         metalness: 0.88,
         roughness: 0.18,
+        transparent: true,
+        opacity: 1,
     });
     metalMaterials.push(baseMaterial);
-
+    weaponModeMaterials.push(baseMaterial);
     const base = new THREE.Mesh(weaponBodyGeometry, baseMaterial);
     base.position.set(0, 0.02, -0.12);
-    weaponGroup.add(base);
+    weaponVisual.add(base);
 
     const upperMaterial = baseMaterial.clone();
     metalMaterials.push(upperMaterial);
+    weaponModeMaterials.push(upperMaterial);
     const upper = new THREE.Mesh(weaponUpperGeometry, upperMaterial);
     upper.position.set(0, 0.12, -0.08);
-    weaponGroup.add(upper);
-
-    const mountMaterial = baseMaterial.clone();
-    metalMaterials.push(mountMaterial);
-    const mountBlock = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.22), mountMaterial);
-    mountBlock.position.set(0, -0.02, 0.26);
-    weaponGroup.add(mountBlock);
+    weaponVisual.add(upper);
 
     const barrelMaterial = baseMaterial.clone();
     metalMaterials.push(barrelMaterial);
+    weaponModeMaterials.push(barrelMaterial);
     [-0.11, 0.11].forEach((offsetX) => {
         const barrel = new THREE.Mesh(weaponBarrelGeometry, barrelMaterial);
         barrel.rotation.x = Math.PI * 0.5;
         barrel.position.set(offsetX, 0.04, -0.58);
-        weaponGroup.add(barrel);
+        weaponVisual.add(barrel);
 
         const muzzleRingMaterial = new THREE.MeshBasicMaterial({
             color: 0x82eaff,
@@ -2492,10 +2735,11 @@ function createWeaponMount() {
             toneMapped: false,
         });
         glowMaterials.push(muzzleRingMaterial);
+        weaponModeMaterials.push(muzzleRingMaterial);
         const muzzleRing = new THREE.Mesh(weaponMuzzleRingGeometry, muzzleRingMaterial);
         muzzleRing.position.set(offsetX, 0.04, -1.04);
         muzzleRing.rotation.x = Math.PI * 0.5;
-        weaponGroup.add(muzzleRing);
+        weaponVisual.add(muzzleRing);
     });
 
     [-1, 1].forEach((direction) => {
@@ -2505,12 +2749,15 @@ function createWeaponMount() {
             emissiveIntensity: 0.44,
             metalness: 0.62,
             roughness: 0.16,
+            transparent: true,
+            opacity: 1,
         });
         metalMaterials.push(railMaterial);
         glowMaterials.push(railMaterial);
+        weaponModeMaterials.push(railMaterial);
         const rail = new THREE.Mesh(weaponRailGeometry, railMaterial);
         rail.position.set(direction * 0.2, 0.06, -0.28);
-        weaponGroup.add(rail);
+        weaponVisual.add(rail);
 
         const coilMaterial = new THREE.MeshBasicMaterial({
             color: 0x78e4ff,
@@ -2521,17 +2768,19 @@ function createWeaponMount() {
             toneMapped: false,
         });
         glowMaterials.push(coilMaterial);
+        weaponModeMaterials.push(coilMaterial);
         const coil = new THREE.Mesh(weaponCoilGeometry, coilMaterial);
         coil.position.set(direction * 0.22, 0.02, -0.42);
         coil.rotation.y = Math.PI * 0.5;
-        weaponGroup.add(coil);
+        weaponVisual.add(coil);
     });
 
     const sightBaseMaterial = baseMaterial.clone();
     metalMaterials.push(sightBaseMaterial);
+    weaponModeMaterials.push(sightBaseMaterial);
     const sightBase = new THREE.Mesh(weaponSightFrameGeometry, sightBaseMaterial);
     sightBase.position.set(0, 0.19, -0.36);
-    weaponGroup.add(sightBase);
+    weaponVisual.add(sightBase);
 
     const holoMaterial = new THREE.MeshBasicMaterial({
         map: reticleTexture,
@@ -2544,10 +2793,11 @@ function createWeaponMount() {
         toneMapped: false,
     });
     holoMaterials.push(holoMaterial);
+    weaponModeMaterials.push(holoMaterial);
     const holoReticle = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.24), holoMaterial);
     holoReticle.position.set(0, 0.19, -0.84);
     holoReticle.rotation.y = Math.PI;
-    weaponGroup.add(holoReticle);
+    weaponVisual.add(holoReticle);
 
     const holoHaloMaterial = new THREE.MeshBasicMaterial({
         map: pickupGlowTexture,
@@ -2560,10 +2810,163 @@ function createWeaponMount() {
         toneMapped: false,
     });
     holoMaterials.push(holoHaloMaterial);
+    weaponModeMaterials.push(holoHaloMaterial);
     const holoHalo = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), holoHaloMaterial);
     holoHalo.position.set(0, 0.19, -0.86);
     holoHalo.rotation.y = Math.PI;
-    weaponGroup.add(holoHalo);
+    weaponVisual.add(holoHalo);
+
+    const mineVisual = new THREE.Group();
+    mineVisual.position.z = -0.28;
+    weaponGroup.add(mineVisual);
+
+    const mineBaseMaterial = new THREE.MeshStandardMaterial({
+        color: 0x22303f,
+        emissive: 0x1e3a4a,
+        emissiveIntensity: 0.16,
+        metalness: 0.42,
+        roughness: 0.44,
+        transparent: true,
+        opacity: 1,
+    });
+    metalMaterials.push(mineBaseMaterial);
+    mineModeMaterials.push(mineBaseMaterial);
+    const mineBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.19, 0.21, 0.1, 18),
+        mineBaseMaterial
+    );
+    mineVisual.add(mineBase);
+
+    const mineTopMaterial = new THREE.MeshStandardMaterial({
+        color: 0x3a4d62,
+        emissive: 0x58d3f4,
+        emissiveIntensity: 0.12,
+        metalness: 0.38,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 1,
+    });
+    metalMaterials.push(mineTopMaterial);
+    mineModeMaterials.push(mineTopMaterial);
+    const mineTop = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.13, 0.06, 16),
+        mineTopMaterial
+    );
+    mineTop.position.y = 0.07;
+    mineVisual.add(mineTop);
+
+    const mineLedMaterial = new THREE.MeshBasicMaterial({
+        color: 0x89ecff,
+        transparent: true,
+        opacity: 0.92,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    glowMaterials.push(mineLedMaterial);
+    mineModeMaterials.push(mineLedMaterial);
+    const mineLed = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), mineLedMaterial);
+    mineLed.position.y = 0.12;
+    mineVisual.add(mineLed);
+
+    for (let i = 0; i < 8; i += 1) {
+        const angle = (i / 8) * Math.PI * 2;
+        const pinMaterial = new THREE.MeshStandardMaterial({
+            color: 0x6883a3,
+            emissive: 0x32485e,
+            emissiveIntensity: 0.08,
+            metalness: 0.48,
+            roughness: 0.26,
+            transparent: true,
+            opacity: 1,
+        });
+        metalMaterials.push(pinMaterial);
+        mineModeMaterials.push(pinMaterial);
+        const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.07, 6), pinMaterial);
+        pin.position.set(Math.cos(angle) * 0.14, 0.09, Math.sin(angle) * 0.14);
+        mineVisual.add(pin);
+    }
+
+    const mineReticleMaterial = new THREE.MeshBasicMaterial({
+        map: reticleTexture,
+        color: 0x81e8ff,
+        transparent: true,
+        opacity: 0.46,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    holoMaterials.push(mineReticleMaterial);
+    mineModeMaterials.push(mineReticleMaterial);
+    const mineReticle = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), mineReticleMaterial);
+    mineReticle.position.set(0, 0.19, -0.02);
+    mineReticle.rotation.y = Math.PI;
+    mineVisual.add(mineReticle);
+
+    const mineHaloMaterial = new THREE.MeshBasicMaterial({
+        map: pickupGlowTexture,
+        color: 0x5fe0ff,
+        transparent: true,
+        opacity: 0.32,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    holoMaterials.push(mineHaloMaterial);
+    glowMaterials.push(mineHaloMaterial);
+    mineModeMaterials.push(mineHaloMaterial);
+    const mineHalo = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), mineHaloMaterial);
+    mineHalo.position.set(0, 0.18, -0.03);
+    mineHalo.rotation.y = Math.PI;
+    mineVisual.add(mineHalo);
+
+    const modeRingMaterial = new THREE.MeshBasicMaterial({
+        color: 0x77e6ff,
+        transparent: true,
+        opacity: 0.22,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    glowMaterials.push(modeRingMaterial);
+    const modeRing = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.014, 10, 36), modeRingMaterial);
+    modeRing.position.set(0, 0.12, -0.26);
+    modeRing.rotation.x = Math.PI * 0.5;
+    weaponGroup.add(modeRing);
+
+    const modeSweepMaterial = new THREE.MeshBasicMaterial({
+        map: pickupGlowTexture,
+        color: 0x78e4ff,
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    glowMaterials.push(modeSweepMaterial);
+    const modeSweep = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.46), modeSweepMaterial);
+    modeSweep.position.set(0, 0.12, -0.26);
+    modeSweep.rotation.y = Math.PI;
+    weaponGroup.add(modeSweep);
+
+    const modeBurstMaterial = new THREE.MeshBasicMaterial({
+        map: pickupGlowTexture,
+        color: 0x9df0ff,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    glowMaterials.push(modeBurstMaterial);
+    const modeBurst = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.62), modeBurstMaterial);
+    modeBurst.position.set(0, 0.18, -0.3);
+    modeBurst.rotation.y = Math.PI;
+    weaponGroup.add(modeBurst);
 
     const muzzleAnchor = new THREE.Object3D();
     muzzleAnchor.position.set(0, 0.04, -1.04);
@@ -2573,13 +2976,41 @@ function createWeaponMount() {
         root,
         pitchPivot,
         weaponGroup,
+        weaponVisual,
+        mineVisual,
         muzzleAnchor,
         holoReticle,
         holoHalo,
+        mineReticle,
+        mineHalo,
+        modeRing,
+        modeSweep,
+        modeBurst,
+        modeRingMaterial,
+        modeSweepMaterial,
+        modeBurstMaterial,
         metalMaterials,
         glowMaterials,
         holoMaterials,
+        weaponModeMaterials,
+        mineModeMaterials,
     };
+}
+
+function setMaterialArrayOpacity(materials = [], opacity = 1) {
+    const clampedOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
+    for (let index = 0; index < materials.length; index += 1) {
+        const material = materials[index];
+        if (!material || typeof material !== 'object') {
+            continue;
+        }
+        if ('transparent' in material) {
+            material.transparent = clampedOpacity < 0.999 || Boolean(material.transparent);
+        }
+        if ('opacity' in material) {
+            material.opacity = clampedOpacity;
+        }
+    }
 }
 
 function disposeProjectile(entry) {
@@ -3040,12 +3471,15 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
     const projectileUpVector = new THREE.Vector3(0, 1, 0);
     const projectileState = {
         hasWeapon: false,
+        activeMode: COMBAT_MODE_MINE,
         triggerHeld: false,
         heat: 0,
         locked: false,
         hasTarget: false,
         hoverPhase: Math.random() * Math.PI * 2,
         lockPulse: Math.random() * Math.PI * 2,
+        modeBlend: 0,
+        switchPulse: 0,
         recoil: 0,
         shotSequence: 0,
     };
@@ -3059,11 +3493,24 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
             if (disposed) {
                 return;
             }
+            const nextMode =
+                Boolean(snapshot?.hasWeapon) && snapshot?.mode === COMBAT_MODE_WEAPON
+                    ? COMBAT_MODE_WEAPON
+                    : COMBAT_MODE_MINE;
+            if (nextMode !== projectileState.activeMode) {
+                projectileState.switchPulse = 1;
+            }
             projectileState.hasWeapon = Boolean(snapshot?.hasWeapon);
+            projectileState.activeMode = nextMode;
             projectileState.triggerHeld =
-                projectileState.hasWeapon && Boolean(snapshot?.triggerHeld);
+                projectileState.hasWeapon &&
+                projectileState.activeMode === COMBAT_MODE_WEAPON &&
+                Boolean(snapshot?.triggerHeld);
             projectileState.heat = THREE.MathUtils.clamp(Number(snapshot?.heat) || 0, 0, 1);
-            projectileState.locked = projectileState.hasWeapon && Boolean(snapshot?.locked);
+            projectileState.locked =
+                projectileState.hasWeapon &&
+                projectileState.activeMode === COMBAT_MODE_WEAPON &&
+                Boolean(snapshot?.locked);
 
             const hasTarget = Boolean(snapshot?.hasTarget);
             const targetX = Number(snapshot?.targetX);
@@ -3124,7 +3571,8 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
 
             projectileState.shotSequence += 1;
             projectileState.recoil = 1;
-            projectileState.triggerHeld = projectileState.hasWeapon;
+            projectileState.triggerHeld =
+                projectileState.hasWeapon && projectileState.activeMode === COMBAT_MODE_WEAPON;
 
             spawnReplicatedMuzzleFlash(start, direction);
             spawnReplicatedProjectile({
@@ -3148,6 +3596,16 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
 
             projectileState.hoverPhase += dt * 2.2;
             projectileState.lockPulse += dt * 6.8;
+            projectileState.modeBlend = THREE.MathUtils.lerp(
+                projectileState.modeBlend,
+                projectileState.activeMode === COMBAT_MODE_WEAPON ? 1 : 0,
+                1 - Math.exp(-MODE_BLEND_LERP_SPEED * dt)
+            );
+            projectileState.switchPulse = THREE.MathUtils.lerp(
+                projectileState.switchPulse,
+                0,
+                1 - Math.exp(-MODE_SWITCH_PULSE_DECAY * dt)
+            );
             projectileState.recoil = THREE.MathUtils.lerp(
                 projectileState.recoil,
                 0,
@@ -3158,10 +3616,7 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
                     )
             );
 
-            const showMount =
-                options.showMount !== false &&
-                projectileState.hasWeapon &&
-                options.isDestroyed !== true;
+            const showMount = options.showMount !== false && options.isDestroyed !== true;
             mount.root.visible = showMount;
             if (showMount) {
                 updateReplicatedMount(dt, vehicleState);
@@ -3212,12 +3667,14 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
             mount.pitchPivot.lookAt(fallbackLookPoint);
         }
 
-        targetReticleColor.copy(RETICLE_DEFAULT_COLOR);
-        if (projectileState.locked) {
+        const weaponModeActive =
+            projectileState.hasWeapon && projectileState.activeMode === COMBAT_MODE_WEAPON;
+        targetReticleColor.copy(weaponModeActive ? RETICLE_DEFAULT_COLOR : MINE_HOLO_COLOR);
+        if (weaponModeActive && projectileState.locked) {
             targetReticleColor.copy(
                 projectileState.triggerHeld ? RETICLE_LOCK_COLOR : RETICLE_HOT_COLOR
             );
-        } else if (projectileState.triggerHeld) {
+        } else if (weaponModeActive && projectileState.triggerHeld) {
             targetReticleColor.copy(RETICLE_HOT_COLOR);
         }
         reticleColor.lerp(targetReticleColor, 1 - Math.exp(-12 * dt));
@@ -3228,7 +3685,7 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
             0.65 +
             projectileState.heat * 1.2 +
             pulse * 0.22 +
-            (projectileState.locked ? 0.35 + lockPulse * 0.28 : 0);
+            (weaponModeActive && projectileState.locked ? 0.35 + lockPulse * 0.28 : 0);
 
         for (let i = 0; i < mount.glowMaterials.length; i += 1) {
             const material = mount.glowMaterials[i];
@@ -3247,9 +3704,11 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
                 0.28 +
                 pulse * 0.12 +
                 projectileState.heat * 0.1 +
-                (projectileState.locked ? 0.12 : 0);
+                (weaponModeActive && projectileState.locked ? 0.12 : 0);
         }
-        const hotBlend = THREE.MathUtils.clamp(projectileState.heat * 0.8, 0, 1);
+        const hotBlend = weaponModeActive
+            ? THREE.MathUtils.clamp(projectileState.heat * 0.8, 0, 1)
+            : 0;
         for (let i = 0; i < mount.metalMaterials.length; i += 1) {
             const material = mount.metalMaterials[i];
             weaponTempColor.copy(WEAPON_METAL_COLOR).lerp(WEAPON_HOT_COLOR, hotBlend * 0.24);
@@ -3258,8 +3717,19 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
             material.emissiveIntensity = 0.14 + projectileState.heat * 0.4;
         }
 
+        mount.holoReticle.visible = weaponModeActive;
+        mount.holoHalo.visible = weaponModeActive;
         mount.holoReticle.scale.setScalar(1);
         mount.holoHalo.scale.setScalar(1);
+        applyMountModePresentation(mount, {
+            dt,
+            modeBlend: projectileState.modeBlend,
+            switchPulse: projectileState.switchPulse,
+            hoverPhase: projectileState.hoverPhase,
+            pulse,
+            weaponModeActive,
+            modeColor: reticleColor,
+        });
     }
 
     function spawnReplicatedProjectile({
@@ -3548,15 +4018,33 @@ function createNoopWeaponSystem() {
     return {
         update() {},
         setTriggerHeld() {},
+        toggleCombatMode() {
+            return {
+                ok: false,
+                mode: COMBAT_MODE_MINE,
+                message: 'VX-9 pickup required before switching hood tools.',
+                timeoutMs: 1600,
+            };
+        },
         resetRound() {},
         onPlayerDestroyed() {},
         applyPickupStateSnapshot() {},
         hasWeapon() {
             return false;
         },
+        getCombatMode() {
+            return COMBAT_MODE_MINE;
+        },
+        getCombatLoadoutSnapshot() {
+            return {
+                hasWeapon: false,
+                mode: COMBAT_MODE_MINE,
+            };
+        },
         getReplicationState() {
             return {
                 hasWeapon: false,
+                mode: COMBAT_MODE_MINE,
                 triggerHeld: false,
                 heat: 0,
                 locked: false,

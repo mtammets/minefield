@@ -5,6 +5,7 @@ const AUDIO_PREFS_VERSION = 1;
 const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
     vehiclesVolume: 1,
+    botVehiclesVolume: 1,
     effectsVolume: 1,
     ambienceVolume: 1,
     musicVolume: 0.08,
@@ -14,6 +15,7 @@ const DEFAULT_AUDIO_PREFS = Object.freeze({
 const AUDIO_PREF_KEYS = Object.freeze([
     'masterVolume',
     'vehiclesVolume',
+    'botVehiclesVolume',
     'effectsVolume',
     'ambienceVolume',
     'musicVolume',

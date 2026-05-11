@@ -197,6 +197,9 @@ export function createGameLoopController(options = {}) {
         chargingLevel: 0,
         worldMapVisible: false,
         gameMode: 'bots',
+        botDescriptors: EMPTY_ARRAY,
+        trafficDescriptors: EMPTY_ARRAY,
+        playerPosition: car.position,
     };
 
     function getRoofLiftOccupantPositions() {
@@ -493,6 +496,9 @@ export function createGameLoopController(options = {}) {
             audioFrameState.chargingLevel = 0;
             audioFrameState.worldMapVisible = worldMapOpen;
             audioFrameState.gameMode = readGameMode();
+            audioFrameState.botDescriptors = EMPTY_ARRAY;
+            audioFrameState.trafficDescriptors = EMPTY_ARRAY;
+            audioFrameState.playerPosition = car.position;
             audioController?.update?.(frameDelta, audioFrameState);
             scorePopupController?.update?.(camera, frameDelta);
             speedometerUi?.update?.({
@@ -862,6 +868,13 @@ export function createGameLoopController(options = {}) {
         audioFrameState.chargingLevel = chargingHudLevel;
         audioFrameState.worldMapVisible = worldMapOpen;
         audioFrameState.gameMode = readGameMode();
+        audioFrameState.botDescriptors = readBotsEnabled() ? botCollectorDescriptors : EMPTY_ARRAY;
+        audioFrameState.trafficDescriptors =
+            readGameMode() === 'online'
+                ? latestMultiplayerCollisionSnapshots
+                : readBotsEnabled()
+                  ? botCollectorDescriptors
+                  : EMPTY_ARRAY;
         audioFrameState.playerPosition = car.position;
         updateUndergroundParkingRuntime(car.position, frameDelta);
         measureStage('audio', () => {
