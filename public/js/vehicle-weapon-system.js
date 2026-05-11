@@ -4,7 +4,6 @@ import {
     applyLorienVelmoreDoorWeaponImpact,
     resolveStoreInteriorAttackDirective,
 } from './environment/buildings.js';
-import { getCameraViewMode } from './camera.js';
 import { getLorienVelmoreRoofLiftLayout } from './environment/lorien-gallery.js';
 import {
     arePositionsSeparatedByUndergroundParking,
@@ -18,54 +17,25 @@ const PICKUP_RESPAWN_DELAY_SEC = 0.9;
 const SHOT_INTERVAL_SEC = 0.082;
 const SHOT_RANGE = 190;
 const CAMERA_AIM_RANGE = 220;
+const FREE_AIM_FOCUS_DISTANCE = 46;
 const AUTO_LOCK_RANGE = 190;
 const AUTO_LOCK_MIN_FORWARD_DOT = 0.6;
-const AUTO_LOCK_MAX_SCREEN_DISTANCE = 0.48;
-const AUTO_LOCK_SCREEN_SCORE_WEIGHT = 2.6;
-const AUTO_LOCK_ZOOM_SCREEN_SCORE_WEIGHT = 5.1;
+const AUTO_LOCK_MAX_LINE_DISTANCE = 16;
+const AUTO_LOCK_ZOOM_MAX_LINE_DISTANCE = 9;
+const AUTO_LOCK_LINE_SCORE_WEIGHT = 3.4;
 const AUTO_LOCK_FORWARD_SCORE_WEIGHT = 1.8;
 const AUTO_LOCK_ZOOM_FORWARD_SCORE_WEIGHT = 1.15;
 const AUTO_LOCK_DISTANCE_SCORE_WEIGHT = 0.65;
 const AUTO_LOCK_ZOOM_DISTANCE_SCORE_WEIGHT = 0.42;
 const AUTO_LOCK_SAMPLE_SCORE_PRIORITY_STEP = 0.00085;
-const CHASE_CAMERA_VIEW_MODE = 6;
-const SCREEN_SPACE_WEAPON_HUD_ENABLED = false;
-const DEFAULT_HUD_PROFILE = Object.freeze({
-    aimNdcX: 0,
-    aimNdcY: 0,
-    hudScale: 1,
-    autoLockScreenDistance: AUTO_LOCK_MAX_SCREEN_DISTANCE,
-});
-const DEFAULT_ZOOM_HUD_PROFILE = Object.freeze({
-    aimNdcX: 0,
-    aimNdcY: 0,
-    hudScale: 0.7,
-    autoLockScreenDistance: AUTO_LOCK_MAX_SCREEN_DISTANCE,
-});
-const CHASE_CAMERA_HUD_PROFILE = Object.freeze({
-    aimNdcX: 0,
-    aimNdcY: 0.18,
-    hudScale: 0.82,
-    autoLockScreenDistance: AUTO_LOCK_MAX_SCREEN_DISTANCE,
-});
-const CHASE_CAMERA_ZOOM_HUD_PROFILE = Object.freeze({
-    aimNdcX: 0,
-    aimNdcY: 0.18,
-    hudScale: 0.62,
-    autoLockScreenDistance: AUTO_LOCK_MAX_SCREEN_DISTANCE,
-});
 const WEAPON_MOUNT_BASE_Y = 0.96;
 const WEAPON_MOUNT_BASE_Z = -1.72;
-const WEAPON_MAX_TRAVERSE_YAW = THREE.MathUtils.degToRad(18);
-const WEAPON_MAX_TRAVERSE_PITCH_UP = THREE.MathUtils.degToRad(10);
-const WEAPON_MAX_TRAVERSE_PITCH_DOWN = THREE.MathUtils.degToRad(6);
 const WEAPON_IDLE_SWAY_SPEED = 2.8;
 const WEAPON_SPEED_SWAY_SPEED = 5.6;
 const WEAPON_RECOIL_RISE = 22;
 const WEAPON_RECOIL_FALL = 10.5;
 const WEAPON_HEAT_RISE = 0.16;
 const WEAPON_HEAT_FALL = 0.46;
-const HUD_TRACKING_SNAP_SPEED = 15.5;
 const MAX_ACTIVE_PROJECTILES = 18;
 const MAX_ACTIVE_IMPACTS = 18;
 const MAX_ACTIVE_MUZZLE_FLASHES = 10;
@@ -115,27 +85,18 @@ const WEAPON_METAL_COLOR = new THREE.Color(0x101923);
 const WEAPON_EDGE_COLOR = new THREE.Color(0x7be9ff);
 const WEAPON_HOT_COLOR = new THREE.Color(0xff9259);
 const hunterReticleColor = new THREE.Color();
-const weaponAimScreenPoint = new THREE.Vector3();
 const weaponAimOrigin = new THREE.Vector3();
 const weaponAimDirection = new THREE.Vector3();
 const weaponAimPoint = new THREE.Vector3();
+const weaponAimFocusPoint = new THREE.Vector3();
 const weaponShotDirection = new THREE.Vector3();
 const weaponMuzzleWorldPosition = new THREE.Vector3();
-const weaponHudAnchorWorldPosition = new THREE.Vector3();
-const weaponHudAnchorProjection = new THREE.Vector3();
 const weaponTempVectorA = new THREE.Vector3();
 const weaponTempVectorB = new THREE.Vector3();
 const weaponTempVectorC = new THREE.Vector3();
 const weaponTempVectorD = new THREE.Vector3();
 const weaponTempVectorE = new THREE.Vector3();
-const weaponZoomCameraPosition = new THREE.Vector3();
-const weaponZoomCameraLookTarget = new THREE.Vector3();
-const weaponZoomCameraUpVector = new THREE.Vector3();
-const weaponPitchPivotQuaternion = new THREE.Quaternion();
-const weaponZoomCameraPose = {
-    position: weaponZoomCameraPosition,
-    lookTarget: weaponZoomCameraLookTarget,
-};
+const weaponBaseQuaternion = new THREE.Quaternion();
 const hunterVisionForwardVector = new THREE.Vector3();
 const hunterVisionUpVector = new THREE.Vector3();
 const hunterTargetRightVector = new THREE.Vector3();
@@ -182,9 +143,6 @@ const weaponSceneImpactFallbackNormal = new THREE.Vector3();
 const weaponSceneImpactNormalMatrix = new THREE.Matrix3();
 const weaponTempColor = new THREE.Color();
 const weaponHudProjection = new THREE.Vector3();
-const weaponLocalOrigin = new THREE.Vector3();
-const weaponLocalTargetPoint = new THREE.Vector3();
-const weaponLocalAimVector = new THREE.Vector3();
 const weaponTraceObstacleBuffer = [];
 const lorienDoorTraceObstacleBuffer = [];
 
@@ -324,19 +282,13 @@ export function createVehicleWeaponSystem({
         shotSequence: 0,
         currentLock: null,
         zoomActive: false,
-        hudX: window.innerWidth * 0.5,
-        hudY: window.innerHeight * 0.5,
         replicationTargetPoint: new THREE.Vector3(),
         hasReplicationTarget: false,
+        aimFocusPoint: new THREE.Vector3(),
+        hasAimFocusPoint: false,
         replicationLocked: false,
         pendingPickupId: '',
     };
-
-    function resetHudPosition(hudProfile = resolveHudProfile()) {
-        const anchor = resolveWeaponHudAnchorScreenPosition(hudProfile);
-        state.hudX = anchor.screenX;
-        state.hudY = anchor.screenY;
-    }
 
     function getWeaponTraceObstacles() {
         const baseObstacles = getStaticObstacles?.();
@@ -510,8 +462,9 @@ export function createVehicleWeaponSystem({
             state.heat = 0;
             state.fireCooldown = 0;
             state.currentLock = null;
+            state.hasAimFocusPoint = false;
+            state.hasReplicationTarget = false;
             state.pendingPickupId = '';
-            resetHudPosition();
             resetPickupEntries();
             hideWeapon();
             resetHunterWeaponState();
@@ -523,8 +476,6 @@ export function createVehicleWeaponSystem({
                 locked: false,
                 zoomed: false,
                 heat: 0,
-                screenX: state.hudX,
-                screenY: state.hudY,
             });
         },
         onPlayerDestroyed() {
@@ -533,8 +484,9 @@ export function createVehicleWeaponSystem({
             state.heat = 0;
             state.fireCooldown = 0;
             state.currentLock = null;
+            state.hasAimFocusPoint = false;
+            state.hasReplicationTarget = false;
             state.pendingPickupId = '';
-            resetHudPosition();
             if (state.hasWeapon) {
                 hideWeapon();
             }
@@ -546,39 +498,13 @@ export function createVehicleWeaponSystem({
                 locked: false,
                 zoomed: false,
                 heat: 0,
-                screenX: state.hudX,
-                screenY: state.hudY,
             });
         },
         hasWeapon() {
             return state.hasWeapon;
         },
-        getZoomCameraPose() {
-            if (!state.hasWeapon) {
-                return null;
-            }
-
-            const sightLine = resolveWeaponSightLine(
-                weaponTempVectorA,
-                weaponTempVectorB,
-                weaponTempVectorC
-            );
-            weaponZoomCameraUpVector
-                .set(0, 1, 0)
-                .applyQuaternion(weaponPitchPivotQuaternion)
-                .normalize();
-            weaponZoomCameraPosition
-                .copy(sightLine.origin)
-                .lerp(sightLine.muzzlePosition, 0.18)
-                .addScaledVector(weaponZoomCameraUpVector, 0.05);
-            if (state.currentLock?.point) {
-                weaponZoomCameraLookTarget.copy(state.currentLock.point);
-            } else {
-                weaponZoomCameraLookTarget
-                    .copy(sightLine.origin)
-                    .addScaledVector(sightLine.direction, CAMERA_AIM_RANGE);
-            }
-            return weaponZoomCameraPose;
+        getCurrentAimFocusPoint() {
+            return state.hasWeapon && state.hasAimFocusPoint ? state.aimFocusPoint : null;
         },
         getCurrentLockPoint() {
             return state.currentLock?.point || null;
@@ -635,7 +561,7 @@ export function createVehicleWeaponSystem({
 
         const weaponMotionState = resolveWeaponMotionState(vehicleState);
         applyWeaponBasePoseToMount(mount, weaponMotionState);
-        const aimState = resolveAimState(gameMode, weaponMotionState);
+        const aimState = resolveAimState(gameMode);
         state.currentLock = aimState.lockedTarget;
         if (
             aimState?.targetPoint &&
@@ -648,9 +574,19 @@ export function createVehicleWeaponSystem({
         } else {
             state.hasReplicationTarget = false;
         }
+        if (
+            aimState?.focusPoint &&
+            Number.isFinite(aimState.focusPoint.x) &&
+            Number.isFinite(aimState.focusPoint.y) &&
+            Number.isFinite(aimState.focusPoint.z)
+        ) {
+            state.aimFocusPoint.copy(aimState.focusPoint);
+            state.hasAimFocusPoint = true;
+        } else {
+            state.hasAimFocusPoint = false;
+        }
         state.replicationLocked = Boolean(aimState?.lockedTarget);
         updateWeaponMount(dt, weaponMotionState, aimState, vehicleWeaponActive);
-        updateHudTracking(dt, aimState, vehicleWeaponActive);
 
         if (vehicleWeaponActive && state.triggerHeld) {
             state.fireCooldown -= dt;
@@ -687,8 +623,6 @@ export function createVehicleWeaponSystem({
             locked: Boolean(aimState.lockedTarget),
             zoomed: state.zoomActive,
             heat: state.heat,
-            screenX: state.hudX,
-            screenY: state.hudY,
         });
     }
 
@@ -867,9 +801,10 @@ export function createVehicleWeaponSystem({
         state.hasWeapon = true;
         state.triggerHeld = false;
         state.fireCooldown = 0;
+        state.hasAimFocusPoint = false;
+        state.hasReplicationTarget = false;
         state.pendingPickupId = '';
         mount.root.visible = true;
-        resetHudPosition();
         onStatus('VX-9 online. Auto-lock engaged. Hold T to fire.', 2600);
         getAudioController()?.onVehicleWeaponPickup?.();
     }
@@ -907,22 +842,6 @@ export function createVehicleWeaponSystem({
         targetMount.weaponGroup.rotation.z = motionState.speedSway * 1.2;
         targetMount.weaponGroup.rotation.x =
             motionState.idleSway * 0.9 + motionState.throttleRatio * 0.02;
-    }
-
-    function resolveWeaponLocalOrigin(motionState, out) {
-        return out.set(
-            0,
-            WEAPON_MOUNT_BASE_Y + motionState.idleSway * 0.3 + 0.04,
-            WEAPON_MOUNT_BASE_Z + motionState.recoilShift - 1.04
-        );
-    }
-
-    function resolveHudProfile() {
-        const isChaseView = getCameraViewMode() === CHASE_CAMERA_VIEW_MODE;
-        if (state.zoomActive) {
-            return isChaseView ? CHASE_CAMERA_ZOOM_HUD_PROFILE : DEFAULT_ZOOM_HUD_PROFILE;
-        }
-        return isChaseView ? CHASE_CAMERA_HUD_PROFILE : DEFAULT_HUD_PROFILE;
     }
 
     function resolveWeaponLockBodyCenterPoint(descriptor, radius, out = weaponTempVectorB) {
@@ -970,21 +889,20 @@ export function createVehicleWeaponSystem({
     function resolveVisibleWeaponLockTargetState({
         descriptor,
         radius,
-        hudAimNdcX = 0,
-        hudAimNdcY = 0,
-        maxScreenDistanceSq = AUTO_LOCK_MAX_SCREEN_DISTANCE * AUTO_LOCK_MAX_SCREEN_DISTANCE,
+        maxLineDistanceSq = AUTO_LOCK_MAX_LINE_DISTANCE * AUTO_LOCK_MAX_LINE_DISTANCE,
         staticObstacles = [],
         weaponLockOrigin,
+        aimDirection,
         botTrafficSystem,
     }) {
-        if (!descriptor?.position || !weaponLockOrigin) {
+        if (!descriptor?.position || !weaponLockOrigin || !aimDirection) {
             return null;
         }
 
         const result = weaponLockTargetState;
         result.visibleCount = 0;
         result.centerVisible = false;
-        result.screenDistanceSq = Number.POSITIVE_INFINITY;
+        result.screenDistanceSq = window.innerWidth * window.innerWidth;
         result.forwardDot = -1;
 
         const samplePoints = populateWeaponLockTargetSamplePoints(descriptor, radius);
@@ -994,7 +912,7 @@ export function createVehicleWeaponSystem({
             const samplePoint = samplePoints[index];
             const toSample = weaponLockVisibilityDirectionVector.subVectors(
                 samplePoint,
-                weaponAimOrigin
+                weaponLockOrigin
             );
             const distance = toSample.length();
             if (!Number.isFinite(distance) || distance < 4 || distance > AUTO_LOCK_RANGE) {
@@ -1002,28 +920,20 @@ export function createVehicleWeaponSystem({
             }
 
             toSample.multiplyScalar(1 / Math.max(distance, 0.0001));
-            const forwardDot = toSample.dot(weaponAimDirection);
+            const forwardDot = toSample.dot(aimDirection);
             if (forwardDot < AUTO_LOCK_MIN_FORWARD_DOT) {
                 continue;
             }
 
-            weaponHudProjection.copy(samplePoint).project(camera);
-            if (
-                !Number.isFinite(weaponHudProjection.x) ||
-                !Number.isFinite(weaponHudProjection.y) ||
-                !Number.isFinite(weaponHudProjection.z)
-            ) {
-                continue;
-            }
-            if (weaponHudProjection.z < -1 || weaponHudProjection.z > 1.08) {
-                continue;
-            }
-
-            const projectedOffsetX = weaponHudProjection.x - hudAimNdcX;
-            const projectedOffsetY = weaponHudProjection.y - hudAimNdcY;
-            const screenDistanceSq =
-                projectedOffsetX * projectedOffsetX + projectedOffsetY * projectedOffsetY;
-            if (screenDistanceSq > maxScreenDistanceSq) {
+            const forwardDistance =
+                (samplePoint.x - weaponLockOrigin.x) * aimDirection.x +
+                (samplePoint.y - weaponLockOrigin.y) * aimDirection.y +
+                (samplePoint.z - weaponLockOrigin.z) * aimDirection.z;
+            const lineDistanceSq = Math.max(
+                0,
+                distance * distance - forwardDistance * forwardDistance
+            );
+            if (lineDistanceSq > maxLineDistanceSq) {
                 continue;
             }
 
@@ -1051,17 +961,6 @@ export function createVehicleWeaponSystem({
                 continue;
             }
 
-            const obstacleImpact = traceWeaponEnvironmentImpact({
-                start: weaponAimOrigin,
-                end: samplePoint,
-                obstacles: staticObstacles,
-                ignoreOriginRadius: BULLET_MARK_MIN_DISTANCE,
-                shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
-                shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
-            });
-            if (obstacleImpact) {
-                continue;
-            }
             const muzzleObstacleImpact = traceWeaponEnvironmentImpact({
                 start: weaponLockOrigin,
                 end: samplePoint,
@@ -1079,208 +978,97 @@ export function createVehicleWeaponSystem({
                 result.centerVisible = true;
             }
 
-            const sampleScore = screenDistanceSq + index * AUTO_LOCK_SAMPLE_SCORE_PRIORITY_STEP;
+            const normalizedLineDistance = lineDistanceSq / Math.max(maxLineDistanceSq, 0.0001);
+            const sampleScore =
+                normalizedLineDistance * AUTO_LOCK_LINE_SCORE_WEIGHT +
+                (1 - forwardDot) * AUTO_LOCK_FORWARD_SCORE_WEIGHT +
+                (weaponDistance / AUTO_LOCK_RANGE) * AUTO_LOCK_DISTANCE_SCORE_WEIGHT +
+                index * AUTO_LOCK_SAMPLE_SCORE_PRIORITY_STEP;
             if (sampleScore >= bestSampleScore) {
                 continue;
             }
 
             bestSampleScore = sampleScore;
             result.point.copy(samplePoint);
-            result.screenDistanceSq = screenDistanceSq;
+            result.screenDistanceSq = lineDistanceSq;
             result.forwardDot = forwardDot;
-            result.screenX = (weaponHudProjection.x * 0.5 + 0.5) * window.innerWidth;
-            result.screenY = (-weaponHudProjection.y * 0.5 + 0.5) * window.innerHeight;
+            result.screenX = window.innerWidth * 0.5;
+            result.screenY = window.innerHeight * 0.5;
+            weaponHudProjection.copy(samplePoint).project(camera);
+            if (
+                Number.isFinite(weaponHudProjection.x) &&
+                Number.isFinite(weaponHudProjection.y) &&
+                Number.isFinite(weaponHudProjection.z)
+            ) {
+                result.screenX = (weaponHudProjection.x * 0.5 + 0.5) * window.innerWidth;
+                result.screenY = (-weaponHudProjection.y * 0.5 + 0.5) * window.innerHeight;
+            }
         }
 
         return result.visibleCount > 0 ? result : null;
     }
 
-    function isTargetWithinWeaponTraverse(targetPoint, localOrigin) {
-        weaponLocalTargetPoint.copy(targetPoint);
-        mountParent.worldToLocal(weaponLocalTargetPoint);
-        weaponLocalAimVector.subVectors(weaponLocalTargetPoint, localOrigin);
-        const aimLengthSq = weaponLocalAimVector.lengthSq();
-        if (!Number.isFinite(aimLengthSq) || aimLengthSq <= 0.0001) {
-            return false;
-        }
-
-        weaponLocalAimVector.multiplyScalar(1 / Math.sqrt(aimLengthSq));
-        const yaw = Math.atan2(weaponLocalAimVector.x, -weaponLocalAimVector.z);
-        const pitch = Math.asin(THREE.MathUtils.clamp(weaponLocalAimVector.y, -1, 1));
-        return (
-            Math.abs(yaw) <= WEAPON_MAX_TRAVERSE_YAW &&
-            pitch <= WEAPON_MAX_TRAVERSE_PITCH_UP &&
-            pitch >= -WEAPON_MAX_TRAVERSE_PITCH_DOWN
-        );
-    }
-
-    function clampWeaponTargetPoint(targetPoint, motionState, out = weaponAimPoint) {
-        mountParent.updateWorldMatrix(true, false);
-        resolveWeaponLocalOrigin(motionState, weaponLocalOrigin);
-        weaponLocalTargetPoint.copy(targetPoint);
-        mountParent.worldToLocal(weaponLocalTargetPoint);
-        weaponLocalAimVector.subVectors(weaponLocalTargetPoint, weaponLocalOrigin);
-
-        const distance = weaponLocalAimVector.length();
-        if (!Number.isFinite(distance) || distance <= 0.0001) {
-            return out.copy(targetPoint);
-        }
-
-        weaponLocalAimVector.multiplyScalar(1 / distance);
-        const yaw = Math.atan2(weaponLocalAimVector.x, -weaponLocalAimVector.z);
-        const pitch = Math.asin(THREE.MathUtils.clamp(weaponLocalAimVector.y, -1, 1));
-        const clampedYaw = THREE.MathUtils.clamp(
-            yaw,
-            -WEAPON_MAX_TRAVERSE_YAW,
-            WEAPON_MAX_TRAVERSE_YAW
-        );
-        const clampedPitch = THREE.MathUtils.clamp(
-            pitch,
-            -WEAPON_MAX_TRAVERSE_PITCH_DOWN,
-            WEAPON_MAX_TRAVERSE_PITCH_UP
-        );
-
-        weaponLocalAimVector.set(
-            Math.sin(clampedYaw) * Math.cos(clampedPitch),
-            Math.sin(clampedPitch),
-            -Math.cos(clampedYaw) * Math.cos(clampedPitch)
-        );
-
-        out.copy(weaponLocalOrigin).addScaledVector(weaponLocalAimVector, distance);
-        mountParent.localToWorld(out);
-        return out;
-    }
-
-    function resolveWeaponSightLine(
-        outOrigin = weaponAimOrigin,
-        outDirection = weaponAimDirection,
-        outMuzzlePosition = weaponTempVectorE
-    ) {
-        if (!state.hasWeapon || !mount?.holoReticle || !mount?.muzzleAnchor) {
-            camera.updateWorldMatrix(true, false);
-            camera.getWorldPosition(outOrigin);
-            camera.getWorldDirection(outDirection).normalize();
-            outMuzzlePosition.copy(outOrigin);
-            return {
-                origin: outOrigin,
-                direction: outDirection,
-                muzzlePosition: outMuzzlePosition,
-            };
-        }
-
+    function resolveFreeAimState() {
         mount.root.updateWorldMatrix(true, true);
-        mount.holoReticle.getWorldPosition(outOrigin);
-        mount.muzzleAnchor.getWorldPosition(outMuzzlePosition);
-        mount.pitchPivot.getWorldQuaternion(weaponPitchPivotQuaternion);
-        outDirection.set(0, 0, -1).applyQuaternion(weaponPitchPivotQuaternion);
-        if (outDirection.lengthSq() <= 0.0001) {
-            outDirection.subVectors(outMuzzlePosition, outOrigin);
+        mount.muzzleAnchor.getWorldPosition(weaponAimOrigin);
+        mountParent.getWorldQuaternion(weaponBaseQuaternion);
+        weaponAimDirection.set(0, 0, -1).applyQuaternion(weaponBaseQuaternion).normalize();
+        weaponAimPoint.copy(weaponAimOrigin).addScaledVector(weaponAimDirection, CAMERA_AIM_RANGE);
+        weaponAimFocusPoint
+            .copy(weaponAimOrigin)
+            .addScaledVector(weaponAimDirection, FREE_AIM_FOCUS_DISTANCE);
+
+        const obstacleImpact = traceWeaponEnvironmentImpact({
+            start: weaponAimOrigin,
+            end: weaponAimPoint,
+            obstacles: getWeaponTraceObstacles(),
+            ignoreOriginRadius: BULLET_MARK_MIN_DISTANCE,
+            shouldIgnoreObstacle: shouldIgnoreWeaponSoftOccluderObstacle,
+            shouldIgnoreHitObject: shouldIgnoreWeaponSoftOccluderSceneRaycastHit,
+        });
+        if (obstacleImpact?.point) {
+            weaponAimPoint.copy(obstacleImpact.point);
+            if (
+                weaponAimOrigin.distanceToSquared(obstacleImpact.point) <
+                weaponAimOrigin.distanceToSquared(weaponAimFocusPoint)
+            ) {
+                weaponAimFocusPoint.copy(obstacleImpact.point);
+            }
         }
-        if (outDirection.lengthSq() <= 0.0001) {
-            camera.getWorldDirection(outDirection).normalize();
-        } else {
-            outDirection.normalize();
-        }
-        return {
-            origin: outOrigin,
-            direction: outDirection,
-            muzzlePosition: outMuzzlePosition,
-        };
     }
 
-    function resolveAimState(gameMode = 'bots', motionState) {
-        const hudProfile = resolveHudProfile();
-        const aimNdcX = SCREEN_SPACE_WEAPON_HUD_ENABLED ? Number(hudProfile?.aimNdcX) || 0 : 0;
-        const aimNdcY = SCREEN_SPACE_WEAPON_HUD_ENABLED ? Number(hudProfile?.aimNdcY) || 0 : 0;
-        camera.updateWorldMatrix(true, false);
-        camera.getWorldPosition(weaponAimOrigin);
-        if (Math.abs(aimNdcX) > 0.0001 || Math.abs(aimNdcY) > 0.0001) {
-            weaponAimScreenPoint.set(aimNdcX, aimNdcY, 0.5).unproject(camera);
-            weaponAimDirection.subVectors(weaponAimScreenPoint, weaponAimOrigin);
-            if (weaponAimDirection.lengthSq() > 0.0001) {
-                weaponAimDirection.normalize();
-            } else {
-                camera.getWorldDirection(weaponAimDirection).normalize();
-            }
-        } else {
-            camera.getWorldDirection(weaponAimDirection).normalize();
-        }
-        weaponAimPoint.copy(weaponAimOrigin).addScaledVector(weaponAimDirection, CAMERA_AIM_RANGE);
-
+    function resolveAimState(gameMode = 'bots') {
+        resolveFreeAimState();
         const botTrafficSystem = gameMode === 'bots' ? getBotTrafficSystem() : null;
-        const lockedTarget = state.hasWeapon
-            ? resolveAutoLockTarget(botTrafficSystem, motionState, hudProfile)
-            : null;
+        const lockedTarget = state.hasWeapon ? resolveAutoLockTarget(botTrafficSystem) : null;
         if (lockedTarget?.point) {
             weaponAimPoint.copy(lockedTarget.point);
-        }
-
-        if (!lockedTarget && weaponAimDirection.y < -0.05) {
-            const estimatedPoint = weaponTempVectorA
-                .copy(weaponAimOrigin)
-                .addScaledVector(weaponAimDirection, 74);
-            const groundY = getGroundHeightAt(estimatedPoint.x, estimatedPoint.z, estimatedPoint.y);
-            if (Number.isFinite(groundY)) {
-                const targetY = groundY + 0.38;
-                const groundHitDistance = (targetY - weaponAimOrigin.y) / weaponAimDirection.y;
-                if (
-                    Number.isFinite(groundHitDistance) &&
-                    groundHitDistance > 10 &&
-                    groundHitDistance < CAMERA_AIM_RANGE
-                ) {
-                    weaponAimPoint
-                        .copy(weaponAimOrigin)
-                        .addScaledVector(weaponAimDirection, groundHitDistance);
-                }
-            }
-        }
-
-        if (state.hasWeapon) {
-            clampWeaponTargetPoint(weaponAimPoint, motionState, weaponAimPoint);
+            weaponAimFocusPoint.copy(lockedTarget.point);
         }
 
         return {
             lockedTarget,
             targetPoint: weaponAimPoint,
+            focusPoint: weaponAimFocusPoint,
             aimOrigin: weaponAimOrigin,
             aimDirection: weaponAimDirection,
-            hudProfile,
         };
     }
 
-    function resolveAutoLockTarget(
-        botTrafficSystem,
-        motionState,
-        hudProfile = DEFAULT_HUD_PROFILE
-    ) {
+    function resolveAutoLockTarget(botTrafficSystem) {
         const staticObstacles = getWeaponTraceObstacles();
         const descriptors = botTrafficSystem?.getCollectorDescriptors?.();
         if (!Array.isArray(descriptors) || descriptors.length <= 0) {
             return null;
         }
 
-        mountParent.updateWorldMatrix(true, false);
-        resolveWeaponLocalOrigin(motionState, weaponLocalOrigin);
-        const weaponLockOrigin = weaponMuzzleWorldPosition.copy(weaponLocalOrigin);
-        mountParent.localToWorld(weaponLockOrigin);
-        const hudAimNdcX = SCREEN_SPACE_WEAPON_HUD_ENABLED
-            ? Number(hudProfile?.aimNdcX) || 0
-            : 0;
-        const hudAimNdcY = SCREEN_SPACE_WEAPON_HUD_ENABLED
-            ? Number(hudProfile?.aimNdcY) || 0
-            : 0;
-
+        const weaponLockOrigin = weaponTempVectorD.copy(weaponAimOrigin);
         const previousLockId =
             typeof state.currentLock?.collectorId === 'string' ? state.currentLock.collectorId : '';
-        const maxScreenDistance = THREE.MathUtils.clamp(
-            Number(hudProfile?.autoLockScreenDistance) || AUTO_LOCK_MAX_SCREEN_DISTANCE,
-            0.08,
-            AUTO_LOCK_MAX_SCREEN_DISTANCE
-        );
-        const maxScreenDistanceSq = maxScreenDistance * maxScreenDistance;
-        const screenDistanceWeight = state.zoomActive
-            ? AUTO_LOCK_ZOOM_SCREEN_SCORE_WEIGHT
-            : AUTO_LOCK_SCREEN_SCORE_WEIGHT;
+        const maxLineDistance = state.zoomActive
+            ? AUTO_LOCK_ZOOM_MAX_LINE_DISTANCE
+            : AUTO_LOCK_MAX_LINE_DISTANCE;
+        const maxLineDistanceSq = maxLineDistance * maxLineDistance;
         const forwardScoreWeight = state.zoomActive
             ? AUTO_LOCK_ZOOM_FORWARD_SCORE_WEIGHT
             : AUTO_LOCK_FORWARD_SCORE_WEIGHT;
@@ -1301,25 +1089,13 @@ export function createVehicleWeaponSystem({
                 0.9,
                 4.2
             );
-            const targetPoint = state.zoomActive
-                ? resolveWeaponLockBodyCenterPoint(descriptor, radius, weaponTempVectorA)
-                : weaponTempVectorA.set(
-                      Number(descriptor.position.x) || 0,
-                      (Number(descriptor.position.y) || 0) + Math.max(0.88, radius * 0.58 + 0.28),
-                      Number(descriptor.position.z) || 0
-                  );
-            if (!isTargetWithinWeaponTraverse(targetPoint, weaponLocalOrigin)) {
-                continue;
-            }
-
             const visibleTargetState = resolveVisibleWeaponLockTargetState({
                 descriptor,
                 radius,
-                hudAimNdcX,
-                hudAimNdcY,
-                maxScreenDistanceSq,
+                maxLineDistanceSq,
                 staticObstacles,
                 weaponLockOrigin,
+                aimDirection: weaponAimDirection,
                 botTrafficSystem,
             });
             if (!visibleTargetState) {
@@ -1327,7 +1103,8 @@ export function createVehicleWeaponSystem({
             }
 
             let score =
-                visibleTargetState.screenDistanceSq * screenDistanceWeight +
+                (visibleTargetState.screenDistanceSq / Math.max(maxLineDistanceSq, 0.0001)) *
+                    AUTO_LOCK_LINE_SCORE_WEIGHT +
                 (1 - visibleTargetState.forwardDot) * forwardScoreWeight +
                 (weaponLockOrigin.distanceTo(visibleTargetState.point) / AUTO_LOCK_RANGE) *
                     distanceScoreWeight;
@@ -1344,86 +1121,23 @@ export function createVehicleWeaponSystem({
                 continue;
             }
 
-            const lockedPoint = state.zoomActive
-                ? resolveWeaponLockBodyCenterPoint(descriptor, radius, weaponTempVectorC)
-                : visibleTargetState.point;
-            let lockedScreenX = visibleTargetState.screenX;
-            let lockedScreenY = visibleTargetState.screenY;
-            if (state.zoomActive) {
-                weaponHudProjection.copy(lockedPoint).project(camera);
-                if (
-                    Number.isFinite(weaponHudProjection.x) &&
-                    Number.isFinite(weaponHudProjection.y) &&
-                    Number.isFinite(weaponHudProjection.z) &&
-                    weaponHudProjection.z >= -1 &&
-                    weaponHudProjection.z <= 1.08
-                ) {
-                    lockedScreenX = (weaponHudProjection.x * 0.5 + 0.5) * window.innerWidth;
-                    lockedScreenY = (-weaponHudProjection.y * 0.5 + 0.5) * window.innerHeight;
-                }
-            }
+            const lockedPoint = resolveWeaponLockBodyCenterPoint(
+                descriptor,
+                radius,
+                weaponTempVectorC
+            );
 
             bestScore = score;
             bestTarget = {
                 collectorId: typeof descriptor.id === 'string' ? descriptor.id : '',
                 name: typeof descriptor.name === 'string' ? descriptor.name : 'Target',
                 point: lockedPoint.clone(),
-                screenX: lockedScreenX,
-                screenY: lockedScreenY,
+                screenX: visibleTargetState.screenX,
+                screenY: visibleTargetState.screenY,
             };
         }
 
         return bestTarget;
-    }
-
-    function updateHudTracking(dt, aimState, isActive) {
-        const hudProfile = aimState?.hudProfile || DEFAULT_HUD_PROFILE;
-        const anchor = resolveWeaponHudAnchorScreenPosition(hudProfile);
-        const targetX = anchor.screenX;
-        const targetY = anchor.screenY;
-        const trackingSpeed = state.zoomActive
-            ? HUD_TRACKING_SNAP_SPEED * 3.2
-            : HUD_TRACKING_SNAP_SPEED;
-        const alpha = 1 - Math.exp(-trackingSpeed * dt);
-        if (!isActive) {
-            state.hudX = targetX;
-            state.hudY = targetY;
-            return;
-        }
-        state.hudX = THREE.MathUtils.lerp(state.hudX, targetX, alpha);
-        state.hudY = THREE.MathUtils.lerp(state.hudY, targetY, alpha);
-    }
-
-    function resolveWeaponHudAnchorScreenPosition(hudProfile = DEFAULT_HUD_PROFILE) {
-        const fallbackX = window.innerWidth * (0.5 + (Number(hudProfile?.aimNdcX) || 0) * 0.5);
-        const fallbackY = window.innerHeight * (0.5 - (Number(hudProfile?.aimNdcY) || 0) * 0.5);
-        if (!state.hasWeapon || !camera?.isCamera || !mount?.holoReticle) {
-            return {
-                screenX: fallbackX,
-                screenY: fallbackY,
-            };
-        }
-
-        mount.root.updateWorldMatrix(true, true);
-        mount.holoReticle.getWorldPosition(weaponHudAnchorWorldPosition);
-        weaponHudAnchorProjection.copy(weaponHudAnchorWorldPosition).project(camera);
-        if (
-            !Number.isFinite(weaponHudAnchorProjection.x) ||
-            !Number.isFinite(weaponHudAnchorProjection.y) ||
-            !Number.isFinite(weaponHudAnchorProjection.z) ||
-            weaponHudAnchorProjection.z < -1 ||
-            weaponHudAnchorProjection.z > 1.08
-        ) {
-            return {
-                screenX: fallbackX,
-                screenY: fallbackY,
-            };
-        }
-
-        return {
-            screenX: (weaponHudAnchorProjection.x * 0.5 + 0.5) * window.innerWidth,
-            screenY: (-weaponHudAnchorProjection.y * 0.5 + 0.5) * window.innerHeight,
-        };
     }
 
     function updateWeaponMount(dt, motionState, aimState, isActive) {
@@ -1479,8 +1193,12 @@ export function createVehicleWeaponSystem({
             material.emissiveIntensity = 0.14 + state.heat * 0.4;
         }
 
-        mount.holoReticle.scale.setScalar(1);
-        mount.holoHalo.scale.setScalar(1);
+        mount.holoReticle.visible = !state.zoomActive;
+        mount.holoHalo.visible = !state.zoomActive;
+        const sightScale = isActive ? 1 : 0.9;
+        const lockScale = aimState.lockedTarget ? 1 + lockPulse * 0.12 : 1;
+        mount.holoReticle.scale.setScalar(sightScale * lockScale);
+        mount.holoHalo.scale.setScalar(0.92 + pulse * 0.14 + state.heat * 0.08);
     }
 
     function fireShot(gameMode, aimState) {
@@ -2538,7 +2256,7 @@ export function createVehicleWeaponSystem({
         });
     }
 
-    function syncHud({ visible, hasWeapon, triggerHeld, locked, zoomed, heat, screenX, screenY }) {
+    function syncHud({ visible, hasWeapon, triggerHeld, locked, zoomed, heat }) {
         if (!hud.root || !hud.scope) {
             return;
         }
@@ -2548,22 +2266,7 @@ export function createVehicleWeaponSystem({
         hud.scope.dataset.firing = triggerHeld ? 'true' : 'false';
         hud.scope.dataset.locked = locked ? 'true' : 'false';
         hud.scope.style.setProperty('--weapon-heat', THREE.MathUtils.clamp(heat, 0, 1).toFixed(3));
-        if (!SCREEN_SPACE_WEAPON_HUD_ENABLED) {
-            hud.root.hidden = true;
-            return;
-        }
-        const hudProfile = resolveHudProfile();
-        hud.root.hidden = !visible || !hasWeapon;
-        hud.root.dataset.armed = visible && hasWeapon ? 'true' : 'false';
-        hud.root.dataset.firing = triggerHeld ? 'true' : 'false';
-        hud.root.dataset.locked = locked ? 'true' : 'false';
-        hud.root.style.left = `${Math.round(Number(screenX) || window.innerWidth * 0.5)}px`;
-        hud.root.style.top = `${Math.round(Number(screenY) || window.innerHeight * 0.5)}px`;
-        hud.root.style.setProperty('--weapon-heat', THREE.MathUtils.clamp(heat, 0, 1).toFixed(3));
-        hud.root.style.setProperty(
-            '--weapon-hud-scale',
-            THREE.MathUtils.clamp(Number(hudProfile?.hudScale) || 1, 0.65, 1.1).toFixed(3)
-        );
+        hud.root.hidden = true;
     }
 
     function activatePickup() {
@@ -2572,6 +2275,8 @@ export function createVehicleWeaponSystem({
 
     function hideWeapon() {
         state.hasWeapon = false;
+        state.hasAimFocusPoint = false;
+        state.hasReplicationTarget = false;
         mount.root.visible = false;
     }
 
@@ -2825,8 +2530,7 @@ function createWeaponMount() {
     const sightBaseMaterial = baseMaterial.clone();
     metalMaterials.push(sightBaseMaterial);
     const sightBase = new THREE.Mesh(weaponSightFrameGeometry, sightBaseMaterial);
-    sightBase.scale.set(0.82, 0.56, 1);
-    sightBase.position.set(0, 0.22, 0.24);
+    sightBase.position.set(0, 0.19, -0.36);
     weaponGroup.add(sightBase);
 
     const holoMaterial = new THREE.MeshBasicMaterial({
@@ -2841,7 +2545,7 @@ function createWeaponMount() {
     });
     holoMaterials.push(holoMaterial);
     const holoReticle = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.24), holoMaterial);
-    holoReticle.position.set(0, 0.42, 0.36);
+    holoReticle.position.set(0, 0.19, -0.84);
     holoReticle.rotation.y = Math.PI;
     weaponGroup.add(holoReticle);
 
@@ -2849,15 +2553,15 @@ function createWeaponMount() {
         map: pickupGlowTexture,
         color: 0x61d5ff,
         transparent: true,
-        opacity: 0.06,
+        opacity: 0.24,
         side: THREE.DoubleSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         toneMapped: false,
     });
     holoMaterials.push(holoHaloMaterial);
-    const holoHalo = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.14), holoHaloMaterial);
-    holoHalo.position.set(0, 0.42, 0.34);
+    const holoHalo = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.42), holoHaloMaterial);
+    holoHalo.position.set(0, 0.19, -0.86);
     holoHalo.rotation.y = Math.PI;
     weaponGroup.add(holoHalo);
 

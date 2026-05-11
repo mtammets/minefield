@@ -27,6 +27,8 @@ const VEHICLE_WEAPON_ZOOM_OUT_SPEED = 8.5;
 const VEHICLE_WEAPON_ZOOM_LOOK_SPEED = 17.5;
 const CAMERA_FOV_MIN = 16;
 const CAMERA_FOV_MAX = 100;
+const DEFAULT_CAMERA_UP = new THREE.Vector3(0, 1, 0);
+const TOP_DOWN_CAMERA_UP = new THREE.Vector3(0, 0, -1);
 const CHASE_CAMERA_VIEW_MODE = 6;
 const CINEMATIC_LOOP_TRACK = Object.freeze([
     { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
@@ -50,8 +52,8 @@ const cinematicTargetPosition = new THREE.Vector3();
 const cinematicLookAtTarget = new THREE.Vector3();
 const vehicleWeaponZoomDirection = new THREE.Vector3();
 const vehicleWeaponZoomTargetPosition = new THREE.Vector3();
-const vehicleWeaponZoomPosePosition = new THREE.Vector3();
-const vehicleWeaponZoomPoseLookTarget = new THREE.Vector3();
+const vehicleWeaponZoomAimPoint = new THREE.Vector3();
+const desiredCameraUp = new THREE.Vector3().copy(DEFAULT_CAMERA_UP);
 const roofCamLocalPosition = new THREE.Vector3(0.24, 1.92, 1.42);
 const roofScreenLookLocal = new THREE.Vector3(0, 0.72, 0.14);
 const roofCamWorldPosition = new THREE.Vector3();
@@ -296,27 +298,20 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     let finalFov = THREE.MathUtils.lerp(targetFov, cinematicShot.targetFov, cinematicBlend);
 
     if (vehicleWeaponZoomBlend > 0.001) {
-        const zoomPose = options.vehicleWeaponZoomPose;
-        if (
-            isFiniteVector3Like(zoomPose?.position) &&
-            isFiniteVector3Like(zoomPose?.lookTarget)
-        ) {
-            vehicleWeaponZoomPosePosition.copy(zoomPose.position);
-            vehicleWeaponZoomPoseLookTarget.copy(zoomPose.lookTarget);
-            targetPosition.lerp(vehicleWeaponZoomPosePosition, vehicleWeaponZoomBlend);
-            lookTarget.lerp(vehicleWeaponZoomPoseLookTarget, vehicleWeaponZoomBlend);
-        } else {
-            vehicleWeaponZoomTargetPosition.copy(targetPosition);
-            vehicleWeaponZoomDirection.subVectors(lookTarget, targetPosition);
-            const zoomDistance = vehicleWeaponZoomDirection.length();
-            if (zoomDistance > 0.0001) {
-                vehicleWeaponZoomDirection.multiplyScalar(1 / zoomDistance);
-                vehicleWeaponZoomTargetPosition.addScaledVector(
-                    vehicleWeaponZoomDirection,
-                    resolveVehicleWeaponZoomPullDistance(zoomDistance)
-                );
-                targetPosition.lerp(vehicleWeaponZoomTargetPosition, vehicleWeaponZoomBlend);
-            }
+        vehicleWeaponZoomTargetPosition.copy(targetPosition);
+        vehicleWeaponZoomDirection.subVectors(lookTarget, targetPosition);
+        const zoomDistance = vehicleWeaponZoomDirection.length();
+        if (zoomDistance > 0.0001) {
+            vehicleWeaponZoomDirection.multiplyScalar(1 / zoomDistance);
+            vehicleWeaponZoomTargetPosition.addScaledVector(
+                vehicleWeaponZoomDirection,
+                resolveVehicleWeaponZoomPullDistance(zoomDistance)
+            );
+            targetPosition.lerp(vehicleWeaponZoomTargetPosition, vehicleWeaponZoomBlend);
+        }
+        if (isFiniteVector3Like(options.vehicleWeaponAimPoint)) {
+            vehicleWeaponZoomAimPoint.copy(options.vehicleWeaponAimPoint);
+            lookTarget.lerp(vehicleWeaponZoomAimPoint, vehicleWeaponZoomBlend);
         }
         finalFov = THREE.MathUtils.lerp(
             finalFov,
@@ -341,6 +336,8 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
         return;
     }
 
+    desiredCameraUp.copy(resolveCameraUpVector(cameraViewMode));
+    camera.up.copy(desiredCameraUp);
     camera.position.lerp(targetPosition, finalFollowBlend);
     smoothedLookTarget.lerp(lookTarget, finalLookBlend);
     if (!isFiniteVector3Like(camera.position) || !isFiniteVector3Like(smoothedLookTarget)) {
@@ -554,6 +551,15 @@ function resolveVehicleWeaponZoomPullDistance(zoomDistance) {
             return Math.min(zoomDistance * 0.24, 1.8);
         default:
             return Math.min(zoomDistance * 0.38, 3.2);
+    }
+}
+
+function resolveCameraUpVector(viewMode) {
+    switch (viewMode) {
+        case 2:
+            return TOP_DOWN_CAMERA_UP;
+        default:
+            return DEFAULT_CAMERA_UP;
     }
 }
 

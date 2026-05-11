@@ -702,18 +702,6 @@ export function createGameLoopController(options = {}) {
                 }
 
                 const cameraSpeed = readCarDestroyed() ? 0 : visualState?.speed || 0;
-                updateCamera(car, cameraSpeed, frameDelta, {
-                    vehicleState: visualState,
-                    vehicleWeaponZoomActive:
-                        readVehicleWeaponZoomActive() &&
-                        !worldMapOpen &&
-                        !gamePaused &&
-                        !isEditModeActive &&
-                        !readCarDestroyed() &&
-                        !readPickupRoundFinished(),
-                    vehicleWeaponZoomPose: vehicleWeaponSystem?.getZoomCameraPose?.() || null,
-                    allowAutoCinematic: false,
-                });
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
                 updateEnvironmentMotion(cameraSpeed, monumentRhythmState, frameDelta);
                 starsController.update(frameDelta);
@@ -824,6 +812,7 @@ export function createGameLoopController(options = {}) {
             vehicleWeaponSystem?.update?.(frameDelta, {
                 vehicleState: getVehicleState(),
                 vehicleWeaponZoomActive:
+                    Boolean(vehicleWeaponSystem?.hasWeapon?.()) &&
                     readVehicleWeaponZoomActive() &&
                     !worldMapOpen &&
                     !gamePaused &&
@@ -846,6 +835,19 @@ export function createGameLoopController(options = {}) {
                 worldMapOpen,
                 gameMode: readGameMode(),
             });
+        });
+        updateCamera(car, readCarDestroyed() ? 0 : getVehicleState()?.speed || 0, frameDelta, {
+            vehicleState: getVehicleState(),
+            vehicleWeaponZoomActive:
+                Boolean(vehicleWeaponSystem?.hasWeapon?.()) &&
+                readVehicleWeaponZoomActive() &&
+                !worldMapOpen &&
+                !gamePaused &&
+                !isEditModeActive &&
+                !readCarDestroyed() &&
+                !readPickupRoundFinished(),
+            vehicleWeaponAimPoint: vehicleWeaponSystem?.getCurrentAimFocusPoint?.() || null,
+            allowAutoCinematic: false,
         });
 
         audioFrameState.vehicleState = getVehicleState();
