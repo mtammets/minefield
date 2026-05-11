@@ -315,8 +315,6 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
             return;
         }
 
-        pauseMenuUi.refreshAudioStatus?.();
-
         const filesTotal = Math.max(0, Math.round(Number(snapshot.filesTotal) || 0));
         const filesReady = Math.max(0, Math.round(Number(snapshot.filesReady) || 0));
         const filesFailed = Math.max(0, Math.round(Number(snapshot.filesFailed) || 0));
@@ -3373,26 +3371,6 @@ pauseMenuUi.configureGraphicsControls({
     },
     onCycleMode(step = 1) {
         return cycleGraphicsQualityMode(step, { showStatus: false, persist: true });
-    },
-});
-pauseMenuUi.configureAudioControls({
-    getSnapshot() {
-        return runtimeState.audioController?.getMixerSnapshot?.() || null;
-    },
-    onSetVolume(key, normalizedValue) {
-        return runtimeState.audioController?.setMixerVolume?.(key, normalizedValue) || null;
-    },
-    onToggleMute() {
-        return runtimeState.audioController?.toggleMute?.() || null;
-    },
-    async onUnlock() {
-        if (typeof runtimeState.audioController?.unlock !== 'function') {
-            return runtimeState.audioController?.getMixerSnapshot?.() || null;
-        }
-        await runtimeState.audioController.unlock({
-            waitForPreload: false,
-        });
-        return runtimeState.audioController?.getMixerSnapshot?.() || null;
     },
 });
 syncRuntimeInputContext();

@@ -126,6 +126,10 @@ How it works:
     - dynamic runtime mixing (engine layers, skid, wind, charging, ambience)
     - event-driven one-shots (pickup, collisions, mines, explosions, round end, UI)
     - persistent user preferences in `localStorage` (`silentdrift-audio-prefs-v1`)
+    - deploy defaults sourced from `server/data/audio-prefs.json`
+- When the game is opened through the local dev server (loopback/admin access), changing mixer
+  slider values also updates `server/data/audio-prefs.json`, so the next deploy uses those values
+  as live defaults for users without custom local audio prefs.
 - A compact Audio Mixer panel appears in the lower-right during gameplay.
 - Browsers require user interaction before audio starts; click/tap any key/button to unlock audio.
 - Audio assets are organized under `public/audio/` and are loaded by stable file names.

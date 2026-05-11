@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const Stripe = require('stripe');
 const { Server } = require('socket.io');
+const { createAudioPrefsStore } = require('./audio-prefs-store');
 const { createBillboardContentStore } = require('./billboard-content-store');
 const {
     createLeaderboardStore,
@@ -194,6 +195,9 @@ const EVENT_RATE_LIMITS = {
 
 const app = express();
 const server = http.createServer(app);
+const audioPrefsStore = createAudioPrefsStore({
+    prefsFilePath: path.join(__dirname, 'data/audio-prefs.json'),
+});
 const billboardContentStore = createBillboardContentStore({
     manifestFilePath: path.join(__dirname, 'data/billboard-content.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/billboards'),
@@ -236,6 +240,49 @@ app.get('/api/billboard-content', async (req, res) => {
         res.status(500).json({
             ok: false,
             error: 'Could not read billboard content manifest.',
+        });
+    }
+});
+app.get('/api/audio-prefs/defaults', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+        const config = await audioPrefsStore.readConfig();
+        res.json({
+            ok: true,
+            canEditDefaults: isAudioPrefsAdminAuthorized(req),
+            defaults: config.prefs,
+            updatedAt: config.updatedAt,
+        });
+    } catch (error) {
+        console.error('Audio defaults read failed:', error);
+        res.status(500).json({
+            ok: false,
+            error: 'Could not read audio defaults.',
+        });
+    }
+});
+app.post('/api/audio-prefs/defaults', express.json({ limit: '16kb' }), async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isAudioPrefsAdminAuthorized(req)) {
+        res.status(403).json({
+            ok: false,
+            error: 'Audio defaults admin access denied.',
+        });
+        return;
+    }
+
+    try {
+        const config = await audioPrefsStore.writePrefs(req.body);
+        res.json({
+            ok: true,
+            defaults: config.prefs,
+            updatedAt: config.updatedAt,
+        });
+    } catch (error) {
+        console.error('Audio defaults save failed:', error);
+        res.status(500).json({
+            ok: false,
+            error: 'Could not save audio defaults.',
         });
     }
 });
@@ -1680,10 +1727,18 @@ function resolveDonateBaseUrl(req) {
 }
 
 function isBillboardContentAdminAuthorized(req) {
+    return isAdminTokenAuthorized(req, BILLBOARD_CONTENT_ADMIN_TOKEN);
+}
+
+function isAudioPrefsAdminAuthorized(req) {
+    return isAdminTokenAuthorized(req, BILLBOARD_CONTENT_ADMIN_TOKEN);
+}
+
+function isAdminTokenAuthorized(req, expectedToken = '') {
     if (isLoopbackRequest(req)) {
         return true;
     }
-    if (!BILLBOARD_CONTENT_ADMIN_TOKEN) {
+    if (!expectedToken) {
         return false;
     }
 
@@ -1697,7 +1752,7 @@ function isBillboardContentAdminAuthorized(req) {
     try {
         return crypto.timingSafeEqual(
             Buffer.from(requestToken, 'utf8'),
-            Buffer.from(BILLBOARD_CONTENT_ADMIN_TOKEN, 'utf8')
+            Buffer.from(expectedToken, 'utf8')
         );
     } catch {
         return false;
@@ -2095,7 +2150,9 @@ async function resolveSupabaseIdentityFromAccessToken(accessToken) {
             userId: sanitizeSupabaseUserId(data.user.id),
             email,
             displayName: resolveAuthenticatedDisplayName(data.user, email),
-            avatarPath: sanitizeSupabaseStorageObjectPath(data.user?.user_metadata?.avatar_path || ''),
+            avatarPath: sanitizeSupabaseStorageObjectPath(
+                data.user?.user_metadata?.avatar_path || ''
+            ),
         };
     } catch {
         return null;

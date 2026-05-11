@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "updatedAt": "",
+  "prefs": {
+    "masterVolume": 0.84,
+    "vehiclesVolume": 1,
+    "effectsVolume": 1,
+    "ambienceVolume": 1,
+    "musicVolume": 0.08,
+    "uiVolume": 0.9,
+    "muted": false
+  }
+}

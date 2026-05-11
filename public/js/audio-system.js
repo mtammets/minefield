@@ -12,6 +12,8 @@ import {
 } from './environment/buildings.js';
 
 const AUDIO_PREFS_STORAGE_KEY = 'silentdrift-audio-prefs-v1';
+const AUDIO_PREFS_DEFAULTS_API_PATH = '/api/audio-prefs/defaults';
+const AUDIO_PREFS_DEFAULTS_SAVE_DEBOUNCE_MS = 500;
 const MONUMENT_MUSIC_SOUND_ID = 'monumentHookusPookusInstrumentalLoop01';
 const UFO_DISKO_STORE_MUSIC_SOUND_ID = 'ufoDiskoNebulaStore01';
 
@@ -480,7 +482,8 @@ export function createAudioSystem({ camera = null } = {}) {
         return createNoopAudioSystem();
     }
 
-    const prefs = readAudioPrefs();
+    const persistedPrefsState = readAudioPrefsState(DEFAULT_AUDIO_PREFS);
+    const prefs = persistedPrefsState.prefs;
     const buffers = new Map();
     const failedBuffers = new Set();
     const loopInstances = new Map();
@@ -496,10 +499,19 @@ export function createAudioSystem({ camera = null } = {}) {
     let mixer = null;
     let ui = null;
     let unlocked = false;
+    let runtimeDefaultPrefs = {
+        ...DEFAULT_AUDIO_PREFS,
+    };
     let preloadEnabled = false;
     let preloadPromise = null;
     let gameplayReady = false;
     let disposed = false;
+    let canEditRuntimeDefaults = false;
+    let runtimeDefaultsDirty = false;
+    let runtimeDefaultsLoaded = false;
+    let runtimeDefaultsLoadPromise = null;
+    let runtimeDefaultsSaveTimer = 0;
+    let runtimeDefaultsSaveSignature = '';
     let monumentMusicInstance = null;
     let monumentImpulseBuffer = null;
     let lorienGalleryVideoInstance = null;
@@ -575,6 +587,7 @@ export function createAudioSystem({ camera = null } = {}) {
         const preloadOnInitialize = Boolean(options?.preloadOnInitialize);
         preloadEnabled = preloadEnabled || preloadOnInitialize;
         ensureAudioContext();
+        void loadRuntimeAudioDefaults();
         if (preloadEnabled) {
             startPreload();
         }
@@ -598,6 +611,10 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
         disposed = true;
+        if (runtimeDefaultsSaveTimer) {
+            window.clearTimeout(runtimeDefaultsSaveTimer);
+            runtimeDefaultsSaveTimer = 0;
+        }
         gameplayReady = false;
         removeUnlockListeners();
         if (ui?.root?.parentElement) {
@@ -1147,8 +1164,9 @@ export function createAudioSystem({ camera = null } = {}) {
         if (!isMixerSliderKey(key)) {
             return getMixerSnapshot();
         }
-        prefs[key] = clampNumber(normalizedValue, 0, 1, DEFAULT_AUDIO_PREFS[key]);
-        persistAudioPrefs(prefs);
+        prefs[key] = clampNumber(normalizedValue, 0, 1, runtimeDefaultPrefs[key]);
+        persistAudioPrefs(prefs, runtimeDefaultPrefs);
+        markRuntimeDefaultsDirty();
         applyBusVolumes();
         refreshUi();
         return getMixerSnapshot();
@@ -1157,7 +1175,7 @@ export function createAudioSystem({ camera = null } = {}) {
     function toggleMute(options = {}) {
         const nextMuted = !prefs.muted;
         prefs.muted = nextMuted;
-        persistAudioPrefs(prefs);
+        persistAudioPrefs(prefs, runtimeDefaultPrefs);
         applyBusVolumes();
         refreshUi();
         if (options?.playFeedback) {
@@ -1182,7 +1200,7 @@ export function createAudioSystem({ camera = null } = {}) {
             if (!row) {
                 continue;
             }
-            const value = clampNumber(prefs[slider.key], 0, 1, DEFAULT_AUDIO_PREFS[slider.key]);
+            const value = clampNumber(prefs[slider.key], 0, 1, runtimeDefaultPrefs[slider.key]);
             row.input.value = String(Math.round(value * 100));
             row.value.textContent = `${Math.round(value * 100)}%`;
         }
@@ -1235,7 +1253,7 @@ export function createAudioSystem({ camera = null } = {}) {
             sliders.push({
                 key: slider.key,
                 label: slider.label,
-                value: clampNumber(prefs[slider.key], 0, 1, DEFAULT_AUDIO_PREFS[slider.key]),
+                value: clampNumber(prefs[slider.key], 0, 1, runtimeDefaultPrefs[slider.key]),
             });
         }
         return sliders;
@@ -1243,6 +1261,128 @@ export function createAudioSystem({ camera = null } = {}) {
 
     function isMixerSliderKey(key) {
         return MIXER_SLIDERS.some((slider) => slider.key === key);
+    }
+
+    function markRuntimeDefaultsDirty() {
+        runtimeDefaultsDirty = true;
+        if (!runtimeDefaultsLoaded) {
+            return;
+        }
+        scheduleRuntimeDefaultsSave();
+    }
+
+    function scheduleRuntimeDefaultsSave() {
+        if (!canEditRuntimeDefaults || !runtimeDefaultsDirty || disposed) {
+            return;
+        }
+        if (runtimeDefaultsSaveTimer) {
+            window.clearTimeout(runtimeDefaultsSaveTimer);
+        }
+        runtimeDefaultsSaveTimer = window.setTimeout(() => {
+            runtimeDefaultsSaveTimer = 0;
+            void saveRuntimeDefaultsToServer();
+        }, AUDIO_PREFS_DEFAULTS_SAVE_DEBOUNCE_MS);
+    }
+
+    async function loadRuntimeAudioDefaults() {
+        if (runtimeDefaultsLoadPromise) {
+            return runtimeDefaultsLoadPromise;
+        }
+
+        runtimeDefaultsLoadPromise = (async () => {
+            try {
+                const response = await window.fetch(AUDIO_PREFS_DEFAULTS_API_PATH, {
+                    method: 'GET',
+                    cache: 'no-store',
+                    credentials: 'same-origin',
+                    headers: {
+                        Accept: 'application/json',
+                    },
+                });
+                if (!response.ok) {
+                    runtimeDefaultsLoaded = true;
+                    return false;
+                }
+
+                const payload = await response.json();
+                const nextDefaults = sanitizeAudioPrefs(payload?.defaults, DEFAULT_AUDIO_PREFS);
+                runtimeDefaultPrefs = nextDefaults;
+                canEditRuntimeDefaults = Boolean(payload?.canEditDefaults);
+                runtimeDefaultsSaveSignature = serializeAudioPrefs(nextDefaults);
+                runtimeDefaultsLoaded = true;
+
+                if (!persistedPrefsState.hasStoredPrefs && !runtimeDefaultsDirty) {
+                    applyResolvedAudioPrefs(nextDefaults);
+                    applyBusVolumes();
+                    refreshUi();
+                }
+                if (runtimeDefaultsDirty) {
+                    scheduleRuntimeDefaultsSave();
+                }
+                return true;
+            } catch {
+                runtimeDefaultsLoaded = true;
+                return false;
+            }
+        })();
+
+        return runtimeDefaultsLoadPromise;
+    }
+
+    function applyResolvedAudioPrefs(nextPrefs = {}) {
+        const resolved = sanitizeAudioPrefs(nextPrefs, runtimeDefaultPrefs);
+        for (let index = 0; index < MIXER_SLIDERS.length; index += 1) {
+            const key = MIXER_SLIDERS[index].key;
+            prefs[key] = resolved[key];
+        }
+        prefs.muted = Boolean(resolved.muted);
+    }
+
+    async function saveRuntimeDefaultsToServer() {
+        if (!canEditRuntimeDefaults || !runtimeDefaultsDirty || disposed) {
+            return false;
+        }
+
+        const safeDefaults = sanitizeAudioPrefs(
+            {
+                ...prefs,
+                muted: false,
+            },
+            runtimeDefaultPrefs
+        );
+        const nextSignature = serializeAudioPrefs(safeDefaults);
+        if (nextSignature === runtimeDefaultsSaveSignature) {
+            runtimeDefaultsDirty = false;
+            return true;
+        }
+
+        try {
+            const response = await window.fetch(AUDIO_PREFS_DEFAULTS_API_PATH, {
+                method: 'POST',
+                cache: 'no-store',
+                credentials: 'same-origin',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Accept: 'application/json',
+                },
+                body: JSON.stringify(safeDefaults),
+            });
+            if (!response.ok) {
+                return false;
+            }
+
+            const payload = await response.json();
+            if (!payload?.ok) {
+                return false;
+            }
+
+            runtimeDefaultPrefs = sanitizeAudioPrefs(payload.defaults, safeDefaults);
+            runtimeDefaultsSaveSignature = serializeAudioPrefs(runtimeDefaultPrefs);
+            runtimeDefaultsDirty = false;
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     function installUnlockListeners() {
@@ -3650,50 +3790,76 @@ function createAudioUi(prefs, handlers) {
     };
 }
 
-function readAudioPrefs() {
+function readAudioPrefsState(fallbackPrefs = DEFAULT_AUDIO_PREFS) {
     const safeDefaults = {
-        ...DEFAULT_AUDIO_PREFS,
+        ...sanitizeAudioPrefs(fallbackPrefs, DEFAULT_AUDIO_PREFS),
     };
 
     try {
         const raw = window.localStorage.getItem(AUDIO_PREFS_STORAGE_KEY);
         if (!raw) {
-            return safeDefaults;
+            return {
+                hasStoredPrefs: false,
+                prefs: safeDefaults,
+            };
         }
 
         const parsed = JSON.parse(raw);
         if (!parsed || typeof parsed !== 'object') {
-            return safeDefaults;
+            return {
+                hasStoredPrefs: false,
+                prefs: safeDefaults,
+            };
         }
 
-        const resolved = {
-            ...safeDefaults,
+        return {
+            hasStoredPrefs: true,
+            prefs: sanitizeAudioPrefs(parsed, safeDefaults),
         };
-        for (let i = 0; i < MIXER_SLIDERS.length; i += 1) {
-            const key = MIXER_SLIDERS[i].key;
-            resolved[key] = clampNumber(parsed[key], 0, 1, safeDefaults[key]);
-        }
-        resolved.muted = Boolean(parsed.muted);
-        return resolved;
     } catch {
-        return safeDefaults;
+        return {
+            hasStoredPrefs: false,
+            prefs: safeDefaults,
+        };
     }
 }
 
-function persistAudioPrefs(prefs) {
-    const safePayload = {
-        muted: Boolean(prefs.muted),
-    };
-    for (let i = 0; i < MIXER_SLIDERS.length; i += 1) {
-        const key = MIXER_SLIDERS[i].key;
-        safePayload[key] = clampNumber(prefs[key], 0, 1, DEFAULT_AUDIO_PREFS[key]);
-    }
+function persistAudioPrefs(prefs, fallbackPrefs = DEFAULT_AUDIO_PREFS) {
+    const safePayload = sanitizeAudioPrefs(prefs, fallbackPrefs);
 
     try {
         window.localStorage.setItem(AUDIO_PREFS_STORAGE_KEY, JSON.stringify(safePayload));
     } catch {
         // localStorage can fail in restricted browsing contexts.
     }
+}
+
+function sanitizeAudioPrefs(prefs, fallbackPrefs = DEFAULT_AUDIO_PREFS) {
+    const safeFallback =
+        fallbackPrefs && typeof fallbackPrefs === 'object' ? fallbackPrefs : DEFAULT_AUDIO_PREFS;
+    const resolved = {
+        muted: Boolean(
+            prefs && typeof prefs === 'object' && 'muted' in prefs
+                ? prefs.muted
+                : safeFallback.muted
+        ),
+    };
+
+    for (let index = 0; index < MIXER_SLIDERS.length; index += 1) {
+        const key = MIXER_SLIDERS[index].key;
+        resolved[key] = clampNumber(
+            prefs?.[key],
+            0,
+            1,
+            clampNumber(safeFallback[key], 0, 1, DEFAULT_AUDIO_PREFS[key])
+        );
+    }
+
+    return resolved;
+}
+
+function serializeAudioPrefs(prefs) {
+    return JSON.stringify(sanitizeAudioPrefs(prefs, DEFAULT_AUDIO_PREFS));
 }
 
 function updateAudioListenerFromCamera(context, camera) {
