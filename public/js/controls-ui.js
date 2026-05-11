@@ -99,7 +99,7 @@ const CONTROL_LAYOUTS = Object.freeze({
         {
             title: 'Camera',
             rows: Object.freeze([
-                { label: 'View Presets', keyLabels: ['Cmd+1…7', 'Alt+1…7'] },
+                { label: 'Next View', keyLabels: ['+'] },
                 { label: 'Cinematic Camera', actionId: ACTION_IDS.cameraCinematicToggle },
             ]),
         },
@@ -545,13 +545,13 @@ function mountGameplayStarterHud(keyBindings) {
                                 class="starterKey starterKey--wide"
                                 data-camera-key="modifier"
                             >
-                                Alt/Cmd
+                                +
                             </span>
                             <span
                                 class="starterKey starterKey--range"
                                 data-camera-key="views"
                             >
-                                1-8
+                                Next
                             </span>
                             <span class="starterActionText">Views</span>
                         </div>

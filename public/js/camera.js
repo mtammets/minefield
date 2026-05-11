@@ -25,6 +25,9 @@ const CINEMATIC_LOOP_DURATION_SEC = 18;
 const VEHICLE_WEAPON_ZOOM_IN_SPEED = 11.5;
 const VEHICLE_WEAPON_ZOOM_OUT_SPEED = 8.5;
 const VEHICLE_WEAPON_ZOOM_LOOK_SPEED = 17.5;
+const CAMERA_FOV_MIN = 16;
+const CAMERA_FOV_MAX = 100;
+const CHASE_CAMERA_VIEW_MODE = 6;
 const CINEMATIC_LOOP_TRACK = Object.freeze([
     { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
     { t: 0.22, radius: 10.1, height: 5.5, fov: 71, lookAhead: 2.2, lookHeight: 1.02 },
@@ -47,10 +50,15 @@ const cinematicTargetPosition = new THREE.Vector3();
 const cinematicLookAtTarget = new THREE.Vector3();
 const vehicleWeaponZoomDirection = new THREE.Vector3();
 const vehicleWeaponZoomTargetPosition = new THREE.Vector3();
+const vehicleWeaponZoomPosePosition = new THREE.Vector3();
+const vehicleWeaponZoomPoseLookTarget = new THREE.Vector3();
 const roofCamLocalPosition = new THREE.Vector3(0.24, 1.92, 1.42);
 const roofScreenLookLocal = new THREE.Vector3(0, 0.72, 0.14);
 const roofCamWorldPosition = new THREE.Vector3();
 const roofLookWorldPosition = new THREE.Vector3();
+const lastValidCameraPosition = camera.position.clone();
+const lastValidLookTarget = new THREE.Vector3(0, 1, 0);
+let lastValidCameraFov = camera.fov;
 const cameraViewActionOrder = [
     ACTION_IDS.cameraView1,
     ACTION_IDS.cameraView2,
@@ -66,8 +74,16 @@ document.addEventListener('keydown', (event) => {
     if (!cameraKeyboardControlsEnabled) {
         return;
     }
+    if (event.repeat) {
+        return;
+    }
 
     const normalizedKey = normalizeKeyboardKey(event?.key || '');
+    if (isCameraViewCycleEvent(event, normalizedKey)) {
+        event.preventDefault();
+        cycleCameraViewMode();
+        return;
+    }
     if (
         actionMatchesEvent(
             ACTION_IDS.cameraCinematicToggle,
@@ -93,16 +109,22 @@ document.addEventListener('keydown', (event) => {
             continue;
         }
         event.preventDefault();
-        cameraViewMode = index + 1;
-        autoCinematicMode = false;
-        setCinematicMode(false);
+        setCameraViewMode(index + 1);
         return;
     }
 });
 
 function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
-    const dt = Math.min(deltaTime, 0.05);
-    const speedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 20, 0, 1);
+    if (!isFiniteVector3Like(car?.position) || !Number.isFinite(car?.rotation?.y)) {
+        restoreLastValidCameraState();
+        resetCameraTrackingState();
+        return;
+    }
+
+    const resolvedDeltaTime = Number.isFinite(deltaTime) && deltaTime > 0 ? deltaTime : 1 / 60;
+    const dt = Math.min(resolvedDeltaTime, 0.05);
+    const resolvedSpeed = Number.isFinite(speed) ? speed : 0;
+    const speedRatio = THREE.MathUtils.clamp(Math.abs(resolvedSpeed) / 20, 0, 1);
     const followResponsiveness = THREE.MathUtils.lerp(4, 7.5, speedRatio);
     const lookResponsiveness = THREE.MathUtils.lerp(5, 8.5, speedRatio);
     const headingResponsiveness = THREE.MathUtils.lerp(4.5, 8, speedRatio);
@@ -227,42 +249,13 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
             );
             baseLookTarget.set(car.position.x, car.position.y, car.position.z);
             break;
-        case 6: {
-            const dynamicSpeedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 38, 0, 1);
-            const backDistance = THREE.MathUtils.lerp(5.2, 9.6, dynamicSpeedRatio);
-            const chaseHeight = THREE.MathUtils.lerp(1.9, 3.2, dynamicSpeedRatio);
-            const lookAhead = THREE.MathUtils.lerp(5.5, 14, dynamicSpeedRatio);
-            const sideOffset = THREE.MathUtils.clamp(
-                -smoothedTurnBias * (1.3 + dynamicSpeedRatio * 2.4),
-                -2.6,
-                2.6
-            );
-            const lookSide = sideOffset * -0.28;
-            const turnLift = Math.abs(smoothedTurnBias) * 0.45;
-
-            const sinHeading = Math.sin(smoothedHeading);
-            const cosHeading = Math.cos(smoothedHeading);
-            const forwardX = -sinHeading;
-            const forwardZ = -cosHeading;
-            const rightX = cosHeading;
-            const rightZ = -sinHeading;
-
-            baseTargetPosition.set(
-                car.position.x - forwardX * backDistance + rightX * sideOffset,
-                car.position.y + chaseHeight + turnLift,
-                car.position.z - forwardZ * backDistance + rightZ * sideOffset
-            );
-            baseLookTarget.set(
-                car.position.x + forwardX * lookAhead + rightX * lookSide,
-                car.position.y + THREE.MathUtils.lerp(0.75, 1.45, dynamicSpeedRatio),
-                car.position.z + forwardZ * lookAhead + rightZ * lookSide
-            );
-
-            followBlend = 1 - Math.exp(-THREE.MathUtils.lerp(5.8, 10.6, dynamicSpeedRatio) * dt);
-            lookBlend = 1 - Math.exp(-THREE.MathUtils.lerp(6.2, 11.2, dynamicSpeedRatio) * dt);
-            targetFov = THREE.MathUtils.lerp(76, 88, dynamicSpeedRatio);
+        case CHASE_CAMERA_VIEW_MODE:
+            ({ followBlend, lookBlend, targetFov } = resolveChaseCameraTargets(
+                car,
+                resolvedSpeed,
+                dt
+            ));
             break;
-        }
         case 7: {
             roofCamWorldPosition.copy(roofCamLocalPosition);
             roofLookWorldPosition.copy(roofScreenLookLocal);
@@ -287,10 +280,14 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
             break;
     }
 
-    const cinematicShot = resolveCinematicShot(car, speed, dt);
+    if (!isFiniteVector3Like(baseTargetPosition) || !isFiniteVector3Like(baseLookTarget)) {
+        ({ followBlend, lookBlend, targetFov } = resolveChaseCameraTargets(car, resolvedSpeed, dt));
+    }
+
+    const cinematicShot = resolveCinematicShot(car, resolvedSpeed, dt);
     targetPosition.copy(baseTargetPosition).lerp(cinematicTargetPosition, cinematicBlend);
     lookTarget.copy(baseLookTarget).lerp(cinematicLookAtTarget, cinematicBlend);
-    const finalFollowBlend = THREE.MathUtils.lerp(
+    let finalFollowBlend = THREE.MathUtils.lerp(
         followBlend,
         cinematicShot.followBlend,
         cinematicBlend
@@ -299,20 +296,36 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
     let finalFov = THREE.MathUtils.lerp(targetFov, cinematicShot.targetFov, cinematicBlend);
 
     if (vehicleWeaponZoomBlend > 0.001) {
-        vehicleWeaponZoomTargetPosition.copy(targetPosition);
-        vehicleWeaponZoomDirection.subVectors(lookTarget, targetPosition);
-        const zoomDistance = vehicleWeaponZoomDirection.length();
-        if (zoomDistance > 0.0001) {
-            vehicleWeaponZoomDirection.multiplyScalar(1 / zoomDistance);
-            vehicleWeaponZoomTargetPosition.addScaledVector(
-                vehicleWeaponZoomDirection,
-                resolveVehicleWeaponZoomPullDistance(zoomDistance)
-            );
-            targetPosition.lerp(vehicleWeaponZoomTargetPosition, vehicleWeaponZoomBlend);
+        const zoomPose = options.vehicleWeaponZoomPose;
+        if (
+            isFiniteVector3Like(zoomPose?.position) &&
+            isFiniteVector3Like(zoomPose?.lookTarget)
+        ) {
+            vehicleWeaponZoomPosePosition.copy(zoomPose.position);
+            vehicleWeaponZoomPoseLookTarget.copy(zoomPose.lookTarget);
+            targetPosition.lerp(vehicleWeaponZoomPosePosition, vehicleWeaponZoomBlend);
+            lookTarget.lerp(vehicleWeaponZoomPoseLookTarget, vehicleWeaponZoomBlend);
+        } else {
+            vehicleWeaponZoomTargetPosition.copy(targetPosition);
+            vehicleWeaponZoomDirection.subVectors(lookTarget, targetPosition);
+            const zoomDistance = vehicleWeaponZoomDirection.length();
+            if (zoomDistance > 0.0001) {
+                vehicleWeaponZoomDirection.multiplyScalar(1 / zoomDistance);
+                vehicleWeaponZoomTargetPosition.addScaledVector(
+                    vehicleWeaponZoomDirection,
+                    resolveVehicleWeaponZoomPullDistance(zoomDistance)
+                );
+                targetPosition.lerp(vehicleWeaponZoomTargetPosition, vehicleWeaponZoomBlend);
+            }
         }
         finalFov = THREE.MathUtils.lerp(
             finalFov,
             resolveVehicleWeaponZoomFov(finalFov),
+            vehicleWeaponZoomBlend
+        );
+        finalFollowBlend = THREE.MathUtils.lerp(
+            finalFollowBlend,
+            1 - Math.exp(-VEHICLE_WEAPON_ZOOM_LOOK_SPEED * dt),
             vehicleWeaponZoomBlend
         );
         finalLookBlend = THREE.MathUtils.lerp(
@@ -322,10 +335,22 @@ function updateCamera(car, speed, deltaTime = 1 / 60, options = {}) {
         );
     }
 
+    if (!isFiniteVector3Like(targetPosition) || !isFiniteVector3Like(lookTarget)) {
+        restoreLastValidCameraState();
+        resetCameraTrackingState();
+        return;
+    }
+
     camera.position.lerp(targetPosition, finalFollowBlend);
     smoothedLookTarget.lerp(lookTarget, finalLookBlend);
+    if (!isFiniteVector3Like(camera.position) || !isFiniteVector3Like(smoothedLookTarget)) {
+        restoreLastValidCameraState();
+        resetCameraTrackingState();
+        return;
+    }
     camera.lookAt(smoothedLookTarget);
     updateCameraFov(finalFov, dt);
+    captureLastValidCameraState();
 }
 
 export { camera, updateCamera };
@@ -336,7 +361,7 @@ export function setCameraKeyboardControlsEnabled(nextEnabled) {
 
 export function setCameraViewMode(nextMode) {
     const numericMode = Math.round(Number(nextMode) || 0);
-    if (numericMode < 1 || numericMode > 8) {
+    if (numericMode < 1 || numericMode > cameraViewActionOrder.length) {
         return cameraViewMode;
     }
     cameraViewMode = numericMode;
@@ -374,6 +399,11 @@ function setCinematicMode(nextEnabled) {
     if (!enabled) {
         cinematicWasActive = false;
     }
+}
+
+function cycleCameraViewMode() {
+    const nextIndex = cameraViewMode % cameraViewActionOrder.length;
+    setCameraViewMode(nextIndex + 1);
 }
 
 function resolveCinematicShot(car, speed, dt) {
@@ -467,6 +497,44 @@ function findClosestCinematicTrackProgress(radius, height) {
     return closestProgress;
 }
 
+function resolveChaseCameraTargets(car, speed, dt) {
+    const dynamicSpeedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 38, 0, 1);
+    const backDistance = THREE.MathUtils.lerp(5.2, 9.6, dynamicSpeedRatio);
+    const chaseHeight = THREE.MathUtils.lerp(1.9, 3.2, dynamicSpeedRatio);
+    const lookAhead = THREE.MathUtils.lerp(5.5, 14, dynamicSpeedRatio);
+    const sideOffset = THREE.MathUtils.clamp(
+        -smoothedTurnBias * (1.3 + dynamicSpeedRatio * 2.4),
+        -2.6,
+        2.6
+    );
+    const lookSide = sideOffset * -0.28;
+    const turnLift = Math.abs(smoothedTurnBias) * 0.45;
+
+    const sinHeading = Math.sin(smoothedHeading);
+    const cosHeading = Math.cos(smoothedHeading);
+    const forwardX = -sinHeading;
+    const forwardZ = -cosHeading;
+    const rightX = cosHeading;
+    const rightZ = -sinHeading;
+
+    baseTargetPosition.set(
+        car.position.x - forwardX * backDistance + rightX * sideOffset,
+        car.position.y + chaseHeight + turnLift,
+        car.position.z - forwardZ * backDistance + rightZ * sideOffset
+    );
+    baseLookTarget.set(
+        car.position.x + forwardX * lookAhead + rightX * lookSide,
+        car.position.y + THREE.MathUtils.lerp(0.75, 1.45, dynamicSpeedRatio),
+        car.position.z + forwardZ * lookAhead + rightZ * lookSide
+    );
+
+    return {
+        followBlend: 1 - Math.exp(-THREE.MathUtils.lerp(5.8, 10.6, dynamicSpeedRatio) * dt),
+        lookBlend: 1 - Math.exp(-THREE.MathUtils.lerp(6.2, 11.2, dynamicSpeedRatio) * dt),
+        targetFov: THREE.MathUtils.lerp(76, 88, dynamicSpeedRatio),
+    };
+}
+
 function resolveVehicleWeaponZoomFov(baseFov) {
     switch (cameraViewMode) {
         case 7:
@@ -500,12 +568,59 @@ function lerpAngle(a, b, t) {
 }
 
 function updateCameraFov(targetFov, dt) {
+    const safeTargetFov = clampFiniteNumber(targetFov, CAMERA_FOV_MIN, CAMERA_FOV_MAX, 75);
     const fovLerp = 1 - Math.exp(-5.2 * dt);
-    const nextFov = THREE.MathUtils.lerp(camera.fov, targetFov, fovLerp);
+    const nextFov = THREE.MathUtils.lerp(
+        clampFiniteNumber(camera.fov, CAMERA_FOV_MIN, CAMERA_FOV_MAX, lastValidCameraFov),
+        safeTargetFov,
+        fovLerp
+    );
     if (Math.abs(nextFov - camera.fov) < 0.01) {
         return;
     }
 
     camera.fov = nextFov;
     camera.updateProjectionMatrix();
+}
+
+function captureLastValidCameraState() {
+    if (!isFiniteVector3Like(camera.position) || !isFiniteVector3Like(smoothedLookTarget)) {
+        return;
+    }
+    lastValidCameraPosition.copy(camera.position);
+    lastValidLookTarget.copy(smoothedLookTarget);
+    lastValidCameraFov = clampFiniteNumber(camera.fov, CAMERA_FOV_MIN, CAMERA_FOV_MAX, 75);
+}
+
+function restoreLastValidCameraState() {
+    if (
+        !isFiniteVector3Like(lastValidCameraPosition) ||
+        !isFiniteVector3Like(lastValidLookTarget)
+    ) {
+        return;
+    }
+    camera.position.copy(lastValidCameraPosition);
+    smoothedLookTarget.copy(lastValidLookTarget);
+    camera.fov = clampFiniteNumber(lastValidCameraFov, CAMERA_FOV_MIN, CAMERA_FOV_MAX, 75);
+    camera.lookAt(smoothedLookTarget);
+    camera.updateProjectionMatrix();
+}
+
+function isFiniteVector3Like(value) {
+    return Number.isFinite(value?.x) && Number.isFinite(value?.y) && Number.isFinite(value?.z);
+}
+
+function clampFiniteNumber(value, min, max, fallback) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return fallback;
+    }
+    return THREE.MathUtils.clamp(numeric, min, max);
+}
+
+function isCameraViewCycleEvent(event, normalizedKey = '') {
+    if (event?.ctrlKey || event?.altKey || event?.metaKey) {
+        return false;
+    }
+    return normalizedKey === '+' || event?.code === 'NumpadAdd';
 }

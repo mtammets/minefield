@@ -91,7 +91,7 @@ How it works:
     - `Shift+Tab`: previous roof tab
     - `1-4`: direct roof tabs
 - Camera:
-    - `Alt+1` ... `Alt+7`: camera views
+    - `+` (or numpad `+`): next camera view
     - `Alt+C`: cinematic camera toggle
 - Graphics quality cycle: `Y`.
 

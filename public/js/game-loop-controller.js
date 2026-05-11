@@ -711,6 +711,7 @@ export function createGameLoopController(options = {}) {
                         !isEditModeActive &&
                         !readCarDestroyed() &&
                         !readPickupRoundFinished(),
+                    vehicleWeaponZoomPose: vehicleWeaponSystem?.getZoomCameraPose?.() || null,
                     allowAutoCinematic: false,
                 });
                 const monumentRhythmState = audioController?.getMonumentRhythmState?.() || null;
