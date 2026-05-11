@@ -157,7 +157,7 @@ export function createControlsHelpController({
 } = {}) {
     const welcomeHostEl = document.getElementById('welcomeControlsPanel');
     const pauseHostEl = document.getElementById('pauseControlsPanel');
-    const gameplayStarterHud = mountGameplayStarterHud(keyBindings);
+    const gameplayStarterHud = null;
     const gameplayMineHud = mountGameplayMineHud();
     if (!welcomeHostEl && !pauseHostEl && !gameplayStarterHud && !gameplayMineHud) {
         return createNoopController();

@@ -82,6 +82,7 @@ canvas#gameCanvas {
     z-index: 6;
     pointer-events: none;
     overflow: hidden;
+    isolation: isolate;
 }
 
 #vehicleWeaponHud {
@@ -228,63 +229,427 @@ canvas#gameCanvas {
 }
 
 .scorePopup {
+    --score-popup-intensity: 1;
+    --score-popup-accent: rgba(255, 221, 140, 0.98);
+    --score-popup-accent-soft: rgba(255, 189, 88, 0.5);
+    --score-popup-panel-top: rgba(39, 27, 8, 0.95);
+    --score-popup-panel-bottom: rgba(17, 13, 8, 0.82);
+    --score-popup-border: rgba(255, 223, 146, 0.62);
+    --score-popup-text: rgba(255, 242, 206, 0.98);
+    --score-popup-meta: rgba(255, 234, 198, 0.9);
+    --score-popup-ring: rgba(255, 226, 165, 0.72);
     position: absolute;
     left: 0;
     top: 0;
-    min-width: 84px;
-    padding: 7px 10px 6px;
-    border-radius: 11px;
-    border: 1px solid rgba(183, 225, 255, 0.56);
-    background: linear-gradient(168deg, rgba(9, 23, 40, 0.84), rgba(6, 16, 30, 0.72));
-    box-shadow:
-        0 14px 28px rgba(0, 0, 0, 0.36),
-        inset 0 0 0 1px rgba(255, 255, 255, 0.06);
-    color: rgba(242, 250, 255, 0.98);
+    min-width: 132px;
     transform: translate3d(-9999px, -9999px, 0);
     transform-origin: center center;
     text-align: center;
     will-change: transform, opacity;
 }
 
+.scorePopupFlare,
+.scorePopupRing,
+.scorePopupPlate {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.scorePopupFlare {
+    width: calc(132px + var(--score-popup-intensity) * 42px);
+    height: calc(78px + var(--score-popup-intensity) * 18px);
+    border-radius: 999px;
+    background: radial-gradient(
+        circle,
+        color-mix(in srgb, var(--score-popup-accent) 68%, transparent) 0%,
+        color-mix(in srgb, var(--score-popup-accent-soft) 78%, transparent) 34%,
+        rgba(0, 0, 0, 0) 72%
+    );
+    filter: blur(18px);
+    opacity: 0.86;
+    animation: scorePopupFlareBloom 820ms ease-out both;
+}
+
+.scorePopupRing {
+    width: calc(96px + var(--score-popup-intensity) * 24px);
+    height: calc(96px + var(--score-popup-intensity) * 24px);
+    border-radius: 50%;
+    border: 1.5px solid color-mix(in srgb, var(--score-popup-ring) 88%, white 12%);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--score-popup-ring) 32%, transparent),
+        0 0 24px color-mix(in srgb, var(--score-popup-accent-soft) 44%, transparent);
+    opacity: 0.88;
+    animation: scorePopupRingPulse 680ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scorePopupPlate {
+    position: relative;
+    min-width: 132px;
+    padding: 11px 15px 10px;
+    border-radius: 18px;
+    border: 1px solid var(--score-popup-border);
+    background:
+        linear-gradient(
+            135deg,
+            color-mix(in srgb, white 10%, transparent) 0%,
+            rgba(255, 255, 255, 0) 32%
+        ),
+        linear-gradient(176deg, var(--score-popup-panel-top), var(--score-popup-panel-bottom));
+    box-shadow:
+        0 16px 34px rgba(0, 0, 0, 0.36),
+        0 0 34px color-mix(in srgb, var(--score-popup-accent-soft) 22%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+}
+
+.scorePopupPlate::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        104deg,
+        rgba(255, 255, 255, 0) 22%,
+        rgba(255, 255, 255, 0.16) 50%,
+        rgba(255, 255, 255, 0) 72%
+    );
+    opacity: 0;
+    transform: translateX(-112%);
+    animation: scorePopupShine 780ms ease-out both;
+}
+
 .scorePopupPrimary {
+    position: relative;
+    z-index: 1;
     font-family: 'Orbitron', sans-serif;
-    font-size: 19px;
-    line-height: 1;
-    font-weight: 800;
-    letter-spacing: 0.6px;
-    text-shadow: 0 0 18px rgba(147, 211, 255, 0.45);
+    font-size: clamp(1.2rem, 0.75rem + 1.35vw, 1.92rem);
+    line-height: 0.92;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    color: var(--score-popup-text);
+    text-shadow:
+        0 0 12px color-mix(in srgb, var(--score-popup-accent) 58%, transparent),
+        0 0 30px color-mix(in srgb, var(--score-popup-accent-soft) 54%, transparent);
+}
+
+.scorePopupMetaRow {
+    position: relative;
+    z-index: 1;
+    margin-top: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    flex-wrap: wrap;
 }
 
 .scorePopupMeta {
-    margin-top: 3px;
-    font-size: 10px;
-    line-height: 1.2;
-    letter-spacing: 0.45px;
-    color: rgba(210, 230, 248, 0.9);
+    font-size: 0.62rem;
+    line-height: 1;
+    letter-spacing: 0.22em;
+    color: var(--score-popup-meta);
     text-transform: uppercase;
     white-space: nowrap;
 }
 
-.scorePopupPickup {
-    border-color: rgba(255, 222, 148, 0.72);
-    background: linear-gradient(168deg, rgba(36, 27, 10, 0.88), rgba(19, 15, 8, 0.74));
+.scorePopupChain {
+    padding: 3px 8px 2px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--score-popup-accent) 56%, transparent);
+    background: color-mix(in srgb, var(--score-popup-accent-soft) 16%, rgba(6, 10, 18, 0.78));
+    color: color-mix(in srgb, white 84%, var(--score-popup-accent) 16%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.56rem;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.scorePopupPickup .scorePopupPrimary {
-    color: #ffe2a2;
-    text-shadow: 0 0 16px rgba(255, 193, 90, 0.54);
+.scorePopupPickup {
+    --score-popup-accent: rgba(255, 221, 140, 0.98);
+    --score-popup-accent-soft: rgba(255, 187, 74, 0.52);
+    --score-popup-panel-top: rgba(43, 29, 7, 0.96);
+    --score-popup-panel-bottom: rgba(19, 13, 8, 0.82);
+    --score-popup-border: rgba(255, 223, 146, 0.66);
+    --score-popup-text: rgba(255, 239, 200, 0.99);
+    --score-popup-meta: rgba(255, 234, 198, 0.9);
+    --score-popup-ring: rgba(255, 226, 165, 0.72);
 }
 
 .scorePopupImpact {
-    border-color: rgba(255, 122, 122, 0.84);
-    box-shadow:
-        0 14px 28px rgba(31, 0, 0, 0.32),
-        inset 0 0 0 1px rgba(255, 154, 154, 0.14);
+    --score-popup-accent: rgba(255, 169, 115, 0.98);
+    --score-popup-accent-soft: rgba(255, 91, 54, 0.54);
+    --score-popup-panel-top: rgba(47, 16, 8, 0.96);
+    --score-popup-panel-bottom: rgba(25, 10, 8, 0.84);
+    --score-popup-border: rgba(255, 156, 128, 0.72);
+    --score-popup-text: rgba(255, 228, 198, 0.98);
+    --score-popup-meta: rgba(255, 213, 198, 0.9);
+    --score-popup-ring: rgba(255, 156, 122, 0.74);
 }
 
-.scorePopupImpact .scorePopupPrimary {
-    color: #ffe0bf;
-    text-shadow: 0 0 16px rgba(255, 136, 90, 0.48);
+.scoreHeroBanner {
+    --score-hero-intensity: 1;
+    --score-hero-accent: rgba(255, 224, 143, 0.98);
+    --score-hero-accent-soft: rgba(255, 181, 72, 0.5);
+    --score-hero-panel-top: rgba(42, 27, 8, 0.96);
+    --score-hero-panel-bottom: rgba(15, 11, 7, 0.86);
+    --score-hero-border: rgba(255, 225, 150, 0.68);
+    --score-hero-text: rgba(255, 245, 218, 0.99);
+    --score-hero-meta: rgba(255, 236, 198, 0.88);
+    position: fixed;
+    left: 50%;
+    top: 16vh;
+    width: min(88vw, 440px);
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(-50%, calc(-50% + 36px), 0) scale(0.82);
+    will-change: transform, opacity;
+}
+
+.scoreHeroGlow,
+.scoreHeroBurst,
+.scoreHeroPlate {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.scoreHeroGlow {
+    width: calc(280px + var(--score-hero-intensity) * 84px);
+    height: calc(156px + var(--score-hero-intensity) * 34px);
+    border-radius: 999px;
+    background: radial-gradient(
+        circle,
+        color-mix(in srgb, var(--score-hero-accent) 58%, transparent) 0%,
+        color-mix(in srgb, var(--score-hero-accent-soft) 66%, transparent) 34%,
+        rgba(0, 0, 0, 0) 72%
+    );
+    filter: blur(24px);
+    opacity: 0;
+}
+
+.scoreHeroBurst {
+    width: calc(170px + var(--score-hero-intensity) * 36px);
+    height: calc(170px + var(--score-hero-intensity) * 36px);
+    border-radius: 50%;
+    border: 1px solid color-mix(in srgb, var(--score-hero-border) 72%, transparent);
+    box-shadow:
+        0 0 0 1px color-mix(in srgb, var(--score-hero-border) 24%, transparent),
+        0 0 42px color-mix(in srgb, var(--score-hero-accent-soft) 30%, transparent);
+    opacity: 0;
+}
+
+.scoreHeroPlate {
+    position: relative;
+    width: 100%;
+    padding: 18px 22px 16px;
+    border-radius: 26px;
+    border: 1px solid var(--score-hero-border);
+    background:
+        linear-gradient(
+            132deg,
+            color-mix(in srgb, white 12%, transparent) 0%,
+            rgba(255, 255, 255, 0) 34%
+        ),
+        linear-gradient(180deg, var(--score-hero-panel-top), var(--score-hero-panel-bottom));
+    box-shadow:
+        0 22px 54px rgba(0, 0, 0, 0.42),
+        0 0 44px color-mix(in srgb, var(--score-hero-accent-soft) 20%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+}
+
+.scoreHeroPlate::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        102deg,
+        rgba(255, 255, 255, 0) 18%,
+        rgba(255, 255, 255, 0.18) 49%,
+        rgba(255, 255, 255, 0) 78%
+    );
+    opacity: 0;
+    transform: translateX(-112%);
+    animation: scoreHeroSheen 980ms ease-out both;
+}
+
+.scoreHeroLabelRow,
+.scoreHeroValue,
+.scoreHeroSubline {
+    position: relative;
+    z-index: 1;
+}
+
+.scoreHeroLabelRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.scoreHeroLabel {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.26em;
+    color: var(--score-hero-meta);
+    text-transform: uppercase;
+}
+
+.scoreHeroChip {
+    flex: 0 0 auto;
+    padding: 6px 10px 5px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--score-hero-accent) 60%, transparent);
+    background: color-mix(in srgb, var(--score-hero-accent-soft) 18%, rgba(8, 12, 18, 0.8));
+    color: color-mix(in srgb, white 84%, var(--score-hero-accent) 16%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 0.58rem;
+    line-height: 1;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    box-shadow:
+        0 0 18px color-mix(in srgb, var(--score-hero-accent-soft) 18%, transparent),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.scoreHeroValue {
+    margin-top: 8px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(2rem, 1.3rem + 3.8vw, 3.7rem);
+    line-height: 0.9;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    color: var(--score-hero-text);
+    text-shadow:
+        0 0 22px color-mix(in srgb, var(--score-hero-accent) 48%, transparent),
+        0 0 54px color-mix(in srgb, var(--score-hero-accent-soft) 34%, transparent);
+}
+
+.scoreHeroSubline {
+    margin-top: 9px;
+    font-family: 'Sora', sans-serif;
+    font-size: 0.74rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: color-mix(in srgb, var(--score-hero-meta) 88%, white 12%);
+    text-transform: uppercase;
+}
+
+.scoreHeroBannerPickup {
+    --score-hero-accent: rgba(255, 224, 143, 0.98);
+    --score-hero-accent-soft: rgba(255, 181, 72, 0.5);
+    --score-hero-panel-top: rgba(42, 27, 8, 0.96);
+    --score-hero-panel-bottom: rgba(15, 11, 7, 0.86);
+    --score-hero-border: rgba(255, 225, 150, 0.68);
+    --score-hero-text: rgba(255, 245, 218, 0.99);
+    --score-hero-meta: rgba(255, 236, 198, 0.88);
+}
+
+.scoreHeroBannerImpact {
+    --score-hero-accent: rgba(255, 173, 120, 0.98);
+    --score-hero-accent-soft: rgba(255, 87, 48, 0.54);
+    --score-hero-panel-top: rgba(48, 17, 10, 0.97);
+    --score-hero-panel-bottom: rgba(17, 8, 8, 0.88);
+    --score-hero-border: rgba(255, 160, 126, 0.7);
+    --score-hero-text: rgba(255, 230, 204, 0.99);
+    --score-hero-meta: rgba(255, 210, 194, 0.9);
+}
+
+@keyframes scorePopupFlareBloom {
+    0% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.54);
+    }
+    28% {
+        opacity: 0.95;
+    }
+    100% {
+        opacity: 0.34;
+        transform: translate(-50%, -50%) scale(1.15);
+    }
+}
+
+@keyframes scorePopupRingPulse {
+    0% {
+        opacity: 0.04;
+        transform: translate(-50%, -50%) scale(0.44);
+    }
+    30% {
+        opacity: 0.84;
+    }
+    100% {
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(1.36);
+    }
+}
+
+@keyframes scorePopupShine {
+    0% {
+        opacity: 0;
+        transform: translateX(-112%);
+    }
+    22% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+        transform: translateX(122%);
+    }
+}
+
+@keyframes scoreHeroSheen {
+    0% {
+        opacity: 0;
+        transform: translateX(-112%);
+    }
+    18% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0;
+        transform: translateX(124%);
+    }
+}
+
+@media (max-width: 720px) {
+    .scoreHeroBanner {
+        top: 13.5vh;
+        width: min(92vw, 420px);
+    }
+
+    .scoreHeroPlate {
+        padding: 16px 18px 14px;
+        border-radius: 22px;
+    }
+
+    .scoreHeroLabelRow {
+        gap: 10px;
+    }
+
+    .scoreHeroLabel {
+        font-size: 0.62rem;
+        letter-spacing: 0.22em;
+    }
+
+    .scoreHeroChip {
+        padding: 5px 8px 4px;
+        font-size: 0.54rem;
+    }
+
+    .scoreHeroSubline {
+        font-size: 0.68rem;
+        letter-spacing: 0.1em;
+    }
 }
 
 #raceIntroOverlay {
