@@ -3267,45 +3267,85 @@ body.race-intro-active #miniMapHud {
     text-transform: uppercase;
 }
 
-#leaderboardSummary {
-    margin-top: 7px;
-    font-size: clamp(13px, 1.4vw, 19px);
-    color: rgba(220, 237, 255, 0.94);
-    line-height: 1.35;
-}
-
 .leaderboardKpiGrid {
     margin-top: 14px;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 9px;
+    grid-template-columns: minmax(0, 1fr);
 }
 
-.leaderboardKpi {
-    min-height: 84px;
-    border: 1px solid rgba(152, 198, 249, 0.34);
-    border-radius: 12px;
-    padding: 10px 12px;
-    background: linear-gradient(170deg, rgba(15, 34, 61, 0.76), rgba(8, 19, 37, 0.76));
-    box-shadow: inset 0 0 0 1px rgba(229, 241, 255, 0.05);
+.leaderboardPlayerIdentity {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
-.leaderboardKpiLabel {
-    color: rgba(186, 217, 246, 0.92);
-    font-size: 10px;
-    letter-spacing: 1px;
-    font-weight: 700;
-    text-transform: uppercase;
+.leaderboardPlayerSummaryCard {
+    display: grid;
+    gap: 12px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 224, 255, 0.44);
+    background:
+        linear-gradient(160deg, rgba(16, 34, 60, 0.76), rgba(10, 22, 40, 0.76)),
+        radial-gradient(circle at 16% 22%, rgba(98, 177, 255, 0.1), rgba(98, 177, 255, 0) 34%);
+    box-shadow:
+        inset 0 0 0 1px rgba(175, 230, 255, 0.12),
+        0 0 24px rgba(83, 170, 246, 0.12);
 }
 
-.leaderboardKpiValue {
-    margin-top: 5px;
-    color: rgba(242, 249, 255, 0.99);
-    font-family: 'Orbitron', sans-serif;
-    font-size: clamp(20px, 2.4vw, 34px);
-    line-height: 1.02;
-    letter-spacing: 0.4px;
+.leaderboardPlayerSummaryHead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.leaderboardPlayerAvatar {
+    flex: 0 0 auto;
+    display: inline-flex;
+}
+
+.leaderboardPlayerAvatar .leaderboardAvatar {
+    width: 50px;
+    height: 50px;
+    border-radius: 16px;
+}
+
+.leaderboardPlayerAvatar .leaderboardAvatarFallback {
+    font-size: 16px;
+    letter-spacing: 0.9px;
+}
+
+.leaderboardPlayerName {
+    min-width: 0;
+    color: #f1f8ff;
+    font-size: clamp(24px, 2.7vw, 40px);
     font-weight: 800;
+    letter-spacing: 0.2px;
+    line-height: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.leaderboardPlayerSummaryScore {
+    flex: 0 0 auto;
+    color: #ffefc2;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(24px, 2.8vw, 42px);
+    font-weight: 800;
+    line-height: 1.02;
+    text-align: right;
+    letter-spacing: 0.4px;
+}
+
+.leaderboardPlayerSummaryMeta {
+    color: rgba(206, 232, 255, 0.9);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
 }
 
 .leaderboardSectionHeader {
@@ -3794,6 +3834,126 @@ body.race-intro-active #miniMapHud {
     margin-bottom: 12px;
     background: linear-gradient(165deg, rgba(17, 31, 53, 0.64), rgba(11, 20, 36, 0.74));
     box-shadow: inset 0 0 0 1px rgba(215, 236, 255, 0.05);
+}
+
+.pauseCameraTunePanel {
+    display: grid;
+    gap: 10px;
+    border: 1px solid rgba(157, 198, 255, 0.34);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background:
+        linear-gradient(165deg, rgba(18, 33, 56, 0.72), rgba(10, 19, 33, 0.8)),
+        radial-gradient(circle at 14% 18%, rgba(109, 183, 255, 0.12), rgba(109, 183, 255, 0) 34%);
+    box-shadow:
+        inset 0 0 0 1px rgba(215, 236, 255, 0.04),
+        0 10px 28px rgba(0, 0, 0, 0.18);
+}
+
+.pauseCameraTunePanel[data-active='true'] {
+    border-color: rgba(138, 225, 187, 0.42);
+    box-shadow:
+        inset 0 0 0 1px rgba(215, 236, 255, 0.04),
+        0 14px 32px rgba(0, 0, 0, 0.22),
+        0 0 0 1px rgba(118, 214, 174, 0.08);
+}
+
+.pauseCameraTuneHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pauseCameraTuneScope {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border: 1px solid rgba(154, 223, 255, 0.36);
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: rgba(228, 242, 255, 0.92);
+    background: rgba(24, 46, 75, 0.56);
+}
+
+.pauseCameraTunePanel[data-active='true'] .pauseCameraTuneScope {
+    border-color: rgba(141, 236, 194, 0.58);
+    color: rgba(233, 255, 242, 0.98);
+    background: rgba(24, 87, 61, 0.42);
+}
+
+.pauseCameraTuneMeters {
+    display: grid;
+    gap: 9px;
+}
+
+.pauseCameraTuneMeter {
+    display: grid;
+    gap: 6px;
+}
+
+.pauseCameraTuneMeterHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.pauseCameraTuneMeterLabel,
+.pauseCameraTuneMeterTone {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: rgba(191, 222, 250, 0.92);
+}
+
+.pauseCameraTuneMeterTone {
+    color: rgba(231, 242, 250, 0.98);
+}
+
+.pauseCameraTuneBar {
+    position: relative;
+    height: 10px;
+    border: 1px solid rgba(153, 193, 222, 0.28);
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(10, 20, 34, 0.92);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.24);
+}
+
+.pauseCameraTuneBarFill {
+    display: block;
+    height: 100%;
+    width: 50%;
+    border-radius: inherit;
+    background:
+        linear-gradient(90deg, rgba(85, 150, 220, 0.76), rgba(138, 225, 187, 0.9)),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
+    box-shadow: 0 0 14px rgba(112, 188, 255, 0.18);
+}
+
+.pauseCameraTuneHotkeys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pauseCameraTuneHotkey {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    padding: 0 9px;
+    border: 1px solid rgba(152, 190, 216, 0.24);
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 0.9px;
+    color: rgba(184, 213, 229, 0.88);
+    background: rgba(10, 20, 34, 0.64);
 }
 
 .pauseGraphicsHeader {
@@ -5312,7 +5472,17 @@ body.race-intro-active #botPanel {
     }
 
     .leaderboardKpiGrid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: 1fr;
+    }
+
+    .leaderboardPlayerSummaryHead {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+
+    .leaderboardPlayerSummaryScore {
+        text-align: left;
     }
 
     .leaderboardTopDriversHeader {
@@ -5957,19 +6127,127 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthAvatarFrame {
-    width: 78px;
-    height: 78px;
-    border: 1px solid rgba(156, 199, 223, 0.48);
-    border-radius: 22px;
+    appearance: none;
+    width: 104px;
+    height: 104px;
+    padding: 0;
+    border: 1px solid rgba(166, 205, 229, 0.54);
+    border-radius: 28px;
     overflow: hidden;
+    position: relative;
+    isolation: isolate;
     display: grid;
     place-items: center;
     background:
-        radial-gradient(circle at 30% 20%, rgba(168, 216, 246, 0.16), transparent 60%),
+        radial-gradient(circle at 32% 18%, rgba(168, 216, 246, 0.18), transparent 60%),
         linear-gradient(180deg, rgba(16, 37, 58, 0.96), rgba(8, 18, 29, 0.96));
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.08),
-        0 10px 22px rgba(0, 0, 0, 0.18);
+        0 16px 30px rgba(4, 10, 18, 0.3),
+        0 0 0 1px rgba(88, 148, 214, 0.16);
+    cursor: pointer;
+    transition:
+        transform 140ms ease,
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        filter 140ms ease;
+}
+
+.welcomeAuthAvatarFrame::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    opacity: 0.34;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0)),
+        radial-gradient(circle at 72% 76%, rgba(96, 182, 255, 0.44), transparent 44%);
+    transition: opacity 140ms ease;
+}
+
+.welcomeAuthAvatarFrame::after {
+    content: '+';
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    z-index: 3;
+    width: 32px;
+    height: 32px;
+    border: 1px solid rgba(132, 198, 255, 0.78);
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-family: 'Sora', sans-serif;
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1;
+    color: rgba(242, 249, 255, 0.98);
+    background:
+        linear-gradient(180deg, rgba(37, 97, 154, 0.96), rgba(17, 44, 77, 0.98)),
+        linear-gradient(90deg, rgba(128, 230, 190, 0.18), rgba(128, 230, 190, 0));
+    box-shadow:
+        0 8px 18px rgba(18, 55, 93, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    pointer-events: none;
+    transition:
+        transform 140ms ease,
+        border-color 140ms ease,
+        box-shadow 140ms ease,
+        filter 140ms ease;
+}
+
+.welcomeAuthAvatarFrame[data-interactive='true']:hover,
+.welcomeAuthAvatarFrame[data-interactive='true']:focus-visible {
+    transform: translateY(-1px) scale(1.01);
+    border-color: rgba(179, 220, 246, 0.82);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 18px 34px rgba(0, 0, 0, 0.22),
+        0 0 0 2px rgba(92, 161, 223, 0.16);
+    filter: brightness(1.04);
+}
+
+.welcomeAuthAvatarFrame[data-interactive='true']:hover::before,
+.welcomeAuthAvatarFrame[data-interactive='true']:focus-visible::before {
+    opacity: 1;
+}
+
+.welcomeAuthAvatarFrame[data-interactive='true']:hover::after,
+.welcomeAuthAvatarFrame[data-interactive='true']:focus-visible::after {
+    transform: scale(1.08);
+    border-color: rgba(190, 229, 255, 0.94);
+    box-shadow:
+        0 10px 20px rgba(26, 74, 121, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.welcomeAuthAvatarFrame[data-interactive='false'] {
+    cursor: default;
+}
+
+.welcomeAuthAvatarFrame:disabled {
+    opacity: 0.72;
+    transform: none;
+    filter: none;
+}
+
+.welcomeAuthAvatarFrame:focus-visible {
+    outline: none;
+}
+
+.welcomeAuthAvatarFrame[data-has-image='false']::after {
+    background:
+        linear-gradient(180deg, rgba(29, 117, 80, 0.94), rgba(14, 54, 36, 0.96)),
+        linear-gradient(90deg, rgba(154, 242, 194, 0.16), rgba(154, 242, 194, 0));
+    border-color: rgba(146, 232, 188, 0.76);
+}
+
+.welcomeAuthAvatarFrame[data-has-image='true'] {
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 18px 34px rgba(5, 12, 20, 0.34),
+        0 0 0 1px rgba(91, 152, 221, 0.16);
 }
 
 .welcomeAuthAvatarImage {
@@ -5977,6 +6255,15 @@ body.race-intro-active #botPanel {
     height: 100%;
     object-fit: cover;
     display: block;
+    transition:
+        transform 180ms ease,
+        filter 180ms ease;
+}
+
+.welcomeAuthAvatarFrame[data-interactive='true']:hover .welcomeAuthAvatarImage,
+.welcomeAuthAvatarFrame[data-interactive='true']:focus-visible .welcomeAuthAvatarImage {
+    transform: scale(1.05);
+    filter: saturate(1.04);
 }
 
 .welcomeAuthAvatarImage[hidden] {
@@ -5985,9 +6272,9 @@ body.race-intro-active #botPanel {
 
 .welcomeAuthAvatarFallback {
     font-family: 'Orbitron', sans-serif;
-    font-size: 28px;
+    font-size: 34px;
     font-weight: 800;
-    letter-spacing: 0.8px;
+    letter-spacing: 1.2px;
     color: rgba(235, 247, 255, 0.98);
     text-transform: uppercase;
 }
@@ -5995,7 +6282,53 @@ body.race-intro-active #botPanel {
 .welcomeAuthProfileMeta {
     min-width: 0;
     display: grid;
-    gap: 4px;
+    align-content: center;
+    gap: 10px;
+}
+
+.welcomeAuthProfileInlineActions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.welcomeAuthMetaActionBtn {
+    border: 1px solid rgba(209, 123, 123, 0.46);
+    border-radius: 999px;
+    min-height: 28px;
+    padding: 0 12px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 220, 220, 0.9);
+    background:
+        linear-gradient(180deg, rgba(76, 27, 35, 0.5), rgba(47, 15, 20, 0.54)),
+        linear-gradient(90deg, rgba(255, 162, 162, 0.08), rgba(255, 162, 162, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 10px 20px rgba(38, 8, 12, 0.16);
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        border-color 120ms ease,
+        background 120ms ease,
+        color 120ms ease;
+}
+
+.welcomeAuthMetaActionBtn:hover,
+.welcomeAuthMetaActionBtn:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(232, 157, 157, 0.72);
+    background: rgba(112, 29, 36, 0.34);
+    color: rgba(255, 234, 234, 0.96);
+}
+
+.welcomeAuthMetaActionBtn:disabled {
+    opacity: 0.56;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .welcomeAuthSignedInName {
@@ -6003,19 +6336,19 @@ body.race-intro-active #botPanel {
     align-items: center;
     justify-self: start;
     gap: 8px;
-    min-height: 28px;
-    padding: 0 12px;
+    min-height: 34px;
+    padding: 0 16px;
     border: 1px solid rgba(142, 236, 184, 0.7);
     border-radius: 999px;
     font-family: 'Sora', sans-serif;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 800;
-    letter-spacing: 1px;
+    letter-spacing: 1.2px;
     text-transform: uppercase;
     color: #ebfff7;
     background: linear-gradient(180deg, rgba(28, 106, 71, 0.9), rgba(13, 48, 31, 0.94));
     box-shadow:
-        0 8px 18px rgba(21, 88, 56, 0.22),
+        0 12px 24px rgba(21, 88, 56, 0.22),
         inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
@@ -6030,12 +6363,315 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthSignedInEmail {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    min-height: 34px;
+    max-width: min(100%, 440px);
+    padding: 0 13px;
+    border: 1px solid rgba(124, 170, 204, 0.28);
+    border-radius: 12px;
     font-family: 'Sora', sans-serif;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    color: rgba(186, 214, 232, 0.94);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.32px;
+    color: rgba(214, 230, 241, 0.96);
+    background:
+        linear-gradient(180deg, rgba(13, 29, 45, 0.72), rgba(8, 18, 29, 0.84)),
+        linear-gradient(90deg, rgba(113, 184, 255, 0.08), rgba(113, 184, 255, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
     overflow-wrap: anywhere;
+}
+
+.welcomeAuthSignedInShell {
+    position: relative;
+    display: grid;
+    gap: 14px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+}
+
+.welcomeAuthSignedInShell::before {
+    display: none;
+}
+
+.welcomeAuthSignedInShell::after {
+    display: none;
+}
+
+.welcomeAuthSignedInShell .welcomeAuthProfileRow {
+    position: relative;
+    z-index: 1;
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 18px;
+    align-items: center;
+    min-height: auto;
+    padding: 0 0 14px;
+    border: 0;
+    border-bottom: 1px solid rgba(136, 181, 211, 0.2);
+    border-radius: 0;
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
+}
+
+.welcomeAuthSignedInShell .welcomeAuthProfileRow::before {
+    display: none;
+}
+
+.welcomeAuthSignedInShell .welcomeAuthProfileRow::after {
+    display: none;
+}
+
+.welcomeAuthSignedInShell .welcomeAuthAvatarFrame,
+.welcomeAuthSignedInShell .welcomeAuthProfileMeta {
+    position: relative;
+    z-index: 1;
+}
+
+.welcomeAuthSectionTabs {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 8px;
+    padding: 0;
+}
+
+.welcomeAuthSectionTab {
+    display: grid;
+    place-items: center;
+    flex: 1 1 0;
+    border: 1px solid rgba(131, 176, 209, 0.32);
+    border-radius: 14px;
+    min-height: 42px;
+    padding: 0 16px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(173, 204, 221, 0.88);
+    background:
+        linear-gradient(180deg, rgba(15, 31, 47, 0.82), rgba(8, 18, 29, 0.88)),
+        linear-gradient(90deg, rgba(104, 180, 255, 0.04), rgba(104, 180, 255, 0));
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        color 120ms ease,
+        background 120ms ease;
+}
+
+.welcomeAuthSectionTab[data-selected='true'] {
+    color: rgba(239, 248, 255, 0.98);
+    border-color: rgba(132, 199, 255, 0.88);
+    background:
+        linear-gradient(180deg, rgba(35, 95, 152, 0.9), rgba(18, 46, 81, 0.92)),
+        linear-gradient(90deg, rgba(129, 230, 191, 0.16), rgba(129, 230, 191, 0));
+    box-shadow:
+        0 10px 24px rgba(22, 71, 126, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.welcomeAuthSectionTab:hover,
+.welcomeAuthSectionTab:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(181, 215, 239, 0.72);
+}
+
+.welcomeAuthSectionTab:disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.welcomeAuthSectionStage {
+    position: relative;
+    z-index: 1;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+    background: transparent;
+    box-shadow: none;
+}
+
+.welcomeAuthSectionStage::before {
+    display: none;
+}
+
+.welcomeAuthSectionPanel {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 12px;
+    animation: welcomeAuthPanelFadeIn 180ms ease both;
+}
+
+.welcomeAuthSectionPanel[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthActionGrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.welcomeAuthActionBtn {
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(126, 171, 204, 0.42);
+    border-radius: 18px;
+    min-height: 96px;
+    padding: 0 18px;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-align: center;
+    text-transform: uppercase;
+    color: rgba(228, 240, 248, 0.96);
+    background:
+        linear-gradient(180deg, rgba(18, 40, 61, 0.92), rgba(9, 21, 33, 0.94)),
+        radial-gradient(circle at 20% 18%, rgba(110, 188, 255, 0.08), rgba(110, 188, 255, 0) 36%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 16px 30px rgba(0, 0, 0, 0.16);
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        filter 120ms ease;
+}
+
+.welcomeAuthActionBtn:hover,
+.welcomeAuthActionBtn:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(196, 223, 242, 0.86);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 18px 34px rgba(0, 0, 0, 0.18);
+    filter: brightness(1.03);
+}
+
+.welcomeAuthActionBtn:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthActionBtnPrimary {
+    border-color: rgba(133, 205, 255, 0.68);
+    background:
+        linear-gradient(180deg, rgba(30, 79, 129, 0.92), rgba(14, 35, 59, 0.94)),
+        linear-gradient(90deg, rgba(129, 230, 191, 0.16), rgba(129, 230, 191, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 18px 34px rgba(21, 66, 112, 0.22);
+}
+
+.welcomeAuthGameplayCard {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    min-height: 92px;
+    padding: 0 18px;
+    border: 1px solid rgba(123, 170, 205, 0.38);
+    border-radius: 18px;
+    overflow: hidden;
+    background:
+        linear-gradient(180deg, rgba(14, 31, 47, 0.92), rgba(8, 18, 29, 0.94)),
+        radial-gradient(circle at 18% 20%, rgba(104, 180, 255, 0.08), rgba(104, 180, 255, 0) 34%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 16px 30px rgba(0, 0, 0, 0.16);
+}
+
+.welcomeAuthGameplayCard::before {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 72px;
+    pointer-events: none;
+    opacity: 0.56;
+    background: linear-gradient(90deg, rgba(76, 140, 208, 0.14), rgba(76, 140, 208, 0));
+}
+
+.welcomeAuthGameplayLabel {
+    position: relative;
+    z-index: 1;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: rgba(231, 242, 250, 0.98);
+    text-shadow: none;
+}
+
+.welcomeAuthDangerRow {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.welcomeAuthDangerInlineBtn {
+    border: 1px solid rgba(211, 109, 109, 0.52);
+    border-radius: 999px;
+    min-height: 38px;
+    padding: 0 14px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 207, 207, 0.96);
+    background: rgba(92, 23, 29, 0.34);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        border-color 120ms ease,
+        background 120ms ease,
+        color 120ms ease;
+}
+
+.welcomeAuthDangerInlineBtn:hover,
+.welcomeAuthDangerInlineBtn:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(244, 157, 157, 0.82);
+    background: rgba(116, 29, 36, 0.5);
+    color: rgba(255, 229, 229, 0.98);
+}
+
+.welcomeAuthDangerInlineBtn:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+    transform: none;
+}
+
+@keyframes welcomeAuthPanelFadeIn {
+    0% {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .welcomeAuthStatus {
@@ -6061,6 +6697,132 @@ body.race-intro-active #botPanel {
 
 .welcomeAuthStatus[data-tone='error'] {
     color: rgba(255, 178, 178, 0.96);
+}
+
+.welcomeAuthStatus[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthToggleControl {
+    position: relative;
+    display: inline-flex;
+    width: 52px;
+    height: 30px;
+    flex: 0 0 auto;
+}
+
+.welcomeAuthToggleInput {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.welcomeAuthToggleTrack {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border: 1px solid rgba(150, 190, 214, 0.46);
+    border-radius: 999px;
+    background: linear-gradient(180deg, rgba(17, 36, 54, 0.94), rgba(8, 18, 29, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 8px 16px rgba(0, 0, 0, 0.16);
+    transition:
+        border-color 120ms ease,
+        background 120ms ease,
+        box-shadow 120ms ease;
+}
+
+.welcomeAuthToggleTrack::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, rgba(240, 246, 251, 0.98), rgba(188, 207, 223, 0.94));
+    box-shadow:
+        0 5px 10px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    transition:
+        transform 120ms ease,
+        background 120ms ease;
+}
+
+.welcomeAuthToggleInput:checked + .welcomeAuthToggleTrack {
+    border-color: rgba(141, 236, 194, 0.86);
+    background: linear-gradient(180deg, rgba(30, 99, 70, 0.92), rgba(13, 46, 33, 0.95));
+    box-shadow:
+        0 10px 18px rgba(24, 92, 62, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.welcomeAuthToggleInput:checked + .welcomeAuthToggleTrack::after {
+    transform: translateX(22px);
+    background: linear-gradient(180deg, rgba(233, 255, 243, 0.99), rgba(180, 235, 201, 0.95));
+}
+
+.welcomeAuthToggleInput:focus-visible + .welcomeAuthToggleTrack {
+    outline: none;
+    box-shadow:
+        0 0 0 2px rgba(124, 182, 219, 0.26),
+        0 8px 16px rgba(0, 0, 0, 0.16);
+}
+
+@media (max-width: 720px) {
+    .welcomeAuthSignedInShell {
+        padding: 0;
+    }
+
+    .welcomeAuthProfileRow {
+        grid-template-columns: 1fr;
+        align-items: start;
+    }
+
+    .welcomeAuthSignedInShell .welcomeAuthProfileRow {
+        grid-template-columns: 1fr;
+        min-height: auto;
+        padding: 0 0 14px;
+        gap: 14px;
+    }
+
+    .welcomeAuthAvatarFrame {
+        width: 96px;
+        height: 96px;
+        border-radius: 24px;
+    }
+
+    .welcomeAuthAvatarFrame::after {
+        width: 30px;
+        height: 30px;
+        font-size: 18px;
+    }
+
+    .welcomeAuthInlineActions {
+        grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthActionGrid {
+        grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthSectionTabs {
+        flex-direction: column;
+    }
+
+    .welcomeAuthSectionStage {
+        padding: 0;
+    }
+
+    .welcomeAuthGameplayCard {
+        grid-template-columns: 1fr;
+        justify-items: start;
+        min-height: 88px;
+        padding: 18px;
+    }
 }
 
 #welcomeStartBtn,
@@ -6937,11 +7699,55 @@ body.race-intro-active #botPanel {
 }
 
 .welcomePreviewAccountCard {
-    width: min(100%, 560px);
+    position: relative;
+    width: min(100%, 720px);
+    overflow: hidden;
+    border-color: rgba(176, 212, 232, 0.54);
+    border-radius: 24px;
+    padding: clamp(16px, 2.3vw, 24px);
+    background:
+        radial-gradient(circle at 16% 10%, rgba(112, 184, 255, 0.1), rgba(112, 184, 255, 0) 28%),
+        linear-gradient(170deg, rgba(13, 26, 40, 0.95), rgba(8, 16, 26, 0.96)),
+        linear-gradient(120deg, rgba(146, 208, 242, 0.08), rgba(146, 208, 242, 0));
+    box-shadow:
+        0 28px 62px rgba(0, 0, 0, 0.44),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.welcomePreviewAccountCard::before {
+    display: none;
+}
+
+.welcomePreviewAccountCard::after {
+    display: none;
+}
+
+.welcomePreviewAccountCard .welcomePreviewLeaderboardHeader,
+.welcomePreviewAccountBody {
+    position: relative;
+    z-index: 1;
+}
+
+.welcomePreviewAccountCard .welcomePreviewLeaderboardHeading {
+    display: grid;
+    gap: 2px;
+}
+
+.welcomePreviewAccountCard .welcomePreviewLeaderboardEyebrow {
+    font-size: 10px;
+    letter-spacing: 1.4px;
 }
 
 .welcomePreviewAccountTitle {
-    color: rgba(223, 244, 255, 0.98);
+    margin-top: 0;
+    font-size: clamp(28px, 3.2vw, 38px);
+    line-height: 0.98;
+    letter-spacing: 0.35px;
+    color: transparent;
+    background: linear-gradient(108deg, #f7fbff 0%, #deeffb 34%, #ffffff 54%, #ffdcb2 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    text-shadow: 0 0 18px rgba(178, 216, 242, 0.1);
 }
 
 .welcomePreviewAccountBody {

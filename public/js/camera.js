@@ -30,6 +30,16 @@ const CAMERA_FOV_MAX = 100;
 const DEFAULT_CAMERA_UP = new THREE.Vector3(0, 1, 0);
 const TOP_DOWN_CAMERA_UP = new THREE.Vector3(0, 0, -1);
 const CHASE_CAMERA_VIEW_MODE = 6;
+const CHASE_CAMERA_SETTING_MIN = -1;
+const CHASE_CAMERA_SETTING_MAX = 1;
+const CHASE_CAMERA_DISTANCE_STEP = 0.14;
+const CHASE_CAMERA_HEIGHT_STEP = 0.14;
+const CHASE_CAMERA_DISTANCE_ADJUSTMENT = 2.4;
+const CHASE_CAMERA_HEIGHT_ADJUSTMENT = 1.08;
+const CHASE_CAMERA_LOOKAHEAD_DISTANCE_FACTOR = 2.1;
+const CHASE_CAMERA_LOOKAHEAD_HEIGHT_FACTOR = 0.36;
+const CHASE_CAMERA_FOV_DISTANCE_FACTOR = 5.6;
+const CHASE_CAMERA_FOV_HEIGHT_FACTOR = 1.4;
 const CINEMATIC_LOOP_TRACK = Object.freeze([
     { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
     { t: 0.22, radius: 10.1, height: 5.5, fov: 71, lookAhead: 2.2, lookHeight: 1.02 },
@@ -42,6 +52,7 @@ let smoothedHeading = 0;
 let smoothedTurnBias = 0;
 let hasCameraState = false;
 let cameraKeyboardControlsEnabled = true;
+let chaseCameraSettings = createDefaultChaseCameraSettings();
 
 const targetPosition = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
@@ -356,6 +367,44 @@ export function setCameraKeyboardControlsEnabled(nextEnabled) {
     cameraKeyboardControlsEnabled = Boolean(nextEnabled);
 }
 
+export function getChaseCameraSettings() {
+    return {
+        ...chaseCameraSettings,
+    };
+}
+
+export function setChaseCameraSettings(nextSettings = {}) {
+    chaseCameraSettings = normalizeChaseCameraSettings(nextSettings, chaseCameraSettings);
+    return getChaseCameraSettings();
+}
+
+export function adjustChaseCameraSettings({ distanceStep = 0, heightStep = 0 } = {}) {
+    return setChaseCameraSettings({
+        distanceBias:
+            chaseCameraSettings.distanceBias +
+            resolveFiniteNumber(distanceStep, 0) * CHASE_CAMERA_DISTANCE_STEP,
+        heightBias:
+            chaseCameraSettings.heightBias +
+            resolveFiniteNumber(heightStep, 0) * CHASE_CAMERA_HEIGHT_STEP,
+    });
+}
+
+export function resetChaseCameraSettings() {
+    chaseCameraSettings = createDefaultChaseCameraSettings();
+    return getChaseCameraSettings();
+}
+
+export function getChaseCameraTuneSnapshot() {
+    const settings = getChaseCameraSettings();
+    return {
+        ...settings,
+        distancePercent: normalizeChaseCameraSettingPercent(settings.distanceBias),
+        heightPercent: normalizeChaseCameraSettingPercent(settings.heightBias),
+        distanceTone: resolveChaseCameraDistanceTone(settings.distanceBias),
+        heightTone: resolveChaseCameraHeightTone(settings.heightBias),
+    };
+}
+
 export function setCameraViewMode(nextMode) {
     const numericMode = Math.round(Number(nextMode) || 0);
     if (numericMode < 1 || numericMode > cameraViewActionOrder.length) {
@@ -496,9 +545,27 @@ function findClosestCinematicTrackProgress(radius, height) {
 
 function resolveChaseCameraTargets(car, speed, dt) {
     const dynamicSpeedRatio = THREE.MathUtils.clamp(Math.abs(speed) / 38, 0, 1);
-    const backDistance = THREE.MathUtils.lerp(5.2, 9.6, dynamicSpeedRatio);
-    const chaseHeight = THREE.MathUtils.lerp(1.9, 3.2, dynamicSpeedRatio);
-    const lookAhead = THREE.MathUtils.lerp(5.5, 14, dynamicSpeedRatio);
+    const distanceBias = chaseCameraSettings.distanceBias;
+    const heightBias = chaseCameraSettings.heightBias;
+    const backDistance = THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(5.2, 9.6, dynamicSpeedRatio) +
+            distanceBias * CHASE_CAMERA_DISTANCE_ADJUSTMENT,
+        3.2,
+        12.8
+    );
+    const chaseHeight = THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(1.9, 3.2, dynamicSpeedRatio) +
+            heightBias * CHASE_CAMERA_HEIGHT_ADJUSTMENT,
+        1,
+        5.2
+    );
+    const lookAhead = THREE.MathUtils.clamp(
+        THREE.MathUtils.lerp(5.5, 14, dynamicSpeedRatio) +
+            distanceBias * CHASE_CAMERA_LOOKAHEAD_DISTANCE_FACTOR +
+            heightBias * CHASE_CAMERA_LOOKAHEAD_HEIGHT_FACTOR,
+        4.4,
+        17.5
+    );
     const sideOffset = THREE.MathUtils.clamp(
         -smoothedTurnBias * (1.3 + dynamicSpeedRatio * 2.4),
         -2.6,
@@ -521,14 +588,26 @@ function resolveChaseCameraTargets(car, speed, dt) {
     );
     baseLookTarget.set(
         car.position.x + forwardX * lookAhead + rightX * lookSide,
-        car.position.y + THREE.MathUtils.lerp(0.75, 1.45, dynamicSpeedRatio),
+        car.position.y +
+            THREE.MathUtils.clamp(
+                THREE.MathUtils.lerp(0.75, 1.45, dynamicSpeedRatio) + heightBias * 0.22,
+                0.55,
+                1.95
+            ),
         car.position.z + forwardZ * lookAhead + rightZ * lookSide
     );
 
     return {
         followBlend: 1 - Math.exp(-THREE.MathUtils.lerp(5.8, 10.6, dynamicSpeedRatio) * dt),
         lookBlend: 1 - Math.exp(-THREE.MathUtils.lerp(6.2, 11.2, dynamicSpeedRatio) * dt),
-        targetFov: THREE.MathUtils.lerp(76, 88, dynamicSpeedRatio),
+        targetFov: clampFiniteNumber(
+            THREE.MathUtils.lerp(76, 88, dynamicSpeedRatio) +
+                distanceBias * CHASE_CAMERA_FOV_DISTANCE_FACTOR +
+                heightBias * CHASE_CAMERA_FOV_HEIGHT_FACTOR,
+            CAMERA_FOV_MIN,
+            CAMERA_FOV_MAX,
+            75
+        ),
     };
 }
 
@@ -622,6 +701,58 @@ function clampFiniteNumber(value, min, max, fallback) {
         return fallback;
     }
     return THREE.MathUtils.clamp(numeric, min, max);
+}
+
+function createDefaultChaseCameraSettings() {
+    return {
+        distanceBias: 0,
+        heightBias: 0,
+    };
+}
+
+function normalizeChaseCameraSettings(value = {}, fallback = createDefaultChaseCameraSettings()) {
+    const source = value && typeof value === 'object' ? value : {};
+    const base = fallback && typeof fallback === 'object' ? fallback : createDefaultChaseCameraSettings();
+    return {
+        distanceBias: clampChaseCameraSettingValue(source.distanceBias, base.distanceBias),
+        heightBias: clampChaseCameraSettingValue(source.heightBias, base.heightBias),
+    };
+}
+
+function clampChaseCameraSettingValue(value, fallback = 0) {
+    const numeric = resolveFiniteNumber(value, fallback);
+    return THREE.MathUtils.clamp(numeric, CHASE_CAMERA_SETTING_MIN, CHASE_CAMERA_SETTING_MAX);
+}
+
+function resolveFiniteNumber(value, fallback = 0) {
+    return Number.isFinite(value) ? Number(value) : Number(fallback) || 0;
+}
+
+function normalizeChaseCameraSettingPercent(value) {
+    const normalized = clampChaseCameraSettingValue(value, 0);
+    return ((normalized - CHASE_CAMERA_SETTING_MIN) /
+        (CHASE_CAMERA_SETTING_MAX - CHASE_CAMERA_SETTING_MIN)) *
+        100;
+}
+
+function resolveChaseCameraDistanceTone(value) {
+    if (value <= -0.42) {
+        return 'TIGHT';
+    }
+    if (value >= 0.42) {
+        return 'WIDE';
+    }
+    return 'BALANCED';
+}
+
+function resolveChaseCameraHeightTone(value) {
+    if (value <= -0.42) {
+        return 'LOW';
+    }
+    if (value >= 0.42) {
+        return 'HIGH';
+    }
+    return 'NEUTRAL';
 }
 
 function isCameraViewCycleEvent(event, normalizedKey = '') {

@@ -13,6 +13,7 @@ import {
 } from './constants.js';
 import { WORLD_MAP_DRIVE_LOCK_MODES } from './input-context.js';
 import { getCarSkinPresetByColorHex } from './car-skins.js';
+import { readPersistedAutoFullscreenOnStart } from './player-persistence.js';
 
 const ELIMINATION_AUTOCOLLECT_POINTS_PER_PICKUP = 100;
 const ROUND_FINALIZE_UI_DEFER_FRAMES_DEFAULT = 2;
@@ -20,6 +21,8 @@ const ROUND_FINALIZE_UI_DEFER_FRAMES_ELIMINATION = 3;
 const VEHICLE_RECOVER_MAX_SPEED_KPH = 18;
 const VEHICLE_RECOVER_COOLDOWN_MS = 3500;
 const DEFAULT_START_CAMERA_VIEW_MODE = 6;
+const CHASE_CAMERA_VIEW_MODE = 6;
+const CHASE_CAMERA_TUNE_PROFILE_SAVE_DEBOUNCE_MS = 420;
 const SCORE_MODEL_TEXT =
     'Pickup: 100 pts. Mine kill: 300 pts. Auto-collected remaining pickups: 100 pts each.';
 
@@ -31,7 +34,13 @@ export function createGameSessionController({
     getGroundHeightAt,
     setCameraKeyboardControlsEnabled,
     setCameraViewMode = () => DEFAULT_START_CAMERA_VIEW_MODE,
+    getCameraViewMode = () => DEFAULT_START_CAMERA_VIEW_MODE,
     resetCameraTrackingState,
+    getChaseCameraSettings = () => createDefaultChaseCameraSettings(),
+    setChaseCameraSettings = () => createDefaultChaseCameraSettings(),
+    adjustChaseCameraSettings = () => createDefaultChaseCameraSettings(),
+    resetChaseCameraSettings = () => createDefaultChaseCameraSettings(),
+    getChaseCameraTuneSnapshot = () => null,
     initializePlayerPhysics,
     getVehicleState = () => ({ speed: 0 }),
     setPlayerBatteryLevel,
@@ -89,6 +98,10 @@ export function createGameSessionController({
     setIsGamePaused,
     getIsWelcomeModalVisible,
     setIsWelcomeModalVisible,
+    getAuthState = () => null,
+    readGuestChaseCameraSettings = () => createDefaultChaseCameraSettings(),
+    persistGuestChaseCameraSettings = () => {},
+    persistAccountChaseCameraSettings = null,
     getSelectedCarColorHex,
     setSelectedCarColorHex,
     getSelectedCarSkinId = () => '',
@@ -110,6 +123,10 @@ export function createGameSessionController({
     let pendingRoundPresentationRafHandle = null;
     let pendingRoundPresentationToken = 0;
     let lastVehicleRecoverAt = -Number.POSITIVE_INFINITY;
+    let chaseCameraTuneModeActive = false;
+    let chaseCameraTunePauseOwned = false;
+    let chaseCameraTunePreviousViewMode = DEFAULT_START_CAMERA_VIEW_MODE;
+    let chaseCameraTuneSaveTimeout = null;
     function getBotHudStateWithScores() {
         const botEntries = getBotSystem()?.getHudState?.() || [];
         return botEntries.map((bot) => ({
@@ -156,6 +173,13 @@ export function createGameSessionController({
         clearDriveKeys,
         enforceDriveLockMode,
         setPauseState,
+        toggleChaseCameraTuneMode,
+        isChaseCameraTuneModeActive,
+        adjustChaseCameraTune,
+        resetChaseCameraTuneToDefault,
+        getCameraTuneUiSnapshot,
+        refreshPauseMenuCameraTuneStatus,
+        handleAuthStateChanged,
         requestGameplayFullscreen,
         dismissWelcomeModal,
         showWelcomeModal,
@@ -206,7 +230,16 @@ export function createGameSessionController({
         if (shouldPause && raceIntroController.isActive()) {
             return;
         }
+        if (!shouldPause && chaseCameraTuneModeActive) {
+            deactivateChaseCameraTuneMode({
+                resumeGameplay: false,
+                flushSave: true,
+            });
+        }
         if (getIsGamePaused() === shouldPause) {
+            if (shouldPause && showPauseMenu) {
+                pauseMenuUi.refreshCameraTuneStatus?.();
+            }
             return;
         }
 
@@ -219,6 +252,7 @@ export function createGameSessionController({
                 return;
             }
             pauseMenuUi.show();
+            pauseMenuUi.refreshCameraTuneStatus?.();
             return;
         }
         pauseMenuUi.hide();
@@ -251,6 +285,10 @@ export function createGameSessionController({
 
     function showWelcomeModal() {
         clearPendingRoundPresentation();
+        deactivateChaseCameraTuneMode({
+            resumeGameplay: false,
+            flushSave: true,
+        });
         carEditModeController.setActive(false);
         raceIntroController.stop();
         setIsWelcomeModalVisible(true);
@@ -262,6 +300,85 @@ export function createGameSessionController({
         setCameraKeyboardControlsEnabled(true);
         welcomeModalUi.show();
         audioController?.onWelcomeVisibilityChanged?.(true);
+    }
+
+    function toggleChaseCameraTuneMode() {
+        if (chaseCameraTuneModeActive) {
+            return deactivateChaseCameraTuneMode({
+                resumeGameplay: true,
+                flushSave: true,
+            });
+        }
+
+        chaseCameraTunePauseOwned = !getIsGamePaused();
+        chaseCameraTunePreviousViewMode = getCameraViewMode();
+        chaseCameraTuneModeActive = true;
+        if (chaseCameraTunePreviousViewMode !== CHASE_CAMERA_VIEW_MODE) {
+            setCameraViewMode(CHASE_CAMERA_VIEW_MODE);
+        }
+        setCameraKeyboardControlsEnabled(false);
+        if (chaseCameraTunePauseOwned) {
+            setPauseState(true, {
+                showPauseMenu: true,
+            });
+        } else {
+            pauseMenuUi.show();
+        }
+        refreshPauseMenuCameraTuneStatus();
+        objectiveUi.showInfo('Camera tune: arrows adjust, R reset, C close.', 1800);
+        return getCameraTuneUiSnapshot();
+    }
+
+    function isChaseCameraTuneModeActive() {
+        return chaseCameraTuneModeActive;
+    }
+
+    function adjustChaseCameraTune({ distanceStep = 0, heightStep = 0 } = {}) {
+        const nextSettings = adjustChaseCameraSettings({
+            distanceStep,
+            heightStep,
+        });
+        return handleAppliedChaseCameraSettings(nextSettings);
+    }
+
+    function resetChaseCameraTuneToDefault() {
+        const nextSettings = resetChaseCameraSettings();
+        return handleAppliedChaseCameraSettings(nextSettings);
+    }
+
+    function getCameraTuneUiSnapshot() {
+        const cameraSnapshot = getChaseCameraTuneSnapshot?.();
+        if (!cameraSnapshot || typeof cameraSnapshot !== 'object') {
+            return {
+                visible: false,
+            };
+        }
+        return {
+            visible: true,
+            active: chaseCameraTuneModeActive,
+            scopeLabel: getAuthState()?.authenticated ? 'PROFILE' : 'LOCAL',
+            distancePercent: cameraSnapshot.distancePercent,
+            heightPercent: cameraSnapshot.heightPercent,
+            distanceTone: cameraSnapshot.distanceTone,
+            heightTone: cameraSnapshot.heightTone,
+            resetDisabled: false,
+        };
+    }
+
+    function refreshPauseMenuCameraTuneStatus() {
+        pauseMenuUi.refreshCameraTuneStatus?.();
+        return getCameraTuneUiSnapshot();
+    }
+
+    function handleAuthStateChanged(authState = null) {
+        clearPendingChaseCameraProfileSave();
+        const authenticated = Boolean(authState?.authenticated);
+        const nextSettings = authenticated
+            ? normalizeChaseCameraSettings(authState?.chaseCameraSettings)
+            : normalizeChaseCameraSettings(readGuestChaseCameraSettings());
+        setChaseCameraSettings(nextSettings);
+        refreshPauseMenuCameraTuneStatus();
+        return nextSettings;
     }
 
     function startRaceIntroSequence() {
@@ -296,6 +413,81 @@ export function createGameSessionController({
         }
         pendingRoundPresentationRafHandle = null;
         pendingRoundPresentationToken += 1;
+    }
+
+    function handleAppliedChaseCameraSettings(nextSettings) {
+        const safeSettings = normalizeChaseCameraSettings(nextSettings);
+        if (getAuthState()?.authenticated) {
+            scheduleChaseCameraProfileSave(safeSettings);
+        } else {
+            persistGuestChaseCameraSettings(safeSettings);
+        }
+        refreshPauseMenuCameraTuneStatus();
+        return getCameraTuneUiSnapshot();
+    }
+
+    function scheduleChaseCameraProfileSave(nextSettings) {
+        clearPendingChaseCameraProfileSave();
+        if (typeof persistAccountChaseCameraSettings !== 'function') {
+            return;
+        }
+        const safeSettings = normalizeChaseCameraSettings(nextSettings);
+        chaseCameraTuneSaveTimeout = window.setTimeout(() => {
+            chaseCameraTuneSaveTimeout = null;
+            void Promise.resolve(persistAccountChaseCameraSettings(safeSettings)).catch(() => {});
+        }, CHASE_CAMERA_TUNE_PROFILE_SAVE_DEBOUNCE_MS);
+    }
+
+    function clearPendingChaseCameraProfileSave() {
+        if (chaseCameraTuneSaveTimeout == null) {
+            return;
+        }
+        window.clearTimeout(chaseCameraTuneSaveTimeout);
+        chaseCameraTuneSaveTimeout = null;
+    }
+
+    function flushChaseCameraProfileSave() {
+        if (chaseCameraTuneSaveTimeout == null) {
+            return;
+        }
+        clearPendingChaseCameraProfileSave();
+        if (typeof persistAccountChaseCameraSettings !== 'function') {
+            return;
+        }
+        void Promise.resolve(
+            persistAccountChaseCameraSettings(normalizeChaseCameraSettings(getChaseCameraSettings()))
+        ).catch(() => {});
+    }
+
+    function deactivateChaseCameraTuneMode({
+        resumeGameplay = false,
+        flushSave = false,
+        restorePreviousView = true,
+    } = {}) {
+        if (!chaseCameraTuneModeActive) {
+            if (flushSave) {
+                flushChaseCameraProfileSave();
+            }
+            return getCameraTuneUiSnapshot();
+        }
+
+        const previousViewMode = chaseCameraTunePreviousViewMode;
+        const shouldResumeGameplay = resumeGameplay && chaseCameraTunePauseOwned;
+        chaseCameraTuneModeActive = false;
+        chaseCameraTunePauseOwned = false;
+        chaseCameraTunePreviousViewMode = DEFAULT_START_CAMERA_VIEW_MODE;
+        if (restorePreviousView && previousViewMode !== CHASE_CAMERA_VIEW_MODE) {
+            setCameraViewMode(previousViewMode);
+        }
+        setCameraKeyboardControlsEnabled(!carEditModeController.isActive());
+        if (flushSave) {
+            flushChaseCameraProfileSave();
+        }
+        refreshPauseMenuCameraTuneStatus();
+        if (shouldResumeGameplay) {
+            setPauseState(false);
+        }
+        return getCameraTuneUiSnapshot();
     }
 
     function refreshPlayerSpawnState() {
@@ -981,7 +1173,10 @@ export function createGameSessionController({
         }
     }
 
-    function requestGameplayFullscreen() {
+    function requestGameplayFullscreen(options = {}) {
+        if (!options.force && !readPersistedAutoFullscreenOnStart(true)) {
+            return;
+        }
         if (document.fullscreenElement) {
             return;
         }
@@ -1104,4 +1299,24 @@ export function createGameSessionController({
             .slice(0, 18);
         return normalized || 'Driver';
     }
+}
+
+function createDefaultChaseCameraSettings() {
+    return {
+        distanceBias: 0,
+        heightBias: 0,
+    };
+}
+
+function normalizeChaseCameraSettings(settings = null) {
+    const source = settings && typeof settings === 'object' ? settings : {};
+    return {
+        distanceBias: clampChaseCameraSettingValue(source.distanceBias, 0),
+        heightBias: clampChaseCameraSettingValue(source.heightBias, 0),
+    };
+}
+
+function clampChaseCameraSettingValue(value, fallback = 0) {
+    const numeric = Number.isFinite(value) ? Number(value) : Number(fallback) || 0;
+    return THREE.MathUtils.clamp(numeric, -1, 1);
 }

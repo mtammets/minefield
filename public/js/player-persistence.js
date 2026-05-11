@@ -4,6 +4,8 @@ import {
     PLAYER_CAR_SKIN_STORAGE_KEY,
     PLAYER_TOP_SPEED_STORAGE_KEY,
     GRAPHICS_QUALITY_MODE_STORAGE_KEY,
+    AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
+    CHASE_CAMERA_SETTINGS_STORAGE_KEY,
     CAR_COLOR_PRESETS,
     DEFAULT_PLAYER_CAR_COLOR_HEX,
 } from './constants.js';
@@ -26,6 +28,8 @@ export {
 } from './car-skins.js';
 
 const GRAPHICS_QUALITY_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
+const CHASE_CAMERA_SETTING_MIN = -1;
+const CHASE_CAMERA_SETTING_MAX = 1;
 
 export function readPersistedPlayerTopSpeedKph({
     getPlayerTopSpeedLimit,
@@ -77,6 +81,58 @@ export function persistGraphicsQualityMode(mode) {
     }
     try {
         window.localStorage.setItem(GRAPHICS_QUALITY_MODE_STORAGE_KEY, normalizedMode);
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedAutoFullscreenOnStart(fallback = true) {
+    const fallbackValue = fallback !== false;
+    try {
+        const storedValue = window.localStorage.getItem(AUTO_FULLSCREEN_ON_START_STORAGE_KEY);
+        return resolveAutoFullscreenOnStart(storedValue, fallbackValue);
+    } catch {
+        return fallbackValue;
+    }
+}
+
+export function persistAutoFullscreenOnStart(enabled) {
+    try {
+        window.localStorage.setItem(
+            AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
+            enabled ? 'true' : 'false'
+        );
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedChaseCameraSettings(
+    fallback = {
+        distanceBias: 0,
+        heightBias: 0,
+    }
+) {
+    const fallbackSettings = sanitizeChaseCameraSettings(fallback);
+    try {
+        const storedValue = window.localStorage.getItem(CHASE_CAMERA_SETTINGS_STORAGE_KEY);
+        if (!storedValue) {
+            return fallbackSettings;
+        }
+        const parsed = JSON.parse(storedValue);
+        return sanitizeChaseCameraSettings(parsed, fallbackSettings);
+    } catch {
+        return fallbackSettings;
+    }
+}
+
+export function persistChaseCameraSettings(settings) {
+    const safeSettings = sanitizeChaseCameraSettings(settings);
+    try {
+        window.localStorage.setItem(
+            CHASE_CAMERA_SETTINGS_STORAGE_KEY,
+            JSON.stringify(safeSettings)
+        );
     } catch {
         // localStorage can fail in restricted browsing modes.
     }
@@ -198,4 +254,50 @@ function resolveGraphicsQualityMode(value, fallback = 'auto') {
         return normalized;
     }
     return fallback;
+}
+
+function resolveAutoFullscreenOnStart(value, fallback = true) {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (
+        normalized === 'true' ||
+        normalized === '1' ||
+        normalized === 'yes' ||
+        normalized === 'on'
+    ) {
+        return true;
+    }
+    if (
+        normalized === 'false' ||
+        normalized === '0' ||
+        normalized === 'no' ||
+        normalized === 'off'
+    ) {
+        return false;
+    }
+    return fallback !== false;
+}
+
+export function sanitizeChaseCameraSettings(
+    value,
+    fallback = {
+        distanceBias: 0,
+        heightBias: 0,
+    }
+) {
+    const source = value && typeof value === 'object' ? value : {};
+    const fallbackSource = fallback && typeof fallback === 'object' ? fallback : {};
+    const fallbackDistanceBias = clampChaseCameraSettingValue(fallbackSource.distanceBias, 0);
+    const fallbackHeightBias = clampChaseCameraSettingValue(fallbackSource.heightBias, 0);
+    return {
+        distanceBias: clampChaseCameraSettingValue(source.distanceBias, fallbackDistanceBias),
+        heightBias: clampChaseCameraSettingValue(source.heightBias, fallbackHeightBias),
+    };
+}
+
+function clampChaseCameraSettingValue(value, fallback = 0) {
+    const numeric = Number.isFinite(value) ? value : Number(fallback) || 0;
+    return THREE.MathUtils.clamp(numeric, CHASE_CAMERA_SETTING_MIN, CHASE_CAMERA_SETTING_MAX);
 }

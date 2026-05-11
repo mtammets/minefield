@@ -2,6 +2,10 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import { createCarRig } from './car.js';
 import { CAR_SKIN_PRESETS, DEFAULT_PLAYER_CAR_SKIN_ID, getCarSkinPresetById } from './car-skins.js';
 import {
+    persistAutoFullscreenOnStart,
+    readPersistedAutoFullscreenOnStart,
+} from './player-persistence.js';
+import {
     WELCOME_CAR_SPIN_SPEED,
     WELCOME_PREVIEW_STATE_SPEED,
     WELCOME_PREVIEW_REAR_LIGHT_Z,
@@ -21,6 +25,9 @@ const ONLINE_CODE_LOOKUP_DEBOUNCE_MS = 260;
 const ONLINE_PLAYER_NAME_MAX_LENGTH = 18;
 const AUTH_PASSWORD_MIN_LENGTH = 6;
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
+const AUTH_SIGNED_IN_STATUS_TEXT = 'Signed in. Online rooms and score sync are unlocked.';
+const AUTH_SIGNED_OUT_STATUS_TEXT =
+    'Create an account or sign in to unlock online rooms and score sync.';
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const WELCOME_START_SEQUENCE_MIN_MS = 2600;
 const WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS = 260;
@@ -88,15 +95,19 @@ export function createWelcomeModalController({
     const authAvatarImageEl = document.getElementById('welcomeAuthAvatarImage');
     const authAvatarFallbackEl = document.getElementById('welcomeAuthAvatarFallback');
     const authAvatarInputEl = document.getElementById('welcomeAuthAvatarInput');
-    const authAvatarUploadBtnEl = document.getElementById('welcomeAuthAvatarUploadBtn');
     const authAvatarRemoveBtnEl = document.getElementById('welcomeAuthAvatarRemoveBtn');
     const authSignedInNameEl = document.getElementById('welcomeAuthSignedInName');
     const authSignedInEmailEl = document.getElementById('welcomeAuthSignedInEmail');
+    const authSectionGameplayTabEl = document.getElementById('welcomeAuthSectionGameplayTab');
+    const authSectionSecurityTabEl = document.getElementById('welcomeAuthSectionSecurityTab');
+    const authSectionGameplayPanelEl = document.getElementById('welcomeAuthSectionGameplayPanel');
+    const authSectionSecurityPanelEl = document.getElementById('welcomeAuthSectionSecurityPanel');
     const authChangePasswordToggleBtnEl = document.getElementById(
         'welcomeAuthChangePasswordToggleBtn'
     );
     const authSignOutBtnEl = document.getElementById('welcomeAuthSignOutBtn');
     const authDeleteAccountBtnEl = document.getElementById('welcomeAuthDeleteAccountBtn');
+    const autoFullscreenInputEl = document.getElementById('welcomeAutoFullscreenInput');
     const authPasswordChangePanelEl = document.getElementById('welcomeAuthPasswordChangePanel');
     const authNewPasswordInputEl = document.getElementById('welcomeAuthNewPasswordInput');
     const authConfirmNewPasswordInputEl = document.getElementById(
@@ -241,6 +252,8 @@ export function createWelcomeModalController({
     let preferredOnlinePlayerName = DEFAULT_ONLINE_PLAYER_NAME;
     let authMode = 'sign-in';
     let authUiState = normalizeWelcomeAuthState(getAuthState?.());
+    let authSignedInSection = 'gameplay';
+    let autoFullscreenOnStart = readPersistedAutoFullscreenOnStart(true);
     let authLocalStatusText = '';
     let authLocalStatusTone = 'muted';
     let authPasswordChangeOpen = false;
@@ -454,14 +467,30 @@ export function createWelcomeModalController({
         authDeleteAccountBtnEl.addEventListener('click', () => {
             void handleDeleteAccount();
         });
+        authSectionGameplayTabEl?.addEventListener('click', () => {
+            setAuthSignedInSection('gameplay');
+        });
+        authSectionSecurityTabEl?.addEventListener('click', () => {
+            setAuthSignedInSection('security');
+        });
+        autoFullscreenInputEl?.addEventListener('change', () => {
+            autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
+            persistAutoFullscreenOnStart(autoFullscreenOnStart);
+            syncAutoFullscreenPreferenceUi();
+        });
         authPasswordChangeSubmitBtnEl?.addEventListener('click', () => {
             void handlePasswordChangeSubmit();
         });
         authPasswordChangeCancelBtnEl?.addEventListener('click', () => {
             handlePasswordChangeCancel();
         });
-        authAvatarUploadBtnEl?.addEventListener('click', () => {
-            if (authUiState.loading || !authUiState.authenticated) {
+        authAvatarFrameEl?.addEventListener('click', () => {
+            if (
+                !authAvatarInputEl ||
+                authUiState.loading ||
+                !authUiState.authenticated ||
+                authAvatarFrameEl.disabled
+            ) {
                 return;
             }
             authAvatarInputEl.value = '';
@@ -601,6 +630,8 @@ export function createWelcomeModalController({
             cancelStartSequence();
             rootEl.hidden = false;
             resetStartSequenceUi();
+            setAuthSignedInSection('gameplay', { skipSync: true });
+            syncAutoFullscreenPreferenceUi();
             setAuthState(getAuthState?.());
             setWelcomeLeaderboardOpen(false, { skipSync: true });
             setWelcomeAccountOpen(false, { skipSync: true });
@@ -627,6 +658,7 @@ export function createWelcomeModalController({
         hide() {
             cancelStartSequence();
             resetTaglineTransition();
+            setAuthSignedInSection('gameplay', { skipSync: true });
             setWelcomeLeaderboardOpen(false, { skipSync: true });
             setWelcomeAccountOpen(false, { skipSync: true });
             requestWelcomeDonateClose();
@@ -731,6 +763,13 @@ export function createWelcomeModalController({
             focusAuthPanel(mode, options);
         },
     };
+
+    function syncAutoFullscreenPreferenceUi() {
+        autoFullscreenOnStart = readPersistedAutoFullscreenOnStart(autoFullscreenOnStart);
+        if (autoFullscreenInputEl) {
+            autoFullscreenInputEl.checked = autoFullscreenOnStart;
+        }
+    }
 
     function initializePreviewLoadingUi() {
         if (previewShellEl) {
@@ -1290,6 +1329,9 @@ export function createWelcomeModalController({
             writeStoredOnlinePlayerName(authUiState.displayName);
         }
         if (!authUiState.authenticated) {
+            setAuthSignedInSection('gameplay', {
+                skipSync: true,
+            });
             setPasswordChangeOpen(false, {
                 clearInputs: true,
                 skipSync: true,
@@ -1329,7 +1371,7 @@ export function createWelcomeModalController({
         const canManageProfileImage =
             authenticated &&
             enabled &&
-            Boolean(authUiState.profileImageEnabled && authAvatarInputEl && authAvatarUploadBtnEl);
+            Boolean(authUiState.profileImageEnabled && authAvatarInputEl && authAvatarFrameEl);
         const hasProfileImage = Boolean(authUiState.avatarUrl);
         const localStatus = authLocalStatusText.trim();
         const remoteStatus =
@@ -1337,11 +1379,22 @@ export function createWelcomeModalController({
         const statusText =
             localStatus ||
             remoteStatus ||
-            (authenticated
-                ? 'Signed in. Online rooms and score sync are unlocked.'
-                : 'Create an account or sign in to unlock online rooms and score sync.');
+            (authenticated ? AUTH_SIGNED_IN_STATUS_TEXT : AUTH_SIGNED_OUT_STATUS_TEXT);
         const statusTone =
             localStatus && authLocalStatusTone ? authLocalStatusTone : authUiState.statusTone;
+        const shouldShowStatus =
+            !authenticated ||
+            busy ||
+            Boolean(localStatus) ||
+            (Boolean(remoteStatus) && remoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT);
+        const availableSignedInSections = resolveAvailableAuthSignedInSections({
+            authenticated,
+        });
+        const activeSignedInSection = resolveAuthSignedInSection(
+            authSignedInSection,
+            availableSignedInSections
+        );
+        authSignedInSection = activeSignedInSection;
 
         authPanelEl.dataset.authenticated = authenticated ? 'true' : 'false';
         authPanelEl.dataset.authMode = showSignUp ? 'sign-up' : 'sign-in';
@@ -1386,13 +1439,44 @@ export function createWelcomeModalController({
         if (previewAccountTitleEl) {
             previewAccountTitleEl.textContent = authUiState.displayName || 'ACCOUNT';
         }
+        if (authSectionGameplayTabEl) {
+            const selected = authenticated && activeSignedInSection === 'gameplay';
+            authSectionGameplayTabEl.hidden = !authenticated;
+            authSectionGameplayTabEl.disabled = !authenticated || busy;
+            authSectionGameplayTabEl.dataset.selected = selected ? 'true' : 'false';
+            authSectionGameplayTabEl.setAttribute('aria-selected', selected ? 'true' : 'false');
+        }
+        if (authSectionSecurityTabEl) {
+            const selected = authenticated && activeSignedInSection === 'security';
+            authSectionSecurityTabEl.hidden = !authenticated;
+            authSectionSecurityTabEl.disabled = !authenticated || busy;
+            authSectionSecurityTabEl.dataset.selected = selected ? 'true' : 'false';
+            authSectionSecurityTabEl.setAttribute('aria-selected', selected ? 'true' : 'false');
+        }
+        if (authSectionGameplayPanelEl) {
+            authSectionGameplayPanelEl.hidden =
+                !authenticated || activeSignedInSection !== 'gameplay';
+        }
+        if (authSectionSecurityPanelEl) {
+            authSectionSecurityPanelEl.hidden =
+                !authenticated || activeSignedInSection !== 'security';
+        }
+        if (authAvatarFrameEl) {
+            authAvatarFrameEl.disabled = !canManageProfileImage || busy;
+            authAvatarFrameEl.dataset.interactive =
+                canManageProfileImage && !busy ? 'true' : 'false';
+            authAvatarFrameEl.setAttribute(
+                'aria-label',
+                hasProfileImage ? 'Change profile photo' : 'Add profile photo'
+            );
+        }
         if (authChangePasswordToggleBtnEl) {
             authChangePasswordToggleBtnEl.hidden = !canChangePassword;
             authChangePasswordToggleBtnEl.disabled = !canChangePassword || busy;
             authChangePasswordToggleBtnEl.dataset.open =
                 canChangePassword && authPasswordChangeOpen ? 'true' : 'false';
             authChangePasswordToggleBtnEl.textContent = authPasswordChangeOpen
-                ? 'HIDE PASSWORD FORM'
+                ? 'CANCEL'
                 : 'CHANGE PASSWORD';
         }
         if (authPasswordChangePanelEl) {
@@ -1401,19 +1485,9 @@ export function createWelcomeModalController({
         if (authAvatarInputEl) {
             authAvatarInputEl.disabled = !canManageProfileImage || busy;
         }
-        if (authAvatarUploadBtnEl) {
-            authAvatarUploadBtnEl.hidden = !authenticated || !authUiState.profileImageEnabled;
-            authAvatarUploadBtnEl.disabled =
-                !canManageProfileImage || busy || typeof onAuthUpdateProfileImage !== 'function';
-            authAvatarUploadBtnEl.textContent =
-                busy && authUiState.pendingAction === 'update-avatar'
-                    ? 'UPLOADING PHOTO...'
-                    : hasProfileImage
-                      ? 'CHANGE PHOTO'
-                      : 'ADD PHOTO';
-        }
         if (authAvatarRemoveBtnEl) {
-            authAvatarRemoveBtnEl.hidden = !authenticated || !authUiState.profileImageEnabled;
+            authAvatarRemoveBtnEl.hidden =
+                !authenticated || !authUiState.profileImageEnabled || !hasProfileImage;
             authAvatarRemoveBtnEl.disabled =
                 !canManageProfileImage ||
                 busy ||
@@ -1421,13 +1495,8 @@ export function createWelcomeModalController({
                 typeof onAuthRemoveProfileImage !== 'function';
             authAvatarRemoveBtnEl.textContent =
                 busy && authUiState.pendingAction === 'remove-avatar'
-                    ? 'REMOVING PHOTO...'
-                    : 'REMOVE PHOTO';
-        }
-        if (authDisplayNameInputEl && !authDisplayNameInputEl.value) {
-            authDisplayNameInputEl.value = sanitizeOnlinePlayerNameInput(
-                authUiState.displayName || readStoredOnlinePlayerName()
-            );
+                    ? 'REMOVING...'
+                    : 'REMOVE';
         }
         if (authEmailInputEl && !authenticated && authUiState.email) {
             authEmailInputEl.value = sanitizeAuthEmailInput(authUiState.email);
@@ -1435,6 +1504,7 @@ export function createWelcomeModalController({
         if (authStatusEl) {
             authStatusEl.textContent = statusText;
             authStatusEl.dataset.tone = statusTone || 'muted';
+            authStatusEl.hidden = !shouldShowStatus;
         }
         if (authSubmitBtnEl) {
             authSubmitBtnEl.disabled = authenticated || busy || !enabled;
@@ -1881,6 +1951,9 @@ export function createWelcomeModalController({
             return;
         }
         clearLocalAuthStatus();
+        setAuthSignedInSection('security', {
+            skipSync: true,
+        });
         setPasswordChangeOpen(!authPasswordChangeOpen, {
             clearInputs: !authPasswordChangeOpen,
         });
@@ -2019,6 +2092,40 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncAuthUi();
         }
+    }
+
+    function setAuthSignedInSection(nextSection = 'gameplay', options = {}) {
+        authSignedInSection = resolveAuthSignedInSection(nextSection);
+        if (authSignedInSection !== 'security') {
+            setPasswordChangeOpen(false, {
+                clearInputs: true,
+                skipSync: true,
+            });
+        }
+        if (!options.skipSync) {
+            syncAuthUi();
+        }
+    }
+
+    function resolveAvailableAuthSignedInSections({ authenticated = false } = {}) {
+        if (!authenticated) {
+            return [];
+        }
+        return ['gameplay', 'security'];
+    }
+
+    function resolveAuthSignedInSection(
+        value = 'gameplay',
+        availableSections = resolveAvailableAuthSignedInSections({
+            authenticated: authUiState.authenticated,
+        })
+    ) {
+        const normalized =
+            value === 'gameplay' || value === 'security' ? value : 'gameplay';
+        if (availableSections.includes(normalized)) {
+            return normalized;
+        }
+        return availableSections[0] || 'gameplay';
     }
 
     function resetPasswordChangeInputs() {
@@ -3552,8 +3659,12 @@ function escapeWelcomeLeaderboardHtml(value) {
 function buildWelcomeLeaderboardAvatarHtml(entry) {
     const playerName = sanitizeWelcomeLeaderboardName(entry?.playerName || '');
     const avatarUrl = sanitizeWelcomeLeaderboardImageUrl(entry?.avatarUrl || '');
-    const fallbackLabel = escapeWelcomeLeaderboardHtml(resolveWelcomeLeaderboardAvatarFallback(playerName));
-    const altText = escapeWelcomeLeaderboardHtml(playerName ? `${playerName} profile photo` : 'Profile photo');
+    const fallbackLabel = escapeWelcomeLeaderboardHtml(
+        resolveWelcomeLeaderboardAvatarFallback(playerName)
+    );
+    const altText = escapeWelcomeLeaderboardHtml(
+        playerName ? `${playerName} profile photo` : 'Profile photo'
+    );
     if (avatarUrl) {
         return (
             '<span class="welcomePreviewLeaderboardAvatar">' +

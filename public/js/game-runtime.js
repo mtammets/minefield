@@ -45,7 +45,13 @@ import {
     updateCamera,
     setCameraKeyboardControlsEnabled,
     setCameraViewMode,
+    getCameraViewMode,
     resetCameraTrackingState,
+    getChaseCameraSettings,
+    setChaseCameraSettings,
+    adjustChaseCameraSettings,
+    resetChaseCameraSettings,
+    getChaseCameraTuneSnapshot,
 } from './camera.js';
 import { createCarEditModeController } from './editmode.js';
 import {
@@ -89,6 +95,8 @@ import {
     persistPlayerTopSpeedKph,
     readPersistedGraphicsQualityMode,
     persistGraphicsQualityMode,
+    readPersistedChaseCameraSettings,
+    persistChaseCameraSettings,
     resolvePlayerCarColorHex,
     resolvePlayerCarSkinId,
     getCarSkinPresetIndex,
@@ -213,6 +221,7 @@ setPlayerTopSpeedLimitKph(
         getPlayerTopSpeedLimitBounds,
     })
 );
+setChaseCameraSettings(readPersistedChaseCameraSettings());
 
 const {
     objectiveUi,
@@ -279,6 +288,7 @@ runtimeState.authController = createAuthController({
     onStateChanged(state) {
         welcomeModalUi.setAuthState?.(state);
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
+        runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
     },
 });
 welcomeModalUi.setAuthState?.(runtimeState.authController.getState?.());
@@ -2792,7 +2802,13 @@ runtimeState.gameSessionController = createGameSessionController({
     getGroundHeightAt,
     setCameraKeyboardControlsEnabled,
     setCameraViewMode,
+    getCameraViewMode,
     resetCameraTrackingState,
+    getChaseCameraSettings,
+    setChaseCameraSettings,
+    adjustChaseCameraSettings,
+    resetChaseCameraSettings,
+    getChaseCameraTuneSnapshot,
     initializePlayerPhysics,
     getVehicleState,
     setPlayerBatteryLevel,
@@ -2966,6 +2982,16 @@ runtimeState.gameSessionController = createGameSessionController({
     setIsWelcomeModalVisible(value) {
         runtimeState.isWelcomeModalVisible = Boolean(value);
     },
+    getAuthState: () => runtimeState.authController?.getState?.() || null,
+    readGuestChaseCameraSettings() {
+        return readPersistedChaseCameraSettings();
+    },
+    persistGuestChaseCameraSettings(settings) {
+        persistChaseCameraSettings(settings);
+    },
+    persistAccountChaseCameraSettings(settings) {
+        return runtimeState.authController?.updateChaseCameraSettings?.(settings);
+    },
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     setSelectedCarColorHex(value) {
         runtimeState.selectedCarColorHex = value >>> 0;
@@ -2994,6 +3020,9 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     audioController: runtimeState.audioController,
 });
+runtimeState.gameSessionController.handleAuthStateChanged?.(
+    runtimeState.authController?.getState?.() || null
+);
 
 runtimeState.botsMissionDirector = createBotsMissionDirector({
     objectiveUi,
@@ -3373,6 +3402,14 @@ pauseMenuUi.configureGraphicsControls({
         return cycleGraphicsQualityMode(step, { showStatus: false, persist: true });
     },
 });
+pauseMenuUi.configureCameraTuneControls({
+    getSnapshot() {
+        return runtimeState.gameSessionController?.getCameraTuneUiSnapshot?.() || null;
+    },
+    onReset() {
+        return runtimeState.gameSessionController?.resetChaseCameraTuneToDefault?.() || null;
+    },
+});
 syncRuntimeInputContext();
 
 runtimeState.inputController = createInputController({
@@ -3391,6 +3428,18 @@ runtimeState.inputController = createInputController({
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     onSetPauseState(nextPaused) {
         runtimeState.gameSessionController?.setPauseState(nextPaused);
+    },
+    getIsCameraTuneModeActive() {
+        return Boolean(runtimeState.gameSessionController?.isChaseCameraTuneModeActive?.());
+    },
+    onToggleChaseCameraTuneMode() {
+        return runtimeState.gameSessionController?.toggleChaseCameraTuneMode?.() || null;
+    },
+    onAdjustChaseCameraTune(adjustment) {
+        return runtimeState.gameSessionController?.adjustChaseCameraTune?.(adjustment) || null;
+    },
+    onResetChaseCameraTune() {
+        return runtimeState.gameSessionController?.resetChaseCameraTuneToDefault?.() || null;
     },
     onDismissWelcomeModal(mode, startContext = null) {
         runtimeState.gameSessionController?.dismissWelcomeModal(mode, startContext);

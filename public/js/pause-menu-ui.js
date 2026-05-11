@@ -4,6 +4,13 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
     const resumeBtnEl = document.getElementById('pauseResumeBtn');
     const graphicsPanelEl = document.getElementById('pauseGraphicsPanel');
     const graphicsCycleBtnEl = document.getElementById('pauseGraphicsCycleBtn');
+    const cameraTunePanelEl = document.getElementById('pauseCameraTunePanel');
+    const cameraTuneScopeEl = document.getElementById('pauseCameraTuneScope');
+    const cameraTuneDistanceToneEl = document.getElementById('pauseCameraTuneDistanceTone');
+    const cameraTuneDistanceFillEl = document.getElementById('pauseCameraTuneDistanceFill');
+    const cameraTuneHeightToneEl = document.getElementById('pauseCameraTuneHeightTone');
+    const cameraTuneHeightFillEl = document.getElementById('pauseCameraTuneHeightFill');
+    const cameraTuneResetBtnEl = document.getElementById('pauseCameraTuneResetBtn');
 
     if (!rootEl || !exitBtnEl || !resumeBtnEl) {
         return createNoopController();
@@ -11,7 +18,10 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
 
     let getGraphicsQualitySnapshot = () => null;
     let onCycleGraphicsQualityMode = null;
+    let getCameraTuneSnapshot = () => null;
+    let onResetCameraTune = null;
     let lastGraphicsSignature = '';
+    let lastCameraTuneSignature = '';
 
     exitBtnEl.addEventListener('click', () => {
         onExit?.();
@@ -30,18 +40,32 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         }
         refreshGraphicsStatus();
     });
+    cameraTuneResetBtnEl?.addEventListener('click', () => {
+        if (typeof onResetCameraTune !== 'function') {
+            return;
+        }
+        const snapshot = onResetCameraTune();
+        if (snapshot && typeof snapshot === 'object') {
+            applyCameraTuneSnapshot(snapshot);
+            return;
+        }
+        refreshCameraTuneStatus();
+    });
 
     return {
         show,
         hide,
         isVisible,
         configureGraphicsControls,
+        configureCameraTuneControls,
         refreshGraphicsStatus,
+        refreshCameraTuneStatus,
     };
 
     function show() {
         rootEl.hidden = false;
         refreshGraphicsStatus();
+        refreshCameraTuneStatus();
     }
 
     function hide() {
@@ -61,12 +85,29 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         refreshGraphicsStatus();
     }
 
+    function configureCameraTuneControls({ getSnapshot = null, onReset = null } = {}) {
+        getCameraTuneSnapshot = typeof getSnapshot === 'function' ? getSnapshot : () => null;
+        onResetCameraTune = typeof onReset === 'function' ? onReset : null;
+        if (cameraTuneResetBtnEl) {
+            cameraTuneResetBtnEl.disabled = typeof onResetCameraTune !== 'function';
+        }
+        refreshCameraTuneStatus();
+    }
+
     function refreshGraphicsStatus() {
         if (!graphicsPanelEl) {
             return;
         }
         const snapshot = getGraphicsQualitySnapshot?.();
         applyGraphicsSnapshot(snapshot);
+    }
+
+    function refreshCameraTuneStatus() {
+        if (!cameraTunePanelEl) {
+            return;
+        }
+        const snapshot = getCameraTuneSnapshot?.();
+        applyCameraTuneSnapshot(snapshot);
     }
 
     function applyGraphicsSnapshot(snapshot = null) {
@@ -101,6 +142,64 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         graphicsCycleBtnEl.disabled = typeof onCycleGraphicsQualityMode !== 'function';
         lastGraphicsSignature = signature;
     }
+
+    function applyCameraTuneSnapshot(snapshot = null) {
+        if (!cameraTunePanelEl) {
+            return;
+        }
+
+        if (!snapshot || typeof snapshot !== 'object' || snapshot.visible === false) {
+            const hiddenSignature = 'hidden';
+            if (lastCameraTuneSignature === hiddenSignature) {
+                return;
+            }
+            cameraTunePanelEl.hidden = true;
+            lastCameraTuneSignature = hiddenSignature;
+            return;
+        }
+
+        const scopeLabel = String(snapshot.scopeLabel || 'LOCAL').trim().toUpperCase();
+        const distanceTone = String(snapshot.distanceTone || 'BALANCED').trim().toUpperCase();
+        const heightTone = String(snapshot.heightTone || 'NEUTRAL').trim().toUpperCase();
+        const distancePercent = clampPercent(snapshot.distancePercent);
+        const heightPercent = clampPercent(snapshot.heightPercent);
+        const active = Boolean(snapshot.active);
+        const signature = [
+            scopeLabel,
+            distanceTone,
+            heightTone,
+            distancePercent,
+            heightPercent,
+            active ? 'active' : 'idle',
+            typeof onResetCameraTune === 'function' ? 'reset' : 'readonly',
+        ].join('|');
+        if (signature === lastCameraTuneSignature) {
+            return;
+        }
+
+        cameraTunePanelEl.hidden = false;
+        cameraTunePanelEl.dataset.active = active ? 'true' : 'false';
+        if (cameraTuneScopeEl) {
+            cameraTuneScopeEl.textContent = scopeLabel;
+        }
+        if (cameraTuneDistanceToneEl) {
+            cameraTuneDistanceToneEl.textContent = distanceTone;
+        }
+        if (cameraTuneHeightToneEl) {
+            cameraTuneHeightToneEl.textContent = heightTone;
+        }
+        if (cameraTuneDistanceFillEl) {
+            cameraTuneDistanceFillEl.style.width = `${distancePercent}%`;
+        }
+        if (cameraTuneHeightFillEl) {
+            cameraTuneHeightFillEl.style.width = `${heightPercent}%`;
+        }
+        if (cameraTuneResetBtnEl) {
+            cameraTuneResetBtnEl.disabled =
+                typeof onResetCameraTune !== 'function' || Boolean(snapshot.resetDisabled);
+        }
+        lastCameraTuneSignature = signature;
+    }
 }
 
 function createNoopController() {
@@ -111,6 +210,16 @@ function createNoopController() {
             return false;
         },
         configureGraphicsControls() {},
+        configureCameraTuneControls() {},
         refreshGraphicsStatus() {},
+        refreshCameraTuneStatus() {},
     };
+}
+
+function clampPercent(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+        return 50;
+    }
+    return Math.min(100, Math.max(0, numeric));
 }

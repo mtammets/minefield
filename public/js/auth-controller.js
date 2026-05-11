@@ -9,6 +9,8 @@ const PROFILE_IMAGE_MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const PROFILE_IMAGE_OUTPUT_SIZE_PX = 512;
 const PROFILE_IMAGE_OUTPUT_QUALITY = 0.86;
 const PROFILE_IMAGE_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const CHASE_CAMERA_SETTING_MIN = -1;
+const CHASE_CAMERA_SETTING_MAX = 1;
 
 export function createAuthController({ onStateChanged = null, onToast = null } = {}) {
     const listeners = new Set();
@@ -476,6 +478,52 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 return updateRequestFailure(error);
             }
         },
+        async updateChaseCameraSettings(settings = null) {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                return {
+                    ok: false,
+                    error: 'Supabase auth is unavailable on this server.',
+                };
+            }
+
+            if (!state.authenticated || !state.userId) {
+                return {
+                    ok: false,
+                    error: 'Sign in before saving chase camera settings.',
+                };
+            }
+
+            const normalizedSettings = sanitizeChaseCameraSettings(settings);
+            try {
+                const metadata = buildUpdatedUserMetadata(
+                    currentSession?.user,
+                    {
+                        chase_camera_settings: normalizedSettings,
+                    },
+                    state.displayName
+                );
+                const { data, error } = await supabaseClient.auth.updateUser({
+                    data: metadata,
+                });
+                if (error) {
+                    throw error;
+                }
+
+                applySession(mergeCurrentSessionUser(data?.user), {
+                    preserveStatus: true,
+                });
+                return {
+                    ok: true,
+                    settings: normalizedSettings,
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    error: normalizeSupabaseAuthError(error),
+                };
+            }
+        },
         dispose() {
             if (authSubscription && typeof authSubscription.unsubscribe === 'function') {
                 authSubscription.unsubscribe();
@@ -653,6 +701,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                   avatarStoragePath
               )
             : '';
+        const chaseCameraSettings = authenticated ? resolveChaseCameraSettings(user) : null;
         if (authenticated && displayName) {
             writeStoredPlayerName(displayName);
         }
@@ -672,6 +721,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             displayName: authenticated ? displayName : '',
             avatarUrl,
             avatarStoragePath,
+            chaseCameraSettings,
             requiresEmailConfirmation: false,
             statusText:
                 typeof options?.statusText === 'string'
@@ -706,6 +756,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             displayName: '',
             avatarUrl: '',
             avatarStoragePath: '',
+            chaseCameraSettings: null,
             requiresEmailConfirmation: false,
             statusText,
             statusTone: 'info',
@@ -817,6 +868,7 @@ function createInitialAuthState() {
         displayName: '',
         avatarUrl: '',
         avatarStoragePath: '',
+        chaseCameraSettings: null,
         requiresEmailConfirmation: false,
         statusText: 'Create an account or sign in to unlock online rooms and score sync.',
         statusTone: 'muted',
@@ -903,6 +955,10 @@ function resolveProfileImagePath(user) {
     return sanitizeProfileImagePath(user?.user_metadata?.avatar_path || '');
 }
 
+function resolveChaseCameraSettings(user) {
+    return sanitizeChaseCameraSettings(user?.user_metadata?.chase_camera_settings);
+}
+
 function resolveProfileImagePublicUrl(baseUrl, bucketName, profileImagePath) {
     const safeBaseUrl =
         typeof baseUrl === 'string' && /^(https?:)?\/\//iu.test(baseUrl.trim())
@@ -927,12 +983,26 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
         sanitizeDisplayName(currentMetadata.display_name || '') ||
         sanitizeDisplayName(fallbackDisplayName) ||
         DEFAULT_DRIVER_NAME;
-    const nextAvatarPath = sanitizeProfileImagePath(updates.avatar_path || '');
-    return {
+    const nextAvatarPath = Object.prototype.hasOwnProperty.call(updates, 'avatar_path')
+        ? sanitizeProfileImagePath(updates.avatar_path || '')
+        : sanitizeProfileImagePath(currentMetadata.avatar_path || '');
+    const nextChaseCameraSettings = Object.prototype.hasOwnProperty.call(
+        updates,
+        'chase_camera_settings'
+    )
+        ? sanitizeChaseCameraSettings(updates.chase_camera_settings)
+        : resolveChaseCameraSettings(user);
+    const nextMetadata = {
         ...currentMetadata,
         display_name: displayName,
         avatar_path: nextAvatarPath,
     };
+    if (nextChaseCameraSettings) {
+        nextMetadata.chase_camera_settings = nextChaseCameraSettings;
+    } else {
+        delete nextMetadata.chase_camera_settings;
+    }
+    return nextMetadata;
 }
 
 function buildProfileImageStoragePath(userId, extension = 'webp') {
@@ -954,6 +1024,23 @@ function resolveDisplayName(user, email = '') {
     }
     const storedName = sanitizeDisplayName(readStoredPlayerName());
     return storedName || DEFAULT_DRIVER_NAME;
+}
+
+function sanitizeChaseCameraSettings(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    const safeDistanceBias = clampChaseCameraSettingValue(value.distanceBias, 0);
+    const safeHeightBias = clampChaseCameraSettingValue(value.heightBias, 0);
+    return {
+        distanceBias: safeDistanceBias,
+        heightBias: safeHeightBias,
+    };
+}
+
+function clampChaseCameraSettingValue(value, fallback = 0) {
+    const numeric = Number.isFinite(value) ? Number(value) : Number(fallback) || 0;
+    return Math.min(CHASE_CAMERA_SETTING_MAX, Math.max(CHASE_CAMERA_SETTING_MIN, numeric));
 }
 
 function readStoredPlayerName() {

@@ -28,6 +28,7 @@ const CONTROL_LAYOUTS = Object.freeze({
                 },
                 { label: 'Restart Round', actionId: ACTION_IDS.restartRound },
                 { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
+                { label: 'Camera Tune', actionId: ACTION_IDS.cameraTuneToggle },
             ]),
         },
         {
@@ -99,6 +100,7 @@ const CONTROL_LAYOUTS = Object.freeze({
         {
             title: 'Camera',
             rows: Object.freeze([
+                { label: 'Chase Camera Tune', actionId: ACTION_IDS.cameraTuneToggle },
                 { label: 'Next View', keyLabels: ['+'] },
                 { label: 'Cinematic Camera', actionId: ACTION_IDS.cameraCinematicToggle },
             ]),

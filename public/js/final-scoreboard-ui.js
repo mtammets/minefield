@@ -7,10 +7,10 @@ export function createFinalScoreboardController({
 } = {}) {
     const rootEl = document.getElementById('finalLeaderboard');
     const titleEl = document.getElementById('leaderboardTitle');
-    const summaryEl = document.getElementById('leaderboardSummary');
-    const playerRankEl = document.getElementById('leaderboardPlayerRank');
+    const playerAvatarEl = document.getElementById('leaderboardPlayerAvatar');
+    const playerNameEl = document.getElementById('leaderboardPlayerName');
     const playerScoreEl = document.getElementById('leaderboardPlayerScore');
-    const collectedTotalEl = document.getElementById('leaderboardCollectedTotal');
+    const collectedMetaEl = document.getElementById('leaderboardCollectedMeta');
     const sectionTitleEl = document.getElementById('leaderboardSectionTitle');
     const sectionMetaEl = document.getElementById('leaderboardSectionMeta');
     const globalPanelEl = document.getElementById('leaderboardGlobalPanel');
@@ -34,7 +34,7 @@ export function createFinalScoreboardController({
     let lastRoundSnapshot = null;
     let globalLeaderboardState = createInitialGlobalLeaderboardState();
 
-    if (!rootEl || !summaryEl || !listEl || !titleEl) {
+    if (!rootEl || !listEl || !titleEl) {
         return {
             show() {},
             hide() {},
@@ -64,7 +64,6 @@ export function createFinalScoreboardController({
     return {
         show({
             titleText = '',
-            summaryText = '',
             entries = [],
             topScore = 0,
             winnerLabel = '',
@@ -85,7 +84,13 @@ export function createFinalScoreboardController({
             const playerScore = Math.max(0, Math.round(Number(playerEntry?.score) || 0));
             const roundOpponentCount = normalizedEntries.filter((entry) => !isPlayerEntry(entry)).length;
             const authState = getAuthState?.() || null;
-            const playerAvatarUrl = sanitizeLeaderboardImageUrl(authState?.avatarUrl || '');
+            const playerDisplayName =
+                resolveGlobalLeaderboardName(authState?.displayName || '') ||
+                (playerEntry ? resolveEntryName(playerEntry) : '') ||
+                'YOU';
+            const playerAvatarUrl = sanitizeLeaderboardImageUrl(
+                playerEntry?.avatarUrl || authState?.avatarUrl || ''
+            );
 
             const resolvedWinnerLabel = resolveWinnerLabel(
                 normalizedEntries,
@@ -100,28 +105,24 @@ export function createFinalScoreboardController({
                       : 'ROUND COMPLETE';
             const isCampaignPresentation = /campaign|mission/iu.test(resolvedTitleText);
             titleEl.textContent = resolvedTitleText;
-            summaryEl.textContent =
-                buildSummaryText({
-                    finishLabel,
-                    winnerLabel: resolvedWinnerLabel,
-                    totalCollected: resolvedTotalCollected,
-                    totalPickups: resolvedTotalPickups,
-                    totalScore: resolvedTotalScore,
-                    bonusPointsAwarded,
-                    bonusPickupsAwarded,
-                }) || summaryText;
-
-            if (playerRankEl) {
-                playerRankEl.textContent = playerIndex >= 0 ? `#${playerIndex + 1}` : '--';
+            if (playerAvatarEl) {
+                playerAvatarEl.innerHTML = buildLeaderboardAvatarHtml({
+                    avatarUrl: playerAvatarUrl,
+                    name: playerDisplayName,
+                });
             }
+            if (playerNameEl) {
+                playerNameEl.textContent = playerDisplayName;
+            }
+
             if (playerScoreEl) {
                 playerScoreEl.textContent = `${numberFormatter.format(playerScore)} pts`;
             }
-            if (collectedTotalEl) {
-                collectedTotalEl.textContent =
+            if (collectedMetaEl) {
+                collectedMetaEl.textContent =
                     resolvedTotalPickups > 0
-                        ? `${numberFormatter.format(resolvedTotalCollected)}/${numberFormatter.format(resolvedTotalPickups)}`
-                        : '--';
+                        ? `Collected ${numberFormatter.format(resolvedTotalCollected)}/${numberFormatter.format(resolvedTotalPickups)}`
+                        : 'Collected --';
             }
             if (sectionTitleEl) {
                 sectionTitleEl.textContent = isCampaignPresentation ? 'RUN STANDINGS' : 'ROUND STANDINGS';
@@ -179,7 +180,6 @@ export function createFinalScoreboardController({
             renderGlobalLeaderboard();
             lastRoundSnapshot = {
                 title: titleEl.textContent || 'ROUND COMPLETE',
-                summaryText: summaryEl.textContent || '',
                 finishLabel,
                 winnerLabel: resolvedWinnerLabel,
                 topScore: resolvedTopScore,
@@ -207,16 +207,19 @@ export function createFinalScoreboardController({
         hide() {
             rootEl.hidden = true;
             listEl.innerHTML = '';
-            summaryEl.textContent = '';
             titleEl.textContent = 'ROUND COMPLETE';
-            if (playerRankEl) {
-                playerRankEl.textContent = '#-';
+            if (playerAvatarEl) {
+                playerAvatarEl.innerHTML =
+                    '<span class="leaderboardAvatar leaderboardAvatarFallback" aria-hidden="true">Y</span>';
+            }
+            if (playerNameEl) {
+                playerNameEl.textContent = 'YOU';
             }
             if (playerScoreEl) {
                 playerScoreEl.textContent = '0 pts';
             }
-            if (collectedTotalEl) {
-                collectedTotalEl.textContent = '0/0';
+            if (collectedMetaEl) {
+                collectedMetaEl.textContent = 'Collected 0/0';
             }
             if (sectionTitleEl) {
                 sectionTitleEl.textContent = 'ROUND STANDINGS';
@@ -285,36 +288,6 @@ function resolveWinnerLabel(entries, topScore, providedWinnerLabel) {
         return `Tie: ${winners.join(', ')}`;
     }
     return `Winner: ${winners[0]}`;
-}
-
-function buildSummaryText({
-    finishLabel = '',
-    winnerLabel = '',
-    totalCollected = 0,
-    totalPickups = 0,
-    totalScore = 0,
-    bonusPointsAwarded = 0,
-    bonusPickupsAwarded = 0,
-} = {}) {
-    const parts = [];
-    const finishText = typeof finishLabel === 'string' ? finishLabel.trim() : '';
-    if (finishText) {
-        parts.push(finishText);
-    }
-    const winnerText = typeof winnerLabel === 'string' ? winnerLabel.trim() : '';
-    if (winnerText) {
-        parts.push(winnerText);
-    }
-    if (totalPickups > 0) {
-        parts.push(`Pickups ${totalCollected}/${totalPickups}`);
-    }
-    if (totalScore > 0) {
-        parts.push(`Total ${totalScore} pts`);
-    }
-    if (bonusPointsAwarded > 0 && bonusPickupsAwarded > 0) {
-        parts.push(`Auto sweep +${bonusPointsAwarded} pts (${bonusPickupsAwarded} pickups)`);
-    }
-    return parts.join(' | ');
 }
 
 function escapeHtml(value) {

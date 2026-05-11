@@ -22,7 +22,11 @@ export function createInputController(options = {}) {
         getIsWelcomeModalVisible = () => false,
         getIsGamePaused = () => false,
         getIsCarDestroyed = () => false,
+        getIsCameraTuneModeActive = () => false,
         onSetPauseState = () => {},
+        onToggleChaseCameraTuneMode = () => null,
+        onAdjustChaseCameraTune = () => null,
+        onResetChaseCameraTune = () => null,
         onDismissWelcomeModal = () => {},
         onRestartGameWithCountdown = () => {},
         onClearDriveKeys = () => {},
@@ -171,6 +175,7 @@ export function createInputController(options = {}) {
                 matchesAction(ACTION_IDS.restartRound) ||
                 matchesAction(ACTION_IDS.restartFromScoreboard) ||
                 matchesAction(ACTION_IDS.pauseToggle) ||
+                matchesAction(ACTION_IDS.cameraTuneToggle) ||
                 matchesAction(ACTION_IDS.roofMenuNext) ||
                 matchesAction(ACTION_IDS.roofMenuPrevious) ||
                 matchesAction(ACTION_IDS.mapToggle) ||
@@ -204,6 +209,7 @@ export function createInputController(options = {}) {
             isRaceIntroActive && !raceIntroController.isDrivingUnlocked();
         const inputContext = getInputContext();
         const worldMapVisible = Boolean(isWorldMapVisible());
+        const cameraTuneModeActive = Boolean(getIsCameraTuneModeActive());
 
         if (matchesAction(ACTION_IDS.pauseToggle)) {
             event.preventDefault();
@@ -222,6 +228,10 @@ export function createInputController(options = {}) {
             }
             if (isKeyDown && !finalScoreboardUi.isVisible()) {
                 setVehicleWeaponZoomHeld(false);
+                if (cameraTuneModeActive) {
+                    onToggleChaseCameraTuneMode();
+                    return;
+                }
                 const nextPausedState = !getIsGamePaused();
                 onSetPauseState(nextPausedState);
                 if (document.fullscreenElement) {
@@ -234,7 +244,57 @@ export function createInputController(options = {}) {
             return;
         }
 
-        const allowMapToggleWhilePaused = matchesAction(ACTION_IDS.mapToggle);
+        if (matchesAction(ACTION_IDS.cameraTuneToggle)) {
+            if (!isKeyDown || isRaceIntroActive || finalScoreboardUi.isVisible()) {
+                return;
+            }
+            event.preventDefault();
+            onToggleChaseCameraTuneMode();
+            reportAction(ACTION_IDS.cameraTuneToggle);
+            return;
+        }
+
+        if (cameraTuneModeActive) {
+            if (!isKeyDown) {
+                return;
+            }
+            if (key === 'arrowleft') {
+                event.preventDefault();
+                onAdjustChaseCameraTune({
+                    distanceStep: -1,
+                });
+                return;
+            }
+            if (key === 'arrowright') {
+                event.preventDefault();
+                onAdjustChaseCameraTune({
+                    distanceStep: 1,
+                });
+                return;
+            }
+            if (key === 'arrowup') {
+                event.preventDefault();
+                onAdjustChaseCameraTune({
+                    heightStep: 1,
+                });
+                return;
+            }
+            if (key === 'arrowdown') {
+                event.preventDefault();
+                onAdjustChaseCameraTune({
+                    heightStep: -1,
+                });
+                return;
+            }
+            if (key === 'r') {
+                event.preventDefault();
+                onResetChaseCameraTune();
+                return;
+            }
+        }
+
+        const allowMapToggleWhilePaused =
+            matchesAction(ACTION_IDS.mapToggle) && !cameraTuneModeActive;
         if (getIsGamePaused() && !allowMapToggleWhilePaused) {
             return;
         }

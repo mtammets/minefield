@@ -171,140 +171,203 @@
                             </div>
                         </div>
                         <div id="welcomeAuthSignedInView" class="welcomeAuthSignedInView" hidden>
-                            <div class="welcomeAuthProfileRow">
+                            <div class="welcomeAuthSignedInShell">
+                                <div class="welcomeAuthProfileRow">
+                                    <button
+                                        id="welcomeAuthAvatarFrame"
+                                        class="welcomeAuthAvatarFrame"
+                                        data-has-image="false"
+                                        type="button"
+                                        aria-label="Change profile photo"
+                                    >
+                                        <img
+                                            id="welcomeAuthAvatarImage"
+                                            class="welcomeAuthAvatarImage"
+                                            alt="Profile photo"
+                                            hidden
+                                        />
+                                        <div
+                                            id="welcomeAuthAvatarFallback"
+                                            class="welcomeAuthAvatarFallback"
+                                        >
+                                            D
+                                        </div>
+                                    </button>
+                                    <div class="welcomeAuthProfileMeta">
+                                        <div
+                                            id="welcomeAuthSignedInName"
+                                            class="welcomeAuthSignedInName"
+                                        >
+                                            ONLINE
+                                        </div>
+                                        <div
+                                            id="welcomeAuthSignedInEmail"
+                                            class="welcomeAuthSignedInEmail"
+                                        >
+                                            driver@example.com
+                                        </div>
+                                        <div class="welcomeAuthProfileInlineActions">
+                                            <button
+                                                id="welcomeAuthAvatarRemoveBtn"
+                                                class="welcomeAuthMetaActionBtn"
+                                                type="button"
+                                            >
+                                                REMOVE
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <input
+                                    id="welcomeAuthAvatarInput"
+                                    class="welcomeAuthFileInput"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    hidden
+                                />
                                 <div
-                                    id="welcomeAuthAvatarFrame"
-                                    class="welcomeAuthAvatarFrame"
-                                    data-has-image="false"
+                                    class="welcomeAuthSectionTabs"
+                                    role="tablist"
+                                    aria-label="Profile controls"
                                 >
-                                    <img
-                                        id="welcomeAuthAvatarImage"
-                                        class="welcomeAuthAvatarImage"
-                                        alt="Profile photo"
+                                    <button
+                                        id="welcomeAuthSectionGameplayTab"
+                                        class="welcomeAuthSectionTab"
+                                        type="button"
+                                        role="tab"
+                                        aria-selected="true"
+                                        aria-controls="welcomeAuthSectionGameplayPanel"
+                                        data-selected="true"
+                                    >
+                                        GAMEPLAY
+                                    </button>
+                                    <button
+                                        id="welcomeAuthSectionSecurityTab"
+                                        class="welcomeAuthSectionTab"
+                                        type="button"
+                                        role="tab"
+                                        aria-selected="false"
+                                        aria-controls="welcomeAuthSectionSecurityPanel"
+                                        data-selected="false"
+                                    >
+                                        SECURITY
+                                    </button>
+                                </div>
+                                <div class="welcomeAuthSectionStage">
+                                    <section
+                                        id="welcomeAuthSectionGameplayPanel"
+                                        class="welcomeAuthSectionPanel"
+                                        role="tabpanel"
+                                        aria-labelledby="welcomeAuthSectionGameplayTab"
+                                    >
+                                        <div class="welcomeAuthGameplayCard">
+                                            <span class="welcomeAuthGameplayLabel">
+                                                AUTO FULLSCREEN
+                                            </span>
+                                            <span class="welcomeAuthToggleControl">
+                                                <input
+                                                    id="welcomeAutoFullscreenInput"
+                                                    class="welcomeAuthToggleInput"
+                                                    type="checkbox"
+                                                    checked
+                                                />
+                                                <span
+                                                    class="welcomeAuthToggleTrack"
+                                                    aria-hidden="true"
+                                                ></span>
+                                            </span>
+                                        </div>
+                                    </section>
+                                    <section
+                                        id="welcomeAuthSectionSecurityPanel"
+                                        class="welcomeAuthSectionPanel"
+                                        role="tabpanel"
+                                        aria-labelledby="welcomeAuthSectionSecurityTab"
                                         hidden
-                                    />
-                                    <div
-                                        id="welcomeAuthAvatarFallback"
-                                        class="welcomeAuthAvatarFallback"
                                     >
-                                        D
-                                    </div>
-                                </div>
-                                <div class="welcomeAuthProfileMeta">
-                                    <div
-                                        id="welcomeAuthSignedInName"
-                                        class="welcomeAuthSignedInName"
-                                    >
-                                        ONLINE
-                                    </div>
-                                    <div
-                                        id="welcomeAuthSignedInEmail"
-                                        class="welcomeAuthSignedInEmail"
-                                    >
-                                        driver@example.com
-                                    </div>
-                                </div>
-                            </div>
-                            <input
-                                id="welcomeAuthAvatarInput"
-                                class="welcomeAuthFileInput"
-                                type="file"
-                                accept="image/jpeg,image/png,image/webp"
-                                hidden
-                            />
-                            <div class="welcomeAuthActions welcomeAuthInlineActions">
-                                <button
-                                    id="welcomeAuthAvatarUploadBtn"
-                                    class="welcomeAuthSecondaryBtn"
-                                    type="button"
-                                >
-                                    CHANGE PHOTO
-                                </button>
-                                <button
-                                    id="welcomeAuthAvatarRemoveBtn"
-                                    class="welcomeAuthSecondaryBtn"
-                                    type="button"
-                                >
-                                    REMOVE PHOTO
-                                </button>
-                            </div>
-                            <div class="welcomeAuthActions">
-                                <button
-                                    id="welcomeAuthChangePasswordToggleBtn"
-                                    class="welcomeAuthSecondaryBtn"
-                                    type="button"
-                                >
-                                    CHANGE PASSWORD
-                                </button>
-                                <button
-                                    id="welcomeAuthSignOutBtn"
-                                    class="welcomeAuthSecondaryBtn"
-                                    type="button"
-                                >
-                                    LOG OUT
-                                </button>
-                                <button
-                                    id="welcomeAuthDeleteAccountBtn"
-                                    class="welcomeAuthDangerBtn"
-                                    type="button"
-                                >
-                                    DELETE ACCOUNT
-                                </button>
-                            </div>
-                            <div
-                                id="welcomeAuthPasswordChangePanel"
-                                class="welcomeAuthPasswordChangePanel"
-                                hidden
-                            >
-                                <div class="welcomeAuthFields">
-                                    <div class="welcomeAuthField">
-                                        <label
-                                            class="welcomeAuthLabel"
-                                            for="welcomeAuthNewPasswordInput"
+                                        <div class="welcomeAuthActionGrid">
+                                            <button
+                                                id="welcomeAuthChangePasswordToggleBtn"
+                                                class="welcomeAuthActionBtn welcomeAuthActionBtnPrimary"
+                                                type="button"
+                                            >
+                                                CHANGE PASSWORD
+                                            </button>
+                                            <button
+                                                id="welcomeAuthSignOutBtn"
+                                                class="welcomeAuthActionBtn"
+                                                type="button"
+                                            >
+                                                LOG OUT
+                                            </button>
+                                        </div>
+                                        <div
+                                            id="welcomeAuthPasswordChangePanel"
+                                            class="welcomeAuthPasswordChangePanel"
+                                            hidden
                                         >
-                                            NEW PASSWORD
-                                        </label>
-                                        <input
-                                            id="welcomeAuthNewPasswordInput"
-                                            class="welcomeAuthInput"
-                                            type="password"
-                                            maxlength="256"
-                                            autocomplete="new-password"
-                                            placeholder="At least 6 characters"
-                                        />
-                                    </div>
-                                    <div class="welcomeAuthField">
-                                        <label
-                                            class="welcomeAuthLabel"
-                                            for="welcomeAuthConfirmNewPasswordInput"
-                                        >
-                                            CONFIRM NEW PASSWORD
-                                        </label>
-                                        <input
-                                            id="welcomeAuthConfirmNewPasswordInput"
-                                            class="welcomeAuthInput"
-                                            type="password"
-                                            maxlength="256"
-                                            autocomplete="new-password"
-                                            placeholder="Repeat your new password"
-                                        />
-                                    </div>
-                                </div>
-                                <div class="welcomeAuthActions welcomeAuthInlineActions">
-                                    <button
-                                        id="welcomeAuthPasswordChangeSubmitBtn"
-                                        class="welcomeAuthSubmitBtn"
-                                        type="button"
-                                    >
-                                        UPDATE PASSWORD
-                                    </button>
-                                    <button
-                                        id="welcomeAuthPasswordChangeCancelBtn"
-                                        class="welcomeAuthSecondaryBtn"
-                                        type="button"
-                                    >
-                                        CANCEL
-                                    </button>
+                                            <div class="welcomeAuthFields">
+                                                <div class="welcomeAuthField">
+                                                    <label
+                                                        class="welcomeAuthLabel"
+                                                        for="welcomeAuthNewPasswordInput"
+                                                    >
+                                                        NEW PASSWORD
+                                                    </label>
+                                                    <input
+                                                        id="welcomeAuthNewPasswordInput"
+                                                        class="welcomeAuthInput"
+                                                        type="password"
+                                                        maxlength="256"
+                                                        autocomplete="new-password"
+                                                        placeholder="At least 6 characters"
+                                                    />
+                                                </div>
+                                                <div class="welcomeAuthField">
+                                                    <label
+                                                        class="welcomeAuthLabel"
+                                                        for="welcomeAuthConfirmNewPasswordInput"
+                                                    >
+                                                        CONFIRM NEW PASSWORD
+                                                    </label>
+                                                    <input
+                                                        id="welcomeAuthConfirmNewPasswordInput"
+                                                        class="welcomeAuthInput"
+                                                        type="password"
+                                                        maxlength="256"
+                                                        autocomplete="new-password"
+                                                        placeholder="Repeat your new password"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div
+                                                class="welcomeAuthActions welcomeAuthInlineActions"
+                                            >
+                                                <button
+                                                    id="welcomeAuthPasswordChangeSubmitBtn"
+                                                    class="welcomeAuthSubmitBtn"
+                                                    type="button"
+                                                >
+                                                    UPDATE PASSWORD
+                                                </button>
+                                                <button
+                                                    id="welcomeAuthPasswordChangeCancelBtn"
+                                                    class="welcomeAuthSecondaryBtn"
+                                                    type="button"
+                                                >
+                                                    CANCEL
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="welcomeAuthDangerRow">
+                                            <button
+                                                id="welcomeAuthDeleteAccountBtn"
+                                                class="welcomeAuthDangerInlineBtn"
+                                                type="button"
+                                            >
+                                                DELETE ACCOUNT
+                                            </button>
+                                        </div>
+                                    </section>
                                 </div>
                             </div>
                         </div>
@@ -690,21 +753,32 @@
                 <div class="leaderboardHero">
                     <div class="leaderboardHeroCopy">
                         <div id="leaderboardTitle">ROUND COMPLETE</div>
-                        <div id="leaderboardSummary"></div>
                     </div>
                 </div>
                 <div class="leaderboardKpiGrid" aria-label="Round summary">
-                    <div class="leaderboardKpi">
-                        <div class="leaderboardKpiLabel">YOUR PLACE</div>
-                        <div id="leaderboardPlayerRank" class="leaderboardKpiValue">#-</div>
-                    </div>
-                    <div class="leaderboardKpi">
-                        <div class="leaderboardKpiLabel">YOUR SCORE</div>
-                        <div id="leaderboardPlayerScore" class="leaderboardKpiValue">0 pts</div>
-                    </div>
-                    <div class="leaderboardKpi">
-                        <div class="leaderboardKpiLabel">COLLECTED</div>
-                        <div id="leaderboardCollectedTotal" class="leaderboardKpiValue">0/0</div>
+                    <div class="leaderboardPlayerSummaryCard">
+                        <div class="leaderboardPlayerSummaryHead">
+                            <div id="leaderboardPlayerIdentity" class="leaderboardPlayerIdentity">
+                                <span
+                                    id="leaderboardPlayerAvatar"
+                                    class="leaderboardPlayerAvatar"
+                                    aria-hidden="true"
+                                >
+                                    <span class="leaderboardAvatar leaderboardAvatarFallback">
+                                        Y
+                                    </span>
+                                </span>
+                                <span id="leaderboardPlayerName" class="leaderboardPlayerName">
+                                    YOU
+                                </span>
+                            </div>
+                            <div id="leaderboardPlayerScore" class="leaderboardPlayerSummaryScore">
+                                0 pts
+                            </div>
+                        </div>
+                        <div id="leaderboardCollectedMeta" class="leaderboardPlayerSummaryMeta">
+                            Collected 0/0
+                        </div>
                     </div>
                 </div>
                 <section id="leaderboardRoundPanel" hidden>
@@ -778,6 +852,56 @@
                             MODE: MEDIUM
                         </button>
                     </div>
+                </div>
+                <div id="pauseCameraTunePanel" class="pauseCameraTunePanel" hidden>
+                    <div class="pauseCameraTuneHeader">
+                        <span class="pauseGraphicsLabel">CHASE CAMERA</span>
+                        <span id="pauseCameraTuneScope" class="pauseCameraTuneScope">LOCAL</span>
+                    </div>
+                    <div class="pauseCameraTuneMeters">
+                        <div class="pauseCameraTuneMeter">
+                            <div class="pauseCameraTuneMeterHeader">
+                                <span class="pauseCameraTuneMeterLabel">DISTANCE</span>
+                                <span
+                                    id="pauseCameraTuneDistanceTone"
+                                    class="pauseCameraTuneMeterTone"
+                                >
+                                    BALANCED
+                                </span>
+                            </div>
+                            <div class="pauseCameraTuneBar" aria-hidden="true">
+                                <span
+                                    id="pauseCameraTuneDistanceFill"
+                                    class="pauseCameraTuneBarFill"
+                                ></span>
+                            </div>
+                        </div>
+                        <div class="pauseCameraTuneMeter">
+                            <div class="pauseCameraTuneMeterHeader">
+                                <span class="pauseCameraTuneMeterLabel">HEIGHT</span>
+                                <span
+                                    id="pauseCameraTuneHeightTone"
+                                    class="pauseCameraTuneMeterTone"
+                                >
+                                    NEUTRAL
+                                </span>
+                            </div>
+                            <div class="pauseCameraTuneBar" aria-hidden="true">
+                                <span
+                                    id="pauseCameraTuneHeightFill"
+                                    class="pauseCameraTuneBarFill"
+                                ></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pauseCameraTuneHotkeys" aria-hidden="true">
+                        <span class="pauseCameraTuneHotkey">C CLOSE</span>
+                        <span class="pauseCameraTuneHotkey">ARROWS ADJUST</span>
+                        <span class="pauseCameraTuneHotkey">R RESET</span>
+                    </div>
+                    <button id="pauseCameraTuneResetBtn" class="pauseBtn quality" type="button">
+                        RESET CAMERA
+                    </button>
                 </div>
                 <section
                     id="pauseControlsPanel"
