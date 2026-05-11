@@ -150,9 +150,6 @@ export function createGameSessionController({
             return;
         }
         const collectors = [{ id: 'player', position: car.position }];
-        if (botsEnabled) {
-            collectors.push(...(getBotSystem()?.getCollectorDescriptors?.() || []));
-        }
         collectibleSystem.primeForCollectors(collectors);
     }
     return {
@@ -658,7 +655,7 @@ export function createGameSessionController({
             typeof options?.finishLabel === 'string' && options.finishLabel.trim()
                 ? options.finishLabel.trim()
                 : finishReason === 'opponents-eliminated'
-                ? 'Opponents eliminated'
+                  ? 'Opponents eliminated'
                   : 'No pickups left';
         const bonusPointsAwarded = Math.max(
             0,

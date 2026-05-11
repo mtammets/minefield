@@ -2849,151 +2849,243 @@ body.race-intro-active #miniMapHud {
     pointer-events: none;
 }
 
-.botRow {
-    display: grid;
-    gap: 8px;
-    padding: 10px 11px 9px;
-    border-radius: 16px;
-    background: linear-gradient(180deg, rgba(19, 35, 58, 0.52), rgba(13, 25, 42, 0.66));
-    border: 1px solid rgba(137, 186, 238, 0.18);
+@keyframes playerHudLifeGlow {
+    0%,
+    100% {
+        box-shadow:
+            0 0 0 rgba(255, 176, 73, 0),
+            0 0 0 rgba(255, 230, 176, 0);
+    }
+    50% {
+        box-shadow:
+            0 0 22px rgba(255, 176, 73, 0.24),
+            0 0 8px rgba(255, 230, 176, 0.16);
+    }
 }
 
-.botRespawning {
-    opacity: 0.7;
+@keyframes playerHudScorePulse {
+    0% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
+    18% {
+        transform: scale(1.24);
+        filter: brightness(1.12);
+    }
+    44% {
+        transform: scale(0.96);
+        filter: brightness(1.04);
+    }
+    100% {
+        transform: scale(1);
+        filter: brightness(1);
+    }
 }
 
-.botRowPlayer {
-    background: linear-gradient(180deg, rgba(60, 47, 20, 0.62), rgba(35, 27, 13, 0.7));
-    border-color: rgba(255, 208, 117, 0.36);
+@keyframes playerHudScoreGainRise {
+    0% {
+        opacity: 0;
+        transform: translate3d(-50%, 18px, 0) scale(0.72);
+    }
+    18% {
+        opacity: 1;
+        transform: translate3d(-50%, -2px, 0) scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: translate3d(-50%, -42px, 0) scale(1.06);
+    }
 }
 
-.botRowOut {
-    opacity: 0.5;
-}
-
-.botMain,
-.botIdentity,
-.botSubline,
-.botLivesPips {
-    display: flex;
-    align-items: center;
-}
-
-.botMain {
-    justify-content: space-between;
-    gap: 12px;
-}
-
-.botIdentity {
-    min-width: 0;
-    gap: 8px;
-}
-
-.botName {
-    min-width: 0;
-    color: rgba(236, 246, 255, 0.96);
-    font-family: 'Orbitron', sans-serif;
-    font-size: 18px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.botSwatch {
-    width: 12px;
-    height: 12px;
-    border-radius: 4px;
-    border: 1px solid rgba(230, 242, 255, 0.72);
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.19);
-    flex: 0 0 auto;
-}
-
-.botScore {
-    flex: 0 0 auto;
-    color: rgba(255, 248, 234, 0.98);
-    font-family: 'Orbitron', sans-serif;
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-}
-
-.botLivesPips {
-    gap: 5px;
-}
-
-.botLifePip {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 1px solid rgba(228, 243, 255, 0.5);
-}
-
-.botLifePip.active {
-    background: rgba(255, 97, 97, 0.98);
-    box-shadow: 0 0 8px rgba(255, 90, 90, 0.46);
-}
-
-.botLifePip.empty {
-    background: rgba(177, 202, 232, 0.2);
-    border-color: rgba(191, 213, 238, 0.28);
-}
-
-.botSubline {
-    justify-content: space-between;
-    gap: 10px;
-}
-
-.botStateChip {
-    flex: 0 0 auto;
-    padding: 4px 7px 3px;
-    border-radius: 999px;
-    border: 1px solid rgba(155, 211, 255, 0.22);
-    background: rgba(20, 36, 55, 0.7);
-    font-family: 'Orbitron', sans-serif;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    color: rgba(214, 236, 255, 0.88);
-}
-
-.botStateChip.is-out {
-    border-color: rgba(255, 148, 148, 0.22);
-    color: rgba(255, 208, 208, 0.82);
-}
-
-.botCollected {
-    flex: 0 0 auto;
-    color: rgba(188, 215, 239, 0.92);
-    font-family: 'Orbitron', sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    min-width: 0;
+@keyframes playerHudScoreFlash {
+    0% {
+        opacity: 0;
+        transform: translateX(-50%) scale(0.88);
+    }
+    20% {
+        opacity: 1;
+        transform: translateX(-50%) scale(1.06);
+    }
+    100% {
+        opacity: 0;
+        transform: translateX(-50%) scale(1.22);
+    }
 }
 
 #botPanel {
-    z-index: 4;
-    padding: 11px 12px 10px;
-    border: 1px solid var(--hud-border);
-    border-radius: var(--hud-radius);
-    background: linear-gradient(170deg, var(--hud-bg-top), var(--hud-bg-bottom));
-    color: var(--hud-text);
-    font-family: 'Sora', sans-serif;
-    letter-spacing: 0.4px;
-    box-shadow:
-        var(--hud-shadow),
-        inset 0 0 0 1px rgba(218, 240, 255, 0.05);
+    position: relative;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+    overflow: visible;
 }
 
 #botPanel::before {
+    display: none;
+}
+
+#botList {
+    display: block;
+    width: 0;
+    height: 0;
+    overflow: visible;
+}
+
+.playerHudScoreDock,
+.playerHudLivesDock {
+    position: fixed;
+    z-index: 5;
+    display: grid;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.playerHudScoreDock {
+    left: 50%;
+    top: 18px;
+    transform: translateX(-50%);
+    justify-items: center;
+    text-align: center;
+    position: fixed;
+}
+
+.playerHudLivesDock {
+    top: 22px;
+    right: 22px;
+    justify-items: end;
+}
+
+.playerHudDockLabel,
+.playerHudPickupValue,
+.playerHudRespawnLabel {
+    font-family: 'Orbitron', sans-serif;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.playerHudDockLabel {
+    padding: 7px 12px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(150, 208, 247, 0.22);
+    background: rgba(7, 16, 29, 0.68);
+    color: rgba(208, 234, 255, 0.86);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    box-shadow:
+        0 12px 26px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(236, 247, 255, 0.07);
+    backdrop-filter: blur(14px);
+}
+
+.playerHudScoreStack {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-width: 160px;
+}
+
+.playerHudScoreValue,
+.playerHudLivesFooter {
+    font-family: 'Orbitron', sans-serif;
+    font-variant-numeric: tabular-nums;
+}
+
+.playerHudScoreValue {
+    color: rgba(255, 248, 237, 0.98);
+    font-size: clamp(52px, 7vw, 92px);
+    font-weight: 800;
+    letter-spacing: -0.08em;
+    line-height: 0.86;
+    text-shadow:
+        0 0 32px rgba(114, 223, 255, 0.22),
+        0 10px 28px rgba(0, 0, 0, 0.32);
+}
+
+.playerHudScoreGain {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    color: rgba(255, 214, 126, 0.96);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(20px, 3.2vw, 30px);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    text-shadow:
+        0 0 24px rgba(255, 202, 102, 0.26),
+        0 8px 18px rgba(0, 0, 0, 0.24);
+    animation: playerHudScoreGainRise 620ms cubic-bezier(0.19, 1, 0.22, 1) both;
+}
+
+.playerHudPickupValue {
+    color: rgba(255, 210, 139, 0.92);
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+.playerHudScoreDock.is-scoring::after {
     content: '';
     position: absolute;
-    inset: 0;
-    border-radius: inherit;
+    left: 50%;
+    top: 50px;
+    width: 190px;
+    height: 190px;
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(126, 225, 255, 0.26) 0%,
+        rgba(126, 225, 255, 0.08) 36%,
+        rgba(126, 225, 255, 0) 72%
+    );
     pointer-events: none;
-    border: 1px solid var(--hud-border-soft);
+    animation: playerHudScoreFlash 560ms ease-out both;
+}
+
+.playerHudScoreDock.is-scoring .playerHudScoreValue {
+    animation: playerHudScorePulse 540ms cubic-bezier(0.2, 0.9, 0.24, 1) both;
+}
+
+.playerHudLivesTrack {
+    display: flex;
+    gap: 8px;
+}
+
+.playerHudLife {
+    width: 34px;
+    height: 14px;
+    border-radius: 999px;
+    border: 1px solid rgba(184, 218, 248, 0.18);
+    background: linear-gradient(180deg, rgba(49, 66, 92, 0.72), rgba(18, 28, 45, 0.92));
+    box-shadow: inset 0 1px 0 rgba(238, 247, 255, 0.05);
+}
+
+.playerHudLife.is-active {
+    border-color: rgba(255, 238, 205, 0.74);
+    background: linear-gradient(135deg, rgba(255, 224, 142, 0.98), rgba(255, 142, 70, 0.92));
+    animation: playerHudLifeGlow 2.8s ease-in-out infinite;
+}
+
+.playerHudLife.is-empty {
+    opacity: 0.42;
+}
+
+.playerHudLivesFooter {
+    color: rgba(241, 248, 255, 0.94);
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.06em;
+    text-shadow: 0 8px 22px rgba(0, 0, 0, 0.26);
+}
+
+.playerHudRespawnLabel {
+    color: rgba(255, 216, 163, 0.94);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+}
+
+.playerHudLivesDock.is-respawning .playerHudDockLabel {
+    border-color: rgba(255, 202, 133, 0.28);
+    color: rgba(255, 230, 192, 0.9);
 }
 
 #finalLeaderboard {
@@ -3060,7 +3152,7 @@ body.race-intro-active #miniMapHud {
 .leaderboardKpiGrid {
     margin-top: 14px;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 9px;
 }
 
@@ -5241,6 +5333,29 @@ body.race-intro-active #botPanel {
 
     #starterControlsHud {
         width: min(680px, calc(100vw - 24px));
+    }
+
+    .playerHudScoreDock {
+        top: 12px;
+    }
+
+    .playerHudScoreValue {
+        font-size: clamp(40px, 8vw, 68px);
+    }
+
+    .playerHudLivesDock {
+        top: 14px;
+        right: 12px;
+        gap: 8px;
+    }
+
+    .playerHudLife {
+        width: 28px;
+        height: 12px;
+    }
+
+    .playerHudLivesFooter {
+        font-size: 20px;
     }
 
     .leaderboardCard {

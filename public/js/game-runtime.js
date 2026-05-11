@@ -731,11 +731,9 @@ async function prepareGraphicsForSessionStart(mode = 'bots', options = {}) {
         skidMarkController?.prewarmParticles?.();
         const warmedMineKillUiFlow = prewarmMineKillUiFlow();
 
-        const collectors = [{ id: 'player', position: car.position }];
-        if (mode === 'bots') {
-            collectors.push(...(runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || []));
-        }
-        runtimeState.collectibleSystem?.primeForCollectors?.(collectors);
+        runtimeState.collectibleSystem?.primeForCollectors?.([
+            { id: 'player', position: car.position },
+        ]);
         reportProgress({
             stage: 'graphics',
             progress: 0.18,
@@ -1251,6 +1249,9 @@ function spawnScorePopup({ collectorId = 'player', pointsAwarded = 0, sourceLabe
     if (SHOW_ONLY_LOCAL_SCORE_POPUPS && !isLocalCollectorId(collectorId)) {
         return;
     }
+    if (runtimeState.gameMode === 'bots' && isLocalCollectorId(collectorId)) {
+        return;
+    }
     runtimeState.scorePopupController?.prewarm?.();
     runtimeState.scorePopupController?.spawn?.({
         collectorId,
@@ -1434,33 +1435,14 @@ function buildCurrentPlayerHudState() {
     };
 }
 
-function buildBotHudStateWithScores() {
-    const botEntries = runtimeState.botTrafficSystem?.getHudState?.() || EMPTY_ARRAY;
-    return botEntries.map((bot) => ({
-        ...bot,
-        score: Math.max(
-            0,
-            Math.round(
-                Number(bot?.score) ||
-                    Number(
-                        runtimeState.scoringSystem?.getCollectorScore?.(bot?.collectorId || '') || 0
-                    )
-            )
-        ),
-    }));
-}
-
 function renderBotsHud() {
-    botStatusUi.render(buildBotHudStateWithScores(), buildCurrentPlayerHudState());
+    botStatusUi.render(EMPTY_ARRAY, buildCurrentPlayerHudState());
 }
 
 function primeCollectiblesForMissionCollectors() {
-    const collectors = [{ id: 'player', position: car.position }];
-    const botCollectors = runtimeState.botTrafficSystem?.getCollectorDescriptors?.() || EMPTY_ARRAY;
-    for (let i = 0; i < botCollectors.length; i += 1) {
-        collectors.push(botCollectors[i]);
-    }
-    runtimeState.collectibleSystem?.primeForCollectors?.(collectors);
+    runtimeState.collectibleSystem?.primeForCollectors?.([
+        { id: 'player', position: car.position },
+    ]);
 }
 
 function resetMissionCollectorChains() {
@@ -2237,33 +2219,13 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
             return;
         }
         if (runtimeState.gameMode === 'bots') {
-            confirmCollection?.();
-            const nextTotalCollected = runtimeState.totalCollectedCount + 1;
-            const roundProgress = getObjectiveRoundProgress();
-            const scoreEvent = awardLocalPickupScore({
+            restoreCollection?.();
+            recordPerformanceDiagnosticEvent('pickup_rejected_non_player_bots_mode', {
                 collectorId,
-                speedKph: Math.abs(
-                    runtimeState.botTrafficSystem?.getCollectorSpeed?.(collectorId) || 0
-                ),
-                roundProgress,
+                pickupId: typeof pickupId === 'string' ? pickupId : '',
+                pickupColorHex,
+                position: serializeEventPosition(position),
             });
-            runtimeState.totalCollectedCount = nextTotalCollected;
-            runtimeState.botTrafficSystem?.registerCollected(collectorId);
-            recordPerformanceDiagnosticEvent('pickup_scored_local', {
-                collectorId,
-                pointsAwarded: Math.max(0, Math.round(Number(scoreEvent?.pointsAwarded) || 0)),
-                totalScore: runtimeState.totalScore,
-                totalCollectedCount: runtimeState.totalCollectedCount,
-            });
-            spawnScorePopup({
-                collectorId,
-                pointsAwarded: scoreEvent?.pointsAwarded || 0,
-                sourceLabel: 'PICKUP',
-            });
-            runtimeState.botsMissionDirector?.handlePickupCollected?.({
-                collectorId,
-            });
-            renderBotsHud();
         }
     },
     onExhausted: ({ totalPickups, collectedPickups }) => {

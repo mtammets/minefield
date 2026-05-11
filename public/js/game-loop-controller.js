@@ -722,7 +722,7 @@ export function createGameLoopController(options = {}) {
                     visiblePickups = collectibleSystem.getVisiblePickups();
                     if (botsEnabled) {
                         const botTrafficStageStartMs = performance.now();
-                        botTrafficSystem?.update?.(car.position, visiblePickups, frameDelta);
+                        botTrafficSystem?.update?.(car.position, EMPTY_ARRAY, frameDelta);
                         updateBotMineDeployment(
                             botTrafficSystem?.getCollisionSnapshots?.() || EMPTY_ARRAY,
                             frameDelta
@@ -737,19 +737,13 @@ export function createGameLoopController(options = {}) {
                     }
 
                     collectorBuffer.length = 1;
-                    if (botsEnabled) {
-                        appendCollisionSnapshots(collectorBuffer, botCollectorDescriptors);
-                    }
                     measureStage('collectibles', () => {
                         collectibleSystem.updateForCollectors(collectorBuffer, frameDelta);
                     });
                     botHudUpdateTimer += frameDelta;
                     if (botHudUpdateTimer >= BOT_STATUS_UPDATE_INTERVAL_SEC) {
                         botHudUpdateTimer = 0;
-                        botStatusUi.render(
-                            botsEnabled ? buildBotHudEntries(botHudState) : EMPTY_ARRAY,
-                            createPlayerHudState()
-                        );
+                        botStatusUi.render(EMPTY_ARRAY, createPlayerHudState());
                     }
                 }
 

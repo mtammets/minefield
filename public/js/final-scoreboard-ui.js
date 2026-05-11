@@ -10,7 +10,6 @@ export function createFinalScoreboardController({
     const summaryEl = document.getElementById('leaderboardSummary');
     const playerRankEl = document.getElementById('leaderboardPlayerRank');
     const playerScoreEl = document.getElementById('leaderboardPlayerScore');
-    const topScoreEl = document.getElementById('leaderboardTopScore');
     const collectedTotalEl = document.getElementById('leaderboardCollectedTotal');
     const sectionTitleEl = document.getElementById('leaderboardSectionTitle');
     const sectionMetaEl = document.getElementById('leaderboardSectionMeta');
@@ -118,9 +117,6 @@ export function createFinalScoreboardController({
             if (playerScoreEl) {
                 playerScoreEl.textContent = `${numberFormatter.format(playerScore)} pts`;
             }
-            if (topScoreEl) {
-                topScoreEl.textContent = `${numberFormatter.format(resolvedTopScore)} pts`;
-            }
             if (collectedTotalEl) {
                 collectedTotalEl.textContent =
                     resolvedTotalPickups > 0
@@ -218,9 +214,6 @@ export function createFinalScoreboardController({
             }
             if (playerScoreEl) {
                 playerScoreEl.textContent = '0 pts';
-            }
-            if (topScoreEl) {
-                topScoreEl.textContent = '0 pts';
             }
             if (collectedTotalEl) {
                 collectedTotalEl.textContent = '0/0';
