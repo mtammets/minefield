@@ -1034,6 +1034,7 @@ groundLayerDebugController.refresh();
 groundLayerDebugController.setEditModeActive(false);
 const chargingProgressHudController = createChargingProgressHudController(scene, camera, {
     vehicle: car,
+    showWorldHud: false,
     getChargingAnchor(target) {
         return chargingZoneController.getHudAnchor?.(target) || null;
     },
@@ -3595,6 +3596,7 @@ runtimeState.gameLoopController = createGameLoopController({
     getIsGamePaused: () => runtimeState.isGamePaused,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getIsBatteryDepleted: () => runtimeState.isBatteryDepleted,
+    getPlayerBattery: () => runtimeState.playerBattery,
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
     getPlayerScore: () => runtimeState.playerScore,
     getPlayerCarsRemaining: () => runtimeState.playerCarsRemaining,

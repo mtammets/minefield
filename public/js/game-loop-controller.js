@@ -82,6 +82,7 @@ export function createGameLoopController(options = {}) {
         getIsGamePaused,
         getIsCarDestroyed,
         getIsBatteryDepleted,
+        getPlayerBattery,
         getPlayerCollectedCount,
         getPlayerScore,
         getPlayerCarsRemaining,
@@ -117,6 +118,7 @@ export function createGameLoopController(options = {}) {
         typeof getIsCarDestroyed === 'function' ? getIsCarDestroyed : () => false;
     const readBatteryDepleted =
         typeof getIsBatteryDepleted === 'function' ? getIsBatteryDepleted : () => false;
+    const readPlayerBattery = typeof getPlayerBattery === 'function' ? getPlayerBattery : () => 100;
     const readPlayerCollectedCount =
         typeof getPlayerCollectedCount === 'function' ? getPlayerCollectedCount : () => 0;
     const readVehicleWeaponZoomActive =
@@ -503,6 +505,8 @@ export function createGameLoopController(options = {}) {
                 throttle: 0,
                 destroyed: false,
                 batteryDepleted: false,
+                batteryPercent: readPlayerBattery(),
+                chargingActive: false,
             });
 
             if (typeof renderer.clear === 'function') {
@@ -885,6 +889,8 @@ export function createGameLoopController(options = {}) {
             throttle: speedometerVehicleState?.throttle,
             destroyed: readCarDestroyed(),
             batteryDepleted: readBatteryDepleted(),
+            batteryPercent: readPlayerBattery(),
+            chargingActive: chargingHudActive,
         });
 
         const qualityAdaptiveAllowed =

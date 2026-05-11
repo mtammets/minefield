@@ -11,6 +11,7 @@ import { markGroundDebugLayer } from './environment/ground-debug.js';
 
 export function createChargingProgressHudController(scene, camera, options = {}) {
     const vehicle = options.vehicle || null;
+    const showWorldHud = options.showWorldHud !== false;
     const getChargingAnchor =
         typeof options.getChargingAnchor === 'function' ? options.getChargingAnchor : () => null;
     const getBatteryPercent =
@@ -22,10 +23,7 @@ export function createChargingProgressHudController(scene, camera, options = {})
         90,
         100
     );
-    const chargedBannerDurationSec = Math.max(
-        0.4,
-        Number(options.chargedBannerDurationSec) || 1.5
-    );
+    const chargedBannerDurationSec = Math.max(0.4, Number(options.chargedBannerDurationSec) || 1.5);
     const lowBatteryShowThreshold = THREE.MathUtils.clamp(
         Number(options.lowBatteryShowThreshold) || BATTERY_LOW_HUD_SHOW_THRESHOLD,
         0.02,
@@ -154,7 +152,11 @@ export function createChargingProgressHudController(scene, camera, options = {})
             } else if (batteryNormalized <= criticalBatteryShowThreshold) {
                 state.criticalBatteryAlertActive = true;
             }
-            if (isCharging && batteryPercent >= chargeCompleteThreshold && !state.chargeCompleteLatched) {
+            if (
+                isCharging &&
+                batteryPercent >= chargeCompleteThreshold &&
+                !state.chargeCompleteLatched
+            ) {
                 state.chargeCompleteLatched = true;
                 state.chargedHoldTimer = chargedBannerDurationSec;
                 frameSnapshot.chargeCompletedThisFrame = true;
@@ -168,6 +170,13 @@ export function createChargingProgressHudController(scene, camera, options = {})
             if (batteryPercent < chargeCompleteThreshold - 1.5) {
                 state.chargeCompleteLatched = false;
                 state.chargedHoldTimer = 0;
+            }
+            if (!showWorldHud) {
+                state.visibleBlend = 0;
+                state.displayPercent = batteryPercent;
+                state.hasLastChargingAnchor = false;
+                root.visible = false;
+                return frameSnapshot;
             }
             const showCharged = state.chargeCompleteLatched && state.chargedHoldTimer > 0;
             const showChargedIdle =
@@ -209,8 +218,7 @@ export function createChargingProgressHudController(scene, camera, options = {})
             state.scanPhase += dt * (1.6 + charging * 4.2);
 
             const hoverPulse = 0.5 + 0.5 * Math.sin(state.scanPhase * 1.7);
-            const useChargingAnchor =
-                showChargingPresentation || showCharged || showChargedIdle;
+            const useChargingAnchor = showChargingPresentation || showCharged || showChargedIdle;
             const anchor = useChargingAnchor ? getChargingAnchor(chargingAnchor) : null;
             if (anchor) {
                 lastChargingAnchor.copy(anchor);
@@ -354,19 +362,17 @@ export function createChargingProgressHudController(scene, camera, options = {})
         ctx.fillStyle = scanGradient;
         ctx.fillRect(px + 10, scanY - 24, pw - 20, 48);
 
-        const batteryLevel = showCharged
-            ? 1
-            : THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
+        const batteryLevel = showCharged ? 1 : THREE.MathUtils.clamp(getBatteryNormalized(), 0, 1);
         const bigPercentText = showCharged ? 'CHARGED' : `${Math.round(displayPercent)}%`;
         const subText = showCharged
             ? 'Battery full. Drive on.'
             : isCharging
-            ? `LAADIMINE +${chargingBatteryGainPerSec.toFixed(1)}%/s`
-            : isCriticalBattery
-              ? 'CRITICAL BATTERY - CHARGE NOW'
-              : showLowBatteryReminder
-                ? 'LOW BATTERY - DRIVE TO CHARGER'
-                : 'LAADIMISE OOTEL';
+              ? `LAADIMINE +${chargingBatteryGainPerSec.toFixed(1)}%/s`
+              : isCriticalBattery
+                ? 'CRITICAL BATTERY - CHARGE NOW'
+                : showLowBatteryReminder
+                  ? 'LOW BATTERY - DRIVE TO CHARGER'
+                  : 'LAADIMISE OOTEL';
 
         ctx.textAlign = 'center';
         ctx.shadowColor = textShadow;
@@ -739,9 +745,7 @@ export function createChargingZoneController(scene, chargingZones = [], options 
             const prepEase = prep * prep * (3 - 2 * prep);
             const zoneActiveLevel = isInside ? activeLevel : 0;
             const hover = 0.5 + 0.5 * Math.sin(state.pulsePhase * 1.45 + zone.beaconPhase);
-            const guideFade = isInside
-                ? 1 - Math.max(prepEase * 0.74, zoneActiveLevel * 0.92)
-                : 1;
+            const guideFade = isInside ? 1 - Math.max(prepEase * 0.74, zoneActiveLevel * 0.92) : 1;
 
             zone.marker.material.opacity =
                 0.56 + prepEase * 0.18 + zoneActiveLevel * (0.14 + pulse * 0.18);
@@ -754,8 +758,7 @@ export function createChargingZoneController(scene, chargingZones = [], options 
             zone.beacon.position.y =
                 1.26 + hover * 0.16 + guideFade * 0.22 + zoneActiveLevel * 0.08;
             zone.beacon.scale.setScalar(
-                zone.radius *
-                    (1.44 + hover * 0.08 + guideFade * 0.22 + zoneActiveLevel * 0.04)
+                zone.radius * (1.44 + hover * 0.08 + guideFade * 0.22 + zoneActiveLevel * 0.04)
             );
         }
     }

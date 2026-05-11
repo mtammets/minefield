@@ -65,6 +65,17 @@ export function createSpeedometerController() {
                     <span class="speedometerDriveMode">AUTO</span>
                 </div>
             </div>
+            <div class="speedometerBatteryPod" aria-hidden="true">
+                <div class="speedometerBatteryIcon">
+                    <span class="speedometerBatteryCap"></span>
+                    <span class="speedometerBatteryCell">
+                        <span class="speedometerBatteryFill" data-speedometer-battery-fill></span>
+                    </span>
+                </div>
+                <div class="speedometerBatteryLabel">Energy</div>
+                <div class="speedometerBatteryValue" data-speedometer-battery-value>100%</div>
+                <div class="speedometerBatteryStatus" data-speedometer-battery-status>READY</div>
+            </div>
         </div>
     `;
     document.body.append(rootEl);
@@ -74,6 +85,9 @@ export function createSpeedometerController() {
     const needleEl = rootEl.querySelector('[data-speedometer-needle]');
     const speedValueEl = rootEl.querySelector('[data-speedometer-speed]');
     const gearValueEl = rootEl.querySelector('[data-speedometer-gear]');
+    const batteryFillEl = rootEl.querySelector('[data-speedometer-battery-fill]');
+    const batteryValueEl = rootEl.querySelector('[data-speedometer-battery-value]');
+    const batteryStatusEl = rootEl.querySelector('[data-speedometer-battery-status]');
 
     const state = {
         visible: false,
@@ -100,11 +114,15 @@ export function createSpeedometerController() {
                 .slice(-3);
             const gearLabel = resolveGearLabel(frameState);
             const tone = resolveTone(frameState, targetSpeedKph);
+            const batteryPercent = clampNumber(frameState.batteryPercent, 0, 100, 100);
+            const batteryLevel = clampNumber(batteryPercent / 100, 0, 1, 1);
+            const batteryState = resolveBatteryState(frameState, batteryPercent);
             const motion =
                 frameState.rawSpeedMps < -0.6 ? 'reverse' : targetSpeedKph > 1 ? 'drive' : 'idle';
 
             rootEl.dataset.tone = tone;
             rootEl.dataset.motion = motion;
+            rootEl.dataset.batteryState = batteryState;
             if (progressEl) {
                 progressEl.style.strokeDasharray = `${(progress * 100).toFixed(2)} 100`;
             }
@@ -119,6 +137,15 @@ export function createSpeedometerController() {
             }
             if (gearValueEl) {
                 gearValueEl.textContent = gearLabel;
+            }
+            if (batteryFillEl) {
+                batteryFillEl.style.transform = `scaleY(${batteryLevel.toFixed(3)})`;
+            }
+            if (batteryValueEl) {
+                batteryValueEl.textContent = `${Math.round(batteryPercent)}%`;
+            }
+            if (batteryStatusEl) {
+                batteryStatusEl.textContent = resolveBatteryStatusLabel(batteryState);
             }
         },
         dispose() {
@@ -205,6 +232,37 @@ function resolveTone(frameState = {}, speedKph = 0) {
         return 'charged';
     }
     return 'ready';
+}
+
+function resolveBatteryState(frameState = {}, batteryPercent = 100) {
+    if (frameState.destroyed) {
+        return 'offline';
+    }
+    if (frameState.batteryDepleted || batteryPercent <= 10) {
+        return 'critical';
+    }
+    if (frameState.chargingActive) {
+        return 'charging';
+    }
+    if (batteryPercent <= 30) {
+        return 'low';
+    }
+    return 'ready';
+}
+
+function resolveBatteryStatusLabel(state = 'ready') {
+    switch (state) {
+        case 'offline':
+            return 'OFF';
+        case 'critical':
+            return 'LOW';
+        case 'charging':
+            return 'CHARGE';
+        case 'low':
+            return 'WATCH';
+        default:
+            return 'READY';
+    }
 }
 
 function clampNumber(value, min, max, fallback = 0) {
