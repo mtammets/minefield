@@ -66,6 +66,14 @@
                         >
                             SUPPORT THE GAME <span aria-hidden="true">❤</span>
                         </button>
+                        <button
+                            id="welcomeSettingsBtn"
+                            type="button"
+                            aria-controls="welcomePreviewSettingsOverlay"
+                            aria-expanded="false"
+                        >
+                            SETTINGS <span aria-hidden="true">SYSTEM</span>
+                        </button>
                     </div>
                     <section id="welcomeAuthPanel" class="welcomeAuthPanel" aria-label="Account">
                         <div id="welcomeAuthSignedOutView" class="welcomeAuthSignedOutView">
@@ -224,85 +232,62 @@
                                     accept="image/jpeg,image/png,image/webp"
                                     hidden
                                 />
-                                <div
-                                    class="welcomeAuthSectionTabs"
-                                    role="tablist"
-                                    aria-label="Profile controls"
-                                >
-                                    <button
-                                        id="welcomeAuthSectionGameplayTab"
-                                        class="welcomeAuthSectionTab"
-                                        type="button"
-                                        role="tab"
-                                        aria-selected="true"
-                                        aria-controls="welcomeAuthSectionGameplayPanel"
-                                        data-selected="true"
+                                <div class="welcomeAuthSectionHeading">
+                                    <div class="welcomeAuthSectionEyebrow">ACCOUNT TOOLS</div>
+                                    <div
+                                        id="welcomeAuthSectionSecurityTitle"
+                                        class="welcomeAuthSectionTitle"
                                     >
-                                        GAMEPLAY
-                                    </button>
-                                    <button
-                                        id="welcomeAuthSectionSecurityTab"
-                                        class="welcomeAuthSectionTab"
-                                        type="button"
-                                        role="tab"
-                                        aria-selected="false"
-                                        aria-controls="welcomeAuthSectionSecurityPanel"
-                                        data-selected="false"
-                                    >
-                                        SECURITY
-                                    </button>
+                                        Security
+                                    </div>
                                 </div>
                                 <div class="welcomeAuthSectionStage">
                                     <section
-                                        id="welcomeAuthSectionGameplayPanel"
-                                        class="welcomeAuthSectionPanel"
-                                        role="tabpanel"
-                                        aria-labelledby="welcomeAuthSectionGameplayTab"
-                                    >
-                                        <div class="welcomeAuthGameplayCard">
-                                            <span class="welcomeAuthGameplayLabel">
-                                                AUTO FULLSCREEN
-                                            </span>
-                                            <span class="welcomeAuthToggleControl">
-                                                <input
-                                                    id="welcomeAutoFullscreenInput"
-                                                    class="welcomeAuthToggleInput"
-                                                    type="checkbox"
-                                                    checked
-                                                />
-                                                <span
-                                                    class="welcomeAuthToggleTrack"
-                                                    aria-hidden="true"
-                                                ></span>
-                                            </span>
-                                        </div>
-                                    </section>
-                                    <section
                                         id="welcomeAuthSectionSecurityPanel"
-                                        class="welcomeAuthSectionPanel"
-                                        role="tabpanel"
-                                        aria-labelledby="welcomeAuthSectionSecurityTab"
+                                        class="welcomeAuthSectionPanel welcomeAuthSecurityPanel"
+                                        role="region"
+                                        aria-labelledby="welcomeAuthSectionSecurityTitle"
                                         hidden
                                     >
-                                        <div class="welcomeAuthActionGrid">
-                                            <button
-                                                id="welcomeAuthChangePasswordToggleBtn"
-                                                class="welcomeAuthActionBtn welcomeAuthActionBtnPrimary"
-                                                type="button"
-                                            >
-                                                CHANGE PASSWORD
-                                            </button>
-                                            <button
-                                                id="welcomeAuthSignOutBtn"
-                                                class="welcomeAuthActionBtn"
-                                                type="button"
-                                            >
-                                                LOG OUT
-                                            </button>
+                                        <div class="welcomeAuthSecurityRail">
+                                            <div class="welcomeAuthSecurityItem">
+                                                <div class="welcomeAuthSecurityCopy">
+                                                    <div class="welcomeAuthSecurityItemTitle">
+                                                        Password
+                                                    </div>
+                                                    <div class="welcomeAuthSecurityItemHint">
+                                                        Update it only when needed.
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    id="welcomeAuthChangePasswordToggleBtn"
+                                                    class="welcomeAuthCompactActionBtn welcomeAuthCompactActionBtnPrimary"
+                                                    type="button"
+                                                >
+                                                    CHANGE
+                                                </button>
+                                            </div>
+                                            <div class="welcomeAuthSecurityItem">
+                                                <div class="welcomeAuthSecurityCopy">
+                                                    <div class="welcomeAuthSecurityItemTitle">
+                                                        Session
+                                                    </div>
+                                                    <div class="welcomeAuthSecurityItemHint">
+                                                        Log out from this device.
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    id="welcomeAuthSignOutBtn"
+                                                    class="welcomeAuthCompactActionBtn"
+                                                    type="button"
+                                                >
+                                                    LOG OUT
+                                                </button>
+                                            </div>
                                         </div>
                                         <div
                                             id="welcomeAuthPasswordChangePanel"
-                                            class="welcomeAuthPasswordChangePanel"
+                                            class="welcomeAuthPasswordChangePanel welcomeAuthPasswordSheet"
                                             hidden
                                         >
                                             <div class="welcomeAuthFields">
@@ -358,7 +343,16 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        <div class="welcomeAuthDangerRow">
+                                        <div class="welcomeAuthDangerZone">
+                                            <div class="welcomeAuthDangerMeta">
+                                                <div class="welcomeAuthDangerTitle">
+                                                    Danger Zone
+                                                </div>
+                                                <div class="welcomeAuthDangerHint">
+                                                    Permanently remove this account and its saved
+                                                    leaderboard data.
+                                                </div>
+                                            </div>
                                             <button
                                                 id="welcomeAuthDeleteAccountBtn"
                                                 class="welcomeAuthDangerInlineBtn"
@@ -560,16 +554,13 @@
                             ></div>
                         </section>
                     </div>
-                    <div
+                    <aside
                         id="welcomePreviewAccountOverlay"
-                        class="welcomePreviewLeaderboardOverlay welcomePreviewAccountOverlay"
+                        class="welcomePreviewAccountPanel"
+                        aria-labelledby="welcomePreviewAccountTitle"
                         hidden
                     >
-                        <section
-                            class="welcomePreviewLeaderboardCard welcomePreviewAccountCard"
-                            role="dialog"
-                            aria-labelledby="welcomePreviewAccountTitle"
-                        >
+                        <div class="welcomePreviewAccountCard">
                             <div class="welcomePreviewLeaderboardHeader">
                                 <div class="welcomePreviewLeaderboardHeading">
                                     <div class="welcomePreviewLeaderboardEyebrow">
@@ -596,8 +587,118 @@
                                 id="welcomePreviewAccountBody"
                                 class="welcomePreviewAccountBody"
                             ></div>
-                        </section>
-                    </div>
+                        </div>
+                    </aside>
+                    <aside
+                        id="welcomePreviewSettingsOverlay"
+                        class="welcomePreviewAccountPanel welcomePreviewSettingsOverlay"
+                        aria-labelledby="welcomePreviewSettingsTitle"
+                        hidden
+                    >
+                        <div class="welcomePreviewAccountCard welcomePreviewSettingsCard">
+                            <div class="welcomePreviewLeaderboardHeader">
+                                <div class="welcomePreviewLeaderboardHeading">
+                                    <div class="welcomePreviewLeaderboardEyebrow">
+                                        GAME SETTINGS
+                                    </div>
+                                    <div
+                                        id="welcomePreviewSettingsTitle"
+                                        class="welcomePreviewLeaderboardTitle welcomePreviewSettingsTitle"
+                                    >
+                                        Settings
+                                    </div>
+                                </div>
+                                <div class="welcomePreviewLeaderboardHeaderActions">
+                                    <button
+                                        id="welcomePreviewSettingsCloseBtn"
+                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        type="button"
+                                    >
+                                        CLOSE
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="welcomePreviewAccountBody welcomePreviewSettingsBody">
+                                <section
+                                    id="welcomeSettingsPanel"
+                                    class="welcomeAuthPanel welcomeSettingsPanel"
+                                    aria-label="Settings"
+                                >
+                                    <div class="welcomeAuthGameplayCard">
+                                        <span class="welcomeAuthGameplayLabel">
+                                            AUTO FULLSCREEN
+                                        </span>
+                                        <span class="welcomeAuthToggleControl">
+                                            <input
+                                                id="welcomeAutoFullscreenInput"
+                                                class="welcomeAuthToggleInput"
+                                                type="checkbox"
+                                                checked
+                                            />
+                                            <span
+                                                class="welcomeAuthToggleTrack"
+                                                aria-hidden="true"
+                                            ></span>
+                                        </span>
+                                    </div>
+                                    <div
+                                        id="welcomeAuthCarWrapCard"
+                                        class="welcomeAuthGameplayCard welcomeAuthGameplayCardWrap"
+                                        hidden
+                                    >
+                                        <div class="welcomeAuthGameplayMeta">
+                                            <span class="welcomeAuthGameplayLabel">
+                                                CUSTOM CAR WRAP
+                                            </span>
+                                            <span class="welcomeAuthGameplayHint">
+                                                Overlay your uploaded image across the car body.
+                                            </span>
+                                        </div>
+                                        <div class="welcomeAuthCarWrapControls">
+                                            <div class="welcomeAuthCarWrapPreviewFrame">
+                                                <img
+                                                    id="welcomeAuthCarWrapPreview"
+                                                    class="welcomeAuthCarWrapPreview"
+                                                    alt="Custom car wrap preview"
+                                                    hidden
+                                                />
+                                                <div
+                                                    id="welcomeAuthCarWrapFallback"
+                                                    class="welcomeAuthCarWrapFallback"
+                                                >
+                                                    WRAP
+                                                </div>
+                                            </div>
+                                            <div class="welcomeAuthCarWrapActions">
+                                                <button
+                                                    id="welcomeAuthCarWrapUploadBtn"
+                                                    class="welcomeAuthMetaActionBtn welcomeAuthCarWrapUploadBtn"
+                                                    type="button"
+                                                >
+                                                    UPLOAD WRAP
+                                                </button>
+                                                <button
+                                                    id="welcomeAuthCarWrapRemoveBtn"
+                                                    class="welcomeAuthMetaActionBtn"
+                                                    type="button"
+                                                    hidden
+                                                >
+                                                    REMOVE
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <input
+                                            id="welcomeAuthCarWrapInput"
+                                            class="welcomeAuthFileInput"
+                                            type="file"
+                                            accept="image/jpeg,image/png,image/webp"
+                                            hidden
+                                        />
+                                    </div>
+                                </section>
+                            </div>
+                        </div>
+                    </aside>
                     <div
                         id="welcomePreviewDonateOverlay"
                         class="welcomePreviewLeaderboardOverlay welcomePreviewDonateOverlay"

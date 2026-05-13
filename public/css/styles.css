@@ -6567,6 +6567,32 @@ body.race-intro-active #botPanel {
     z-index: 1;
 }
 
+.welcomeAuthSectionHeading {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 4px;
+    padding: 0 2px;
+}
+
+.welcomeAuthSectionEyebrow {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: rgba(180, 208, 226, 0.8);
+}
+
+.welcomeAuthSectionTitle {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: rgba(239, 246, 253, 0.98);
+}
+
 .welcomeAuthSectionTabs {
     position: relative;
     z-index: 1;
@@ -6651,6 +6677,126 @@ body.race-intro-active #botPanel {
 
 .welcomeAuthSectionPanel[hidden] {
     display: none !important;
+}
+
+.welcomeAuthSecurityPanel {
+    gap: 14px;
+}
+
+.welcomeAuthSecurityRail {
+    display: grid;
+    gap: 10px;
+}
+
+.welcomeAuthSecurityItem {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid rgba(124, 170, 204, 0.34);
+    border-radius: 18px;
+    background:
+        linear-gradient(180deg, rgba(13, 29, 45, 0.78), rgba(8, 18, 29, 0.84)),
+        linear-gradient(90deg, rgba(98, 176, 255, 0.05), rgba(98, 176, 255, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 12px 22px rgba(0, 0, 0, 0.14);
+}
+
+.welcomeAuthSecurityCopy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.welcomeAuthSecurityItemTitle {
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: rgba(238, 246, 252, 0.98);
+}
+
+.welcomeAuthSecurityItemHint {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: rgba(173, 201, 220, 0.88);
+}
+
+.welcomeAuthCompactActionBtn {
+    border: 1px solid rgba(126, 171, 204, 0.42);
+    border-radius: 999px;
+    min-height: 40px;
+    padding: 0 16px;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(231, 242, 250, 0.96);
+    background:
+        linear-gradient(180deg, rgba(18, 40, 61, 0.9), rgba(9, 21, 33, 0.92)),
+        linear-gradient(90deg, rgba(110, 188, 255, 0.06), rgba(110, 188, 255, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 18px rgba(0, 0, 0, 0.14);
+    cursor: pointer;
+    transition:
+        transform 120ms ease,
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        filter 120ms ease,
+        background 120ms ease;
+}
+
+.welcomeAuthCompactActionBtn:hover,
+.welcomeAuthCompactActionBtn:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(196, 223, 242, 0.82);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 12px 22px rgba(0, 0, 0, 0.16);
+    filter: brightness(1.03);
+}
+
+.welcomeAuthCompactActionBtn:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthCompactActionBtnPrimary {
+    border-color: rgba(133, 205, 255, 0.68);
+    background:
+        linear-gradient(180deg, rgba(30, 79, 129, 0.92), rgba(14, 35, 59, 0.94)),
+        linear-gradient(90deg, rgba(129, 230, 191, 0.16), rgba(129, 230, 191, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 12px 22px rgba(21, 66, 112, 0.18);
+}
+
+.welcomeAuthCompactActionBtnPrimary[data-open='true'] {
+    border-color: rgba(167, 230, 255, 0.88);
+    background:
+        linear-gradient(180deg, rgba(35, 112, 167, 0.94), rgba(16, 49, 84, 0.96)),
+        linear-gradient(90deg, rgba(129, 230, 191, 0.14), rgba(129, 230, 191, 0));
+}
+
+.welcomeAuthPasswordSheet {
+    padding: 14px;
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, rgba(12, 24, 38, 0.86), rgba(8, 17, 28, 0.9)),
+        linear-gradient(90deg, rgba(98, 176, 255, 0.05), rgba(98, 176, 255, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 14px 24px rgba(0, 0, 0, 0.14);
 }
 
 .welcomeAuthActionGrid {
@@ -6756,9 +6902,134 @@ body.race-intro-active #botPanel {
     text-shadow: none;
 }
 
-.welcomeAuthDangerRow {
-    display: flex;
-    justify-content: flex-end;
+.welcomeAuthGameplayMeta {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: 6px;
+}
+
+.welcomeAuthGameplayHint {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: rgba(177, 204, 221, 0.9);
+}
+
+.welcomeAuthGameplayCardWrap {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+}
+
+.welcomeAuthCarWrapControls {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 12px;
+    align-items: center;
+}
+
+.welcomeAuthCarWrapPreviewFrame {
+    width: 126px;
+    height: 74px;
+    border: 1px solid rgba(137, 182, 215, 0.44);
+    border-radius: 18px;
+    overflow: hidden;
+    position: relative;
+    display: grid;
+    place-items: center;
+    background:
+        linear-gradient(180deg, rgba(18, 40, 61, 0.96), rgba(7, 16, 26, 0.96)),
+        radial-gradient(circle at 22% 26%, rgba(118, 195, 255, 0.14), rgba(118, 195, 255, 0) 38%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 14px 26px rgba(0, 0, 0, 0.16);
+}
+
+.welcomeAuthCarWrapPreviewFrame::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(140deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0));
+}
+
+.welcomeAuthCarWrapPreview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.welcomeAuthCarWrapPreview[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthCarWrapFallback {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: rgba(226, 241, 250, 0.96);
+}
+
+.welcomeAuthCarWrapActions {
+    display: grid;
+    gap: 8px;
+    justify-items: start;
+}
+
+.welcomeAuthCarWrapUploadBtn {
+    border-color: rgba(131, 214, 178, 0.54);
+    color: rgba(228, 255, 241, 0.96);
+    background:
+        linear-gradient(180deg, rgba(19, 88, 60, 0.56), rgba(12, 49, 34, 0.64)),
+        linear-gradient(90deg, rgba(154, 242, 194, 0.08), rgba(154, 242, 194, 0));
+}
+
+.welcomeAuthCarWrapUploadBtn:hover,
+.welcomeAuthCarWrapUploadBtn:focus-visible {
+    border-color: rgba(168, 237, 208, 0.82);
+    background: rgba(28, 101, 71, 0.46);
+    color: rgba(241, 255, 247, 0.98);
+}
+
+.welcomeAuthDangerZone {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border: 1px solid rgba(148, 90, 90, 0.28);
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, rgba(46, 15, 20, 0.32), rgba(24, 8, 12, 0.36)),
+        linear-gradient(90deg, rgba(255, 126, 126, 0.06), rgba(255, 126, 126, 0));
+}
+
+.welcomeAuthDangerMeta {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.welcomeAuthDangerTitle {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 220, 220, 0.96);
+}
+
+.welcomeAuthDangerHint {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: rgba(231, 190, 190, 0.82);
 }
 
 .welcomeAuthDangerInlineBtn {
@@ -6946,6 +7217,17 @@ body.race-intro-active #botPanel {
         flex-direction: column;
     }
 
+    .welcomeAuthSecurityItem,
+    .welcomeAuthDangerZone {
+        grid-template-columns: 1fr;
+        align-items: start;
+    }
+
+    .welcomeAuthCompactActionBtn,
+    .welcomeAuthDangerInlineBtn {
+        justify-self: start;
+    }
+
     .welcomeAuthSectionStage {
         padding: 0;
     }
@@ -6956,13 +7238,27 @@ body.race-intro-active #botPanel {
         min-height: 88px;
         padding: 18px;
     }
+
+    .welcomeAuthGameplayCardWrap {
+        grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthCarWrapControls {
+        grid-template-columns: 1fr;
+        width: 100%;
+    }
+
+    .welcomeAuthCarWrapPreviewFrame {
+        width: min(100%, 220px);
+    }
 }
 
 #welcomeStartBtn,
 #welcomeStartOnlineBtn,
 #welcomeLeaderboardBtn,
 #welcomeAccountBtn,
-#welcomeDonateBtn {
+#welcomeDonateBtn,
+#welcomeSettingsBtn {
     position: relative;
     border: 1px solid rgba(175, 207, 225, 0.54);
     border-radius: 14px;
@@ -6988,7 +7284,8 @@ body.race-intro-active #botPanel {
 #welcomeStartOnlineBtn::before,
 #welcomeLeaderboardBtn::before,
 #welcomeAccountBtn::before,
-#welcomeDonateBtn::before {
+#welcomeDonateBtn::before,
+#welcomeSettingsBtn::before {
     content: '';
     position: absolute;
     left: 1px;
@@ -7077,11 +7374,29 @@ body.race-intro-active #botPanel {
         inset 0 1px 0 rgba(255, 240, 215, 0.16);
 }
 
+#welcomeSettingsBtn {
+    color: rgba(244, 244, 255, 0.98);
+    border-color: rgba(214, 190, 255, 0.7);
+    background: linear-gradient(180deg, rgba(88, 72, 144, 0.9), rgba(39, 29, 76, 0.95));
+    box-shadow:
+        0 8px 16px rgba(67, 53, 122, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+#welcomeSettingsBtn[data-open='true'] {
+    border-color: rgba(191, 233, 255, 0.84);
+    background: linear-gradient(180deg, rgba(46, 108, 160, 0.92), rgba(18, 48, 80, 0.96));
+    box-shadow:
+        0 10px 20px rgba(28, 82, 132, 0.28),
+        inset 0 1px 0 rgba(235, 247, 255, 0.16);
+}
+
 #welcomeStartBtn span,
 #welcomeStartOnlineBtn span,
 #welcomeLeaderboardBtn span,
 #welcomeAccountBtn span,
-#welcomeDonateBtn span {
+#welcomeDonateBtn span,
+#welcomeSettingsBtn span {
     font-size: 18px;
     transform: translateY(-1px);
 }
@@ -7090,7 +7405,8 @@ body.race-intro-active #botPanel {
 #welcomeStartOnlineBtn:hover,
 #welcomeLeaderboardBtn:hover,
 #welcomeAccountBtn:hover,
-#welcomeDonateBtn:hover {
+#welcomeDonateBtn:hover,
+#welcomeSettingsBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.03);
     border-color: rgba(214, 232, 246, 0.88);
@@ -7100,7 +7416,8 @@ body.race-intro-active #botPanel {
 #welcomeStartOnlineBtn:active,
 #welcomeLeaderboardBtn:active,
 #welcomeAccountBtn:active,
-#welcomeDonateBtn:active {
+#welcomeDonateBtn:active,
+#welcomeSettingsBtn:active {
     transform: translateY(0);
     filter: brightness(0.98);
 }
@@ -7125,7 +7442,8 @@ body.race-intro-active #botPanel {
 #welcomeStartOnlineBtn:disabled,
 #welcomeLeaderboardBtn:disabled,
 #welcomeAccountBtn:disabled,
-#welcomeDonateBtn:disabled {
+#welcomeDonateBtn:disabled,
+#welcomeSettingsBtn:disabled {
     opacity: 0.5;
     cursor: wait;
     transform: none;
@@ -7687,11 +8005,28 @@ body.race-intro-active #botPanel {
     display: none;
 }
 
-.welcomePreviewAccountOverlay {
+.welcomePreviewAccountPanel {
+    position: absolute;
+    top: clamp(16px, 2.4vw, 28px);
+    left: clamp(16px, 2.4vw, 28px);
+    right: clamp(16px, 2.4vw, 28px);
+    bottom: clamp(16px, 2.4vw, 28px);
     z-index: 9;
+    display: grid;
+    align-items: stretch;
+    justify-items: stretch;
+    animation: welcomePreviewLeaderboardIn 220ms ease both;
+}
+
+.welcomePreviewAccountPanel[hidden] {
+    display: none;
 }
 
 .welcomePreviewDonateOverlay {
+    z-index: 9;
+}
+
+.welcomePreviewSettingsOverlay {
     z-index: 9;
 }
 
@@ -7833,18 +8168,17 @@ body.race-intro-active #botPanel {
 
 .welcomePreviewAccountCard {
     position: relative;
-    width: min(100%, 720px);
-    overflow: hidden;
-    border-color: rgba(176, 212, 232, 0.54);
-    border-radius: 24px;
-    padding: clamp(16px, 2.3vw, 24px);
-    background:
-        radial-gradient(circle at 16% 10%, rgba(112, 184, 255, 0.1), rgba(112, 184, 255, 0) 28%),
-        linear-gradient(170deg, rgba(13, 26, 40, 0.95), rgba(8, 16, 26, 0.96)),
-        linear-gradient(120deg, rgba(146, 208, 242, 0.08), rgba(146, 208, 242, 0));
-    box-shadow:
-        0 28px 62px rgba(0, 0, 0, 0.44),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    padding: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+    pointer-events: none;
 }
 
 .welcomePreviewAccountCard::before {
@@ -7859,6 +8193,7 @@ body.race-intro-active #botPanel {
 .welcomePreviewAccountBody {
     position: relative;
     z-index: 1;
+    pointer-events: auto;
 }
 
 .welcomePreviewAccountCard .welcomePreviewLeaderboardHeading {
@@ -7883,16 +8218,28 @@ body.race-intro-active #botPanel {
     text-shadow: 0 0 18px rgba(178, 216, 242, 0.1);
 }
 
+.welcomePreviewSettingsTitle {
+    color: rgba(232, 241, 255, 0.98);
+}
+
 .welcomePreviewAccountBody {
     display: grid;
+    align-content: start;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding-right: 4px;
 }
 
 .welcomePreviewAccountBody .welcomeAuthPanel {
+    width: min(100%, 640px);
+    justify-self: center;
     border: 0;
     border-radius: 0;
     padding: 0;
     background: transparent;
     box-shadow: none;
+    min-height: 0;
 }
 
 .welcomePreviewDonateCard {
@@ -8233,7 +8580,8 @@ body.race-intro-active #botPanel {
     #welcomeStartOnlineBtn,
     #welcomeLeaderboardBtn,
     #welcomeAccountBtn,
-    #welcomeDonateBtn {
+    #welcomeDonateBtn,
+    #welcomeSettingsBtn {
         min-height: 54px;
         padding: 0 14px;
         font-size: 11px;
@@ -8243,7 +8591,8 @@ body.race-intro-active #botPanel {
     #welcomeStartOnlineBtn span,
     #welcomeLeaderboardBtn span,
     #welcomeAccountBtn span,
-    #welcomeDonateBtn span {
+    #welcomeDonateBtn span,
+    #welcomeSettingsBtn span {
         font-size: 16px;
     }
 
@@ -8267,6 +8616,13 @@ body.race-intro-active #botPanel {
     .welcomeShowroomBay {
         border-radius: 16px;
         min-height: clamp(260px, 42vh, 360px);
+    }
+
+    .welcomePreviewAccountPanel {
+        top: 10px;
+        right: 10px;
+        bottom: 10px;
+        left: 10px;
     }
 
     .welcomePreviewLeaderboardOverlay {

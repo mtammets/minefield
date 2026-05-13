@@ -55,6 +55,8 @@ export function createWelcomeModalController({
     onAuthSignOut,
     onAuthUpdateProfileImage,
     onAuthRemoveProfileImage,
+    onAuthUpdateCarWrap,
+    onAuthRemoveCarWrap,
     onAuthChangePassword,
     onAuthDeleteAccount,
     onRefreshGlobalLeaderboard,
@@ -96,11 +98,14 @@ export function createWelcomeModalController({
     const authAvatarFallbackEl = document.getElementById('welcomeAuthAvatarFallback');
     const authAvatarInputEl = document.getElementById('welcomeAuthAvatarInput');
     const authAvatarRemoveBtnEl = document.getElementById('welcomeAuthAvatarRemoveBtn');
+    const authCarWrapCardEl = document.getElementById('welcomeAuthCarWrapCard');
+    const authCarWrapPreviewEl = document.getElementById('welcomeAuthCarWrapPreview');
+    const authCarWrapFallbackEl = document.getElementById('welcomeAuthCarWrapFallback');
+    const authCarWrapUploadBtnEl = document.getElementById('welcomeAuthCarWrapUploadBtn');
+    const authCarWrapRemoveBtnEl = document.getElementById('welcomeAuthCarWrapRemoveBtn');
+    const authCarWrapInputEl = document.getElementById('welcomeAuthCarWrapInput');
     const authSignedInNameEl = document.getElementById('welcomeAuthSignedInName');
     const authSignedInEmailEl = document.getElementById('welcomeAuthSignedInEmail');
-    const authSectionGameplayTabEl = document.getElementById('welcomeAuthSectionGameplayTab');
-    const authSectionSecurityTabEl = document.getElementById('welcomeAuthSectionSecurityTab');
-    const authSectionGameplayPanelEl = document.getElementById('welcomeAuthSectionGameplayPanel');
     const authSectionSecurityPanelEl = document.getElementById('welcomeAuthSectionSecurityPanel');
     const authChangePasswordToggleBtnEl = document.getElementById(
         'welcomeAuthChangePasswordToggleBtn'
@@ -136,6 +141,7 @@ export function createWelcomeModalController({
     const leaderboardBtnEl = document.getElementById('welcomeLeaderboardBtn');
     const accountBtnEl = document.getElementById('welcomeAccountBtn');
     const donateBtnEl = document.getElementById('welcomeDonateBtn');
+    const settingsBtnEl = document.getElementById('welcomeSettingsBtn');
     const previewShellEl = document.getElementById('welcomePreviewShell');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
     const previewLoadingEl = document.getElementById('welcomePreviewLoading');
@@ -156,6 +162,8 @@ export function createWelcomeModalController({
     const previewAccountTitleEl = document.getElementById('welcomePreviewAccountTitle');
     const previewAccountBodyEl = document.getElementById('welcomePreviewAccountBody');
     const previewAccountCloseBtnEl = document.getElementById('welcomePreviewAccountCloseBtn');
+    const previewSettingsOverlayEl = document.getElementById('welcomePreviewSettingsOverlay');
+    const previewSettingsCloseBtnEl = document.getElementById('welcomePreviewSettingsCloseBtn');
     const previewDonateOverlayEl = document.getElementById('welcomePreviewDonateOverlay');
     const previewDonateCloseBtnEl = document.getElementById('welcomePreviewDonateCloseBtn');
     const previewOnlineOverlayEl = document.getElementById('welcomePreviewOnlineOverlay');
@@ -252,13 +260,14 @@ export function createWelcomeModalController({
     let preferredOnlinePlayerName = DEFAULT_ONLINE_PLAYER_NAME;
     let authMode = 'sign-in';
     let authUiState = normalizeWelcomeAuthState(getAuthState?.());
-    let authSignedInSection = 'gameplay';
+    let authSignedInSection = 'security';
     let autoFullscreenOnStart = readPersistedAutoFullscreenOnStart(true);
     let authLocalStatusText = '';
     let authLocalStatusTone = 'muted';
     let authPasswordChangeOpen = false;
     let welcomeLeaderboardOpen = false;
     let welcomeAccountOpen = false;
+    let welcomeSettingsOpen = false;
     let welcomeDonateOpen = false;
     let welcomeGlobalLeaderboardState = createInitialWelcomeGlobalLeaderboardState();
     let onlineCodeLookupTimeout = null;
@@ -374,6 +383,7 @@ export function createWelcomeModalController({
     if (previewShellEl) {
         previewShellEl.dataset.leaderboardOpen = 'false';
         previewShellEl.dataset.accountOpen = 'false';
+        previewShellEl.dataset.settingsOpen = 'false';
         previewShellEl.dataset.donateOpen = 'false';
         previewShellEl.dataset.onlineOpen = 'false';
     }
@@ -402,6 +412,7 @@ export function createWelcomeModalController({
         }
         setWelcomeLeaderboardOpen(false);
         setWelcomeAccountOpen(false);
+        setWelcomeSettingsOpen(false);
         setWelcomeDonateOpen(true);
     });
     document.addEventListener(WELCOME_DONATE_CLOSE_EVENT, () => {
@@ -467,12 +478,6 @@ export function createWelcomeModalController({
         authDeleteAccountBtnEl.addEventListener('click', () => {
             void handleDeleteAccount();
         });
-        authSectionGameplayTabEl?.addEventListener('click', () => {
-            setAuthSignedInSection('gameplay');
-        });
-        authSectionSecurityTabEl?.addEventListener('click', () => {
-            setAuthSignedInSection('security');
-        });
         autoFullscreenInputEl?.addEventListener('change', () => {
             autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
             persistAutoFullscreenOnStart(autoFullscreenOnStart);
@@ -502,6 +507,24 @@ export function createWelcomeModalController({
         authAvatarRemoveBtnEl?.addEventListener('click', () => {
             void handleProfileImageRemoval();
         });
+        authCarWrapUploadBtnEl?.addEventListener('click', () => {
+            if (
+                !authCarWrapInputEl ||
+                authUiState.loading ||
+                !authUiState.authenticated ||
+                authCarWrapUploadBtnEl.disabled
+            ) {
+                return;
+            }
+            authCarWrapInputEl.value = '';
+            authCarWrapInputEl.click();
+        });
+        authCarWrapInputEl?.addEventListener('change', () => {
+            void handleCarWrapSelection();
+        });
+        authCarWrapRemoveBtnEl?.addEventListener('click', () => {
+            void handleCarWrapRemoval();
+        });
         authAvatarImageEl?.addEventListener('error', () => {
             if (authAvatarFrameEl) {
                 authAvatarFrameEl.dataset.hasImage = 'false';
@@ -514,11 +537,24 @@ export function createWelcomeModalController({
                 authAvatarFallbackEl.hidden = false;
             }
         });
+        authCarWrapPreviewEl?.addEventListener('error', () => {
+            if (authCarWrapCardEl) {
+                authCarWrapCardEl.dataset.hasImage = 'false';
+            }
+            if (authCarWrapPreviewEl) {
+                authCarWrapPreviewEl.hidden = true;
+                authCarWrapPreviewEl.removeAttribute('src');
+            }
+            if (authCarWrapFallbackEl) {
+                authCarWrapFallbackEl.hidden = false;
+            }
+        });
     }
 
     startBtnEl.addEventListener('click', () => {
         setWelcomeLeaderboardOpen(false);
         setWelcomeAccountOpen(false);
+        setWelcomeSettingsOpen(false);
         requestWelcomeDonateClose();
         closeOnlineModeFlow({ clearSelection: true });
         preferredStartMode = 'bots';
@@ -530,12 +566,16 @@ export function createWelcomeModalController({
     accountBtnEl?.addEventListener('click', () => {
         handleWelcomeAccountToggle();
     });
+    settingsBtnEl?.addEventListener('click', () => {
+        handleWelcomeSettingsToggle();
+    });
     startOnlineBtnEl?.addEventListener('click', () => {
         if (launchSequenceState.active) {
             return;
         }
         setWelcomeLeaderboardOpen(false);
         setWelcomeAccountOpen(false);
+        setWelcomeSettingsOpen(false);
         requestWelcomeDonateClose();
         if (hasOnlineStartFlow) {
             if (onlineModeFlowEl.hidden) {
@@ -608,6 +648,14 @@ export function createWelcomeModalController({
     previewAccountCloseBtnEl?.addEventListener('click', () => {
         setWelcomeAccountOpen(false);
     });
+    previewSettingsOverlayEl?.addEventListener('click', (event) => {
+        if (event.target === previewSettingsOverlayEl) {
+            setWelcomeSettingsOpen(false);
+        }
+    });
+    previewSettingsCloseBtnEl?.addEventListener('click', () => {
+        setWelcomeSettingsOpen(false);
+    });
     previewDonateOverlayEl?.addEventListener('click', (event) => {
         if (event.target === previewDonateOverlayEl) {
             requestWelcomeDonateClose();
@@ -630,14 +678,16 @@ export function createWelcomeModalController({
             cancelStartSequence();
             rootEl.hidden = false;
             resetStartSequenceUi();
-            setAuthSignedInSection('gameplay', { skipSync: true });
+            setAuthSignedInSection('security', { skipSync: true });
             syncAutoFullscreenPreferenceUi();
             setAuthState(getAuthState?.());
             setWelcomeLeaderboardOpen(false, { skipSync: true });
             setWelcomeAccountOpen(false, { skipSync: true });
+            setWelcomeSettingsOpen(false, { skipSync: true });
             setWelcomeDonateOpen(false, { skipSync: true });
             syncWelcomeLeaderboardUi();
             syncWelcomeAccountUi();
+            syncWelcomeSettingsUi();
             syncWelcomeDonateUi();
             preferredStartMode = 'bots';
             if (hasOnlineStartFlow) {
@@ -658,9 +708,10 @@ export function createWelcomeModalController({
         hide() {
             cancelStartSequence();
             resetTaglineTransition();
-            setAuthSignedInSection('gameplay', { skipSync: true });
+            setAuthSignedInSection('security', { skipSync: true });
             setWelcomeLeaderboardOpen(false, { skipSync: true });
             setWelcomeAccountOpen(false, { skipSync: true });
+            setWelcomeSettingsOpen(false, { skipSync: true });
             requestWelcomeDonateClose();
             setWelcomeDonateOpen(false, { skipSync: true });
             closeOnlineModeFlow({ clearSelection: true });
@@ -1329,7 +1380,7 @@ export function createWelcomeModalController({
             writeStoredOnlinePlayerName(authUiState.displayName);
         }
         if (!authUiState.authenticated) {
-            setAuthSignedInSection('gameplay', {
+            setAuthSignedInSection('security', {
                 skipSync: true,
             });
             setPasswordChangeOpen(false, {
@@ -1344,6 +1395,7 @@ export function createWelcomeModalController({
             authMode = 'sign-in';
         }
         clearLocalAuthStatus();
+        syncPreviewVehicleWrap();
         syncAuthUi();
     }
 
@@ -1373,6 +1425,11 @@ export function createWelcomeModalController({
             enabled &&
             Boolean(authUiState.profileImageEnabled && authAvatarInputEl && authAvatarFrameEl);
         const hasProfileImage = Boolean(authUiState.avatarUrl);
+        const canManageCarWrap =
+            authenticated &&
+            enabled &&
+            Boolean(authUiState.carWrapEnabled && authCarWrapInputEl && authCarWrapUploadBtnEl);
+        const hasCarWrap = Boolean(authUiState.carWrapUrl);
         const localStatus = authLocalStatusText.trim();
         const remoteStatus =
             typeof authUiState.statusText === 'string' ? authUiState.statusText.trim() : '';
@@ -1436,26 +1493,26 @@ export function createWelcomeModalController({
                 authAvatarImageEl.removeAttribute('src');
             }
         }
+        if (authCarWrapCardEl) {
+            authCarWrapCardEl.hidden = !authenticated;
+            authCarWrapCardEl.dataset.hasImage = hasCarWrap ? 'true' : 'false';
+        }
+        if (authCarWrapFallbackEl) {
+            authCarWrapFallbackEl.hidden = hasCarWrap;
+        }
+        if (authCarWrapPreviewEl) {
+            if (hasCarWrap) {
+                if (authCarWrapPreviewEl.getAttribute('src') !== authUiState.carWrapUrl) {
+                    authCarWrapPreviewEl.src = authUiState.carWrapUrl;
+                }
+                authCarWrapPreviewEl.hidden = false;
+            } else {
+                authCarWrapPreviewEl.hidden = true;
+                authCarWrapPreviewEl.removeAttribute('src');
+            }
+        }
         if (previewAccountTitleEl) {
             previewAccountTitleEl.textContent = authUiState.displayName || 'ACCOUNT';
-        }
-        if (authSectionGameplayTabEl) {
-            const selected = authenticated && activeSignedInSection === 'gameplay';
-            authSectionGameplayTabEl.hidden = !authenticated;
-            authSectionGameplayTabEl.disabled = !authenticated || busy;
-            authSectionGameplayTabEl.dataset.selected = selected ? 'true' : 'false';
-            authSectionGameplayTabEl.setAttribute('aria-selected', selected ? 'true' : 'false');
-        }
-        if (authSectionSecurityTabEl) {
-            const selected = authenticated && activeSignedInSection === 'security';
-            authSectionSecurityTabEl.hidden = !authenticated;
-            authSectionSecurityTabEl.disabled = !authenticated || busy;
-            authSectionSecurityTabEl.dataset.selected = selected ? 'true' : 'false';
-            authSectionSecurityTabEl.setAttribute('aria-selected', selected ? 'true' : 'false');
-        }
-        if (authSectionGameplayPanelEl) {
-            authSectionGameplayPanelEl.hidden =
-                !authenticated || activeSignedInSection !== 'gameplay';
         }
         if (authSectionSecurityPanelEl) {
             authSectionSecurityPanelEl.hidden =
@@ -1475,9 +1532,7 @@ export function createWelcomeModalController({
             authChangePasswordToggleBtnEl.disabled = !canChangePassword || busy;
             authChangePasswordToggleBtnEl.dataset.open =
                 canChangePassword && authPasswordChangeOpen ? 'true' : 'false';
-            authChangePasswordToggleBtnEl.textContent = authPasswordChangeOpen
-                ? 'CANCEL'
-                : 'CHANGE PASSWORD';
+            authChangePasswordToggleBtnEl.textContent = authPasswordChangeOpen ? 'CLOSE' : 'CHANGE';
         }
         if (authPasswordChangePanelEl) {
             authPasswordChangePanelEl.hidden = !canChangePassword || !authPasswordChangeOpen;
@@ -1494,9 +1549,30 @@ export function createWelcomeModalController({
                 !hasProfileImage ||
                 typeof onAuthRemoveProfileImage !== 'function';
             authAvatarRemoveBtnEl.textContent =
-                busy && authUiState.pendingAction === 'remove-avatar'
-                    ? 'REMOVING...'
-                    : 'REMOVE';
+                busy && authUiState.pendingAction === 'remove-avatar' ? 'REMOVING...' : 'REMOVE';
+        }
+        if (authCarWrapInputEl) {
+            authCarWrapInputEl.disabled = !canManageCarWrap || busy;
+        }
+        if (authCarWrapUploadBtnEl) {
+            authCarWrapUploadBtnEl.disabled = !canManageCarWrap || busy;
+            authCarWrapUploadBtnEl.textContent =
+                busy && authUiState.pendingAction === 'update-car-wrap'
+                    ? 'UPLOADING...'
+                    : hasCarWrap
+                      ? 'REPLACE WRAP'
+                      : 'UPLOAD WRAP';
+        }
+        if (authCarWrapRemoveBtnEl) {
+            authCarWrapRemoveBtnEl.hidden =
+                !authenticated || !authUiState.carWrapEnabled || !hasCarWrap;
+            authCarWrapRemoveBtnEl.disabled =
+                !canManageCarWrap ||
+                busy ||
+                !hasCarWrap ||
+                typeof onAuthRemoveCarWrap !== 'function';
+            authCarWrapRemoveBtnEl.textContent =
+                busy && authUiState.pendingAction === 'remove-car-wrap' ? 'REMOVING...' : 'REMOVE';
         }
         if (authEmailInputEl && !authenticated && authUiState.email) {
             authEmailInputEl.value = sanitizeAuthEmailInput(authUiState.email);
@@ -1574,6 +1650,10 @@ export function createWelcomeModalController({
             requestWelcomeDonateClose();
             return;
         }
+        if (welcomeSettingsOpen) {
+            setWelcomeSettingsOpen(false);
+            return;
+        }
         if (welcomeAccountOpen) {
             setWelcomeAccountOpen(false);
             return;
@@ -1592,6 +1672,7 @@ export function createWelcomeModalController({
             return;
         }
         setWelcomeAccountOpen(false);
+        setWelcomeSettingsOpen(false);
         requestWelcomeDonateClose();
         closeOnlineModeFlow({ clearSelection: true });
         setWelcomeLeaderboardOpen(true);
@@ -1607,6 +1688,7 @@ export function createWelcomeModalController({
             return;
         }
         setWelcomeLeaderboardOpen(false);
+        setWelcomeSettingsOpen(false);
         requestWelcomeDonateClose();
         closeOnlineModeFlow({ clearSelection: true });
         setWelcomeAccountOpen(true);
@@ -1614,6 +1696,21 @@ export function createWelcomeModalController({
             preserveStatus: true,
             openOverlay: false,
         });
+    }
+
+    function handleWelcomeSettingsToggle() {
+        if (launchSequenceState.active) {
+            return;
+        }
+        if (welcomeSettingsOpen) {
+            setWelcomeSettingsOpen(false);
+            return;
+        }
+        setWelcomeLeaderboardOpen(false);
+        setWelcomeAccountOpen(false);
+        requestWelcomeDonateClose();
+        closeOnlineModeFlow({ clearSelection: true });
+        setWelcomeSettingsOpen(true);
     }
 
     function requestWelcomeDonateClose() {
@@ -1724,6 +1821,29 @@ export function createWelcomeModalController({
         previewAccountOverlayEl.hidden = !welcomeAccountOpen;
     }
 
+    function setWelcomeSettingsOpen(nextOpen, options = {}) {
+        welcomeSettingsOpen = Boolean(
+            nextOpen && settingsBtnEl && previewShellEl && previewSettingsOverlayEl
+        );
+        if (!options.skipSync) {
+            syncWelcomeSettingsUi();
+        }
+    }
+
+    function syncWelcomeSettingsUi() {
+        const hasWelcomeSettings = Boolean(
+            settingsBtnEl && previewShellEl && previewSettingsOverlayEl
+        );
+        if (!hasWelcomeSettings) {
+            return;
+        }
+
+        previewShellEl.dataset.settingsOpen = welcomeSettingsOpen ? 'true' : 'false';
+        settingsBtnEl.dataset.open = welcomeSettingsOpen ? 'true' : 'false';
+        settingsBtnEl.setAttribute('aria-expanded', welcomeSettingsOpen ? 'true' : 'false');
+        previewSettingsOverlayEl.hidden = !welcomeSettingsOpen;
+    }
+
     function setWelcomeDonateOpen(nextOpen, options = {}) {
         welcomeDonateOpen = Boolean(
             nextOpen && donateBtnEl && previewShellEl && previewDonateOverlayEl
@@ -1777,6 +1897,7 @@ export function createWelcomeModalController({
         }
         if (options.openOverlay !== false) {
             setWelcomeLeaderboardOpen(false);
+            setWelcomeSettingsOpen(false);
             requestWelcomeDonateClose();
             closeOnlineModeFlow({ clearSelection: true });
             setWelcomeAccountOpen(true);
@@ -1946,6 +2067,69 @@ export function createWelcomeModalController({
         syncAuthUi();
     }
 
+    async function handleCarWrapSelection() {
+        if (
+            authUiState.loading ||
+            !authUiState.authenticated ||
+            !authUiState.carWrapEnabled ||
+            typeof onAuthUpdateCarWrap !== 'function'
+        ) {
+            if (authCarWrapInputEl) {
+                authCarWrapInputEl.value = '';
+            }
+            return;
+        }
+
+        const file = authCarWrapInputEl?.files?.[0] || null;
+        if (!file) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        syncAuthUi();
+
+        const response = await Promise.resolve(onAuthUpdateCarWrap(file)).catch((error) => ({
+            ok: false,
+            error: error?.message || 'Could not update the car wrap.',
+        }));
+
+        if (authCarWrapInputEl) {
+            authCarWrapInputEl.value = '';
+        }
+        if (!response?.ok && response?.error) {
+            setLocalAuthStatus(String(response.error), 'error');
+            syncAuthUi();
+            return;
+        }
+        syncAuthUi();
+    }
+
+    async function handleCarWrapRemoval() {
+        if (
+            authUiState.loading ||
+            !authUiState.authenticated ||
+            !authUiState.carWrapUrl ||
+            typeof onAuthRemoveCarWrap !== 'function'
+        ) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        syncAuthUi();
+
+        const response = await Promise.resolve(onAuthRemoveCarWrap()).catch((error) => ({
+            ok: false,
+            error: error?.message || 'Could not remove the car wrap.',
+        }));
+
+        if (!response?.ok && response?.error) {
+            setLocalAuthStatus(String(response.error), 'error');
+            syncAuthUi();
+            return;
+        }
+        syncAuthUi();
+    }
+
     function handlePasswordChangeToggle() {
         if (!authUiState.authenticated || authUiState.loading || !authUiState.enabled) {
             return;
@@ -2094,7 +2278,7 @@ export function createWelcomeModalController({
         }
     }
 
-    function setAuthSignedInSection(nextSection = 'gameplay', options = {}) {
+    function setAuthSignedInSection(nextSection = 'security', options = {}) {
         authSignedInSection = resolveAuthSignedInSection(nextSection);
         if (authSignedInSection !== 'security') {
             setPasswordChangeOpen(false, {
@@ -2111,21 +2295,20 @@ export function createWelcomeModalController({
         if (!authenticated) {
             return [];
         }
-        return ['gameplay', 'security'];
+        return ['security'];
     }
 
     function resolveAuthSignedInSection(
-        value = 'gameplay',
+        value = 'security',
         availableSections = resolveAvailableAuthSignedInSections({
             authenticated: authUiState.authenticated,
         })
     ) {
-        const normalized =
-            value === 'gameplay' || value === 'security' ? value : 'gameplay';
+        const normalized = value === 'security' ? value : 'security';
         if (availableSections.includes(normalized)) {
             return normalized;
         }
-        return availableSections[0] || 'gameplay';
+        return availableSections[0] || 'security';
     }
 
     function resetPasswordChangeInputs() {
@@ -2166,6 +2349,7 @@ export function createWelcomeModalController({
         }
         setWelcomeLeaderboardOpen(false);
         setWelcomeAccountOpen(false);
+        setWelcomeSettingsOpen(false);
         requestWelcomeDonateClose();
         preferredStartMode = 'online';
         if (!hasOnlineStartFlow) {
@@ -3134,10 +3318,21 @@ export function createWelcomeModalController({
         };
     }
 
+    function syncPreviewVehicleWrap() {
+        const wrapUrl =
+            authUiState?.authenticated && authUiState?.carWrapUrl ? authUiState.carWrapUrl : '';
+        for (let i = 0; i < previewVehicles.length; i += 1) {
+            previewVehicles[i]?.rig?.setAppearance?.({
+                wrapUrl,
+            });
+        }
+    }
+
     function createPreviewVehicle() {
         const rig = createCarRig({
             skinId: DEFAULT_PLAYER_CAR_SKIN_ID,
             bodyColor: getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID).bodyColor,
+            wrapUrl: '',
             displayName: 'MAREK',
             addLights: true,
             addWheelWellLights: false,
@@ -3185,6 +3380,7 @@ export function createWelcomeModalController({
         return {
             enabled: Boolean(source.enabled),
             profileImageEnabled: Boolean(source.profileImageEnabled),
+            carWrapEnabled: Boolean(source.carWrapEnabled),
             ready: Boolean(source.ready),
             loading: Boolean(source.loading),
             pendingAction: typeof source.pendingAction === 'string' ? source.pendingAction : '',
@@ -3192,6 +3388,7 @@ export function createWelcomeModalController({
             displayName: sanitizeOnlinePlayerNameInput(source.displayName || ''),
             email: sanitizeAuthEmailInput(source.email || ''),
             avatarUrl: sanitizeProfileImageUrl(source.avatarUrl || ''),
+            carWrapUrl: sanitizeProfileImageUrl(source.carWrapUrl || ''),
             statusText: typeof source.statusText === 'string' ? source.statusText : '',
             statusTone: sanitizeAuthTone(source.statusTone),
             requiresEmailConfirmation: Boolean(source.requiresEmailConfirmation),
