@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+    applySupabaseStorageAvailability,
     buildSupabasePublicConfig,
     resolveSupabaseRuntimeConfig,
     sanitizePostgresConnectionString,
@@ -56,6 +57,7 @@ test('resolveSupabaseRuntimeConfig reports public and service readiness', () => 
     assert.equal(config.databaseEnabled, true);
     assert.equal(config.projectRef, 'uffldlrjjvxzbjftgyxg');
     assert.equal(config.profileImagesBucket, 'profile-images');
+    assert.equal(config.carWrapsBucket, 'car-wraps');
 });
 
 test('resolveSupabaseRuntimeConfig prefers the pooler connection for live database reads', () => {
@@ -92,6 +94,8 @@ test('buildSupabasePublicConfig only exposes browser-safe fields', () => {
         projectRef: 'uffldlrjjvxzbjftgyxg',
         profileImagesBucket: '',
         profileImagesEnabled: false,
+        carWrapsBucket: '',
+        carWrapsEnabled: false,
         leaderboardEnabled: true,
     });
 });
@@ -117,6 +121,67 @@ test('buildSupabasePublicConfig exposes profile image storage settings', () => {
         projectRef: 'uffldlrjjvxzbjftgyxg',
         profileImagesBucket: 'profile-images',
         profileImagesEnabled: true,
+        carWrapsBucket: '',
+        carWrapsEnabled: false,
         leaderboardEnabled: false,
+    });
+});
+
+test('buildSupabasePublicConfig exposes car wrap storage settings', () => {
+    const publicConfig = buildSupabasePublicConfig(
+        {
+            projectRef: 'uffldlrjjvxzbjftgyxg',
+            url: 'https://uffldlrjjvxzbjftgyxg.supabase.co',
+            anonKey: 'public-key-value-public-key-value-public-key-value',
+            publicEnabled: true,
+            carWrapsBucket: 'car-wraps',
+        },
+        {
+            leaderboardEnabled: false,
+        }
+    );
+
+    assert.deepEqual(publicConfig, {
+        enabled: true,
+        url: 'https://uffldlrjjvxzbjftgyxg.supabase.co',
+        anonKey: 'public-key-value-public-key-value-public-key-value',
+        projectRef: 'uffldlrjjvxzbjftgyxg',
+        profileImagesBucket: '',
+        profileImagesEnabled: false,
+        carWrapsBucket: 'car-wraps',
+        carWrapsEnabled: true,
+        leaderboardEnabled: false,
+    });
+});
+
+test('applySupabaseStorageAvailability disables missing buckets without exposing them', () => {
+    const publicConfig = applySupabaseStorageAvailability(
+        {
+            enabled: true,
+            url: 'https://uffldlrjjvxzbjftgyxg.supabase.co',
+            anonKey: 'public-key-value-public-key-value-public-key-value',
+            projectRef: 'uffldlrjjvxzbjftgyxg',
+            profileImagesBucket: 'profile-images',
+            profileImagesEnabled: true,
+            carWrapsBucket: 'car-wraps',
+            carWrapsEnabled: true,
+            leaderboardEnabled: true,
+        },
+        {
+            profileImagesBucketAvailable: true,
+            carWrapsBucketAvailable: false,
+        }
+    );
+
+    assert.deepEqual(publicConfig, {
+        enabled: true,
+        url: 'https://uffldlrjjvxzbjftgyxg.supabase.co',
+        anonKey: 'public-key-value-public-key-value-public-key-value',
+        projectRef: 'uffldlrjjvxzbjftgyxg',
+        profileImagesBucket: 'profile-images',
+        profileImagesEnabled: true,
+        carWrapsBucket: '',
+        carWrapsEnabled: false,
+        leaderboardEnabled: true,
     });
 });

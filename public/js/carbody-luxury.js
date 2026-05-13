@@ -30,6 +30,8 @@ const TAILLIGHT_BRAKE_EMISSIVE = 2.45;
 const WIRELESS_CHARGE_GLOW_COLOR = 0x88eeff;
 const CAR_SKIN_TEXTURE_CACHE = new Map();
 const CAR_SKIN_BODY_TEXTURE_CACHE = new Map();
+const CAR_WRAP_TEXTURE_SET_CACHE = new Map();
+const CAR_WRAP_IMAGE_PROMISE_CACHE = new Map();
 const DEFAULT_SKIN_MATERIAL = 'gloss-paint';
 const BODY_FINISH_PROFILES = Object.freeze({
     'gloss-paint': Object.freeze({
@@ -324,6 +326,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
     const {
         bodyColor = 0x2d67a6,
         skinId = DEFAULT_PLAYER_CAR_SKIN_ID,
+        wrapUrl = '',
         bodyDimensions = DEFAULT_BODY_DIMENSIONS,
         wheelPositions = DEFAULT_WHEEL_POSITIONS,
         displayName = 'MAREK',
@@ -426,11 +429,14 @@ function addLuxuryBody(car, bodyConfig = {}) {
     const currentAppearance = {
         skinId: resolvePlayerCarSkinId(skinId),
         colorHex: normalizeBodyColorHex(bodyColor, DEFAULT_PLAYER_CAR_SKIN_ID),
+        wrapUrl: sanitizeUserWrapTextureUrl(wrapUrl),
     };
+    let appearanceRequestId = 0;
 
     applyAppearance({
         skinId: currentAppearance.skinId,
         colorHex: currentAppearance.colorHex,
+        wrapUrl: currentAppearance.wrapUrl,
     });
 
     return {
@@ -475,9 +481,18 @@ function addLuxuryBody(car, bodyConfig = {}) {
     };
 
     function applyAppearance(appearance = null) {
+        appearanceRequestId += 1;
+        const requestId = appearanceRequestId;
         const nextSkinPreset = getCarSkinPresetById(appearance?.skinId ?? currentAppearance.skinId);
         const finishProfile = getSkinFinishProfile(nextSkinPreset);
         const bodyTexture = getCarSkinBodyTexture(nextSkinPreset);
+        const shouldPreserveWrap =
+            appearance == null ||
+            typeof appearance !== 'object' ||
+            !Object.prototype.hasOwnProperty.call(appearance, 'wrapUrl');
+        const nextWrapUrl = shouldPreserveWrap
+            ? currentAppearance.wrapUrl
+            : sanitizeUserWrapTextureUrl(appearance?.wrapUrl || '');
         const shouldUsePresetColor =
             appearance == null ||
             typeof appearance !== 'object' ||
@@ -494,6 +509,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
 
         currentAppearance.skinId = nextSkinPreset.id;
         currentAppearance.colorHex = nextColorHex;
+        currentAppearance.wrapUrl = nextWrapUrl;
 
         for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
             applySkinFinishToBodyMaterial(
@@ -506,9 +522,36 @@ function addLuxuryBody(car, bodyConfig = {}) {
             );
         }
 
-        skinController?.applySkin?.(nextSkinPreset, nextColorHex);
+        skinController?.applySkin?.(nextSkinPreset, nextWrapUrl);
         wirelessChargeMarker?.setTheme?.(nextSkinPreset);
         roofBrandingController?.setTheme?.(nextSkinPreset);
+
+        if (!nextWrapUrl) {
+            return;
+        }
+
+        void getUserWrapTextureSet(nextSkinPreset, nextWrapUrl)
+            .then((wrapTextureSet) => {
+                if (
+                    requestId !== appearanceRequestId ||
+                    currentAppearance.skinId !== nextSkinPreset.id ||
+                    currentAppearance.wrapUrl !== nextWrapUrl
+                ) {
+                    return;
+                }
+
+                for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
+                    applySkinFinishToBodyMaterial(
+                        bodyPanelMaterials[i],
+                        finishProfile,
+                        nextSkinPreset,
+                        nextColor,
+                        bodyEmissive,
+                        wrapTextureSet.bodyTexture
+                    );
+                }
+            })
+            .catch(() => {});
     }
 }
 
@@ -1165,9 +1208,11 @@ function createBodySkinController(parent, bodyDimensions) {
         phase: Math.random() * Math.PI * 2,
         skinId: DEFAULT_PLAYER_CAR_SKIN_ID,
         finishProfile: getSkinFinishProfile(getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID)),
+        wrapUrl: '',
+        wrapRequestId: 0,
     };
 
-    applySkin(getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID));
+    applySkin(getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID), '');
 
     return {
         applySkin,
@@ -1201,7 +1246,7 @@ function createBodySkinController(parent, bodyDimensions) {
         },
     };
 
-    function applySkin(skinPreset = null) {
+    function applySkin(skinPreset = null, wrapUrl = '') {
         const preset =
             skinPreset && typeof skinPreset === 'object'
                 ? skinPreset
@@ -1214,9 +1259,12 @@ function createBodySkinController(parent, bodyDimensions) {
         const accentColor = new THREE.Color(preset.accentColor);
         const stripeColor = new THREE.Color(preset.stripeColor);
         const glowColor = new THREE.Color(preset.glowColor);
+        const safeWrapUrl = sanitizeUserWrapTextureUrl(wrapUrl);
 
         skinState.skinId = preset.id;
         skinState.finishProfile = finishProfile;
+        skinState.wrapUrl = safeWrapUrl;
+        skinState.wrapRequestId += 1;
 
         applySkinTexture(topMaterial, topTexture, accentColor, finishProfile, 'top');
         applySkinTexture(sideLeftMaterial, sideTexture, accentColor, finishProfile, 'side');
@@ -1231,6 +1279,16 @@ function createBodySkinController(parent, bodyDimensions) {
         railRightMaterial.emissive.copy(glowColor);
         railRightMaterial.metalness = finishProfile.railMetalness;
         railRightMaterial.roughness = finishProfile.railRoughness;
+
+        if (!safeWrapUrl) {
+            return;
+        }
+
+        clearSkinTexture(topMaterial, finishProfile);
+        clearSkinTexture(sideLeftMaterial, finishProfile);
+        clearSkinTexture(sideRightMaterial, finishProfile);
+        clearSkinTexture(frontMaterial, finishProfile);
+        clearSkinTexture(rearMaterial, finishProfile);
     }
 }
 
@@ -1258,6 +1316,16 @@ function applySkinTexture(material, texture, emissiveColor, finishProfile, surfa
         surface === 'front' || surface === 'rear'
             ? Math.min(1, finishProfile.decalOpacity + 0.04)
             : finishProfile.decalOpacity;
+    material.needsUpdate = true;
+}
+
+function clearSkinTexture(material, finishProfile) {
+    material.map = null;
+    material.emissiveMap = null;
+    material.emissive.setHex(0x000000);
+    material.metalness = finishProfile.decalMetalness;
+    material.roughness = finishProfile.decalRoughness;
+    material.opacity = 0;
     material.needsUpdate = true;
 }
 
@@ -1362,6 +1430,246 @@ function createCarSkinTexture(skinPreset, surface = 'top') {
     texture.anisotropy = 4;
     texture.needsUpdate = true;
     return texture;
+}
+
+function getUserWrapTextureSet(skinPreset, wrapUrl) {
+    const safeWrapUrl = sanitizeUserWrapTextureUrl(wrapUrl);
+    if (!safeWrapUrl) {
+        return Promise.reject(new Error('Wrap URL is missing.'));
+    }
+
+    const cacheKey = `${skinPreset.id}:${safeWrapUrl}`;
+    if (CAR_WRAP_TEXTURE_SET_CACHE.has(cacheKey)) {
+        return CAR_WRAP_TEXTURE_SET_CACHE.get(cacheKey);
+    }
+
+    const textureSetPromise = loadUserWrapImage(safeWrapUrl).then((image) => ({
+        bodyTexture: createCarWrapCombinedBodyTexture(skinPreset, image),
+        topTexture: createCarWrapCombinedTexture(skinPreset, image, 'top'),
+        sideTexture: createCarWrapCombinedTexture(skinPreset, image, 'side'),
+        frontTexture: createCarWrapCombinedTexture(skinPreset, image, 'front'),
+        rearTexture: createCarWrapCombinedTexture(skinPreset, image, 'rear'),
+    }));
+
+    CAR_WRAP_TEXTURE_SET_CACHE.set(cacheKey, textureSetPromise);
+    return textureSetPromise.catch((error) => {
+        CAR_WRAP_TEXTURE_SET_CACHE.delete(cacheKey);
+        throw error;
+    });
+}
+
+function createCarWrapCombinedTexture(skinPreset, image, surface = 'top') {
+    const baseTexture = getCarSkinTexture(skinPreset, surface);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, baseTexture?.image?.width || 1024);
+    canvas.height = Math.max(1, baseTexture?.image?.height || 1024);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return baseTexture;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (baseTexture?.image) {
+        ctx.drawImage(baseTexture.image, 0, 0, canvas.width, canvas.height);
+    }
+    drawUserWrapOverlay(ctx, canvas.width, canvas.height, image, surface, skinPreset);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function createCarWrapCombinedBodyTexture(skinPreset, image) {
+    const baseTexture = getCarSkinBodyTexture(skinPreset);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, baseTexture?.image?.width || 1024);
+    canvas.height = Math.max(1, baseTexture?.image?.height || 512);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return baseTexture;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (baseTexture?.image) {
+        ctx.drawImage(baseTexture.image, 0, 0, canvas.width, canvas.height);
+    }
+    drawUserWrapOverlay(ctx, canvas.width, canvas.height, image, 'body', skinPreset);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(1, 1);
+    texture.offset.set(0, 0);
+    texture.anisotropy = 8;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function drawUserWrapOverlay(ctx, width, height, image, surface, skinPreset) {
+    const viewport = resolveUserWrapViewport(surface);
+    const imageWidth = Math.max(1, image?.naturalWidth || image?.width || 1);
+    const imageHeight = Math.max(1, image?.naturalHeight || image?.height || 1);
+    const sourceX = Math.max(0, Math.round(viewport.x * imageWidth));
+    const sourceY = Math.max(0, Math.round(viewport.y * imageHeight));
+    const sourceWidth = Math.max(1, Math.round(viewport.width * imageWidth));
+    const sourceHeight = Math.max(1, Math.round(viewport.height * imageHeight));
+    const overlayOpacity =
+        surface === 'top'
+            ? 0.96
+            : surface === 'side'
+              ? 0.9
+              : surface === 'body'
+                ? 0.72
+                : 0.86;
+
+    ctx.save();
+    ctx.globalAlpha = overlayOpacity;
+    drawImageCoverRegion(
+        ctx,
+        image,
+        sourceX,
+        sourceY,
+        sourceWidth,
+        sourceHeight,
+        0,
+        0,
+        width,
+        height
+    );
+    ctx.restore();
+
+    const glossGradient = ctx.createLinearGradient(0, 0, 0, height);
+    glossGradient.addColorStop(0, rgbaFromHex(skinPreset.stripeColor, 0.2));
+    glossGradient.addColorStop(0.28, 'rgba(255, 255, 255, 0.05)');
+    glossGradient.addColorStop(0.72, rgbaFromHex(skinPreset.accentColorSecondary, 0.08));
+    glossGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.18));
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = glossGradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+
+    const vignetteGradient = ctx.createLinearGradient(0, 0, width, 0);
+    vignetteGradient.addColorStop(0, 'rgba(5, 9, 14, 0.26)');
+    vignetteGradient.addColorStop(0.14, 'rgba(5, 9, 14, 0)');
+    vignetteGradient.addColorStop(0.86, 'rgba(5, 9, 14, 0)');
+    vignetteGradient.addColorStop(1, 'rgba(5, 9, 14, 0.26)');
+    ctx.save();
+    ctx.fillStyle = vignetteGradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+}
+
+function resolveUserWrapViewport(surface = 'top') {
+    switch (surface) {
+        case 'body':
+            return { x: 0, y: 0, width: 1, height: 1 };
+        case 'side':
+            return { x: 0.06, y: 0.2, width: 0.88, height: 0.6 };
+        case 'front':
+            return { x: 0.18, y: 0.08, width: 0.64, height: 0.5 };
+        case 'rear':
+            return { x: 0.18, y: 0.42, width: 0.64, height: 0.5 };
+        case 'top':
+        default:
+            return { x: 0.08, y: 0.06, width: 0.84, height: 0.84 };
+    }
+}
+
+function drawImageCoverRegion(
+    ctx,
+    image,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    targetX,
+    targetY,
+    targetWidth,
+    targetHeight
+) {
+    const safeSourceWidth = Math.max(1, sourceWidth);
+    const safeSourceHeight = Math.max(1, sourceHeight);
+    const sourceAspectRatio = safeSourceWidth / safeSourceHeight;
+    const targetAspectRatio = Math.max(1, targetWidth) / Math.max(1, targetHeight);
+    let cropWidth = safeSourceWidth;
+    let cropHeight = safeSourceHeight;
+    let cropX = sourceX;
+    let cropY = sourceY;
+
+    if (sourceAspectRatio > targetAspectRatio) {
+        cropWidth = safeSourceHeight * targetAspectRatio;
+        cropX = sourceX + (safeSourceWidth - cropWidth) * 0.5;
+    } else {
+        cropHeight = safeSourceWidth / targetAspectRatio;
+        cropY = sourceY + (safeSourceHeight - cropHeight) * 0.5;
+    }
+
+    ctx.drawImage(
+        image,
+        cropX,
+        cropY,
+        cropWidth,
+        cropHeight,
+        targetX,
+        targetY,
+        targetWidth,
+        targetHeight
+    );
+}
+
+function loadUserWrapImage(url) {
+    const safeUrl = sanitizeUserWrapTextureUrl(url);
+    if (!safeUrl) {
+        return Promise.reject(new Error('Wrap URL is invalid.'));
+    }
+    if (CAR_WRAP_IMAGE_PROMISE_CACHE.has(safeUrl)) {
+        return CAR_WRAP_IMAGE_PROMISE_CACHE.get(safeUrl);
+    }
+
+    const imagePromise = new Promise((resolve, reject) => {
+        const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.onload = () => {
+            resolve(image);
+        };
+        image.onerror = () => {
+            reject(new Error('Could not load car wrap image.'));
+        };
+        image.src = safeUrl;
+    });
+
+    CAR_WRAP_IMAGE_PROMISE_CACHE.set(safeUrl, imagePromise);
+    return imagePromise.catch((error) => {
+        CAR_WRAP_IMAGE_PROMISE_CACHE.delete(safeUrl);
+        throw error;
+    });
+}
+
+function sanitizeUserWrapTextureUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    if (!normalized) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(
+            normalized,
+            typeof window?.location?.origin === 'string' ? window.location.origin : undefined
+        );
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            return '';
+        }
+        return parsed.toString();
+    } catch {
+        return '';
+    }
 }
 
 function drawSkinMaterialBase(ctx, width, height, skinPreset, surface) {

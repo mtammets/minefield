@@ -66,6 +66,7 @@ function normalizeSupabaseBrowserConfig(config) {
     const anonKey = sanitizeSupabasePublicKey(source.anonKey);
     const projectRef = sanitizeSupabaseProjectRef(source.projectRef);
     const profileImagesBucket = sanitizeSupabaseStorageBucketName(source.profileImagesBucket);
+    const carWrapsBucket = sanitizeSupabaseStorageBucketName(source.carWrapsBucket);
 
     return {
         enabled: Boolean(source.enabled && url && anonKey),
@@ -74,6 +75,8 @@ function normalizeSupabaseBrowserConfig(config) {
         projectRef,
         profileImagesBucket,
         profileImagesEnabled: Boolean(source.profileImagesEnabled && profileImagesBucket),
+        carWrapsBucket,
+        carWrapsEnabled: Boolean(source.carWrapsEnabled && carWrapsBucket),
         leaderboardEnabled: Boolean(source.leaderboardEnabled),
     };
 }

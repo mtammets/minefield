@@ -738,7 +738,7 @@ export function createMultiplayerController(options = {}) {
         }
 
         const profile = readProfileFromUi();
-        const signature = `${profile.name}|${profile.colorHex}|${profile.skinId}`;
+        const signature = `${profile.name}|${profile.colorHex}|${profile.skinId}|${profile.carWrapPath || ''}`;
         if (!force && signature === lastProfileSignature) {
             return;
         }
@@ -1089,6 +1089,7 @@ export function createMultiplayerController(options = {}) {
         const carRig = createCarRig({
             skinId: playerSnapshot?.skinId || '',
             bodyColor: playerSnapshot?.colorHex ?? 0x6cb3ff,
+            wrapUrl: playerSnapshot?.carWrapUrl || '',
             displayName: playerSnapshot?.name || 'Online',
             addLights: true,
             addWheelWellLights: false,
@@ -1109,6 +1110,7 @@ export function createMultiplayerController(options = {}) {
             name: playerSnapshot?.name || 'Online',
             skinId: typeof playerSnapshot?.skinId === 'string' ? playerSnapshot.skinId : '',
             colorHex: (playerSnapshot?.colorHex ?? 0x6cb3ff) >>> 0,
+            carWrapUrl: sanitizeMediaUrl(playerSnapshot?.carWrapUrl || ''),
             car: carRig.car,
             updateVisuals: carRig.updateVisuals,
             setBodyColor: carRig.setBodyColor,
@@ -1186,13 +1188,20 @@ export function createMultiplayerController(options = {}) {
         const nextColor = Number.isFinite(snapshotColorNumeric)
             ? Math.max(0, Math.min(0xffffff, Math.round(snapshotColorNumeric))) >>> 0
             : remote.colorHex || 0x6cb3ff;
-        if (nextColor !== remote.colorHex || nextSkinId !== remote.skinId) {
+        const nextCarWrapUrl = sanitizeMediaUrl(playerSnapshot?.carWrapUrl || '');
+        if (
+            nextColor !== remote.colorHex ||
+            nextSkinId !== remote.skinId ||
+            nextCarWrapUrl !== remote.carWrapUrl
+        ) {
             remote.colorHex = nextColor;
             remote.skinId = nextSkinId;
+            remote.carWrapUrl = nextCarWrapUrl;
             if (typeof remote.setAppearance === 'function') {
                 remote.setAppearance({
                     skinId: nextSkinId,
                     colorHex: nextColor,
+                    wrapUrl: nextCarWrapUrl,
                 });
             } else {
                 remote.setBodyColor?.(nextColor);
@@ -1634,10 +1643,13 @@ export function createMultiplayerController(options = {}) {
             typeof getSelectedCarSkinId === 'function' && typeof getSelectedCarSkinId() === 'string'
                 ? getSelectedCarSkinId().trim()
                 : '';
+        const authState = getAuthState?.() || null;
+        const safeCarWrapPath = sanitizeStorageObjectPath(authState?.carWrapStoragePath || '');
         return {
             name: safeName,
             colorHex: safeColorHex,
             skinId: safeSkinId,
+            carWrapPath: safeCarWrapPath,
         };
     }
 
@@ -2058,6 +2070,44 @@ function clampColorHex(value) {
         return 0x2d67a6;
     }
     return Math.max(0, Math.min(0xffffff, Math.round(numeric))) >>> 0;
+}
+
+function sanitizeStorageObjectPath(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+    if (!normalized || normalized.length > 512 || normalized.includes('..')) {
+        return '';
+    }
+    const segments = normalized.split('/');
+    if (segments.some((segment) => !/^[a-zA-Z0-9._-]{1,120}$/u.test(segment))) {
+        return '';
+    }
+    return normalized;
+}
+
+function sanitizeMediaUrl(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    if (!normalized) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(
+            normalized,
+            typeof window?.location?.origin === 'string' ? window.location.origin : undefined
+        );
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            return '';
+        }
+        return parsed.toString();
+    } catch {
+        return '';
+    }
 }
 
 function clampNumber(value, min, max, fallback = 0) {

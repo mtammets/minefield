@@ -41,6 +41,33 @@ Notes:
 - Socket.IO accepts same-host websocket requests by default; use `SOCKET_ALLOWED_ORIGINS` if your
   proxy/CDN setup needs an explicit origin allowlist.
 
+## Supabase Auth Media
+
+If you want signed-in users to upload profile photos and custom car wraps, configure Supabase auth
+plus Storage:
+
+```bash
+SUPABASE_PROJECT_REF=your-project-ref
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+# Optional overrides:
+SUPABASE_PROFILE_IMAGES_BUCKET=profile-images
+SUPABASE_CAR_WRAPS_BUCKET=car-wraps
+```
+
+Apply the Storage bucket/policy SQL in Supabase:
+
+- `supabase/profile-images.sql`
+- `supabase/car-wraps.sql`
+
+How it works:
+
+- profile photos are stored in the authenticated user's own folder inside `profile-images`
+- custom car wraps are stored in the authenticated user's own folder inside `car-wraps`
+- the selected wrap path is saved in Supabase `user_metadata.car_wrap_path`
+- account deletion now removes leaderboard entries, profile photos, and saved car wrap uploads
+
 Local webhook testing with Stripe CLI:
 
 ```bash

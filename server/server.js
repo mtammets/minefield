@@ -17,6 +17,7 @@ const {
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
 const {
+    applySupabaseStorageAvailability,
     buildSupabasePublicConfig,
     createSupabaseServiceClient,
     resolveSupabaseConnectOrigin,
@@ -174,7 +175,8 @@ const HTTP_LEADERBOARD_SUBMIT_WINDOW_MS = 60_000;
 const HTTP_LEADERBOARD_SUBMIT_MAX = 12;
 const ONLINE_AUTH_REQUIRED_ERROR = 'Sign in is required for online rooms.';
 const ONLINE_AUTH_SERVER_ERROR = 'Online auth is not configured on this server.';
-const PROFILE_IMAGE_STORAGE_LIST_LIMIT = 100;
+const USER_STORAGE_LIST_LIMIT = 100;
+const SUPABASE_STORAGE_AVAILABILITY_CACHE_TTL_MS = 60_000;
 
 const EVENT_RATE_LIMITS = {
     'mp:createRoom': { windowMs: 10_000, max: 8 },
@@ -213,6 +215,10 @@ const io = new Server(server, {
 const rooms = new Map();
 const ipRateLimitStore = new Map();
 let lastIpRateStorePruneAt = 0;
+let supabaseStorageAvailabilityCache = null;
+let supabaseStorageAvailabilityCacheExpiresAt = 0;
+let supabaseStorageAvailabilityRefreshPromise = null;
+let lastSupabaseStorageAvailabilityWarning = '';
 
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -352,14 +358,15 @@ app.get('/api/ping', (req, res) => {
     });
 });
 
-app.get('/api/public-config', (req, res) => {
+app.get('/api/public-config', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
+    const storageAvailability = await resolveSupabaseStorageAvailability();
     res.json({
         ok: true,
         analytics: {
             gaMeasurementId: GA_MEASUREMENT_ID || null,
         },
-        supabase: SUPABASE_PUBLIC_CONFIG,
+        supabase: applySupabaseStorageAvailability(SUPABASE_PUBLIC_CONFIG, storageAvailability),
     });
 });
 
@@ -414,10 +421,19 @@ app.delete('/api/auth/account', async (req, res) => {
             console.warn('Profile image cleanup after account deletion failed:', cleanupError);
         }
 
+        let deletedCarWraps = 0;
+        try {
+            const cleanupResult = await deleteStoredCarWrapsForUser(authIdentity.userId);
+            deletedCarWraps = Math.max(0, Math.round(Number(cleanupResult?.deletedCount) || 0));
+        } catch (cleanupError) {
+            console.warn('Car wrap cleanup after account deletion failed:', cleanupError);
+        }
+
         res.json({
             ok: true,
             deletedLeaderboardEntries,
             deletedProfileImages,
+            deletedCarWraps,
         });
     } catch (error) {
         console.error('Supabase account deletion failed:', error);
@@ -704,7 +720,8 @@ io.on('connection', (socket) => {
             const profile = resolveProfile(
                 payload?.profile,
                 createAuthenticatedProfile(authIdentity, socket.id),
-                socket.id
+                socket.id,
+                authIdentity
             );
             socket.data.profile = profile;
             leaveCurrentRoom(socket);
@@ -820,7 +837,8 @@ io.on('connection', (socket) => {
             const profile = resolveProfile(
                 payload?.profile,
                 createAuthenticatedProfile(authIdentity, socket.id),
-                socket.id
+                socket.id,
+                authIdentity
             );
             socket.data.profile = profile;
             leaveCurrentRoom(socket);
@@ -870,7 +888,12 @@ io.on('connection', (socket) => {
         if (!consumeInboundEventQuota(socket, 'mp:updateProfile')) {
             return;
         }
-        const profile = resolveProfile(payload, socket.data.profile, socket.id);
+        const profile = resolveProfile(
+            payload,
+            socket.data.profile,
+            socket.id,
+            socket.data.authIdentity
+        );
         socket.data.profile = profile;
 
         const roomCode = socket.data.roomCode;
@@ -892,6 +915,8 @@ io.on('connection', (socket) => {
         player.name = profile.name;
         player.colorHex = profile.colorHex;
         player.skinId = profile.skinId;
+        player.carWrapPath = profile.carWrapPath;
+        player.carWrapUrl = profile.carWrapUrl;
         room.updatedAt = Date.now();
         emitRoomState(room);
     });
@@ -2154,6 +2179,9 @@ async function resolveSupabaseIdentityFromAccessToken(accessToken) {
             avatarPath: sanitizeSupabaseStorageObjectPath(
                 data.user?.user_metadata?.avatar_path || ''
             ),
+            carWrapPath: sanitizeSupabaseStorageObjectPath(
+                data.user?.user_metadata?.car_wrap_path || ''
+            ),
         };
     } catch {
         return null;
@@ -2165,22 +2193,37 @@ function createAuthenticatedProfile(authIdentity = null, socketId = '') {
     if (!authIdentity || typeof authIdentity !== 'object') {
         return fallbackProfile;
     }
+    const carWrapPath = resolvePlayerCarWrapPath(
+        authIdentity.carWrapPath,
+        authIdentity.userId,
+        fallbackProfile.carWrapPath
+    );
     return {
         ...fallbackProfile,
         name: sanitizePlayerName(
             authIdentity.displayName || resolveEmailName(authIdentity.email),
             fallbackProfile.name
         ),
+        carWrapPath,
+        carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
     };
 }
 
 function createRoomPlayer(id, profile, authIdentity = null) {
+    const safeUserId = sanitizeSupabaseUserId(authIdentity?.userId);
+    const carWrapPath = resolvePlayerCarWrapPath(
+        profile?.carWrapPath,
+        safeUserId,
+        authIdentity?.carWrapPath
+    );
     return {
         id,
-        userId: sanitizeSupabaseUserId(authIdentity?.userId),
+        userId: safeUserId,
         name: profile.name,
         colorHex: profile.colorHex,
         skinId: profile.skinId,
+        carWrapPath,
+        carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
         collectedCount: 0,
         score: 0,
         lastPickupPoints: 0,
@@ -2429,6 +2472,7 @@ function serializeRoom(room) {
                 name: player.name,
                 colorHex: player.colorHex,
                 skinId: player.skinId,
+                carWrapUrl: resolvePlayerCarWrapPublicUrl(player.carWrapPath || ''),
                 collectedCount,
                 score,
                 isDestroyed,
@@ -2544,6 +2588,8 @@ function createDefaultProfile(socketId) {
         name: `Player-${shortId}`,
         colorHex: 0x2d67a6,
         skinId: DEFAULT_PLAYER_SKIN_ID,
+        carWrapPath: '',
+        carWrapUrl: '',
     };
 }
 
@@ -2594,11 +2640,153 @@ function sanitizeSupabaseStorageObjectPath(value) {
     return normalized;
 }
 
-async function deleteStoredProfileImagesForUser(userId) {
-    const safeUserId = sanitizeSupabaseUserId(userId);
-    const safeBucketName = sanitizeSupabaseStorageBucketName(
-        supabaseRuntimeConfig.profileImagesBucket
+function resolveSupabaseStorageObjectPublicUrl(baseUrl, bucketName, objectPath) {
+    const safeBaseUrl =
+        typeof baseUrl === 'string' && /^(https?:)?\/\//iu.test(baseUrl.trim())
+            ? baseUrl.trim().replace(/\/+$/u, '')
+            : '';
+    const safeBucketName = sanitizeSupabaseStorageBucketName(bucketName);
+    const safeObjectPath = sanitizeSupabaseStorageObjectPath(objectPath);
+    if (!safeBaseUrl || !safeBucketName || !safeObjectPath) {
+        return '';
+    }
+    const encodedPath = safeObjectPath
+        .split('/')
+        .map((segment) => encodeURIComponent(segment))
+        .join('/');
+    return `${safeBaseUrl}/storage/v1/object/public/${encodeURIComponent(safeBucketName)}/${encodedPath}`;
+}
+
+async function resolveSupabaseStorageAvailability() {
+    if (!supabaseServiceClient || !SUPABASE_PUBLIC_CONFIG.enabled) {
+        return null;
+    }
+
+    const now = Date.now();
+    if (supabaseStorageAvailabilityCache && now < supabaseStorageAvailabilityCacheExpiresAt) {
+        return supabaseStorageAvailabilityCache;
+    }
+    if (supabaseStorageAvailabilityRefreshPromise) {
+        return supabaseStorageAvailabilityRefreshPromise;
+    }
+
+    supabaseStorageAvailabilityRefreshPromise = (async () => {
+        try {
+            const { data, error } = await supabaseServiceClient.storage.listBuckets();
+            if (error) {
+                throw error;
+            }
+
+            const bucketNames = new Set(
+                (Array.isArray(data) ? data : [])
+                    .map((bucket) =>
+                        sanitizeSupabaseStorageBucketName(bucket?.name || bucket?.id || '')
+                    )
+                    .filter(Boolean)
+            );
+
+            const availability = {
+                profileImagesBucketAvailable: Boolean(
+                    !SUPABASE_PUBLIC_CONFIG.profileImagesBucket ||
+                        bucketNames.has(SUPABASE_PUBLIC_CONFIG.profileImagesBucket)
+                ),
+                carWrapsBucketAvailable: Boolean(
+                    !SUPABASE_PUBLIC_CONFIG.carWrapsBucket ||
+                        bucketNames.has(SUPABASE_PUBLIC_CONFIG.carWrapsBucket)
+                ),
+            };
+
+            logMissingSupabaseStorageBuckets(availability);
+            supabaseStorageAvailabilityCache = availability;
+            supabaseStorageAvailabilityCacheExpiresAt =
+                Date.now() + SUPABASE_STORAGE_AVAILABILITY_CACHE_TTL_MS;
+            return availability;
+        } catch (error) {
+            console.warn('Supabase storage capability check failed:', error);
+            supabaseStorageAvailabilityCache = null;
+            supabaseStorageAvailabilityCacheExpiresAt = 0;
+            return null;
+        } finally {
+            supabaseStorageAvailabilityRefreshPromise = null;
+        }
+    })();
+
+    return supabaseStorageAvailabilityRefreshPromise;
+}
+
+function logMissingSupabaseStorageBuckets(availability) {
+    const missingBuckets = [];
+    if (
+        SUPABASE_PUBLIC_CONFIG.profileImagesBucket &&
+        availability?.profileImagesBucketAvailable === false
+    ) {
+        missingBuckets.push(SUPABASE_PUBLIC_CONFIG.profileImagesBucket);
+    }
+    if (SUPABASE_PUBLIC_CONFIG.carWrapsBucket && availability?.carWrapsBucketAvailable === false) {
+        missingBuckets.push(SUPABASE_PUBLIC_CONFIG.carWrapsBucket);
+    }
+
+    const nextWarning = missingBuckets.join(', ');
+    if (!nextWarning) {
+        lastSupabaseStorageAvailabilityWarning = '';
+        return;
+    }
+    if (nextWarning === lastSupabaseStorageAvailabilityWarning) {
+        return;
+    }
+
+    lastSupabaseStorageAvailabilityWarning = nextWarning;
+    console.warn(
+        `Supabase storage buckets are missing: ${nextWarning}. Run the matching SQL setup before enabling uploads.`
     );
+}
+
+function resolvePlayerCarWrapPath(value, userId, fallback = '') {
+    const safeUserId = sanitizeSupabaseUserId(userId);
+    const safeFallbackPath = sanitizeSupabaseStorageObjectPath(fallback);
+    if (!safeUserId) {
+        return safeFallbackPath;
+    }
+
+    const safePath = sanitizeSupabaseStorageObjectPath(value);
+    const candidatePath = safePath || safeFallbackPath;
+    if (!candidatePath) {
+        return '';
+    }
+
+    const [ownerUserId = ''] = candidatePath.split('/');
+    if (ownerUserId !== safeUserId) {
+        return safeFallbackPath;
+    }
+
+    return candidatePath;
+}
+
+function resolvePlayerCarWrapPublicUrl(carWrapPath) {
+    return resolveSupabaseStorageObjectPublicUrl(
+        supabaseRuntimeConfig.url,
+        supabaseRuntimeConfig.carWrapsBucket,
+        carWrapPath
+    );
+}
+
+async function deleteStoredProfileImagesForUser(userId) {
+    return deleteStoredStorageObjectsForUser({
+        userId,
+        bucketName: supabaseRuntimeConfig.profileImagesBucket,
+    });
+}
+
+async function deleteStoredCarWrapsForUser(userId) {
+    return deleteStoredStorageObjectsForUser({
+        userId,
+        bucketName: supabaseRuntimeConfig.carWrapsBucket,
+    });
+}
+
+async function deleteStoredStorageObjectsForUser({ userId, bucketName } = {}) {
+    const safeUserId = sanitizeSupabaseUserId(userId);
+    const safeBucketName = sanitizeSupabaseStorageBucketName(bucketName);
     if (!supabaseServiceClient || !safeUserId || !safeBucketName) {
         return {
             deletedCount: 0,
@@ -2611,7 +2799,7 @@ async function deleteStoredProfileImagesForUser(userId) {
 
     while (true) {
         const { data, error } = await storage.list(safeUserId, {
-            limit: PROFILE_IMAGE_STORAGE_LIST_LIMIT,
+            limit: USER_STORAGE_LIST_LIMIT,
             offset,
             sortBy: {
                 column: 'name',
@@ -2635,7 +2823,7 @@ async function deleteStoredProfileImagesForUser(userId) {
                 )
                 .filter(Boolean)
         );
-        if (items.length < PROFILE_IMAGE_STORAGE_LIST_LIMIT) {
+        if (items.length < USER_STORAGE_LIST_LIMIT) {
             break;
         }
         offset += items.length;
@@ -2672,12 +2860,20 @@ function resolveAuthenticatedDisplayName(user, email = '') {
     return sanitizePlayerName(resolveEmailName(email), '');
 }
 
-function resolveProfile(input, fallback, socketId) {
+function resolveProfile(input, fallback, socketId, authIdentity = null) {
     const defaultProfile = fallback || createDefaultProfile(socketId);
+    const safeUserId = sanitizeSupabaseUserId(authIdentity?.userId);
+    const carWrapPath = resolvePlayerCarWrapPath(
+        input?.carWrapPath,
+        safeUserId,
+        defaultProfile.carWrapPath
+    );
     return {
         name: sanitizePlayerName(input?.name, defaultProfile.name),
         colorHex: sanitizeColorHex(input?.colorHex, defaultProfile.colorHex),
         skinId: sanitizePlayerSkinId(input?.skinId, defaultProfile.skinId),
+        carWrapPath,
+        carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
     };
 }
 

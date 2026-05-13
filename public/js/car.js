@@ -76,6 +76,7 @@ export function createCarRig(options = {}) {
     const {
         bodyColor = 0x2d67a6,
         skinId = DEFAULT_PLAYER_CAR_SKIN_ID,
+        wrapUrl = '',
         displayName = 'MAREK',
         addLights = true,
         addWheelWellLights = true,
@@ -99,6 +100,7 @@ export function createCarRig(options = {}) {
     const bodyMeta = addLuxuryBody(bodyRig, {
         bodyColor,
         skinId,
+        wrapUrl,
         displayName,
         roofScreenDynamic,
     });

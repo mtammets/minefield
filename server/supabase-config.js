@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 
 const DEFAULT_SUPABASE_PROFILE_IMAGES_BUCKET = 'profile-images';
+const DEFAULT_SUPABASE_CAR_WRAPS_BUCKET = 'car-wraps';
 
 function sanitizeSupabaseProjectRef(value) {
     if (typeof value !== 'string') {
@@ -81,6 +82,9 @@ function resolveSupabaseRuntimeConfig(env = process.env) {
     const profileImagesBucket = sanitizeSupabaseStorageBucketName(
         env?.SUPABASE_PROFILE_IMAGES_BUCKET || DEFAULT_SUPABASE_PROFILE_IMAGES_BUCKET
     );
+    const carWrapsBucket = sanitizeSupabaseStorageBucketName(
+        env?.SUPABASE_CAR_WRAPS_BUCKET || DEFAULT_SUPABASE_CAR_WRAPS_BUCKET
+    );
     const dbUrl = sanitizePostgresConnectionString(env?.SUPABASE_DB_URL || '');
     const dbPoolerUrl = sanitizePostgresConnectionString(env?.SUPABASE_DB_POOLER_URL || '');
     const databaseConnectionString = dbPoolerUrl || dbUrl;
@@ -91,6 +95,7 @@ function resolveSupabaseRuntimeConfig(env = process.env) {
         anonKey,
         serviceRoleKey,
         profileImagesBucket,
+        carWrapsBucket,
         dbUrl,
         dbPoolerUrl,
         databaseConnectionString,
@@ -107,6 +112,7 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
     const profileImagesBucket = sanitizeSupabaseStorageBucketName(
         runtimeConfig.profileImagesBucket || ''
     );
+    const carWrapsBucket = sanitizeSupabaseStorageBucketName(runtimeConfig.carWrapsBucket || '');
 
     return {
         enabled: Boolean(runtimeConfig.publicEnabled),
@@ -115,7 +121,45 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
         projectRef: runtimeConfig.publicEnabled ? runtimeConfig.projectRef : '',
         profileImagesBucket: runtimeConfig.publicEnabled ? profileImagesBucket : '',
         profileImagesEnabled: Boolean(runtimeConfig.publicEnabled && profileImagesBucket),
+        carWrapsBucket: runtimeConfig.publicEnabled ? carWrapsBucket : '',
+        carWrapsEnabled: Boolean(runtimeConfig.publicEnabled && carWrapsBucket),
         leaderboardEnabled,
+    };
+}
+
+function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) {
+    const source = publicConfig && typeof publicConfig === 'object' ? publicConfig : {};
+    const enabled = Boolean(source.enabled);
+    const url = enabled ? sanitizeSupabaseUrl(source.url || '') : '';
+    const anonKey = enabled ? sanitizeSupabaseKey(source.anonKey || '') : '';
+    const projectRef = enabled ? sanitizeSupabaseProjectRef(source.projectRef || '') : '';
+    const profileImagesBucket = enabled
+        ? sanitizeSupabaseStorageBucketName(source.profileImagesBucket || '')
+        : '';
+    const carWrapsBucket = enabled
+        ? sanitizeSupabaseStorageBucketName(source.carWrapsBucket || '')
+        : '';
+    const profileImagesEnabled = Boolean(source.profileImagesEnabled && profileImagesBucket);
+    const carWrapsEnabled = Boolean(source.carWrapsEnabled && carWrapsBucket);
+    const adjustedAvailability =
+        availability && typeof availability === 'object' ? availability : {};
+
+    return {
+        enabled: Boolean(enabled && url && anonKey),
+        url,
+        anonKey,
+        projectRef,
+        profileImagesBucket:
+            adjustedAvailability.profileImagesBucketAvailable === false ? '' : profileImagesBucket,
+        profileImagesEnabled:
+            adjustedAvailability.profileImagesBucketAvailable === false
+                ? false
+                : profileImagesEnabled,
+        carWrapsBucket:
+            adjustedAvailability.carWrapsBucketAvailable === false ? '' : carWrapsBucket,
+        carWrapsEnabled:
+            adjustedAvailability.carWrapsBucketAvailable === false ? false : carWrapsEnabled,
+        leaderboardEnabled: Boolean(source.leaderboardEnabled),
     };
 }
 
@@ -147,6 +191,7 @@ function createSupabaseServiceClient(config = {}) {
 }
 
 module.exports = {
+    applySupabaseStorageAvailability,
     buildSupabasePublicConfig,
     createSupabaseServiceClient,
     resolveSupabaseConnectOrigin,

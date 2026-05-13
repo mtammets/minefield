@@ -5,10 +5,13 @@ const DEFAULT_DRIVER_NAME = 'Driver';
 const PLAYER_NAME_MAX_LENGTH = 18;
 const AUTH_PASSWORD_MIN_LENGTH = 6;
 const AUTH_DELETE_ACCOUNT_ENDPOINT_PATH = '/api/auth/account';
-const PROFILE_IMAGE_MAX_INPUT_BYTES = 10 * 1024 * 1024;
+const USER_MEDIA_MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const PROFILE_IMAGE_OUTPUT_SIZE_PX = 512;
+const CAR_WRAP_OUTPUT_WIDTH_PX = 2048;
+const CAR_WRAP_OUTPUT_HEIGHT_PX = 1024;
 const PROFILE_IMAGE_OUTPUT_QUALITY = 0.86;
-const PROFILE_IMAGE_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const CAR_WRAP_OUTPUT_QUALITY = 0.9;
+const USER_MEDIA_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const CHASE_CAMERA_SETTING_MIN = -1;
 const CHASE_CAMERA_SETTING_MAX = 1;
 
@@ -399,12 +402,18 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     data: metadata,
                 });
                 if (error) {
-                    await removeStoredProfileImages([nextAvatarPath]).catch(() => {});
+                    await removeStoredStorageObjects(
+                        [nextAvatarPath],
+                        browserConfig.profileImagesBucket
+                    ).catch(() => {});
                     throw error;
                 }
 
                 if (oldAvatarPath && oldAvatarPath !== nextAvatarPath) {
-                    await removeStoredProfileImages([oldAvatarPath]).catch(() => {});
+                    await removeStoredStorageObjects(
+                        [oldAvatarPath],
+                        browserConfig.profileImagesBucket
+                    ).catch(() => {});
                 }
 
                 applySession(mergeCurrentSessionUser(data?.user), {
@@ -466,9 +475,168 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     throw error;
                 }
 
-                await removeStoredProfileImages([currentAvatarPath]).catch(() => {});
+                await removeStoredStorageObjects(
+                    [currentAvatarPath],
+                    browserConfig.profileImagesBucket
+                ).catch(() => {});
                 applySession(mergeCurrentSessionUser(data?.user), {
                     statusText: 'Profile photo removed.',
+                    statusTone: 'success',
+                });
+                return {
+                    ok: true,
+                };
+            } catch (error) {
+                return updateRequestFailure(error);
+            }
+        },
+        async updateCarWrap(file) {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                const errorMessage = 'Supabase auth is unavailable on this server.';
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: errorMessage,
+                    statusTone: 'error',
+                });
+                return {
+                    ok: false,
+                    error: errorMessage,
+                };
+            }
+
+            if (!state.authenticated || !state.userId) {
+                return updateValidationFailure('Sign in before changing the car wrap.');
+            }
+
+            if (!browserConfig.carWrapsEnabled || !browserConfig.carWrapsBucket) {
+                return updateValidationFailure(
+                    'Car wrap storage is not configured on this server.'
+                );
+            }
+
+            updateState({
+                loading: true,
+                pendingAction: 'update-car-wrap',
+                statusText: 'Preparing car wrap...',
+                statusTone: 'info',
+                requiresEmailConfirmation: false,
+            });
+
+            try {
+                const preparedImage = await prepareCarWrapUpload(file);
+                const oldCarWrapPath = resolveCarWrapPath(currentSession?.user);
+                const nextCarWrapPath = buildCarWrapStoragePath(
+                    state.userId,
+                    preparedImage.extension
+                );
+                const uploadResult = await supabaseClient.storage
+                    .from(browserConfig.carWrapsBucket)
+                    .upload(nextCarWrapPath, preparedImage.blob, {
+                        cacheControl: '3600',
+                        contentType: preparedImage.contentType,
+                        upsert: false,
+                    });
+                if (uploadResult.error) {
+                    throw uploadResult.error;
+                }
+
+                updateState({
+                    statusText: 'Saving car wrap...',
+                    statusTone: 'info',
+                });
+
+                const metadata = buildUpdatedUserMetadata(
+                    currentSession?.user,
+                    {
+                        car_wrap_path: nextCarWrapPath,
+                    },
+                    state.displayName
+                );
+                const { data, error } = await supabaseClient.auth.updateUser({
+                    data: metadata,
+                });
+                if (error) {
+                    await removeStoredStorageObjects(
+                        [nextCarWrapPath],
+                        browserConfig.carWrapsBucket
+                    ).catch(() => {});
+                    throw error;
+                }
+
+                if (oldCarWrapPath && oldCarWrapPath !== nextCarWrapPath) {
+                    await removeStoredStorageObjects(
+                        [oldCarWrapPath],
+                        browserConfig.carWrapsBucket
+                    ).catch(() => {});
+                }
+
+                applySession(mergeCurrentSessionUser(data?.user), {
+                    statusText: 'Car wrap updated.',
+                    statusTone: 'success',
+                });
+                return {
+                    ok: true,
+                };
+            } catch (error) {
+                return updateRequestFailure(error);
+            }
+        },
+        async removeCarWrap() {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                const errorMessage = 'Supabase auth is unavailable on this server.';
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: errorMessage,
+                    statusTone: 'error',
+                });
+                return {
+                    ok: false,
+                    error: errorMessage,
+                };
+            }
+
+            if (!state.authenticated || !state.userId) {
+                return updateValidationFailure('Sign in before removing the car wrap.');
+            }
+
+            const currentCarWrapPath = resolveCarWrapPath(currentSession?.user);
+            if (!currentCarWrapPath) {
+                return updateValidationFailure('No custom car wrap is set.');
+            }
+
+            updateState({
+                loading: true,
+                pendingAction: 'remove-car-wrap',
+                statusText: 'Removing car wrap...',
+                statusTone: 'info',
+                requiresEmailConfirmation: false,
+            });
+
+            try {
+                const metadata = buildUpdatedUserMetadata(
+                    currentSession?.user,
+                    {
+                        car_wrap_path: '',
+                    },
+                    state.displayName
+                );
+                const { data, error } = await supabaseClient.auth.updateUser({
+                    data: metadata,
+                });
+                if (error) {
+                    throw error;
+                }
+
+                await removeStoredStorageObjects(
+                    [currentCarWrapPath],
+                    browserConfig.carWrapsBucket
+                ).catch(() => {});
+                applySession(mergeCurrentSessionUser(data?.user), {
+                    statusText: 'Car wrap removed.',
                     statusTone: 'success',
                 });
                 return {
@@ -577,12 +745,15 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             updateState({
                 enabled: false,
                 profileImageEnabled: false,
+                carWrapEnabled: false,
                 ready: true,
                 loading: false,
                 pendingAction: '',
                 authenticated: false,
                 avatarUrl: '',
                 avatarStoragePath: '',
+                carWrapUrl: '',
+                carWrapStoragePath: '',
                 statusText: 'Supabase auth is unavailable on this server.',
                 statusTone: 'error',
             });
@@ -592,6 +763,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         updateState({
             enabled: true,
             profileImageEnabled: Boolean(config.profileImagesEnabled && config.profileImagesBucket),
+            carWrapEnabled: Boolean(config.carWrapsEnabled && config.carWrapsBucket),
             ready: false,
             loading: true,
             pendingAction: '',
@@ -605,6 +777,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 updateState({
                     enabled: false,
                     profileImageEnabled: false,
+                    carWrapEnabled: false,
                     ready: true,
                     loading: false,
                     statusText: 'Supabase auth client failed to load.',
@@ -640,12 +813,17 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 profileImageEnabled: Boolean(
                     browserConfig.profileImagesEnabled && browserConfig.profileImagesBucket
                 ),
+                carWrapEnabled: Boolean(
+                    browserConfig.carWrapsEnabled && browserConfig.carWrapsBucket
+                ),
                 ready: true,
                 loading: false,
                 pendingAction: '',
                 authenticated: false,
                 avatarUrl: '',
                 avatarStoragePath: '',
+                carWrapUrl: '',
+                carWrapStoragePath: '',
                 statusText: normalizeSupabaseAuthError(error),
                 statusTone: 'error',
             });
@@ -694,11 +872,19 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         const email = sanitizeEmail(user?.email || '');
         const displayName = resolveDisplayName(user, email);
         const avatarStoragePath = authenticated ? resolveProfileImagePath(user) : '';
+        const carWrapStoragePath = authenticated ? resolveCarWrapPath(user) : '';
         const avatarUrl = authenticated
-            ? resolveProfileImagePublicUrl(
+            ? resolveStorageObjectPublicUrl(
                   browserConfig.url,
                   browserConfig.profileImagesBucket,
                   avatarStoragePath
+              )
+            : '';
+        const carWrapUrl = authenticated
+            ? resolveStorageObjectPublicUrl(
+                  browserConfig.url,
+                  browserConfig.carWrapsBucket,
+                  carWrapStoragePath
               )
             : '';
         const chaseCameraSettings = authenticated ? resolveChaseCameraSettings(user) : null;
@@ -712,6 +898,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             profileImageEnabled: Boolean(
                 browserConfig.profileImagesEnabled && browserConfig.profileImagesBucket
             ),
+            carWrapEnabled: Boolean(browserConfig.carWrapsEnabled && browserConfig.carWrapsBucket),
             ready: true,
             loading: false,
             pendingAction: '',
@@ -721,6 +908,8 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             displayName: authenticated ? displayName : '',
             avatarUrl,
             avatarStoragePath,
+            carWrapUrl,
+            carWrapStoragePath,
             chaseCameraSettings,
             requiresEmailConfirmation: false,
             statusText:
@@ -747,6 +936,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         updateState({
             enabled: state.enabled,
             profileImageEnabled: state.profileImageEnabled,
+            carWrapEnabled: state.carWrapEnabled,
             ready: true,
             loading: false,
             pendingAction: '',
@@ -756,6 +946,8 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             displayName: '',
             avatarUrl: '',
             avatarStoragePath: '',
+            carWrapUrl: '',
+            carWrapStoragePath: '',
             chaseCameraSettings: null,
             requiresEmailConfirmation: false,
             statusText,
@@ -818,16 +1010,15 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         }
     }
 
-    async function removeStoredProfileImages(paths = []) {
+    async function removeStoredStorageObjects(paths = [], bucketName = '') {
         const safePaths = Array.isArray(paths)
-            ? paths.map((path) => sanitizeProfileImagePath(path)).filter(Boolean)
+            ? paths.map((path) => sanitizeStorageObjectPath(path)).filter(Boolean)
             : [];
-        if (!supabaseClient || !browserConfig.profileImagesBucket || safePaths.length === 0) {
+        const safeBucketName = sanitizeProfileImageBucketName(bucketName);
+        if (!supabaseClient || !safeBucketName || safePaths.length === 0) {
             return;
         }
-        const { error } = await supabaseClient.storage
-            .from(browserConfig.profileImagesBucket)
-            .remove(safePaths);
+        const { error } = await supabaseClient.storage.from(safeBucketName).remove(safePaths);
         if (error) {
             throw error;
         }
@@ -859,6 +1050,7 @@ function createInitialAuthState() {
     return {
         enabled: false,
         profileImageEnabled: false,
+        carWrapEnabled: false,
         ready: false,
         loading: false,
         pendingAction: '',
@@ -868,6 +1060,8 @@ function createInitialAuthState() {
         displayName: '',
         avatarUrl: '',
         avatarStoragePath: '',
+        carWrapUrl: '',
+        carWrapStoragePath: '',
         chaseCameraSettings: null,
         requiresEmailConfirmation: false,
         statusText: 'Create an account or sign in to unlock online rooms and score sync.',
@@ -883,6 +1077,8 @@ function createInitialBrowserConfig() {
         projectRef: '',
         profileImagesBucket: '',
         profileImagesEnabled: false,
+        carWrapsBucket: '',
+        carWrapsEnabled: false,
         leaderboardEnabled: false,
     };
 }
@@ -937,6 +1133,10 @@ function sanitizeProfileImageBucketName(value) {
 }
 
 function sanitizeProfileImagePath(value) {
+    return sanitizeStorageObjectPath(value);
+}
+
+function sanitizeStorageObjectPath(value) {
     if (typeof value !== 'string') {
         return '';
     }
@@ -955,21 +1155,25 @@ function resolveProfileImagePath(user) {
     return sanitizeProfileImagePath(user?.user_metadata?.avatar_path || '');
 }
 
+function resolveCarWrapPath(user) {
+    return sanitizeStorageObjectPath(user?.user_metadata?.car_wrap_path || '');
+}
+
 function resolveChaseCameraSettings(user) {
     return sanitizeChaseCameraSettings(user?.user_metadata?.chase_camera_settings);
 }
 
-function resolveProfileImagePublicUrl(baseUrl, bucketName, profileImagePath) {
+function resolveStorageObjectPublicUrl(baseUrl, bucketName, objectPath) {
     const safeBaseUrl =
         typeof baseUrl === 'string' && /^(https?:)?\/\//iu.test(baseUrl.trim())
             ? baseUrl.trim().replace(/\/+$/u, '')
             : '';
     const safeBucketName = sanitizeProfileImageBucketName(bucketName);
-    const safeProfileImagePath = sanitizeProfileImagePath(profileImagePath);
-    if (!safeBaseUrl || !safeBucketName || !safeProfileImagePath) {
+    const safeObjectPath = sanitizeStorageObjectPath(objectPath);
+    if (!safeBaseUrl || !safeBucketName || !safeObjectPath) {
         return '';
     }
-    const encodedPath = safeProfileImagePath
+    const encodedPath = safeObjectPath
         .split('/')
         .map((segment) => encodeURIComponent(segment))
         .join('/');
@@ -986,6 +1190,9 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
     const nextAvatarPath = Object.prototype.hasOwnProperty.call(updates, 'avatar_path')
         ? sanitizeProfileImagePath(updates.avatar_path || '')
         : sanitizeProfileImagePath(currentMetadata.avatar_path || '');
+    const nextCarWrapPath = Object.prototype.hasOwnProperty.call(updates, 'car_wrap_path')
+        ? sanitizeStorageObjectPath(updates.car_wrap_path || '')
+        : sanitizeStorageObjectPath(currentMetadata.car_wrap_path || '');
     const nextChaseCameraSettings = Object.prototype.hasOwnProperty.call(
         updates,
         'chase_camera_settings'
@@ -996,6 +1203,7 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
         ...currentMetadata,
         display_name: displayName,
         avatar_path: nextAvatarPath,
+        car_wrap_path: nextCarWrapPath,
     };
     if (nextChaseCameraSettings) {
         nextMetadata.chase_camera_settings = nextChaseCameraSettings;
@@ -1006,11 +1214,22 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
 }
 
 function buildProfileImageStoragePath(userId, extension = 'webp') {
+    return buildUserMediaStoragePath(userId, 'avatar', extension);
+}
+
+function buildCarWrapStoragePath(userId, extension = 'webp') {
+    return buildUserMediaStoragePath(userId, 'wrap', extension);
+}
+
+function buildUserMediaStoragePath(userId, kind, extension = 'webp') {
     const safeUserId = sanitizeUserId(userId);
+    const safeKind = kind === 'wrap' ? 'wrap' : 'avatar';
     const safeExtension = extension === 'jpg' ? 'jpg' : 'webp';
     const timestamp = Date.now().toString(36);
     const randomSuffix = Math.random().toString(36).slice(2, 10);
-    return sanitizeProfileImagePath(`${safeUserId}/${timestamp}-${randomSuffix}.${safeExtension}`);
+    return sanitizeStorageObjectPath(
+        `${safeUserId}/${safeKind}-${timestamp}-${randomSuffix}.${safeExtension}`
+    );
 }
 
 function resolveDisplayName(user, email = '') {
@@ -1071,42 +1290,75 @@ function resolveEmailRedirectUrl() {
 }
 
 async function prepareProfileImageUpload(file) {
+    return prepareUserMediaUpload(file, {
+        outputWidth: PROFILE_IMAGE_OUTPUT_SIZE_PX,
+        outputHeight: PROFILE_IMAGE_OUTPUT_SIZE_PX,
+        outputQuality: PROFILE_IMAGE_OUTPUT_QUALITY,
+        emptyMessage: 'Could not prepare the selected image.',
+    });
+}
+
+async function prepareCarWrapUpload(file) {
+    return prepareUserMediaUpload(file, {
+        outputWidth: CAR_WRAP_OUTPUT_WIDTH_PX,
+        outputHeight: CAR_WRAP_OUTPUT_HEIGHT_PX,
+        outputQuality: CAR_WRAP_OUTPUT_QUALITY,
+        emptyMessage: 'Could not prepare the selected wrap.',
+    });
+}
+
+async function prepareUserMediaUpload(
+    file,
+    {
+        outputWidth = PROFILE_IMAGE_OUTPUT_SIZE_PX,
+        outputHeight = PROFILE_IMAGE_OUTPUT_SIZE_PX,
+        outputQuality = PROFILE_IMAGE_OUTPUT_QUALITY,
+        emptyMessage = 'Could not prepare the selected image.',
+    } = {}
+) {
     if (!(file instanceof File)) {
         throw new Error('Choose an image file first.');
     }
-    if (!PROFILE_IMAGE_ALLOWED_TYPES.has(file.type)) {
+    if (!USER_MEDIA_ALLOWED_TYPES.has(file.type)) {
         throw new Error('Only JPG, PNG, or WebP images are supported.');
     }
     if (!Number.isFinite(file.size) || file.size <= 0) {
         throw new Error('The selected image is empty.');
     }
-    if (file.size > PROFILE_IMAGE_MAX_INPUT_BYTES) {
+    if (file.size > USER_MEDIA_MAX_INPUT_BYTES) {
         throw new Error('Choose an image smaller than 10 MB.');
     }
 
     const image = await loadImageFromFile(file);
     const canvas = document.createElement('canvas');
-    canvas.width = PROFILE_IMAGE_OUTPUT_SIZE_PX;
-    canvas.height = PROFILE_IMAGE_OUTPUT_SIZE_PX;
+    canvas.width = Math.max(1, Math.round(Number(outputWidth) || PROFILE_IMAGE_OUTPUT_SIZE_PX));
+    canvas.height = Math.max(1, Math.round(Number(outputHeight) || PROFILE_IMAGE_OUTPUT_SIZE_PX));
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-        throw new Error('Could not prepare the selected image.');
+        throw new Error(emptyMessage);
     }
 
     const sourceWidth = Math.max(1, image.naturalWidth || image.width || 1);
     const sourceHeight = Math.max(1, image.naturalHeight || image.height || 1);
-    const cropSize = Math.max(1, Math.min(sourceWidth, sourceHeight));
-    const cropX = Math.max(0, (sourceWidth - cropSize) * 0.5);
-    const cropY = Math.max(0, (sourceHeight - cropSize) * 0.5);
+    const targetAspectRatio = canvas.width / Math.max(1, canvas.height);
+    const sourceAspectRatio = sourceWidth / sourceHeight;
+    let cropWidth = sourceWidth;
+    let cropHeight = sourceHeight;
+    if (sourceAspectRatio > targetAspectRatio) {
+        cropWidth = Math.max(1, sourceHeight * targetAspectRatio);
+    } else {
+        cropHeight = Math.max(1, sourceWidth / targetAspectRatio);
+    }
+    const cropX = Math.max(0, (sourceWidth - cropWidth) * 0.5);
+    const cropY = Math.max(0, (sourceHeight - cropHeight) * 0.5);
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
 
-    const webpBlob = await canvasToBlob(canvas, 'image/webp', PROFILE_IMAGE_OUTPUT_QUALITY);
-    const jpegBlob =
-        webpBlob || (await canvasToBlob(canvas, 'image/jpeg', PROFILE_IMAGE_OUTPUT_QUALITY));
+    const webpBlob = await canvasToBlob(canvas, 'image/webp', outputQuality);
+    const jpegBlob = webpBlob || (await canvasToBlob(canvas, 'image/jpeg', outputQuality));
     if (!jpegBlob) {
         throw new Error('Could not encode the selected image.');
     }
@@ -1168,7 +1420,7 @@ function normalizeSupabaseAuthError(error) {
             message
         )
     ) {
-        return 'Profile image storage is not configured correctly on this server.';
+        return 'Image storage is not configured correctly on this server.';
     }
     return message;
 }

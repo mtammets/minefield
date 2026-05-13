@@ -264,6 +264,12 @@ const {
     onAuthRemoveProfileImage() {
         return runtimeState.authController?.removeProfileImage?.();
     },
+    onAuthUpdateCarWrap(file) {
+        return runtimeState.authController?.updateCarWrap?.(file);
+    },
+    onAuthRemoveCarWrap() {
+        return runtimeState.authController?.removeCarWrap?.();
+    },
     onAuthChangePassword(credentials) {
         return runtimeState.authController?.changePassword?.(credentials);
     },
@@ -288,6 +294,9 @@ runtimeState.authController = createAuthController({
     },
     onStateChanged(state) {
         welcomeModalUi.setAuthState?.(state);
+        setPlayerCarAppearance({
+            wrapUrl: state?.authenticated ? state?.carWrapUrl || '' : '',
+        });
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
         runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
     },
