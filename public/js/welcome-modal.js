@@ -223,6 +223,7 @@ export function createWelcomeModalController({
         'welcomePreviewLeaderboardCloseBtn'
     );
     const previewAccountOverlayEl = document.getElementById('welcomePreviewAccountOverlay');
+    const previewAccountEyebrowEl = document.getElementById('welcomePreviewAccountEyebrow');
     const previewAccountTitleEl = document.getElementById('welcomePreviewAccountTitle');
     const previewAccountBodyEl = document.getElementById('welcomePreviewAccountBody');
     const previewAccountToolsToggleBtnEl = document.getElementById(
@@ -230,6 +231,8 @@ export function createWelcomeModalController({
     );
     const previewSettingsOverlayEl = document.getElementById('welcomePreviewSettingsOverlay');
     const previewSettingsCloseBtnEl = document.getElementById('welcomePreviewSettingsCloseBtn');
+    const settingsPanelEl = document.getElementById('welcomeSettingsPanel');
+    const settingsFullscreenCardEl = document.getElementById('welcomeSettingsFullscreenCard');
     const previewDonateOverlayEl = document.getElementById('welcomePreviewDonateOverlay');
     const previewDonateCloseBtnEl = document.getElementById('welcomePreviewDonateCloseBtn');
     const previewOnlineOverlayEl = document.getElementById('welcomePreviewOnlineOverlay');
@@ -511,6 +514,11 @@ export function createWelcomeModalController({
         setWelcomeDonateOpen(false);
     });
     document.addEventListener('keydown', handleWelcomeGlobalKeydown);
+    autoFullscreenInputEl?.addEventListener('change', () => {
+        autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
+        persistAutoFullscreenOnStart(autoFullscreenOnStart);
+        syncAutoFullscreenPreferenceUi();
+    });
     if (hasAuthPanel) {
         authSignInTabEl.addEventListener('click', () => {
             setAuthMode('sign-in', { focusField: true });
@@ -566,11 +574,6 @@ export function createWelcomeModalController({
         });
         authDeleteAccountBtnEl.addEventListener('click', () => {
             void handleDeleteAccount();
-        });
-        autoFullscreenInputEl?.addEventListener('change', () => {
-            autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
-            persistAutoFullscreenOnStart(autoFullscreenOnStart);
-            syncAutoFullscreenPreferenceUi();
         });
         authPasswordChangeSubmitBtnEl?.addEventListener('click', () => {
             void handlePasswordChangeSubmit();
@@ -782,7 +785,7 @@ export function createWelcomeModalController({
         }
     });
     previewSettingsCloseBtnEl?.addEventListener('click', () => {
-        setWelcomeSettingsOpen(false);
+        openWelcomeAccountSecurityView();
     });
     previewDonateOverlayEl?.addEventListener('click', (event) => {
         if (event.target === previewDonateOverlayEl) {
@@ -961,6 +964,9 @@ export function createWelcomeModalController({
         if (autoFullscreenInputEl) {
             autoFullscreenInputEl.checked = autoFullscreenOnStart;
         }
+        const fullscreenState = autoFullscreenOnStart ? 'enabled' : 'disabled';
+        settingsPanelEl?.setAttribute('data-auto-fullscreen', fullscreenState);
+        settingsFullscreenCardEl?.setAttribute('data-state', fullscreenState);
     }
 
     function initializePreviewLoadingUi() {
@@ -1562,6 +1568,7 @@ export function createWelcomeModalController({
         clearLocalAuthStatus();
         syncPreviewVehicleWrap();
         syncAuthUi();
+        syncWelcomeSettingsUi();
         if ((didCompleteInteractiveAuth || didRestorePersistedAuthSession) && !rootEl.hidden) {
             focusAuthPanel('sign-in', {
                 preserveStatus: true,
@@ -1704,6 +1711,11 @@ export function createWelcomeModalController({
                 authGarageWrapPreviewEl.hidden = true;
                 authGarageWrapPreviewEl.removeAttribute('src');
             }
+        }
+        if (previewAccountEyebrowEl) {
+            previewAccountEyebrowEl.textContent = garagePanelVisible
+                ? 'GARAGE BAY'
+                : 'PLAYER ACCOUNT';
         }
         if (previewAccountTitleEl) {
             previewAccountTitleEl.textContent = garagePanelVisible ? 'GARAGE' : 'DRIVER PROFILE';
@@ -2531,6 +2543,18 @@ export function createWelcomeModalController({
         setWelcomeSettingsOpen(true);
     }
 
+    function openWelcomeAccountSecurityView() {
+        if (launchSequenceState.active || !authUiState.authenticated) {
+            return;
+        }
+        setWelcomeLeaderboardOpen(false);
+        setWelcomeSettingsOpen(false);
+        requestWelcomeDonateClose();
+        closeOnlineModeFlow({ clearSelection: true });
+        setWelcomeAccountOpen(true);
+        openSecurityPanel();
+    }
+
     function requestWelcomeDonateClose() {
         document.dispatchEvent(new CustomEvent(WELCOME_DONATE_CLOSE_EVENT));
     }
@@ -2777,6 +2801,10 @@ export function createWelcomeModalController({
             return;
         }
 
+        syncAutoFullscreenPreferenceUi();
+        if (previewSettingsCloseBtnEl) {
+            previewSettingsCloseBtnEl.hidden = !authUiState.authenticated;
+        }
         previewShellEl.dataset.settingsOpen = welcomeSettingsOpen ? 'true' : 'false';
         settingsBtnEl.dataset.open = welcomeSettingsOpen ? 'true' : 'false';
         settingsBtnEl.setAttribute('aria-expanded', welcomeSettingsOpen ? 'true' : 'false');

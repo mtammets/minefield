@@ -100,10 +100,7 @@ export function createRuntimeUiControllers({
         onRefreshGlobalLeaderboard,
         getAuthState,
         toCssHex,
-        onStartRequested(mode) {
-            if (mode !== 'bots') {
-                return;
-            }
+        onStartRequested() {
             getGameSessionController()?.requestGameplayFullscreen?.();
         },
         onVehicleChange(vehicleId) {

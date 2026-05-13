@@ -309,6 +309,15 @@ const VARIANT_GROUPS = Object.freeze({
     obstacleCrash: ['obstacleCrash01', 'obstacleCrash02'],
     vehicleExplosion: ['vehicleExplosion01', 'vehicleExplosion02'],
 });
+const UI_SOUND_IDS = Object.freeze([
+    'uiClickSoft01',
+    'uiClickSoft02',
+    'uiToggleOn01',
+    'uiToggleOff01',
+    'uiConfirm01',
+]);
+const UI_INTERACTION_SELECTOR =
+    'button, input[type="button"], input[type="submit"], input[type="reset"], [role="button"]';
 
 const LOOP_RATE_DEFAULT = 1;
 const BOT_TRAFFIC_LAYER_GAIN_SCALE = 0.68;
@@ -544,6 +553,7 @@ export function createAudioSystem({ camera = null } = {}) {
     const streamMediaElements = new Map();
     const eventCooldowns = new Map();
     const unlockListeners = [];
+    const uiInteractionListeners = [];
     const preloadProgressSubscribers = new Set();
 
     let context = null;
@@ -640,12 +650,13 @@ export function createAudioSystem({ camera = null } = {}) {
         preloadEnabled = preloadEnabled || preloadOnInitialize;
         ensureAudioContext();
         void loadRuntimeAudioDefaults();
+        void preloadBuffersByIds(UI_SOUND_IDS);
         if (preloadEnabled) {
             startPreload();
         }
         ui = createAudioUi(prefs, {
             onToggleMute() {
-                toggleMute({ playFeedback: true });
+                toggleMute();
             },
             onVolumeChanged(key, normalizedValue) {
                 setMixerVolume(key, normalizedValue);
@@ -655,6 +666,7 @@ export function createAudioSystem({ camera = null } = {}) {
             },
         });
         installUnlockListeners();
+        installUiInteractionListeners();
         refreshUi();
     }
 
@@ -669,6 +681,7 @@ export function createAudioSystem({ camera = null } = {}) {
         }
         gameplayReady = false;
         removeUnlockListeners();
+        removeUiInteractionListeners();
         if (ui?.root?.parentElement) {
             ui.root.parentElement.removeChild(ui.root);
         }
@@ -1470,6 +1483,74 @@ export function createAudioSystem({ camera = null } = {}) {
                 capture: true,
             });
         }
+    }
+
+    function installUiInteractionListeners() {
+        if (uiInteractionListeners.length > 0) {
+            return;
+        }
+
+        const handleButtonClick = (event) => {
+            if (!isAudioOutputReady()) {
+                return;
+            }
+
+            const target = resolveUiInteractionTarget(event.target);
+            if (!target) {
+                return;
+            }
+
+            playUiVariant('uiClickSoft', {
+                gain: 0.55,
+                rateScale: randomRange(0.98, 1.03),
+            });
+        };
+
+        const listeners = [
+            {
+                eventName: 'click',
+                handler: handleButtonClick,
+            },
+        ];
+
+        for (let i = 0; i < listeners.length; i += 1) {
+            const entry = listeners[i];
+            document.addEventListener(entry.eventName, entry.handler, {
+                capture: true,
+                passive: true,
+            });
+            uiInteractionListeners.push(entry);
+        }
+    }
+
+    function removeUiInteractionListeners() {
+        while (uiInteractionListeners.length > 0) {
+            const entry = uiInteractionListeners.pop();
+            document.removeEventListener(entry.eventName, entry.handler, {
+                capture: true,
+            });
+        }
+    }
+
+    function resolveUiInteractionTarget(target) {
+        if (!(target instanceof Element)) {
+            return null;
+        }
+
+        const candidate = target.closest(UI_INTERACTION_SELECTOR);
+        if (!(candidate instanceof Element)) {
+            return null;
+        }
+        if (candidate.getAttribute('data-ui-sound') === 'off') {
+            return null;
+        }
+        if ('disabled' in candidate && candidate.disabled) {
+            return null;
+        }
+        if (candidate.getAttribute('aria-disabled') === 'true') {
+            return null;
+        }
+        return candidate;
     }
 
     function update(deltaTime = 1 / 60, frameState = {}) {
@@ -4268,8 +4349,34 @@ export function createAudioSystem({ camera = null } = {}) {
         return playOneShot(soundId, options);
     }
 
+    function playUiVariant(variantGroupKey, options = {}) {
+        if (!isAudioOutputReady()) {
+            return false;
+        }
+
+        const variants = VARIANT_GROUPS[variantGroupKey];
+        if (!Array.isArray(variants) || variants.length === 0) {
+            return false;
+        }
+
+        const readyVariants = variants.filter((soundId) => buffers.has(soundId));
+        const candidatePool = readyVariants.length > 0 ? readyVariants : variants;
+        const soundId = candidatePool[Math.floor(Math.random() * candidatePool.length)];
+        if (buffers.has(soundId)) {
+            return playOneShot(soundId, options);
+        }
+
+        void loadBuffer(soundId).then((loadedBuffer) => {
+            if (!loadedBuffer || !isAudioOutputReady()) {
+                return;
+            }
+            playOneShot(soundId, options);
+        });
+        return false;
+    }
+
     function playOneShot(soundId, options = {}) {
-        if (!isRealtimeAudioReady()) {
+        if (!isAudioOutputReady()) {
             return false;
         }
 
@@ -4335,13 +4442,11 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function isRealtimeAudioReady() {
-        return (
-            gameplayReady &&
-            unlocked &&
-            Boolean(context) &&
-            Boolean(mixer) &&
-            context.state === 'running'
-        );
+        return gameplayReady && isAudioOutputReady();
+    }
+
+    function isAudioOutputReady() {
+        return unlocked && Boolean(context) && Boolean(mixer) && context.state === 'running';
     }
 
     function isEventReady(eventKey, cooldownSec = 0) {

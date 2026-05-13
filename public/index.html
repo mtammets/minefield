@@ -820,7 +820,10 @@
                         <div class="welcomePreviewAccountCard">
                             <div class="welcomePreviewLeaderboardHeader">
                                 <div class="welcomePreviewLeaderboardHeading">
-                                    <div class="welcomePreviewLeaderboardEyebrow">
+                                    <div
+                                        id="welcomePreviewAccountEyebrow"
+                                        class="welcomePreviewLeaderboardEyebrow"
+                                    >
                                         PLAYER ACCOUNT
                                     </div>
                                     <div
@@ -932,7 +935,7 @@
                                     </div>
                                     <div
                                         id="welcomePreviewSettingsTitle"
-                                        class="welcomePreviewLeaderboardTitle welcomePreviewSettingsTitle"
+                                        class="welcomePreviewLeaderboardTitle welcomePreviewAccountTitle welcomePreviewSettingsTitle"
                                     >
                                         Settings
                                     </div>
@@ -940,37 +943,55 @@
                                 <div class="welcomePreviewLeaderboardHeaderActions">
                                     <button
                                         id="welcomePreviewSettingsCloseBtn"
-                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        class="welcomePreviewLeaderboardActionBtn is-gear"
                                         type="button"
+                                        aria-label="Open player account tools"
+                                        title="Open player account tools"
                                     >
-                                        CLOSE
+                                        <span aria-hidden="true">⚙</span>
                                     </button>
                                 </div>
                             </div>
                             <div class="welcomePreviewAccountBody welcomePreviewSettingsBody">
-                                <section
-                                    id="welcomeSettingsPanel"
-                                    class="welcomeAuthPanel welcomeSettingsPanel"
-                                    aria-label="Settings"
-                                >
-                                    <div class="welcomeAuthGameplayCard">
-                                        <span class="welcomeAuthGameplayLabel">
-                                            AUTO FULLSCREEN
-                                        </span>
-                                        <span class="welcomeAuthToggleControl">
-                                            <input
-                                                id="welcomeAutoFullscreenInput"
-                                                class="welcomeAuthToggleInput"
-                                                type="checkbox"
-                                                checked
-                                            />
+                                <div class="welcomePreviewSettingsStack">
+                                    <section
+                                        id="welcomeSettingsPanel"
+                                        class="welcomeAuthPanel welcomeSettingsPanel"
+                                        aria-label="Settings"
+                                    >
+                                        <label
+                                            id="welcomeSettingsFullscreenCard"
+                                            class="welcomeSettingsOptionCard welcomeAuthSecurityItem"
+                                            for="welcomeAutoFullscreenInput"
+                                        >
                                             <span
-                                                class="welcomeAuthToggleTrack"
-                                                aria-hidden="true"
-                                            ></span>
-                                        </span>
-                                    </div>
-                                </section>
+                                                class="welcomeSettingsOptionCopy welcomeAuthSecurityCopy"
+                                            >
+                                                <span class="welcomeSettingsOptionTitleRow">
+                                                    <span
+                                                        class="welcomeSettingsOptionTitle welcomeAuthSecurityItemTitle"
+                                                    >
+                                                        AUTO FULLSCREEN
+                                                    </span>
+                                                </span>
+                                            </span>
+                                            <span class="welcomeSettingsOptionToggle">
+                                                <span class="welcomeAuthToggleControl">
+                                                    <input
+                                                        id="welcomeAutoFullscreenInput"
+                                                        class="welcomeAuthToggleInput"
+                                                        type="checkbox"
+                                                        checked
+                                                    />
+                                                    <span
+                                                        class="welcomeAuthToggleTrack"
+                                                        aria-hidden="true"
+                                                    ></span>
+                                                </span>
+                                            </span>
+                                        </label>
+                                    </section>
+                                </div>
                             </div>
                         </div>
                     </aside>
