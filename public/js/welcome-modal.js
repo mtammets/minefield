@@ -36,6 +36,12 @@ const AVATAR_EDITOR_OUTPUT_SIZE_PX = 768;
 const AVATAR_EDITOR_OUTPUT_QUALITY = 0.92;
 const AVATAR_EDITOR_ZOOM_MIN = 1;
 const AVATAR_EDITOR_ZOOM_MAX = 3;
+const PRESET_AVATAR_PATHS = [
+    '/assets/Avatars/avatar1.png',
+    '/assets/Avatars/avatar2.png',
+    '/assets/Avatars/avatar3.png',
+    '/assets/Avatars/avata4.png',
+];
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
 const AUTH_SIGNED_IN_STATUS_TEXT = 'Signed in. Online rooms and score sync are unlocked.';
 const AUTH_SIGNED_OUT_STATUS_TEXT =
@@ -131,6 +137,10 @@ export function createWelcomeModalController({
     );
     const authAvatarChooseBtnEl = document.getElementById('welcomeAuthAvatarChooseBtn');
     const authAvatarRemoveBtnEl = document.getElementById('welcomeAuthAvatarRemoveBtn');
+    const authAvatarPresetGridEl = document.getElementById('welcomeAuthAvatarPresetGrid');
+    const authAvatarPresetBtnEls = Array.from(
+        authAvatarPresetGridEl?.querySelectorAll?.('.welcomeAuthAvatarPresetBtn') || []
+    );
     const authAvatarZoomInputEl = document.getElementById('welcomeAuthAvatarZoomInput');
     const authAvatarZoomValueEl = document.getElementById('welcomeAuthAvatarZoomValue');
     const authAvatarSaveBtnEl = document.getElementById('welcomeAuthAvatarSaveBtn');
@@ -599,6 +609,14 @@ export function createWelcomeModalController({
         });
         authAvatarRemoveBtnEl?.addEventListener('click', () => {
             void handleProfileImageRemoval();
+        });
+        authAvatarPresetBtnEls.forEach((buttonEl) => {
+            buttonEl.addEventListener('click', () => {
+                const presetPath = sanitizePresetAvatarPath(
+                    buttonEl.getAttribute('data-avatar-preset') || ''
+                );
+                void handleAvatarPresetSelection(presetPath);
+            });
         });
         authAvatarZoomInputEl?.addEventListener('input', () => {
             handleAvatarEditorZoomInput();
@@ -2049,6 +2067,17 @@ export function createWelcomeModalController({
                     ? 'REMOVING...'
                     : 'REMOVE PHOTO';
         }
+        authAvatarPresetBtnEls.forEach((buttonEl) => {
+            const presetPath = sanitizePresetAvatarPath(
+                buttonEl.getAttribute('data-avatar-preset') || ''
+            );
+            const selected = Boolean(
+                presetPath && avatarEditorState.selectedPresetPath === presetPath
+            );
+            buttonEl.disabled = !canManageProfileImage || editorBusy || !presetPath;
+            buttonEl.dataset.selected = selected ? 'true' : 'false';
+            buttonEl.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
         if (authAvatarZoomInputEl) {
             authAvatarZoomInputEl.disabled = !hasSource || editorBusy;
             authAvatarZoomInputEl.value = String(
@@ -2143,6 +2172,7 @@ export function createWelcomeModalController({
         avatarEditorState.zoom = AVATAR_EDITOR_ZOOM_MIN;
         avatarEditorState.offsetX = 0;
         avatarEditorState.offsetY = 0;
+        avatarEditorState.selectedPresetPath = '';
     }
 
     async function loadAvatarEditorSourceFromFile(file, { dirty = true } = {}) {
@@ -2150,10 +2180,14 @@ export function createWelcomeModalController({
         const objectUrl = URL.createObjectURL(file);
         await applyAvatarEditorSource(objectUrl, {
             dirty,
+            selectedPresetPath: '',
         });
     }
 
-    async function loadAvatarEditorSourceFromUrl(url, { dirty = false } = {}) {
+    async function loadAvatarEditorSourceFromUrl(
+        url,
+        { dirty = false, selectedPresetPath = '' } = {}
+    ) {
         if (typeof url !== 'string' || !url.trim()) {
             resetAvatarEditorDraft({
                 keepOpen: true,
@@ -2171,10 +2205,14 @@ export function createWelcomeModalController({
         const objectUrl = URL.createObjectURL(blob);
         await applyAvatarEditorSource(objectUrl, {
             dirty,
+            selectedPresetPath,
         });
     }
 
-    async function applyAvatarEditorSource(objectUrl, { dirty = false } = {}) {
+    async function applyAvatarEditorSource(
+        objectUrl,
+        { dirty = false, selectedPresetPath = '' } = {}
+    ) {
         const loadToken = avatarEditorState.loadToken + 1;
         avatarEditorState.loadToken = loadToken;
         avatarEditorState.open = true;
@@ -2199,6 +2237,7 @@ export function createWelcomeModalController({
             avatarEditorState.offsetX = 0;
             avatarEditorState.offsetY = 0;
             avatarEditorState.dirty = Boolean(dirty);
+            avatarEditorState.selectedPresetPath = sanitizePresetAvatarPath(selectedPresetPath);
             avatarEditorState.loading = false;
             syncAuthUi();
         } catch (error) {
@@ -2208,8 +2247,35 @@ export function createWelcomeModalController({
                 avatarEditorState.dirty = false;
                 avatarEditorState.image = null;
                 avatarEditorState.objectUrl = '';
+                avatarEditorState.selectedPresetPath = '';
             }
             throw error;
+        }
+    }
+
+    async function handleAvatarPresetSelection(presetPath = '') {
+        const safePresetPath = sanitizePresetAvatarPath(presetPath);
+        if (
+            !safePresetPath ||
+            authUiState.loading ||
+            avatarEditorState.loading ||
+            avatarEditorState.saving ||
+            !authUiState.authenticated ||
+            !authUiState.profileImageEnabled
+        ) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        try {
+            await loadAvatarEditorSourceFromUrl(safePresetPath, {
+                dirty: true,
+                selectedPresetPath: safePresetPath,
+            });
+        } catch (error) {
+            avatarEditorState.selectedPresetPath = '';
+            setLocalAuthStatus(error?.message || 'Could not load the profile photo.', 'error');
+            syncAuthUi();
         }
     }
 
@@ -4704,7 +4770,16 @@ export function createWelcomeModalController({
             dragOriginX: 0,
             dragOriginY: 0,
             loadToken: 0,
+            selectedPresetPath: '',
         };
+    }
+
+    function sanitizePresetAvatarPath(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const normalized = value.trim();
+        return PRESET_AVATAR_PATHS.includes(normalized) ? normalized : '';
     }
 
     function validateAvatarEditorFile(file) {

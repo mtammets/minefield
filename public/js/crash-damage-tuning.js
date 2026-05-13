@@ -16,7 +16,7 @@ import {
     PART_BASE_IMPACT_INERTIA_SCALE,
 } from './constants.js';
 
-export const CRASH_DAMAGE_TUNING_STORAGE_KEY = 'silentdrift-crash-damage-tuning-v1';
+export const CRASH_DAMAGE_TUNING_STORAGE_KEY = 'silentdrift-crash-damage-tuning-v2';
 
 export const CRASH_DAMAGE_TUNING_FIELDS = [
     {
