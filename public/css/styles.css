@@ -2884,6 +2884,114 @@ body.edit-mode-active #starterControlsHud {
     text-align: center;
 }
 
+.speedometerDriverPod {
+    position: absolute;
+    top: 68px;
+    left: 0;
+    transform: translateX(-54%);
+    min-width: clamp(116px, 8.4vw, 142px);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px 10px 10px;
+    border: 1px solid rgba(140, 209, 255, 0.24);
+    border-radius: 26px;
+    background:
+        linear-gradient(180deg, rgba(13, 27, 45, 0.82), rgba(7, 17, 31, 0.88)),
+        radial-gradient(circle at 28% 18%, rgba(132, 219, 255, 0.14), rgba(132, 219, 255, 0) 58%);
+    box-shadow:
+        0 18px 40px rgba(0, 0, 0, 0.26),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(18px);
+}
+
+.speedometerDriverPod::before {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 18px;
+    border: 1px solid rgba(212, 237, 255, 0.05);
+    pointer-events: none;
+}
+
+.speedometerDriverAvatar {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    overflow: hidden;
+    border-radius: 16px;
+    border: 1px solid rgba(176, 220, 255, 0.32);
+    background:
+        radial-gradient(circle at 34% 30%, rgba(241, 248, 255, 0.2), rgba(241, 248, 255, 0) 38%),
+        linear-gradient(180deg, rgba(19, 41, 64, 0.9), rgba(8, 18, 31, 0.96));
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 0 20px rgba(112, 226, 255, 0.08);
+}
+
+.speedometerDriverAvatarImage {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.speedometerDriverAvatarFallback {
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: rgba(240, 248, 255, 0.98);
+    text-shadow:
+        0 0 14px rgba(126, 207, 255, 0.16),
+        0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.speedometerDriverPod[data-has-image='true'] .speedometerDriverAvatar {
+    border-color: rgba(196, 233, 255, 0.42);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+        0 0 24px rgba(112, 226, 255, 0.14);
+}
+
+.speedometerDriverPod[data-has-image='true'] .speedometerDriverAvatarFallback {
+    display: none;
+}
+
+.speedometerDriverMeta {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.speedometerDriverLabel {
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(186, 220, 247, 0.7);
+}
+
+.speedometerDriverName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: 'Sora', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: rgba(242, 249, 255, 0.98);
+    text-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
 .speedometerBatteryPod {
     position: absolute;
     top: 68px;
@@ -3078,6 +3186,18 @@ body.edit-mode-active #starterControlsHud {
         0 18px 40px rgba(0, 0, 0, 0.26),
         0 0 26px rgba(112, 228, 255, 0.16),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+#speedometerHud[data-driver-signed-in='true'] .speedometerDriverPod {
+    border-color: rgba(152, 216, 255, 0.34);
+    box-shadow:
+        0 18px 40px rgba(0, 0, 0, 0.26),
+        0 0 26px rgba(112, 228, 255, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+#speedometerHud[data-driver-signed-in='true'] .speedometerDriverLabel {
+    color: rgba(195, 230, 255, 0.84);
 }
 
 #speedometerHud[data-battery-state='charging'] .speedometerBatteryFill {
@@ -5800,6 +5920,24 @@ body.race-intro-active #botPanel {
         width: min(312px, calc(100vw - 24px));
     }
 
+    .speedometerDriverPod {
+        top: 74px;
+        transform: translateX(-44%);
+        min-width: 108px;
+        gap: 8px;
+        padding: 9px 10px 9px 9px;
+    }
+
+    .speedometerDriverAvatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+    }
+
+    .speedometerDriverName {
+        font-size: 12px;
+    }
+
     #starterControlsHud {
         width: min(680px, calc(100vw - 24px));
     }
@@ -5889,6 +6027,28 @@ body.race-intro-active #botPanel {
         top: 66px;
         right: 8px;
         width: min(248px, calc(100vw - 16px));
+    }
+
+    .speedometerDriverPod {
+        top: 78px;
+        transform: translateX(-30%);
+        min-width: 102px;
+        gap: 7px;
+        padding: 8px;
+    }
+
+    .speedometerDriverAvatar {
+        width: 36px;
+        height: 36px;
+        border-radius: 13px;
+    }
+
+    .speedometerDriverLabel {
+        font-size: 7px;
+    }
+
+    .speedometerDriverName {
+        font-size: 11px;
     }
 
     .starterMineRackShell {

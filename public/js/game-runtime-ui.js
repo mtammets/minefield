@@ -128,7 +128,9 @@ export function createRuntimeUiControllers({
     });
     donateUi.initialize();
     const economyHudUi = createEconomyHudController();
-    const speedometerUi = createSpeedometerController();
+    const speedometerUi = createSpeedometerController({
+        getAuthState,
+    });
     const toastUi = createToastController();
 
     return {

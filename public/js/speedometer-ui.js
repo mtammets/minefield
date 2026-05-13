@@ -1,4 +1,4 @@
-export function createSpeedometerController() {
+export function createSpeedometerController({ getAuthState = () => null } = {}) {
     if (typeof document === 'undefined' || !document.body) {
         return createNoopSpeedometerController();
     }
@@ -10,6 +10,26 @@ export function createSpeedometerController() {
     rootEl.hidden = true;
     rootEl.innerHTML = `
         <div class="speedometerShell">
+            <div class="speedometerDriverPod" data-has-image="false" aria-label="Driver profile">
+                <div class="speedometerDriverAvatar">
+                    <img
+                        class="speedometerDriverAvatarImage"
+                        data-speedometer-driver-avatar
+                        alt="Driver profile photo"
+                        hidden
+                    />
+                    <span
+                        class="speedometerDriverAvatarFallback"
+                        data-speedometer-driver-fallback
+                    >
+                        D
+                    </span>
+                </div>
+                <div class="speedometerDriverMeta">
+                    <div class="speedometerDriverLabel" data-speedometer-driver-label>LOCAL</div>
+                    <div class="speedometerDriverName" data-speedometer-driver-name>Driver</div>
+                </div>
+            </div>
             <svg class="speedometerDial" viewBox="0 0 320 220" aria-hidden="true">
                 <defs>
                     <linearGradient id="speedometerArcGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -88,16 +108,32 @@ export function createSpeedometerController() {
     const batteryFillEl = rootEl.querySelector('[data-speedometer-battery-fill]');
     const batteryValueEl = rootEl.querySelector('[data-speedometer-battery-value]');
     const batteryStatusEl = rootEl.querySelector('[data-speedometer-battery-status]');
+    const driverPodEl = rootEl.querySelector('.speedometerDriverPod');
+    const driverAvatarImageEl = rootEl.querySelector('[data-speedometer-driver-avatar]');
+    const driverAvatarFallbackEl = rootEl.querySelector('[data-speedometer-driver-fallback]');
+    const driverLabelEl = rootEl.querySelector('[data-speedometer-driver-label]');
+    const driverNameEl = rootEl.querySelector('[data-speedometer-driver-name]');
 
     const state = {
         visible: false,
         displaySpeedKph: 0,
+        driverSignature: '',
     };
+
+    driverAvatarImageEl?.addEventListener('error', () => {
+        if (driverPodEl) {
+            driverPodEl.dataset.hasImage = 'false';
+        }
+        if (driverAvatarImageEl) {
+            driverAvatarImageEl.hidden = true;
+        }
+    });
 
     return {
         update(frameState = {}) {
             const shouldShow = Boolean(frameState.visible) && !frameState.paused;
             syncVisibility(shouldShow);
+            syncDriverProfile();
 
             const deltaTime = clampNumber(frameState.deltaTime, 0, 0.08, 1 / 60);
             const targetSpeedKph = clampNumber(frameState.speedKph, 0, 240, 0);
@@ -171,6 +207,51 @@ export function createSpeedometerController() {
         rootEl.classList.remove('is-visible');
         rootEl.hidden = true;
         rootEl.setAttribute('aria-hidden', 'true');
+    }
+
+    function syncDriverProfile() {
+        const authState = getAuthState?.() || null;
+        const driverProfile = resolveDriverProfile(authState);
+        const nextSignature = [
+            driverProfile.label,
+            driverProfile.name,
+            driverProfile.fallbackInitial,
+            driverProfile.avatarUrl,
+            driverProfile.signedIn ? '1' : '0',
+        ].join('|');
+        if (nextSignature === state.driverSignature) {
+            return;
+        }
+
+        state.driverSignature = nextSignature;
+        rootEl.dataset.driverSignedIn = driverProfile.signedIn ? 'true' : 'false';
+        rootEl.dataset.driverHasImage = driverProfile.avatarUrl ? 'true' : 'false';
+
+        if (driverPodEl) {
+            driverPodEl.dataset.hasImage = driverProfile.avatarUrl ? 'true' : 'false';
+        }
+        if (driverLabelEl) {
+            driverLabelEl.textContent = driverProfile.label;
+        }
+        if (driverNameEl) {
+            driverNameEl.textContent = driverProfile.name;
+        }
+        if (driverAvatarFallbackEl) {
+            driverAvatarFallbackEl.textContent = driverProfile.fallbackInitial;
+        }
+        if (driverAvatarImageEl) {
+            if (driverProfile.avatarUrl) {
+                if (driverAvatarImageEl.src !== driverProfile.avatarUrl) {
+                    driverAvatarImageEl.src = driverProfile.avatarUrl;
+                }
+                driverAvatarImageEl.hidden = false;
+                driverAvatarImageEl.alt = `${driverProfile.name} profile photo`;
+            } else {
+                driverAvatarImageEl.hidden = true;
+                driverAvatarImageEl.removeAttribute('src');
+                driverAvatarImageEl.alt = 'Driver profile photo';
+            }
+        }
     }
 }
 
@@ -263,6 +344,51 @@ function resolveBatteryStatusLabel(state = 'ready') {
         default:
             return 'READY';
     }
+}
+
+function resolveDriverProfile(authState = null) {
+    const signedIn = Boolean(authState?.authenticated);
+    const name = normalizeDriverName(authState?.displayName);
+    const avatarUrl = sanitizeDriverAvatarUrl(authState?.avatarUrl || '');
+    return {
+        signedIn,
+        label: signedIn ? 'PROFILE' : 'LOCAL',
+        name,
+        avatarUrl,
+        fallbackInitial: resolveDriverInitial(name),
+    };
+}
+
+function normalizeDriverName(value = '') {
+    const normalized = typeof value === 'string' ? value.trim() : '';
+    return normalized || 'Driver';
+}
+
+function resolveDriverInitial(name = '') {
+    const normalized = normalizeDriverName(name);
+    return normalized.charAt(0).toUpperCase() || 'D';
+}
+
+function sanitizeDriverAvatarUrl(value = '') {
+    const rawValue = typeof value === 'string' ? value.trim() : '';
+    if (!rawValue) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(rawValue, window.location.href);
+        const protocol = parsed.protocol.toLowerCase();
+        if (
+            protocol === 'http:' ||
+            protocol === 'https:' ||
+            protocol === 'blob:' ||
+            protocol === 'data:'
+        ) {
+            return parsed.href;
+        }
+    } catch {}
+
+    return '';
 }
 
 function clampNumber(value, min, max, fallback = 0) {
