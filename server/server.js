@@ -14,6 +14,7 @@ const {
     ensureLeaderboardSchema,
     sanitizeLeaderboardLimit,
 } = require('./leaderboard-store');
+const { createPlayerEconomyStore, ensurePlayerEconomySchema } = require('./player-economy-store');
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
 const {
@@ -121,6 +122,7 @@ const GA_MEASUREMENT_ID = sanitizeGaMeasurementId(
 const supabaseRuntimeConfig = resolveSupabaseRuntimeConfig(process.env);
 const supabaseServiceClient = createSupabaseServiceClient(supabaseRuntimeConfig);
 const leaderboardStore = createLeaderboardStore(supabaseRuntimeConfig);
+const playerEconomyStore = createPlayerEconomyStore(supabaseRuntimeConfig);
 const SUPABASE_PUBLIC_CONFIG = buildSupabasePublicConfig(supabaseRuntimeConfig, {
     leaderboardEnabled: leaderboardStore.isConfigured(),
 });
@@ -175,6 +177,10 @@ const HTTP_LEADERBOARD_READ_WINDOW_MS = 10_000;
 const HTTP_LEADERBOARD_READ_MAX = 60;
 const HTTP_LEADERBOARD_SUBMIT_WINDOW_MS = 60_000;
 const HTTP_LEADERBOARD_SUBMIT_MAX = 12;
+const HTTP_PLAYER_ECONOMY_READ_WINDOW_MS = 10_000;
+const HTTP_PLAYER_ECONOMY_READ_MAX = 60;
+const HTTP_PLAYER_ECONOMY_SYNC_WINDOW_MS = 60_000;
+const HTTP_PLAYER_ECONOMY_SYNC_MAX = 30;
 const ONLINE_AUTH_REQUIRED_ERROR = 'Sign in is required for online rooms.';
 const ONLINE_AUTH_SERVER_ERROR = 'Online auth is not configured on this server.';
 const USER_STORAGE_LIST_LIMIT = 100;
@@ -431,17 +437,135 @@ app.delete('/api/auth/account', async (req, res) => {
             console.warn('Car wrap cleanup after account deletion failed:', cleanupError);
         }
 
+        let deletedEconomyWallets = 0;
+        let deletedEconomyTransactions = 0;
+        if (playerEconomyStore.isConfigured()) {
+            try {
+                const cleanupResult = await playerEconomyStore.deleteProfileByUserId(
+                    authIdentity.userId
+                );
+                deletedEconomyWallets = Math.max(
+                    0,
+                    Math.round(Number(cleanupResult?.deletedWallets) || 0)
+                );
+                deletedEconomyTransactions = Math.max(
+                    0,
+                    Math.round(Number(cleanupResult?.deletedTransactions) || 0)
+                );
+            } catch (cleanupError) {
+                console.warn('Player economy cleanup after account deletion failed:', cleanupError);
+            }
+        }
+
         res.json({
             ok: true,
             deletedLeaderboardEntries,
             deletedProfileImages,
             deletedCarWraps,
+            deletedEconomyWallets,
+            deletedEconomyTransactions,
         });
     } catch (error) {
         console.error('Supabase account deletion failed:', error);
         res.status(502).json({
             ok: false,
             error: 'Could not delete account right now.',
+        });
+    }
+});
+
+app.get('/api/player-economy/profile', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!playerEconomyStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Player wallet sync is not configured on this server.',
+        });
+        return;
+    }
+    if (
+        !consumeHttpRequestQuota(
+            req,
+            'player-economy-read',
+            HTTP_PLAYER_ECONOMY_READ_WINDOW_MS,
+            HTTP_PLAYER_ECONOMY_READ_MAX
+        )
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many wallet requests. Try again shortly.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        if (!authIdentity?.userId) {
+            res.status(401).json({
+                ok: false,
+                error: 'Sign in before loading wallet progress.',
+            });
+            return;
+        }
+
+        const profile = await playerEconomyStore.readProfileByUserId(authIdentity.userId);
+        res.json({
+            ok: true,
+            profile,
+        });
+    } catch (error) {
+        console.error('Player economy profile read failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not load wallet progress right now.',
+        });
+    }
+});
+
+app.post('/api/player-economy/sync', express.json({ limit: '64kb' }), async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!playerEconomyStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Player wallet sync is not configured on this server.',
+        });
+        return;
+    }
+    if (
+        !consumeHttpRequestQuota(
+            req,
+            'player-economy-sync',
+            HTTP_PLAYER_ECONOMY_SYNC_WINDOW_MS,
+            HTTP_PLAYER_ECONOMY_SYNC_MAX
+        )
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many wallet sync attempts. Try again shortly.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        if (!authIdentity?.userId) {
+            res.status(401).json({
+                ok: false,
+                error: 'Sign in before syncing wallet progress.',
+            });
+            return;
+        }
+
+        const profile = await playerEconomyStore.syncProfileByUserId(authIdentity.userId, req.body);
+        res.json({
+            ok: true,
+            profile,
+        });
+    } catch (error) {
+        console.error('Player economy sync failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not sync wallet progress right now.',
         });
     }
 });
@@ -1573,6 +1697,7 @@ void startServer();
 
 async function startServer() {
     await initializeSupabaseLeaderboardSchema();
+    await initializeSupabasePlayerEconomySchema();
     server.listen(PORT, () => {
         const accessUrls = resolveServerAccessUrls(PORT);
         console.log('Server is running on:');
@@ -1586,6 +1711,9 @@ async function startServer() {
         }
         if (leaderboardStore.isConfigured()) {
             console.log('Supabase leaderboard API is enabled.');
+        }
+        if (playerEconomyStore.isConfigured()) {
+            console.log('Supabase player economy API is enabled.');
         }
         if (supabaseRuntimeConfig.publicEnabled && !supabaseServiceClient) {
             console.warn(
@@ -1627,6 +1755,41 @@ async function initializeSupabaseLeaderboardSchema() {
 
     if (lastError) {
         console.error('Supabase leaderboard schema bootstrap failed:', lastError);
+    }
+}
+
+async function initializeSupabasePlayerEconomySchema() {
+    if (!playerEconomyStore.isConfigured()) {
+        return;
+    }
+    const bootstrapConnectionStrings = Array.from(
+        new Set(
+            [supabaseRuntimeConfig.dbUrl, supabaseRuntimeConfig.dbPoolerUrl].filter(
+                (value) => typeof value === 'string' && value.trim()
+            )
+        )
+    );
+    if (bootstrapConnectionStrings.length === 0) {
+        console.warn(
+            'Supabase player economy is enabled, but no DB connection string is available for automatic schema bootstrap.'
+        );
+        return;
+    }
+
+    let lastError = null;
+    for (let index = 0; index < bootstrapConnectionStrings.length; index += 1) {
+        try {
+            await ensurePlayerEconomySchema({
+                connectionString: bootstrapConnectionStrings[index],
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Supabase player economy schema bootstrap failed:', lastError);
     }
 }
 

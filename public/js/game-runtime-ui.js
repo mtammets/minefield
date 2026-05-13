@@ -6,6 +6,7 @@ import { createDonateUiController } from './donate-ui.js';
 import { createControlsHelpController } from './controls-ui.js';
 import { createSpeedometerController } from './speedometer-ui.js';
 import { createObjectiveHudController } from './objective-hud-ui.js';
+import { createEconomyHudController } from './economy-hud-ui.js';
 import { createToastController } from './toast-ui.js';
 
 export function createRuntimeUiControllers({
@@ -37,6 +38,8 @@ export function createRuntimeUiControllers({
     onAuthDeleteAccount = null,
     onRefreshGlobalLeaderboard = null,
     getAuthState = () => null,
+    getPlayerEconomyState = () => null,
+    onPurchaseVehicle = null,
     onDownloadPerformanceLog = null,
 }) {
     const objectiveUi = createObjectiveHudController({
@@ -99,6 +102,8 @@ export function createRuntimeUiControllers({
         onAuthDeleteAccount,
         onRefreshGlobalLeaderboard,
         getAuthState,
+        getPlayerEconomyState,
+        onPurchaseVehicle,
         toCssHex,
         onStartRequested() {
             getGameSessionController()?.requestGameplayFullscreen?.();
@@ -120,6 +125,7 @@ export function createRuntimeUiControllers({
         },
     });
     donateUi.initialize();
+    const economyHudUi = createEconomyHudController();
     const speedometerUi = createSpeedometerController();
     const toastUi = createToastController();
 
@@ -131,6 +137,7 @@ export function createRuntimeUiControllers({
         pauseMenuUi,
         welcomeModalUi,
         donateUi,
+        economyHudUi,
         speedometerUi,
         toastUi,
     };

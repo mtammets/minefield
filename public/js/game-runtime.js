@@ -112,6 +112,20 @@ import {
     getPlayerVehiclePresetIndex,
     resolvePlayerVehicleId,
 } from './car-vehicles.js';
+import {
+    arePlayerEconomyStatesEqual,
+    awardCreditsToEconomy,
+    mergePlayerEconomyStates,
+    normalizePlayerEconomyState,
+    PLAYER_MINE_KILL_CREDIT_VALUE,
+    PLAYER_PICKUP_CREDIT_VALUE,
+    persistPlayerEconomyState,
+    purchaseVehicleWithEconomy,
+    readPersistedPlayerEconomyState,
+    resolveNextVehicleUnlockTarget,
+    resolveOwnedVehicleIdForEconomy,
+    resolveRoundEconomyReward,
+} from './player-economy.js';
 import { readPersistedCrashDamageTuning, persistCrashDamageTuning } from './crash-damage-tuning.js';
 import { createRaceIntroController } from './race-intro.js';
 import {
@@ -193,7 +207,11 @@ const PLAYER_SPAWN_CLEARANCE = 3.4;
 const PLAYER_SPAWN_BOT_CLEARANCE = 14;
 const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5]);
 const crashParts = getPlayerCarCrashParts();
-const selectedCarVehicleId = resolvePlayerVehicleId(readPersistedPlayerCarVehicleId());
+const initialPlayerEconomyState = readPersistedPlayerEconomyState();
+const selectedCarVehicleId = resolveOwnedVehicleIdForEconomy(
+    readPersistedPlayerCarVehicleId(),
+    initialPlayerEconomyState
+);
 const selectedCarVehiclePreset = getPlayerVehiclePresetById(selectedCarVehicleId);
 const selectedCarSkinId = resolvePlayerCarSkinId(
     readPersistedPlayerCarSkinId(selectedCarVehiclePreset.defaultSkinId)
@@ -213,6 +231,7 @@ const runtimeState = createGameRuntimeState({
     batteryMax: BATTERY_MAX,
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
+runtimeState.playerEconomy = normalizePlayerEconomyState(initialPlayerEconomyState);
 let runtimeGraphicsWarmupReady = false;
 let runtimeGraphicsRecoveryPromise = null;
 let runtimeGraphicsLastRecoveryRequestAtMs = -Number.POSITIVE_INFINITY;
@@ -238,6 +257,7 @@ setChaseCameraSettings(readPersistedChaseCameraSettings());
 
 const {
     objectiveUi,
+    economyHudUi,
     controlsHelpUi,
     botStatusUi,
     finalScoreboardUi,
@@ -296,6 +316,10 @@ const {
         return runtimeState.globalLeaderboardController?.refresh?.();
     },
     getAuthState: () => runtimeState.authController?.getState?.() || null,
+    getPlayerEconomyState: () => runtimeState.playerEconomy,
+    onPurchaseVehicle(vehicleId) {
+        return purchaseVehicleUnlock(vehicleId);
+    },
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
 });
 runtimeState.authController = createAuthController({
@@ -313,12 +337,15 @@ runtimeState.authController = createAuthController({
         setPlayerCarAppearance({
             wrapUrl: state?.authenticated ? state?.carWrapUrl || '' : '',
         });
+        handleRuntimeAuthEconomyStateChanged(state);
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
         runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
         void runtimeState.globalLeaderboardController?.refresh?.();
     },
 });
 welcomeModalUi.setAuthState?.(runtimeState.authController.getState?.());
+welcomeModalUi.setPlayerEconomy?.(runtimeState.playerEconomy);
+syncRuntimeEconomyHud();
 runtimeState.globalLeaderboardController = createGlobalLeaderboardController({
     onStateChanged(state) {
         finalScoreboardUi.setGlobalLeaderboard?.(state);
@@ -330,6 +357,248 @@ runtimeState.globalLeaderboardController = createGlobalLeaderboardController({
 welcomeModalUi.setGlobalLeaderboard?.(runtimeState.globalLeaderboardController.getState?.());
 void runtimeState.authController.initialize().catch(() => {});
 void runtimeState.globalLeaderboardController.initialize();
+
+function syncRuntimePlayerEconomyState(nextEconomyState = null, options = {}) {
+    const normalizedEconomyState = normalizePlayerEconomyState(nextEconomyState);
+    runtimeState.playerEconomy = normalizedEconomyState;
+    if (options.persistLocal !== false) {
+        persistPlayerEconomyState(normalizedEconomyState);
+    }
+    welcomeModalUi.setPlayerEconomy?.(normalizedEconomyState);
+    if (options.reconcileVehicle !== false) {
+        reconcileRuntimeSelectedVehicleWithEconomy(normalizedEconomyState);
+    }
+    syncRuntimeEconomyHud();
+    return normalizedEconomyState;
+}
+
+function syncRuntimeEconomyHud() {
+    economyHudUi.setState?.(buildRuntimeEconomyHudState());
+}
+
+function buildRuntimeEconomyHudState() {
+    const walletCredits = Math.max(0, Math.round(Number(runtimeState.playerEconomy?.credits) || 0));
+    const runCredits = Math.max(0, Math.round(Number(runtimeState.playerEconomyRoundCredits) || 0));
+    const projectedEconomyState = normalizePlayerEconomyState({
+        credits: walletCredits + runCredits,
+        unlockedVehicleIds: runtimeState.playerEconomy?.unlockedVehicleIds,
+    });
+    const nextUnlock = resolveNextVehicleUnlockTarget(projectedEconomyState);
+    const authState = runtimeState.authController?.getState?.() || null;
+    const syncSource =
+        typeof authState?.economySyncSource === 'string'
+            ? authState.economySyncSource.trim().toLowerCase()
+            : 'local';
+    const syncTone =
+        syncSource === 'server' ? 'success' : syncSource === 'pending' ? 'info' : 'muted';
+    const syncLabel = !authState?.authenticated
+        ? 'LOCAL'
+        : syncSource === 'server'
+          ? 'SYNCED'
+          : syncSource === 'pending'
+            ? 'SYNCING'
+            : 'CACHE';
+    const targetValue = nextUnlock.unlocked
+        ? 'All chassis online'
+        : `${Math.min(
+              projectedEconomyState.credits,
+              nextUnlock.unlockPriceCredits
+          )}/${nextUnlock.unlockPriceCredits} CR`;
+    return {
+        walletCredits,
+        runCredits,
+        syncTone,
+        syncLabel,
+        targetLabel: nextUnlock.unlocked ? 'Garage complete' : `Next: ${nextUnlock.vehicleName}`,
+        targetValue,
+        progressRatio: Math.max(0, Math.min(1, Number(nextUnlock.progressRatio) || 0)),
+        activity: runtimeState.playerEconomyLastActivity,
+    };
+}
+
+function resetRuntimeEconomyRoundPreview() {
+    runtimeState.playerEconomyRoundCredits = 0;
+    runtimeState.playerEconomyLastActivity = null;
+    syncRuntimeEconomyHud();
+}
+
+function previewRuntimeEconomyDelta({ creditsDelta = 0, label = '' } = {}) {
+    const normalizedDelta = Math.max(0, Math.round(Number(creditsDelta) || 0));
+    if (normalizedDelta <= 0) {
+        return;
+    }
+    runtimeState.playerEconomyRoundCredits = Math.max(
+        0,
+        Math.round(Number(runtimeState.playerEconomyRoundCredits) || 0) + normalizedDelta
+    );
+    runtimeState.playerEconomyActivityNonce += 1;
+    runtimeState.playerEconomyLastActivity = {
+        id: `economy-${runtimeState.playerEconomyActivityNonce}`,
+        text: `${label || 'Wallet'} +${normalizedDelta} CR`,
+    };
+    syncRuntimeEconomyHud();
+}
+
+function buildRuntimeRoundEconomySummary(reward = null) {
+    const creditsEarned = Math.max(0, Math.round(Number(reward?.creditsEarned) || 0));
+    if (creditsEarned <= 0) {
+        return 'Round settled';
+    }
+    const finishReason =
+        typeof reward?.finishReason === 'string' ? reward.finishReason.trim().toLowerCase() : '';
+    if (finishReason === 'campaign-complete') {
+        return `Campaign clear +${creditsEarned} CR`;
+    }
+    if (finishReason === 'mission-failed') {
+        return `Run settled +${creditsEarned} CR`;
+    }
+    if (finishReason === 'opponents-eliminated') {
+        return `Sector sweep +${creditsEarned} CR`;
+    }
+    if (reward?.isWinner) {
+        return `Victory payout +${creditsEarned} CR`;
+    }
+    return `Round payout +${creditsEarned} CR`;
+}
+
+function reconcileRuntimeSelectedVehicleWithEconomy(economyState = null) {
+    const resolvedVehicleId = resolveOwnedVehicleIdForEconomy(
+        runtimeState.selectedCarVehicleId,
+        economyState || runtimeState.playerEconomy
+    );
+    if (resolvedVehicleId === runtimeState.selectedCarVehicleId) {
+        return false;
+    }
+
+    if (runtimeState.gameSessionController?.setSelectedPlayerCarVehicle) {
+        runtimeState.gameSessionController.setSelectedPlayerCarVehicle(resolvedVehicleId, {
+            persist: true,
+        });
+    } else {
+        runtimeState.selectedCarVehicleId = resolvedVehicleId;
+        setPlayerCarAppearance({
+            vehicleId: resolvedVehicleId,
+            skinId: runtimeState.selectedCarSkinId,
+            colorHex: runtimeState.selectedCarColorHex,
+        });
+        persistPlayerCarVehicleId(resolvedVehicleId);
+    }
+    welcomeModalUi.setSelectedVehicleId?.(resolvedVehicleId, {
+        emitChange: false,
+    });
+    return true;
+}
+
+function handleRuntimeAuthEconomyStateChanged(authState = null) {
+    const mergedEconomyState = mergePlayerEconomyStates(
+        readPersistedPlayerEconomyState(),
+        authState
+    );
+    const normalizedAuthEconomyState = normalizePlayerEconomyState(authState);
+    syncRuntimePlayerEconomyState(mergedEconomyState, {
+        persistLocal: true,
+        reconcileVehicle: true,
+    });
+    if (
+        authState?.authenticated &&
+        !arePlayerEconomyStatesEqual(mergedEconomyState, normalizedAuthEconomyState)
+    ) {
+        void runtimeState.authController?.syncPlayerEconomy?.(mergedEconomyState);
+    }
+}
+
+async function awardRuntimeRoundEconomyReward(event = null) {
+    const reward = resolveRoundEconomyReward({
+        event,
+        gameMode: runtimeState.gameMode,
+    });
+    const nextEconomyState = syncRuntimePlayerEconomyState(
+        awardCreditsToEconomy(runtimeState.playerEconomy, reward.creditsEarned),
+        {
+            persistLocal: true,
+            reconcileVehicle: false,
+        }
+    );
+    if (runtimeState.authController?.isAuthenticated?.()) {
+        await runtimeState.authController?.syncPlayerEconomy?.(nextEconomyState, {
+            transaction: {
+                kind: 'round-reward',
+                summary: buildRuntimeRoundEconomySummary(reward),
+                creditsDelta: reward.creditsEarned,
+                metadata: {
+                    breakdown: reward.breakdown,
+                    gameMode: runtimeState.gameMode,
+                    finishReason: reward.finishReason,
+                },
+            },
+        });
+    }
+    finalScoreboardUi.setEconomyReward?.({
+        creditsEarned: reward.creditsEarned,
+        balanceAfter: nextEconomyState.credits,
+        breakdown: reward.breakdown,
+    });
+    resetRuntimeEconomyRoundPreview();
+    return {
+        reward,
+        economy: nextEconomyState,
+    };
+}
+
+async function purchaseVehicleUnlock(vehicleId = '') {
+    const purchaseResult = purchaseVehicleWithEconomy(runtimeState.playerEconomy, vehicleId);
+    if (!purchaseResult?.ok) {
+        return purchaseResult;
+    }
+
+    const nextEconomyState = syncRuntimePlayerEconomyState(purchaseResult.economy, {
+        persistLocal: true,
+        reconcileVehicle: false,
+    });
+    let syncWarning = '';
+    if (runtimeState.authController?.isAuthenticated?.()) {
+        const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(
+            nextEconomyState,
+            {
+                transaction: {
+                    kind: 'vehicle-unlock',
+                    summary: `Unlocked ${getPlayerVehiclePresetById(purchaseResult.vehicleId)?.name || 'chassis'}`,
+                    creditsDelta: -Math.max(0, Math.round(Number(purchaseResult.costCredits) || 0)),
+                    metadata: {
+                        vehicleId: purchaseResult.vehicleId,
+                        vehicleName:
+                            getPlayerVehiclePresetById(purchaseResult.vehicleId)?.name || 'Chassis',
+                    },
+                },
+            }
+        );
+        if (!syncResult?.ok) {
+            syncWarning = syncResult?.error || 'Account sync failed.';
+        }
+    }
+
+    if (runtimeState.gameSessionController?.setSelectedPlayerCarVehicle) {
+        runtimeState.gameSessionController.setSelectedPlayerCarVehicle(purchaseResult.vehicleId, {
+            persist: true,
+        });
+    } else {
+        runtimeState.selectedCarVehicleId = purchaseResult.vehicleId;
+        setPlayerCarAppearance({
+            vehicleId: purchaseResult.vehicleId,
+            skinId: runtimeState.selectedCarSkinId,
+            colorHex: runtimeState.selectedCarColorHex,
+        });
+        persistPlayerCarVehicleId(purchaseResult.vehicleId);
+    }
+    welcomeModalUi.setSelectedVehicleId?.(purchaseResult.vehicleId, {
+        emitChange: false,
+    });
+    return {
+        ...purchaseResult,
+        economy: nextEconomyState,
+        syncWarning,
+    };
+}
 
 async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null, options = null) {
     const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
@@ -408,6 +677,7 @@ async function prepareRuntimeForSessionStart(mode = 'bots', startContext = null,
     const normalizedMode = mode === 'online' ? 'online' : 'bots';
     const canPrepareOnlineRoomFlow = Boolean(startContext && typeof startContext === 'object');
     clearDeferredMineKillUiTasks({ resetCounters: true });
+    resetRuntimeEconomyRoundPreview();
     reportProgress({
         stage: 'prepare',
         progress: 0,
@@ -2112,6 +2382,10 @@ function handleVehicleWeaponBotDestroyed({
             pointsAwarded,
             sourceLabel: 'BOT KO',
         });
+        previewRuntimeEconomyDelta({
+            creditsDelta: PLAYER_MINE_KILL_CREDIT_VALUE,
+            label: 'Mine kill',
+        });
         objectiveUi.showInfo(`${resolvedTargetName} out: +${pointsAwarded} pts.`, 1450);
         return;
     }
@@ -2206,6 +2480,10 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                             pickupColorHex,
                             buildPickupStatusContext(response.pointsAwarded, response.scoring)
                         );
+                        previewRuntimeEconomyDelta({
+                            creditsDelta: PLAYER_PICKUP_CREDIT_VALUE,
+                            label: 'Pickup',
+                        });
                     }
                 );
                 return {
@@ -2245,6 +2523,10 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
                 pickupColorHex,
                 buildPickupStatusContext(scoreEvent?.pointsAwarded || 0, scoreEvent?.scoring)
             );
+            previewRuntimeEconomyDelta({
+                creditsDelta: PLAYER_PICKUP_CREDIT_VALUE,
+                label: 'Pickup',
+            });
             runtimeState.botsMissionDirector?.handlePickupCollected?.({
                 collectorId: 'player',
             });
@@ -2536,6 +2818,10 @@ runtimeState.mineController = createMineSystemController({
             pointsAwarded,
             sourceLabel: 'MINE KILL',
         });
+        previewRuntimeEconomyDelta({
+            creditsDelta: PLAYER_MINE_KILL_CREDIT_VALUE,
+            label: 'Mine kill',
+        });
         objectiveUi.showInfo(`Mine kill +${pointsAwarded} pts.`, 1400);
     },
     onLocalMineHit({ position, ownerName }) {
@@ -2639,6 +2925,10 @@ runtimeState.mineController = createMineSystemController({
                 }
             }
             if (ownerCollectorId === 'player' && pointsAwarded > 0) {
+                previewRuntimeEconomyDelta({
+                    creditsDelta: PLAYER_MINE_KILL_CREDIT_VALUE,
+                    label: 'Mine kill',
+                });
                 const statusMessage = `${target.label || target.id} out: +${pointsAwarded} pts.`;
                 if (shouldDeferMineKillUi) {
                     queueDeferredMineKillUiTask(
@@ -2854,6 +3144,7 @@ runtimeState.gameSessionController = createGameSessionController({
     persistPlayerCarSkinId,
     persistPlayerCarVehicleId,
     objectiveUi,
+    economyHudUi,
     controlsHelpUi,
     botStatusUi,
     finalScoreboardUi,
@@ -2929,6 +3220,12 @@ runtimeState.gameSessionController = createGameSessionController({
             pointsAwarded,
             pickupCount,
         });
+        if (collectorId === 'player' && pickupCount > 0) {
+            previewRuntimeEconomyDelta({
+                creditsDelta: pickupCount * PLAYER_PICKUP_CREDIT_VALUE,
+                label: 'Sweep reserve',
+            });
+        }
         recordPerformanceDiagnosticEvent('autocollect_bonus_awarded', {
             collectorId,
             pointsAwarded: Math.max(0, Math.round(Number(pointsAwarded) || 0)),
@@ -2953,6 +3250,7 @@ runtimeState.gameSessionController = createGameSessionController({
             bonusPickupsAwarded: Math.max(0, Math.round(Number(event?.bonusPickupsAwarded) || 0)),
             scoreboardEntries: Math.max(0, Math.round(Number(event?.scoreboardEntries) || 0)),
         });
+        void awardRuntimeRoundEconomyReward(event);
         const leaderboardSubmission = resolveLocalLeaderboardSubmission({
             event,
             selectedCarVehicleId: runtimeState.selectedCarVehicleId,
@@ -3061,6 +3359,7 @@ runtimeState.gameSessionController = createGameSessionController({
 runtimeState.gameSessionController.handleAuthStateChanged?.(
     runtimeState.authController?.getState?.() || null
 );
+handleRuntimeAuthEconomyStateChanged(runtimeState.authController?.getState?.() || null);
 
 runtimeState.botsMissionDirector = createBotsMissionDirector({
     objectiveUi,

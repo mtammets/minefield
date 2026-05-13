@@ -55,6 +55,7 @@ export function createGameSessionController({
     persistPlayerCarSkinId,
     persistPlayerCarVehicleId = () => {},
     objectiveUi,
+    economyHudUi = null,
     controlsHelpUi = null,
     botStatusUi,
     finalScoreboardUi,
@@ -283,6 +284,7 @@ export function createGameSessionController({
         carEditModeController.setActive(false);
         welcomeModalUi.hide();
         objectiveUi.setGameplayVisible?.(true);
+        economyHudUi?.setGameplayVisible?.(true);
         controlsHelpUi?.setGameplayVisible?.(true);
         audioController?.onWelcomeVisibilityChanged?.(false);
         restartGameWithCountdown();
@@ -300,6 +302,7 @@ export function createGameSessionController({
         setIsGamePaused(true);
         clearDriveKeys();
         objectiveUi.setGameplayVisible?.(false);
+        economyHudUi?.setGameplayVisible?.(false);
         controlsHelpUi?.setGameplayVisible?.(false);
         pauseMenuUi.hide();
         setCameraKeyboardControlsEnabled(true);

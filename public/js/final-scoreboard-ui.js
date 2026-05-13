@@ -11,6 +11,8 @@ export function createFinalScoreboardController({
     const playerNameEl = document.getElementById('leaderboardPlayerName');
     const playerScoreEl = document.getElementById('leaderboardPlayerScore');
     const collectedMetaEl = document.getElementById('leaderboardCollectedMeta');
+    const economyMetaEl = document.getElementById('leaderboardEconomyMeta');
+    const economyBreakdownEl = document.getElementById('leaderboardEconomyBreakdown');
     const sectionTitleEl = document.getElementById('leaderboardSectionTitle');
     const sectionMetaEl = document.getElementById('leaderboardSectionMeta');
     const globalPanelEl = document.getElementById('leaderboardGlobalPanel');
@@ -82,7 +84,9 @@ export function createFinalScoreboardController({
             const playerIndex = normalizedEntries.findIndex((entry) => isPlayerEntry(entry));
             const playerEntry = playerIndex >= 0 ? normalizedEntries[playerIndex] : null;
             const playerScore = Math.max(0, Math.round(Number(playerEntry?.score) || 0));
-            const roundOpponentCount = normalizedEntries.filter((entry) => !isPlayerEntry(entry)).length;
+            const roundOpponentCount = normalizedEntries.filter(
+                (entry) => !isPlayerEntry(entry)
+            ).length;
             const authState = getAuthState?.() || null;
             const playerDisplayName =
                 resolveGlobalLeaderboardName(authState?.displayName || '') ||
@@ -125,7 +129,9 @@ export function createFinalScoreboardController({
                         : 'Collected --';
             }
             if (sectionTitleEl) {
-                sectionTitleEl.textContent = isCampaignPresentation ? 'RUN STANDINGS' : 'ROUND STANDINGS';
+                sectionTitleEl.textContent = isCampaignPresentation
+                    ? 'RUN STANDINGS'
+                    : 'ROUND STANDINGS';
             }
             if (sectionMetaEl) {
                 sectionMetaEl.textContent = isCampaignPresentation
@@ -199,6 +205,10 @@ export function createFinalScoreboardController({
             };
             syncDownloadLogButtonState();
             rootEl.hidden = false;
+            renderEconomyReward(null);
+        },
+        setEconomyReward(reward = null) {
+            renderEconomyReward(reward);
         },
         setGlobalLeaderboard(nextState = {}) {
             globalLeaderboardState = normalizeGlobalLeaderboardState(nextState);
@@ -221,6 +231,7 @@ export function createFinalScoreboardController({
             if (collectedMetaEl) {
                 collectedMetaEl.textContent = 'Collected 0/0';
             }
+            renderEconomyReward(null);
             if (sectionTitleEl) {
                 sectionTitleEl.textContent = 'ROUND STANDINGS';
             }
@@ -238,6 +249,55 @@ export function createFinalScoreboardController({
 
     function renderGlobalLeaderboard() {
         globalLeaderboardUi.render(globalLeaderboardState, numberFormatter);
+    }
+
+    function renderEconomyReward(reward = null) {
+        if (!economyMetaEl) {
+            return;
+        }
+        const creditsEarned = Math.max(0, Math.round(Number(reward?.creditsEarned) || 0));
+        const balanceAfter = Math.max(0, Math.round(Number(reward?.balanceAfter) || 0));
+        if (creditsEarned <= 0 && balanceAfter <= 0) {
+            economyMetaEl.hidden = true;
+            economyMetaEl.textContent = '';
+            if (economyBreakdownEl) {
+                economyBreakdownEl.hidden = true;
+                economyBreakdownEl.innerHTML = '';
+            }
+            return;
+        }
+        economyMetaEl.hidden = false;
+        economyMetaEl.textContent =
+            creditsEarned > 0
+                ? `Wallet +${numberFormatter.format(creditsEarned)} CR • balance ${numberFormatter.format(balanceAfter)} CR`
+                : `Wallet ${numberFormatter.format(balanceAfter)} CR`;
+        renderEconomyBreakdown(reward?.breakdown);
+    }
+
+    function renderEconomyBreakdown(lines = null) {
+        if (!economyBreakdownEl) {
+            return;
+        }
+        const breakdown = Array.isArray(lines)
+            ? lines
+                  .map((entry) => normalizeEconomyBreakdownEntry(entry))
+                  .filter((entry) => entry.credits > 0)
+            : [];
+        if (breakdown.length <= 0) {
+            economyBreakdownEl.hidden = true;
+            economyBreakdownEl.innerHTML = '';
+            return;
+        }
+        economyBreakdownEl.hidden = false;
+        economyBreakdownEl.innerHTML = breakdown
+            .map(
+                (entry) =>
+                    `<div class="leaderboardEconomyBreakdownRow">` +
+                    `<span class="leaderboardEconomyBreakdownLabel">${escapeHtml(entry.label)}</span>` +
+                    `<span class="leaderboardEconomyBreakdownValue">+${numberFormatter.format(entry.credits)} CR</span>` +
+                    `</div>`
+            )
+            .join('');
     }
 
     function syncDownloadLogButtonState() {
@@ -290,6 +350,17 @@ function resolveWinnerLabel(entries, topScore, providedWinnerLabel) {
     return `Winner: ${winners[0]}`;
 }
 
+function normalizeEconomyBreakdownEntry(entry = null) {
+    const source = entry && typeof entry === 'object' ? entry : {};
+    return {
+        label:
+            typeof source.label === 'string' && source.label.trim()
+                ? source.label.trim()
+                : 'Reward',
+        credits: Math.max(0, Math.round(Number(source.credits) || 0)),
+    };
+}
+
 function escapeHtml(value) {
     return String(value ?? '')
         .replaceAll('&', '&amp;')
@@ -336,7 +407,9 @@ function createFinalGlobalLeaderboardUi({
             }
 
             if (refreshBtnEl) {
-                refreshBtnEl.disabled = Boolean(normalizedState.loading || typeof onRefresh !== 'function');
+                refreshBtnEl.disabled = Boolean(
+                    normalizedState.loading || typeof onRefresh !== 'function'
+                );
             }
             const statusText =
                 typeof normalizedState.statusText === 'string'

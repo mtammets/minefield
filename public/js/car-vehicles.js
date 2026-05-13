@@ -10,6 +10,8 @@ export const PLAYER_VEHICLE_PRESETS = Object.freeze([
         bodyStyle: 'luxury',
         defaultSkinId: DEFAULT_PLAYER_CAR_SKIN_ID,
         previewLabel: 'Street Tank',
+        defaultUnlocked: true,
+        unlockPriceCredits: 0,
     }),
     Object.freeze({
         id: 'apex-formula',
@@ -20,6 +22,8 @@ export const PLAYER_VEHICLE_PRESETS = Object.freeze([
         bodyStyle: 'formula',
         defaultSkinId: 'heatwave-gt',
         previewLabel: 'Open Wheel',
+        defaultUnlocked: false,
+        unlockPriceCredits: 180,
     }),
 ]);
 

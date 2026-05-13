@@ -1421,6 +1421,196 @@ canvas#gameCanvas {
     border-color: rgba(219, 109, 109, 0.34);
 }
 
+#economyHud {
+    position: relative;
+    width: 100%;
+    padding: 14px 14px 13px;
+    border: 1px solid rgba(134, 206, 170, 0.22);
+    border-radius: 22px;
+    background:
+        linear-gradient(180deg, rgba(9, 20, 25, 0.94), rgba(5, 12, 18, 0.96)),
+        radial-gradient(circle at 18% 18%, rgba(127, 234, 191, 0.11), rgba(0, 0, 0, 0) 42%);
+    color: rgba(233, 251, 243, 0.98);
+    font-family: 'Sora', sans-serif;
+    box-shadow:
+        0 22px 46px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(14px) saturate(1.06);
+    overflow: hidden;
+}
+
+#economyHud::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(198, 248, 221, 0.08);
+    pointer-events: none;
+}
+
+#economyHud[hidden] {
+    display: none;
+}
+
+#economyHud[data-flash='true'] {
+    box-shadow:
+        0 22px 52px rgba(0, 0, 0, 0.34),
+        0 0 0 1px rgba(139, 242, 191, 0.24),
+        0 0 28px rgba(88, 238, 169, 0.16);
+}
+
+.economyHudTopbar,
+.economyHudBalanceRow,
+.economyHudProgressMeta,
+.economyHudProgressTrack,
+.economyHudActivity {
+    position: relative;
+    z-index: 1;
+}
+
+.economyHudTopbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.economyHudEyebrow {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: rgba(172, 225, 198, 0.78);
+}
+
+.economyHudSyncBadge {
+    padding: 6px 10px 5px;
+    border-radius: 999px;
+    border: 1px solid rgba(136, 183, 160, 0.22);
+    background: rgba(8, 16, 19, 0.6);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(194, 216, 204, 0.8);
+}
+
+.economyHudSyncBadge[data-tone='success'] {
+    border-color: rgba(129, 233, 185, 0.28);
+    color: rgba(211, 255, 231, 0.96);
+}
+
+.economyHudSyncBadge[data-tone='info'] {
+    border-color: rgba(136, 211, 255, 0.28);
+    color: rgba(206, 239, 255, 0.96);
+}
+
+.economyHudBalanceRow {
+    margin-top: 12px;
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.economyHudBalance {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(24px, 2vw, 30px);
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 0.95;
+    color: rgba(241, 252, 246, 0.98);
+}
+
+.economyHudRunDelta {
+    padding-bottom: 3px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(137, 242, 186, 0.94);
+}
+
+.economyHudProgressMeta {
+    margin-top: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.economyHudTargetLabel,
+.economyHudTargetValue {
+    min-width: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.economyHudTargetLabel {
+    color: rgba(185, 223, 203, 0.8);
+}
+
+.economyHudTargetValue {
+    color: rgba(230, 247, 238, 0.96);
+    text-align: right;
+}
+
+.economyHudProgressTrack {
+    margin-top: 8px;
+    height: 10px;
+    overflow: hidden;
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.02)),
+        rgba(255, 255, 255, 0.05);
+    box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, 0.42),
+        inset 0 0 0 1px rgba(191, 240, 214, 0.05);
+}
+
+.economyHudProgressFill {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    transform-origin: left center;
+    transform: scaleX(0);
+    background: linear-gradient(90deg, rgba(122, 241, 179, 0.94), rgba(255, 224, 132, 0.96));
+    box-shadow: 0 0 24px rgba(120, 243, 180, 0.2);
+    transition: transform 220ms ease;
+}
+
+.economyHudActivity {
+    margin-top: 11px;
+    padding: 7px 10px;
+    border-radius: 14px;
+    border: 1px solid rgba(135, 223, 179, 0.18);
+    background: rgba(7, 18, 16, 0.62);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(212, 255, 232, 0.96);
+    animation: economyHudActivityReveal 220ms ease;
+}
+
+@keyframes economyHudActivityReveal {
+    0% {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 #botPanel {
     position: relative;
     width: 100%;
@@ -3480,6 +3670,48 @@ body.race-intro-active #miniMapHud {
     font-weight: 700;
     letter-spacing: 0.8px;
     text-transform: uppercase;
+}
+
+.leaderboardPlayerSummaryEconomy {
+    color: rgba(255, 233, 171, 0.94);
+}
+
+.leaderboardEconomyBreakdown {
+    display: grid;
+    gap: 8px;
+}
+
+.leaderboardEconomyBreakdown[hidden] {
+    display: none;
+}
+
+.leaderboardEconomyBreakdownRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 9px 10px;
+    border-radius: 13px;
+    border: 1px solid rgba(255, 229, 160, 0.16);
+    background: rgba(255, 226, 150, 0.06);
+}
+
+.leaderboardEconomyBreakdownLabel {
+    min-width: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(224, 239, 251, 0.88);
+}
+
+.leaderboardEconomyBreakdownValue {
+    flex: 0 0 auto;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: rgba(255, 235, 181, 0.98);
 }
 
 .leaderboardSectionHeader {
@@ -6260,6 +6492,173 @@ body.race-intro-active #botPanel {
     align-items: center;
 }
 
+.welcomeAuthWalletToggleBtn {
+    --wallet-progress: 0;
+    appearance: none;
+    position: relative;
+    align-self: end;
+    justify-self: end;
+    width: 76px;
+    height: 76px;
+    padding: 0;
+    border: 1px solid rgba(120, 198, 172, 0.28);
+    border-radius: 26px;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 24% 22%, rgba(121, 244, 183, 0.22), rgba(121, 244, 183, 0) 40%),
+        linear-gradient(180deg, rgba(12, 26, 29, 0.92), rgba(6, 13, 16, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 22px 38px rgba(0, 0, 0, 0.26),
+        0 0 0 1px rgba(97, 171, 145, 0.12);
+    color: rgba(232, 248, 239, 0.96);
+    cursor: pointer;
+    isolation: isolate;
+    transition:
+        transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 220ms ease,
+        box-shadow 220ms ease,
+        filter 220ms ease;
+}
+
+.welcomeAuthWalletToggleBtn::before {
+    content: '';
+    position: absolute;
+    inset: 7px;
+    border-radius: 21px;
+    background: conic-gradient(
+        from -90deg,
+        rgba(121, 241, 179, 0.98) 0turn,
+        rgba(255, 221, 128, 0.98) calc(var(--wallet-progress, 0) * 1turn),
+        rgba(255, 255, 255, 0.08) 0turn,
+        rgba(255, 255, 255, 0.08) 1turn
+    );
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 0);
+    mask: radial-gradient(farthest-side, transparent calc(100% - 4px), #000 0);
+    opacity: 0.9;
+    transition:
+        opacity 220ms ease,
+        transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.welcomeAuthWalletToggleBtn[data-state='ready']::before {
+    background: conic-gradient(
+        from -90deg,
+        rgba(255, 213, 120, 0.98) 0turn,
+        rgba(255, 244, 195, 0.98) calc(var(--wallet-progress, 0) * 1turn),
+        rgba(255, 255, 255, 0.08) 0turn,
+        rgba(255, 255, 255, 0.08) 1turn
+    );
+}
+
+.welcomeAuthWalletToggleBtn[data-state='complete']::before {
+    background: conic-gradient(
+        from -90deg,
+        rgba(137, 246, 195, 0.98) 0turn,
+        rgba(223, 255, 241, 0.98) calc(var(--wallet-progress, 0) * 1turn),
+        rgba(255, 255, 255, 0.08) 0turn,
+        rgba(255, 255, 255, 0.08) 1turn
+    );
+}
+
+.welcomeAuthWalletToggleBtn::after {
+    content: '';
+    position: absolute;
+    inset: -28%;
+    z-index: 0;
+    background:
+        radial-gradient(circle at 50% 50%, rgba(129, 248, 192, 0.24), rgba(129, 248, 192, 0) 54%),
+        conic-gradient(
+            from 0deg,
+            rgba(255, 255, 255, 0) 0deg,
+            rgba(255, 255, 255, 0.18) 48deg,
+            rgba(255, 255, 255, 0) 96deg
+        );
+    opacity: 0.44;
+    transform: rotate(0deg);
+    transition:
+        opacity 220ms ease,
+        transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.welcomeAuthWalletToggleBtn:hover,
+.welcomeAuthWalletToggleBtn:focus-visible,
+.welcomeAuthWalletToggleBtn[data-open='true'] {
+    transform: translateY(-2px) scale(1.02);
+    border-color: rgba(183, 232, 208, 0.62);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 26px 42px rgba(0, 0, 0, 0.28),
+        0 0 0 1px rgba(117, 203, 171, 0.16);
+    filter: brightness(1.04);
+}
+
+.welcomeAuthWalletToggleBtn:hover::after,
+.welcomeAuthWalletToggleBtn:focus-visible::after,
+.welcomeAuthWalletToggleBtn[data-open='true']::after {
+    opacity: 0.82;
+    transform: rotate(24deg);
+}
+
+.welcomeAuthWalletToggleBtn[data-open='true']::before {
+    transform: scale(1.03);
+}
+
+.welcomeAuthWalletToggleBtn:focus-visible {
+    outline: none;
+}
+
+.welcomeAuthWalletToggleBtn[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthWalletToggleOrbit {
+    position: absolute;
+    inset: -18px;
+    z-index: 0;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, rgba(118, 243, 180, 0.16), rgba(118, 243, 180, 0) 58%),
+        conic-gradient(
+            from 180deg,
+            rgba(255, 255, 255, 0) 0deg,
+            rgba(128, 245, 188, 0.28) 84deg,
+            rgba(255, 255, 255, 0) 164deg
+        );
+    opacity: 0.54;
+    filter: blur(6px);
+    transform: rotate(-10deg);
+    transition:
+        opacity 240ms ease,
+        transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.welcomeAuthWalletToggleBtn[data-open='true'] .welcomeAuthWalletToggleOrbit {
+    opacity: 0.84;
+    transform: rotate(22deg) scale(1.06);
+}
+
+.welcomeAuthWalletToggleCore {
+    position: absolute;
+    inset: 12px;
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    border-radius: 20px;
+    background:
+        radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0) 46%),
+        linear-gradient(180deg, rgba(17, 34, 39, 0.94), rgba(8, 17, 20, 0.96));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -16px 24px rgba(0, 0, 0, 0.18);
+}
+
+.welcomeAuthWalletToggleCore svg {
+    width: 26px;
+    height: 26px;
+    display: block;
+}
+
 .welcomeAuthAvatarFrame {
     appearance: none;
     width: 118px;
@@ -6504,6 +6903,346 @@ body.race-intro-active #botPanel {
     text-overflow: ellipsis;
 }
 
+.welcomeAuthWalletBoard {
+    margin-top: 12px;
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border: 1px solid rgba(141, 210, 171, 0.2);
+    border-radius: 22px;
+    background:
+        linear-gradient(180deg, rgba(7, 18, 24, 0.88), rgba(5, 11, 17, 0.94)),
+        radial-gradient(circle at 18% 16%, rgba(126, 235, 188, 0.1), rgba(126, 235, 188, 0) 44%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 20px 28px rgba(0, 0, 0, 0.14);
+}
+
+.welcomeAuthSignedInShell > .welcomeAuthWalletBoard {
+    position: relative;
+    isolation: isolate;
+    margin-top: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-color: rgba(141, 210, 171, 0);
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateY(-18px) scale(0.985);
+    box-shadow: none;
+    transition:
+        max-height 420ms cubic-bezier(0.22, 1, 0.36, 1),
+        margin-top 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        padding 360ms cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 240ms ease,
+        transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 240ms ease,
+        box-shadow 260ms ease;
+}
+
+.welcomeAuthSignedInShell > .welcomeAuthWalletBoard::before {
+    content: '';
+    position: absolute;
+    inset: -18% 18% auto -12%;
+    height: 180px;
+    z-index: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle, rgba(122, 239, 183, 0.12), rgba(122, 239, 183, 0) 62%),
+        radial-gradient(circle at 72% 34%, rgba(255, 224, 127, 0.1), rgba(255, 224, 127, 0) 42%);
+    filter: blur(10px);
+    opacity: 0;
+    transition: opacity 320ms ease;
+}
+
+.welcomeAuthSignedInShell[data-wallet-open='true'] > .welcomeAuthWalletBoard {
+    margin-top: 8px;
+    max-height: 540px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    border-color: rgba(141, 210, 171, 0.2);
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 26px 40px rgba(0, 0, 0, 0.16);
+}
+
+.welcomeAuthSignedInShell[data-wallet-open='true'] > .welcomeAuthWalletBoard::before {
+    opacity: 1;
+}
+
+.welcomeGuestWalletBoard {
+    margin-top: 4px;
+    padding: 13px 14px;
+    border-radius: 18px;
+}
+
+.welcomeGuestWalletBoard .welcomeAuthWalletBalance {
+    font-size: clamp(22px, 2vw, 28px);
+}
+
+.welcomeGuestWalletBoard .welcomeAuthWalletSubline {
+    max-width: 34ch;
+}
+
+.welcomeAuthWalletHero {
+    display: flex;
+    align-items: start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.welcomeAuthWalletHeroCopy {
+    min-width: 0;
+    display: grid;
+    gap: 4px;
+}
+
+.welcomeAuthWalletEyebrow {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.3px;
+    text-transform: uppercase;
+    color: rgba(167, 220, 193, 0.78);
+}
+
+.welcomeAuthWalletBalance {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(26px, 2.2vw, 34px);
+    font-weight: 800;
+    line-height: 0.96;
+    letter-spacing: -0.04em;
+    color: rgba(242, 251, 247, 0.98);
+}
+
+.welcomeAuthWalletSubline {
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(187, 220, 204, 0.82);
+}
+
+.welcomeAuthWalletSyncState {
+    flex: 0 0 auto;
+    padding: 7px 10px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(138, 188, 162, 0.22);
+    background: rgba(8, 16, 20, 0.62);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(194, 215, 204, 0.84);
+}
+
+.welcomeAuthWalletSyncState[data-tone='success'] {
+    border-color: rgba(117, 230, 179, 0.3);
+    color: rgba(214, 255, 232, 0.98);
+}
+
+.welcomeAuthWalletSyncState[data-tone='info'] {
+    border-color: rgba(120, 204, 255, 0.26);
+    color: rgba(215, 241, 255, 0.98);
+}
+
+.welcomeAuthWalletStats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.welcomeAuthWalletStat {
+    min-width: 0;
+    padding: 11px 12px 10px;
+    border: 1px solid rgba(130, 188, 160, 0.18);
+    border-radius: 16px;
+    display: grid;
+    gap: 5px;
+    background:
+        linear-gradient(180deg, rgba(11, 24, 29, 0.84), rgba(7, 15, 20, 0.9)),
+        radial-gradient(circle at 24% 20%, rgba(104, 210, 160, 0.08), rgba(104, 210, 160, 0) 44%);
+}
+
+.welcomeAuthWalletStatLabel {
+    font-family: 'Sora', sans-serif;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(161, 208, 185, 0.74);
+}
+
+.welcomeAuthWalletStatValue {
+    min-width: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(15px, 1.25vw, 18px);
+    font-weight: 800;
+    line-height: 1;
+    color: rgba(238, 248, 242, 0.98);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.welcomeAuthWalletProgress {
+    display: grid;
+    gap: 8px;
+}
+
+.welcomeAuthWalletProgressMeta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.welcomeAuthWalletProgressLabel,
+.welcomeAuthWalletProgressValue {
+    min-width: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.welcomeAuthWalletProgressLabel {
+    color: rgba(188, 219, 203, 0.8);
+}
+
+.welcomeAuthWalletProgressValue {
+    text-align: right;
+    color: rgba(234, 247, 238, 0.96);
+}
+
+.welcomeAuthWalletProgressValue[data-state='ready'] {
+    color: rgba(255, 236, 171, 0.98);
+}
+
+.welcomeAuthWalletProgressValue[data-state='complete'] {
+    color: rgba(171, 248, 210, 0.98);
+}
+
+.welcomeAuthWalletProgressTrack {
+    height: 11px;
+    overflow: hidden;
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03)),
+        rgba(255, 255, 255, 0.05);
+    box-shadow:
+        inset 0 1px 2px rgba(0, 0, 0, 0.42),
+        inset 0 0 0 1px rgba(191, 240, 214, 0.05);
+}
+
+.welcomeAuthWalletProgressFill {
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    transform-origin: left center;
+    transform: scaleX(0);
+    background: linear-gradient(90deg, rgba(121, 241, 179, 0.94), rgba(255, 224, 132, 0.96));
+    box-shadow: 0 0 22px rgba(120, 243, 180, 0.18);
+}
+
+.welcomeAuthWalletProgressFill[data-state='ready'] {
+    background: linear-gradient(90deg, rgba(255, 212, 120, 0.92), rgba(255, 240, 184, 0.98));
+}
+
+.welcomeAuthWalletProgressFill[data-state='complete'] {
+    background: linear-gradient(90deg, rgba(135, 245, 192, 0.96), rgba(210, 255, 232, 0.98));
+}
+
+.welcomeAuthWalletActivity {
+    display: grid;
+    gap: 8px;
+}
+
+.welcomeAuthWalletActivityHeader {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(163, 207, 186, 0.76);
+}
+
+.welcomeAuthWalletActivityList {
+    display: grid;
+    gap: 8px;
+}
+
+.welcomeAuthWalletActivityItem {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    padding: 10px 11px;
+    border: 1px solid rgba(127, 182, 156, 0.16);
+    border-radius: 16px;
+    background: rgba(7, 15, 18, 0.62);
+}
+
+.welcomeAuthWalletActivityItem.is-empty {
+    grid-template-columns: minmax(0, 1fr);
+    color: rgba(191, 216, 202, 0.72);
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.welcomeAuthWalletActivityDelta {
+    min-width: 84px;
+    padding: 6px 8px 5px;
+    border-radius: 12px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-align: center;
+    color: rgba(212, 255, 232, 0.96);
+    background: rgba(15, 57, 41, 0.64);
+}
+
+.welcomeAuthWalletActivityDelta[data-tone='spend'] {
+    color: rgba(255, 219, 205, 0.98);
+    background: rgba(76, 24, 16, 0.62);
+}
+
+.welcomeAuthWalletActivityCopy {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.welcomeAuthWalletActivityTitle {
+    min-width: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(236, 246, 241, 0.97);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.welcomeAuthWalletActivityMeta {
+    min-width: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(177, 206, 192, 0.76);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .welcomeAuthSignedInName::before {
     display: none;
 }
@@ -6535,7 +7274,7 @@ body.race-intro-active #botPanel {
 .welcomeAuthSignedInShell .welcomeAuthProfileRow {
     position: relative;
     z-index: 1;
-    grid-template-columns: 118px minmax(0, 1fr);
+    grid-template-columns: 118px minmax(0, 1fr) auto;
     gap: 18px;
     align-items: start;
     min-height: auto;
@@ -6585,10 +7324,13 @@ body.race-intro-active #botPanel {
     z-index: 3;
     width: auto;
     transform: none;
+    display: grid;
+    align-items: end;
+    padding: clamp(18px, 2.4vw, 30px);
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageMeta {
-    top: clamp(72px, 10vh, 104px);
+    top: auto;
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageVehicleName {
@@ -6596,19 +7338,18 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapCard {
-    position: absolute;
-    right: clamp(20px, 2.4vw, 34px);
-    bottom: clamp(20px, 2.8vw, 34px);
+    position: relative;
+    right: auto;
+    bottom: auto;
     z-index: 3;
     width: auto;
-    grid-template-columns: auto;
-    align-items: start;
+    align-items: end;
     justify-items: end;
-    gap: 0;
+    gap: 12px;
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions {
-    grid-template-columns: repeat(2, auto);
+    grid-template-columns: 1fr;
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageControlRow,
@@ -7035,23 +7776,78 @@ body.race-intro-active #botPanel {
     display: none;
 }
 
-.welcomeAuthGarageMeta {
+.welcomeAuthGarageHero {
+    min-height: 100%;
+    display: grid;
+    align-items: end;
+}
+
+.welcomeAuthGarageHero::after {
+    content: '';
     position: absolute;
-    top: clamp(14px, 2.4vh, 24px);
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(calc(100% - 128px), 460px);
+    inset: auto 0 0 0;
+    height: min(32vh, 280px);
+    pointer-events: none;
+    background:
+        linear-gradient(180deg, rgba(3, 9, 17, 0), rgba(3, 9, 17, 0.18) 28%, rgba(3, 9, 17, 0.62)),
+        radial-gradient(circle at 50% 100%, rgba(121, 190, 255, 0.12), rgba(121, 190, 255, 0) 52%);
+}
+
+.welcomeAuthGarageDock {
+    position: relative;
+    z-index: 1;
+    width: min(calc(100% - 32px), 880px);
+    margin-inline: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: clamp(12px, 1.8vw, 20px);
+    pointer-events: none;
+}
+
+.welcomeAuthGarageMeta {
+    position: relative;
+    top: auto;
+    left: auto;
+    transform: none;
+    width: 100%;
     min-width: 0;
     display: grid;
-    gap: 8px;
-    justify-items: center;
+    gap: 10px;
+    justify-items: stretch;
+    padding: clamp(16px, 1.8vw, 22px);
+    border: 1px solid rgba(142, 193, 227, 0.26);
+    border-radius: 28px;
+    overflow: hidden;
+    isolation: isolate;
+    background:
+        linear-gradient(180deg, rgba(8, 19, 31, 0.78), rgba(4, 10, 18, 0.9)),
+        radial-gradient(circle at 18% 16%, rgba(105, 191, 252, 0.12), rgba(105, 191, 252, 0) 42%),
+        radial-gradient(circle at 84% 20%, rgba(255, 190, 112, 0.12), rgba(255, 190, 112, 0) 24%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 24px 48px rgba(0, 0, 0, 0.24);
+    backdrop-filter: blur(22px) saturate(1.1);
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageMeta::before {
+    content: '';
+    position: absolute;
+    inset: 1px;
+    border-radius: 27px;
     pointer-events: none;
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 34%),
+        linear-gradient(90deg, rgba(127, 207, 255, 0.06), rgba(127, 207, 255, 0) 54%);
+    opacity: 0.9;
 }
 
 .welcomeAuthGarageMeta::after {
     content: '';
     width: min(100%, 118px);
     height: 1px;
+    justify-self: center;
     border-radius: 999px;
     background: linear-gradient(
         90deg,
@@ -7100,6 +7896,51 @@ body.race-intro-active #botPanel {
     display: flex;
     justify-content: center;
     gap: 8px;
+}
+
+.welcomeAuthGarageStatsRow {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageStat {
+    min-width: 0;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(143, 196, 228, 0.26);
+    background:
+        linear-gradient(180deg, rgba(13, 28, 43, 0.7), rgba(7, 16, 27, 0.82)),
+        radial-gradient(circle at 20% 12%, rgba(170, 220, 255, 0.08), rgba(170, 220, 255, 0) 54%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.welcomeAuthGarageStatLabel {
+    color: rgba(173, 212, 238, 0.74);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.welcomeAuthGarageStatValue {
+    margin-top: 4px;
+    color: rgba(242, 248, 255, 0.98);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(14px, 1.2vw, 17px);
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    line-height: 1.1;
+}
+
+.welcomeAuthGarageStatValue[data-state='locked'] {
+    color: rgba(255, 216, 160, 0.96);
 }
 
 .welcomeAuthGarageVehiclePip {
@@ -7173,10 +8014,96 @@ body.race-intro-active #botPanel {
     font-size: 19px;
 }
 
+.welcomeAuthGaragePurchaseBtn {
+    position: relative;
+    z-index: 1;
+    min-height: 44px;
+    padding: 0 16px;
+    border: 1px solid rgba(255, 214, 132, 0.46);
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    align-self: center;
+    justify-self: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255, 246, 219, 0.98);
+    background:
+        linear-gradient(180deg, rgba(105, 75, 28, 0.94), rgba(54, 33, 10, 0.98)),
+        radial-gradient(circle at 24% 18%, rgba(255, 237, 182, 0.18), rgba(255, 237, 182, 0) 54%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 14px 28px rgba(53, 35, 11, 0.26);
+    backdrop-filter: blur(14px) saturate(1.08);
+    cursor: pointer;
+    transition:
+        transform 160ms ease,
+        border-color 160ms ease,
+        box-shadow 160ms ease,
+        filter 160ms ease,
+        opacity 160ms ease;
+    pointer-events: auto;
+}
+
+.welcomeAuthGaragePurchaseBtn:hover,
+.welcomeAuthGaragePurchaseBtn:focus-visible {
+    transform: translateY(-1px) scale(1.01);
+    border-color: rgba(255, 231, 186, 0.76);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 18px 32px rgba(53, 35, 11, 0.28);
+    filter: brightness(1.06);
+}
+
+.welcomeAuthGaragePurchaseBtn:disabled {
+    opacity: 0.56;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthGaragePurchaseBtn[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthGarageHint {
+    position: relative;
+    z-index: 1;
+    max-width: min(100%, 420px);
+    justify-self: center;
+    color: rgba(183, 217, 240, 0.86);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    line-height: 1.5;
+    text-align: center;
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageHint[data-tone='success'] {
+    color: rgba(176, 244, 204, 0.96);
+}
+
+.welcomeAuthGarageHint[data-tone='error'] {
+    color: rgba(255, 193, 178, 0.96);
+}
+
+.welcomeAuthGarageHint[data-tone='info'] {
+    color: rgba(255, 223, 166, 0.96);
+}
+
 .welcomeAuthGarageControlBtn:hover,
 .welcomeAuthGarageControlBtn:focus-visible,
 .welcomeAuthGarageActionBtn:hover,
-.welcomeAuthGarageActionBtn:focus-visible {
+.welcomeAuthGarageActionBtn:focus-visible,
+.welcomeAuthGaragePurchaseBtn:hover,
+.welcomeAuthGaragePurchaseBtn:focus-visible {
     transform: translateY(-1px) scale(1.04);
     border-color: rgba(215, 235, 248, 0.74);
     box-shadow:
@@ -7186,7 +8113,8 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthGarageControlBtn:disabled,
-.welcomeAuthGarageActionBtn:disabled {
+.welcomeAuthGarageActionBtn:disabled,
+.welcomeAuthGaragePurchaseBtn:disabled {
     opacity: 0.52;
     cursor: not-allowed;
     transform: none;
@@ -7217,7 +8145,8 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthGarageWrapCard {
-    align-items: start;
+    align-items: end;
+    justify-items: end;
     pointer-events: none;
 }
 
@@ -7235,10 +8164,20 @@ body.race-intro-active #botPanel {
 
 .welcomeAuthGarageWrapActions {
     display: grid;
-    grid-auto-flow: column;
-    grid-template-columns: repeat(2, auto);
-    gap: 8px;
-    align-self: start;
+    grid-auto-flow: row;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    align-self: end;
+    padding: 10px;
+    border: 1px solid rgba(146, 198, 231, 0.24);
+    border-radius: 22px;
+    background:
+        linear-gradient(180deg, rgba(8, 19, 30, 0.78), rgba(4, 10, 18, 0.9)),
+        radial-gradient(circle at 50% 0%, rgba(128, 208, 255, 0.08), rgba(128, 208, 255, 0) 46%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.07),
+        0 18px 34px rgba(0, 0, 0, 0.22);
+    backdrop-filter: blur(18px) saturate(1.08);
     pointer-events: auto;
 }
 
@@ -7254,6 +8193,10 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthGarageActionBtn[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthGarageWrapCard[hidden] {
     display: none !important;
 }
 
@@ -7792,7 +8735,7 @@ body.race-intro-active #botPanel {
     }
 
     .welcomeAuthSignedInShell .welcomeAuthProfileRow {
-        grid-template-columns: 1fr;
+        grid-template-columns: 96px minmax(0, 1fr) auto;
         min-height: auto;
         padding: 6px 0 14px;
         gap: 14px;
@@ -7816,6 +8759,41 @@ body.race-intro-active #botPanel {
 
     .welcomeAuthProfileStats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .welcomeAuthWalletToggleBtn {
+        width: 68px;
+        height: 68px;
+        border-radius: 22px;
+    }
+
+    .welcomeAuthWalletToggleCore {
+        inset: 10px;
+        border-radius: 16px;
+    }
+
+    .welcomeAuthWalletToggleCore svg {
+        width: 22px;
+        height: 22px;
+    }
+
+    .welcomeAuthWalletHero,
+    .welcomeAuthWalletProgressMeta {
+        grid-template-columns: 1fr;
+        display: grid;
+    }
+
+    .welcomeAuthWalletStats {
+        grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthWalletActivityItem {
+        grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthWalletActivityDelta {
+        min-width: 0;
+        justify-self: start;
     }
 
     .welcomeAuthInlineActions {
@@ -7847,18 +8825,38 @@ body.race-intro-active #botPanel {
         grid-auto-flow: column;
         grid-template-columns: repeat(2, auto);
         width: auto;
+        justify-content: center;
     }
 
     .welcomeAuthGarageControlRow {
         gap: 8px;
     }
 
+    .welcomeAuthGarageDock {
+        width: min(calc(100% - 12px), 100%);
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+
     .welcomeAuthGarageMeta {
-        width: min(calc(100% - 72px), 420px);
+        width: 100%;
+        padding: 14px 14px 16px;
+        border-radius: 24px;
+    }
+
+    .welcomeAuthGarageStatsRow {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .welcomeAuthGaragePurchaseBtn {
+        width: 100%;
     }
 
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions {
         grid-column: auto;
+        grid-auto-flow: column;
+        grid-template-columns: repeat(2, auto);
     }
 
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthSectionStage {
@@ -7872,13 +8870,16 @@ body.race-intro-active #botPanel {
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageHero {
         inset: 0;
         width: auto;
+        padding: 10px;
     }
 
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapCard {
         left: auto;
-        right: 12px;
-        bottom: 12px;
-        width: auto;
+        right: auto;
+        bottom: auto;
+        width: 100%;
+        justify-self: center;
+        justify-items: center;
     }
 
     .welcomeAuthGarageVehicleName {

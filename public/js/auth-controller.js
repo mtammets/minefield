@@ -1,10 +1,19 @@
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from './supabase-browser.js';
+import {
+    createDefaultPlayerEconomyState,
+    mergePlayerEconomyStates,
+    normalizePlayerEconomyState,
+    resolvePlayerEconomyStateFromSource,
+} from './player-economy.js';
 
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const DEFAULT_DRIVER_NAME = 'Driver';
 const PLAYER_NAME_MAX_LENGTH = 18;
 const AUTH_PASSWORD_MIN_LENGTH = 6;
 const AUTH_DELETE_ACCOUNT_ENDPOINT_PATH = '/api/auth/account';
+const PLAYER_ECONOMY_PROFILE_ENDPOINT_PATH = '/api/player-economy/profile';
+const PLAYER_ECONOMY_SYNC_ENDPOINT_PATH = '/api/player-economy/sync';
+const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT = 6;
 const USER_MEDIA_MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const PROFILE_IMAGE_OUTPUT_SIZE_PX = 512;
 const CAR_WRAP_OUTPUT_WIDTH_PX = 2048;
@@ -289,6 +298,49 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 };
             } catch (error) {
                 return updateRequestFailure(error);
+            }
+        },
+        async syncPlayerEconomy(nextEconomyState = null, options = {}) {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                return {
+                    ok: false,
+                    error: resolveAuthUnavailableMessage(),
+                };
+            }
+
+            if (!state.authenticated || !currentSession?.access_token) {
+                return {
+                    ok: false,
+                    error: 'Sign in before syncing wallet progress.',
+                };
+            }
+
+            const normalizedEconomyState = normalizePlayerEconomyState(nextEconomyState);
+            try {
+                const payload = await postPlayerEconomyProfile(
+                    currentSession.access_token,
+                    normalizedEconomyState,
+                    options?.transaction || null
+                );
+                applyPlayerEconomyProfileState(payload?.profile, {
+                    source: 'server',
+                });
+                return {
+                    ok: true,
+                    economy: normalizePlayerEconomyState(
+                        payload?.profile || normalizedEconomyState
+                    ),
+                    profile: normalizePlayerEconomyProfileState(payload?.profile, {
+                        fallbackEconomy: normalizedEconomyState,
+                        source: 'server',
+                    }),
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    error: normalizeSupabaseEconomyError(error),
+                };
             }
         },
         async deleteAccount() {
@@ -768,10 +820,21 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 loading: false,
                 pendingAction: '',
                 authenticated: false,
+                userId: '',
+                email: '',
+                displayName: '',
                 avatarUrl: '',
                 avatarStoragePath: '',
                 carWrapUrl: '',
                 carWrapStoragePath: '',
+                credits: 0,
+                unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+                economySyncSource: 'local',
+                economyLastSyncedAt: '',
+                economyLifetimeEarned: 0,
+                economyLifetimeSpent: 0,
+                economyTransactionCount: 0,
+                economyRecentTransactions: [],
                 statusText: resolveAuthUnavailableMessage(),
                 statusTone: resolveAuthUnavailableTone(),
             });
@@ -798,6 +861,22 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     carWrapEnabled: false,
                     ready: true,
                     loading: false,
+                    authenticated: false,
+                    userId: '',
+                    email: '',
+                    displayName: '',
+                    avatarUrl: '',
+                    avatarStoragePath: '',
+                    carWrapUrl: '',
+                    carWrapStoragePath: '',
+                    credits: 0,
+                    unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+                    economySyncSource: 'local',
+                    economyLastSyncedAt: '',
+                    economyLifetimeEarned: 0,
+                    economyLifetimeSpent: 0,
+                    economyTransactionCount: 0,
+                    economyRecentTransactions: [],
                     statusText: 'Supabase auth client failed to load.',
                     statusTone: 'error',
                 });
@@ -838,10 +917,21 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 loading: false,
                 pendingAction: '',
                 authenticated: false,
+                userId: '',
+                email: '',
+                displayName: '',
                 avatarUrl: '',
                 avatarStoragePath: '',
                 carWrapUrl: '',
                 carWrapStoragePath: '',
+                credits: 0,
+                unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+                economySyncSource: 'local',
+                economyLastSyncedAt: '',
+                economyLifetimeEarned: 0,
+                economyLifetimeSpent: 0,
+                economyTransactionCount: 0,
+                economyRecentTransactions: [],
                 statusText: normalizeSupabaseAuthError(error),
                 statusTone: 'error',
             });
@@ -883,14 +973,121 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         });
     }
 
+    async function refreshPlayerEconomyProfile({ legacyFallback = null } = {}) {
+        if (!state.authenticated || !currentSession?.access_token || !state.userId) {
+            return {
+                ok: false,
+                error: 'Sign in before loading wallet progress.',
+            };
+        }
+
+        const requestUserId = state.userId;
+        try {
+            const payload = await requestPlayerEconomyProfile(currentSession.access_token);
+            const normalizedProfile = normalizePlayerEconomyProfileState(payload?.profile, {
+                fallbackEconomy: legacyFallback,
+                source: 'server',
+            });
+            if (!normalizedProfile.exists && shouldMigrateLegacyEconomyState(legacyFallback)) {
+                const migrationPayload = await postPlayerEconomyProfile(
+                    currentSession.access_token,
+                    legacyFallback,
+                    null
+                );
+                if (state.userId !== requestUserId) {
+                    return {
+                        ok: false,
+                        ignored: true,
+                    };
+                }
+                applyPlayerEconomyProfileState(migrationPayload?.profile, {
+                    source: 'server',
+                });
+                return {
+                    ok: true,
+                    migrated: true,
+                    economy: normalizePlayerEconomyState(
+                        migrationPayload?.profile || legacyFallback
+                    ),
+                    profile: normalizePlayerEconomyProfileState(migrationPayload?.profile, {
+                        fallbackEconomy: legacyFallback,
+                        source: 'server',
+                    }),
+                };
+            }
+            if (state.userId !== requestUserId) {
+                return {
+                    ok: false,
+                    ignored: true,
+                };
+            }
+            applyPlayerEconomyProfileState(normalizedProfile, {
+                source: 'server',
+            });
+            return {
+                ok: true,
+                economy: normalizePlayerEconomyState(normalizedProfile),
+                profile: normalizedProfile,
+            };
+        } catch (error) {
+            if (state.userId === requestUserId) {
+                updateState({
+                    economySyncSource: 'local',
+                });
+            }
+            return {
+                ok: false,
+                error: normalizeSupabaseEconomyError(error),
+            };
+        }
+    }
+
+    function applyPlayerEconomyProfileState(profile = null, options = {}) {
+        const normalizedProfile = normalizePlayerEconomyProfileState(profile, {
+            fallbackEconomy: {
+                credits: state.credits,
+                unlockedVehicleIds: state.unlockedVehicleIds,
+            },
+            source: options?.source,
+        });
+        if (normalizedProfile.userId && state.userId && normalizedProfile.userId !== state.userId) {
+            return false;
+        }
+        updateState({
+            credits: normalizedProfile.credits,
+            unlockedVehicleIds: [...normalizedProfile.unlockedVehicleIds],
+            economySyncSource: normalizedProfile.syncSource,
+            economyLastSyncedAt: normalizedProfile.lastSyncedAt,
+            economyLifetimeEarned: normalizedProfile.lifetimeEarned,
+            economyLifetimeSpent: normalizedProfile.lifetimeSpent,
+            economyTransactionCount: normalizedProfile.transactionCount,
+            economyRecentTransactions: normalizedProfile.recentTransactions.map((entry) => ({
+                ...entry,
+            })),
+        });
+        return true;
+    }
+
     function applySession(session, options = {}) {
         currentSession = session && typeof session === 'object' ? session : null;
         const user = currentSession?.user || null;
         const authenticated = Boolean(currentSession?.access_token && user?.id);
+        const resolvedUserId = authenticated ? sanitizeUserId(user?.id) : '';
         const email = sanitizeEmail(user?.email || '');
         const displayName = resolveDisplayName(user, email);
         const avatarStoragePath = authenticated ? resolveProfileImagePath(user) : '';
         const carWrapStoragePath = authenticated ? resolveCarWrapPath(user) : '';
+        const playerEconomyState = authenticated
+            ? mergePlayerEconomyStates(
+                  state.userId && state.userId === resolvedUserId
+                      ? {
+                            credits: state.credits,
+                            unlockedVehicleIds: state.unlockedVehicleIds,
+                        }
+                      : null,
+                  resolvePlayerEconomyStateFromSource(user)
+              )
+            : createDefaultPlayerEconomyState();
         const avatarUrl = authenticated
             ? resolveStorageObjectPublicUrl(
                   browserConfig.url,
@@ -911,6 +1108,10 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         }
 
         const shouldPreserveStatus = Boolean(options?.preserveStatus);
+        const preserveServerEconomyProfile =
+            authenticated &&
+            state.userId === resolvedUserId &&
+            state.economySyncSource === 'server';
         updateState({
             enabled: true,
             profileImageEnabled: Boolean(
@@ -921,13 +1122,29 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             loading: false,
             pendingAction: '',
             authenticated,
-            userId: authenticated ? sanitizeUserId(user?.id) : '',
+            userId: resolvedUserId,
             email: authenticated ? email : '',
             displayName: authenticated ? displayName : '',
             avatarUrl,
             avatarStoragePath,
             carWrapUrl,
             carWrapStoragePath,
+            credits: playerEconomyState.credits,
+            unlockedVehicleIds: [...playerEconomyState.unlockedVehicleIds],
+            economySyncSource: preserveServerEconomyProfile
+                ? 'server'
+                : authenticated
+                  ? 'pending'
+                  : 'local',
+            economyLastSyncedAt: preserveServerEconomyProfile ? state.economyLastSyncedAt : '',
+            economyLifetimeEarned: preserveServerEconomyProfile ? state.economyLifetimeEarned : 0,
+            economyLifetimeSpent: preserveServerEconomyProfile ? state.economyLifetimeSpent : 0,
+            economyTransactionCount: preserveServerEconomyProfile
+                ? state.economyTransactionCount
+                : 0,
+            economyRecentTransactions: preserveServerEconomyProfile
+                ? state.economyRecentTransactions.map((entry) => ({ ...entry }))
+                : [],
             chaseCameraSettings,
             requiresEmailConfirmation: false,
             statusText:
@@ -947,6 +1164,11 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                         ? 'success'
                         : 'muted',
         });
+        if (authenticated) {
+            void refreshPlayerEconomyProfile({
+                legacyFallback: playerEconomyState,
+            }).catch(() => {});
+        }
     }
 
     function applySignedOutState(statusText) {
@@ -966,6 +1188,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             avatarStoragePath: '',
             carWrapUrl: '',
             carWrapStoragePath: '',
+            credits: 0,
+            unlockedVehicleIds: createDefaultPlayerEconomyState().unlockedVehicleIds,
+            economySyncSource: 'local',
+            economyLastSyncedAt: '',
+            economyLifetimeEarned: 0,
+            economyLifetimeSpent: 0,
+            economyTransactionCount: 0,
+            economyRecentTransactions: [],
             chaseCameraSettings: null,
             requiresEmailConfirmation: false,
             statusText,
@@ -1080,6 +1310,14 @@ function createInitialAuthState() {
         avatarStoragePath: '',
         carWrapUrl: '',
         carWrapStoragePath: '',
+        credits: 0,
+        unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+        economySyncSource: 'local',
+        economyLastSyncedAt: '',
+        economyLifetimeEarned: 0,
+        economyLifetimeSpent: 0,
+        economyTransactionCount: 0,
+        economyRecentTransactions: [],
         chaseCameraSettings: null,
         requiresEmailConfirmation: false,
         statusText: 'Create an account or sign in to unlock online rooms and score sync.',
@@ -1480,10 +1718,261 @@ function normalizeSupabaseAuthError(error) {
     return message;
 }
 
+function normalizeSupabaseEconomyError(error) {
+    const message =
+        typeof error?.message === 'string' && error.message.trim()
+            ? error.message.trim()
+            : 'Wallet sync failed. Try again.';
+    if (/wallet sync is not configured|wallet progress|wallet sync failed/iu.test(message)) {
+        return message;
+    }
+    if (/failed to fetch|networkerror|load failed/iu.test(message)) {
+        return 'Wallet sync failed because the server could not be reached.';
+    }
+    return normalizeSupabaseAuthError(error);
+}
+
 async function readJsonResponse(response) {
     try {
         return await response.json();
     } catch {
         return null;
     }
+}
+
+async function requestPlayerEconomyProfile(accessToken = '') {
+    const response = await window.fetch(PLAYER_ECONOMY_PROFILE_ENDPOINT_PATH, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: accessToken
+            ? {
+                  Authorization: `Bearer ${accessToken}`,
+              }
+            : {},
+    });
+    const payload = await readJsonResponse(response);
+    if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Could not load wallet progress.');
+    }
+    return payload;
+}
+
+async function postPlayerEconomyProfile(
+    accessToken = '',
+    nextEconomyState = null,
+    transaction = null
+) {
+    const normalizedEconomyState = normalizePlayerEconomyState(nextEconomyState);
+    const response = await window.fetch(PLAYER_ECONOMY_SYNC_ENDPOINT_PATH, {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            credits: normalizedEconomyState.credits,
+            unlockedVehicleIds: normalizedEconomyState.unlockedVehicleIds,
+            recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT,
+            transaction: normalizePlayerEconomySyncTransaction(transaction),
+        }),
+    });
+    const payload = await readJsonResponse(response);
+    if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Wallet sync failed.');
+    }
+    return payload;
+}
+
+function normalizePlayerEconomyProfileState(profile = null, options = {}) {
+    const source = profile && typeof profile === 'object' ? profile : {};
+    const fallbackEconomy = normalizePlayerEconomyState(options?.fallbackEconomy);
+    const economy = normalizePlayerEconomyState({
+        credits: source.credits,
+        unlockedVehicleIds: source.unlockedVehicleIds,
+    });
+    const recentTransactions = Array.isArray(source.recentTransactions)
+        ? source.recentTransactions
+              .map((entry) => normalizePlayerEconomyRecentTransaction(entry))
+              .filter(Boolean)
+        : [];
+    return {
+        userId: sanitizeUserId(source.userId || source.user_id),
+        exists: Boolean(source.exists),
+        credits: Number.isFinite(Number(source.credits))
+            ? economy.credits
+            : fallbackEconomy.credits,
+        unlockedVehicleIds:
+            Array.isArray(source.unlockedVehicleIds) && source.unlockedVehicleIds.length > 0
+                ? [...economy.unlockedVehicleIds]
+                : [...fallbackEconomy.unlockedVehicleIds],
+        syncSource:
+            typeof options?.source === 'string' && options.source.trim()
+                ? options.source.trim().toLowerCase()
+                : 'local',
+        lastSyncedAt: sanitizeIsoDateString(source.lastSyncedAt || source.last_synced_at),
+        lifetimeEarned: clampEconomyInteger(source.lifetimeEarned || source.lifetime_earned),
+        lifetimeSpent: clampEconomyInteger(source.lifetimeSpent || source.lifetime_spent),
+        transactionCount: clampEconomyInteger(source.transactionCount || source.transaction_count),
+        recentTransactions,
+    };
+}
+
+function normalizePlayerEconomyRecentTransaction(value = null) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    const kind = sanitizeEconomyTransactionKind(value.kind);
+    const summary = sanitizeEconomyTransactionSummary(value.summary);
+    const creditsDelta = clampSignedEconomyInteger(value.creditsDelta || value.credits_delta);
+    const balanceAfter = clampEconomyInteger(value.balanceAfter || value.balance_after);
+    if (!kind && !summary && creditsDelta === 0 && balanceAfter <= 0) {
+        return null;
+    }
+    return {
+        id: sanitizeUserId(value.id),
+        kind: kind || (creditsDelta < 0 ? 'spend' : 'earn'),
+        summary:
+            summary ||
+            (creditsDelta < 0
+                ? `Spent ${Math.abs(creditsDelta)} CR`
+                : `Earned ${Math.abs(creditsDelta)} CR`),
+        creditsDelta,
+        balanceAfter,
+        createdAt: sanitizeIsoDateString(value.createdAt || value.created_at),
+    };
+}
+
+function normalizePlayerEconomySyncTransaction(value = null) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    const kind = sanitizeEconomyTransactionKind(value.kind);
+    const summary = sanitizeEconomyTransactionSummary(
+        value.summary || value.label || value.description
+    );
+    const creditsDelta = clampSignedEconomyInteger(value.creditsDelta);
+    const metadata = normalizePlayerEconomyTransactionMetadata(value.metadata);
+    if (!kind && !summary && creditsDelta === 0 && Object.keys(metadata).length === 0) {
+        return null;
+    }
+    return {
+        kind: kind || (creditsDelta < 0 ? 'spend' : 'earn'),
+        summary,
+        creditsDelta,
+        metadata,
+    };
+}
+
+function normalizePlayerEconomyTransactionMetadata(value = null) {
+    const source = value && typeof value === 'object' ? value : {};
+    const metadata = {};
+    if (typeof source.vehicleId === 'string') {
+        const vehicleId = sanitizeEconomyVehicleId(source.vehicleId);
+        if (vehicleId) {
+            metadata.vehicleId = vehicleId;
+        }
+    }
+    if (typeof source.vehicleName === 'string') {
+        const vehicleName = sanitizeEconomyTransactionSummary(source.vehicleName, 72);
+        if (vehicleName) {
+            metadata.vehicleName = vehicleName;
+        }
+    }
+    if (typeof source.gameMode === 'string') {
+        const gameMode = sanitizeEconomyTransactionKind(source.gameMode);
+        if (gameMode) {
+            metadata.gameMode = gameMode;
+        }
+    }
+    if (typeof source.finishReason === 'string') {
+        const finishReason = sanitizeEconomyTransactionKind(source.finishReason);
+        if (finishReason) {
+            metadata.finishReason = finishReason;
+        }
+    }
+    if (Array.isArray(source.breakdown)) {
+        const breakdown = source.breakdown
+            .map((entry) => {
+                const label = sanitizeEconomyTransactionSummary(entry?.label, 48);
+                const credits = clampEconomyInteger(entry?.credits);
+                if (!label && credits <= 0) {
+                    return null;
+                }
+                return {
+                    id: sanitizeEconomyTransactionKind(entry?.id),
+                    label: label || 'Reward',
+                    credits,
+                };
+            })
+            .filter(Boolean);
+        if (breakdown.length > 0) {
+            metadata.breakdown = breakdown;
+        }
+    }
+    return metadata;
+}
+
+function shouldMigrateLegacyEconomyState(value = null) {
+    const legacyState = normalizePlayerEconomyState(value);
+    const defaultState = createDefaultPlayerEconomyState();
+    if (legacyState.credits > 0) {
+        return true;
+    }
+    return legacyState.unlockedVehicleIds.length > defaultState.unlockedVehicleIds.length;
+}
+
+function sanitizeEconomyVehicleId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, 32);
+}
+
+function sanitizeEconomyTransactionKind(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, 32);
+}
+
+function sanitizeEconomyTransactionSummary(value, maxLength = 160) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+}
+
+function sanitizeIsoDateString(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return normalized && !Number.isNaN(Date.parse(normalized)) ? normalized : '';
+}
+
+function clampEconomyInteger(value, maxValue = Number.MAX_SAFE_INTEGER) {
+    const numeric = Math.round(Number(value) || 0);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+    return Math.max(0, Math.min(maxValue, numeric));
+}
+
+function clampSignedEconomyInteger(value, maxValue = Number.MAX_SAFE_INTEGER) {
+    const numeric = Math.round(Number(value) || 0);
+    if (!Number.isFinite(numeric)) {
+        return 0;
+    }
+    return Math.max(-maxValue, Math.min(maxValue, numeric));
 }
