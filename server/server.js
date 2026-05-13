@@ -59,7 +59,9 @@ const MAX_PLAYERS_PER_ROOM = 8;
 const MAX_ACTIVE_ROOMS = 500;
 const PLAYER_NAME_MAX_LENGTH = 18;
 const PLAYER_SKIN_ID_MAX_LENGTH = 32;
+const PLAYER_VEHICLE_ID_MAX_LENGTH = 32;
 const DEFAULT_PLAYER_SKIN_ID = 'midnight-comet';
+const DEFAULT_PLAYER_VEHICLE_ID = 'voltline-sled';
 const STATE_UPDATE_MIN_INTERVAL_MS = 35;
 const COLLISION_RELAY_MIN_INTERVAL_MS = 60;
 const MAX_DETACHED_PART_IDS = 32;
@@ -914,6 +916,7 @@ io.on('connection', (socket) => {
 
         player.name = profile.name;
         player.colorHex = profile.colorHex;
+        player.vehicleId = profile.vehicleId;
         player.skinId = profile.skinId;
         player.carWrapPath = profile.carWrapPath;
         player.carWrapUrl = profile.carWrapUrl;
@@ -2221,6 +2224,7 @@ function createRoomPlayer(id, profile, authIdentity = null) {
         userId: safeUserId,
         name: profile.name,
         colorHex: profile.colorHex,
+        vehicleId: profile.vehicleId,
         skinId: profile.skinId,
         carWrapPath,
         carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
@@ -2471,6 +2475,7 @@ function serializeRoom(room) {
                 id: player.id,
                 name: player.name,
                 colorHex: player.colorHex,
+                vehicleId: player.vehicleId,
                 skinId: player.skinId,
                 carWrapUrl: resolvePlayerCarWrapPublicUrl(player.carWrapPath || ''),
                 collectedCount,
@@ -2587,6 +2592,7 @@ function createDefaultProfile(socketId) {
     return {
         name: `Player-${shortId}`,
         colorHex: 0x2d67a6,
+        vehicleId: DEFAULT_PLAYER_VEHICLE_ID,
         skinId: DEFAULT_PLAYER_SKIN_ID,
         carWrapPath: '',
         carWrapUrl: '',
@@ -2688,11 +2694,11 @@ async function resolveSupabaseStorageAvailability() {
             const availability = {
                 profileImagesBucketAvailable: Boolean(
                     !SUPABASE_PUBLIC_CONFIG.profileImagesBucket ||
-                        bucketNames.has(SUPABASE_PUBLIC_CONFIG.profileImagesBucket)
+                    bucketNames.has(SUPABASE_PUBLIC_CONFIG.profileImagesBucket)
                 ),
                 carWrapsBucketAvailable: Boolean(
                     !SUPABASE_PUBLIC_CONFIG.carWrapsBucket ||
-                        bucketNames.has(SUPABASE_PUBLIC_CONFIG.carWrapsBucket)
+                    bucketNames.has(SUPABASE_PUBLIC_CONFIG.carWrapsBucket)
                 ),
             };
 
@@ -2871,6 +2877,7 @@ function resolveProfile(input, fallback, socketId, authIdentity = null) {
     return {
         name: sanitizePlayerName(input?.name, defaultProfile.name),
         colorHex: sanitizeColorHex(input?.colorHex, defaultProfile.colorHex),
+        vehicleId: sanitizePlayerVehicleId(input?.vehicleId, defaultProfile.vehicleId),
         skinId: sanitizePlayerSkinId(input?.skinId, defaultProfile.skinId),
         carWrapPath,
         carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
@@ -2911,6 +2918,19 @@ function sanitizePlayerSkinId(value, fallbackSkinId) {
         .replace(/[^a-z0-9-]/g, '')
         .slice(0, PLAYER_SKIN_ID_MAX_LENGTH);
     return normalized || fallbackSkinId;
+}
+
+function sanitizePlayerVehicleId(value, fallbackVehicleId) {
+    if (typeof value !== 'string') {
+        return fallbackVehicleId;
+    }
+
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, PLAYER_VEHICLE_ID_MAX_LENGTH);
+    return normalized || fallbackVehicleId;
 }
 
 function sanitizeRoomCode(value) {

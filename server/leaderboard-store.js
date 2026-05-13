@@ -15,10 +15,12 @@ const LEADERBOARD_PUBLIC_SELECT_COLUMNS = [
     'game_mode',
     'finish_reason',
     'winner_label',
+    'vehicle_id',
     'car_skin_id',
     'created_at',
 ].join(',');
 const PLAYER_NAME_MAX_LENGTH = 18;
+const VEHICLE_ID_MAX_LENGTH = 32;
 const CAR_SKIN_ID_MAX_LENGTH = 48;
 const WINNER_LABEL_MAX_LENGTH = 72;
 const AVATAR_PATH_MAX_LENGTH = 512;
@@ -83,11 +85,14 @@ function createLeaderboardStore(config = {}) {
                     ...entry,
                     rank: index + 1,
                     segment: 'top',
-                    isViewer: Boolean(viewerUserId && entry.userId && entry.userId === viewerUserId),
+                    isViewer: Boolean(
+                        viewerUserId && entry.userId && entry.userId === viewerUserId
+                    ),
                 })),
                 totalEntries: entries.length,
                 viewerRank: 0,
                 viewerHasEntry: false,
+                viewerStats: createEmptyViewerStats(),
                 topLimit,
                 viewerWindowRadius,
             };
@@ -158,11 +163,9 @@ function createNoopLeaderboardStore() {
                 totalEntries: 0,
                 viewerRank: 0,
                 viewerHasEntry: false,
+                viewerStats: createEmptyViewerStats(),
                 topLimit: sanitizeLeaderboardLimit(options?.topLimit, 5),
-                viewerWindowRadius: sanitizeLeaderboardWindowRadius(
-                    options?.viewerWindowRadius,
-                    2
-                ),
+                viewerWindowRadius: sanitizeLeaderboardWindowRadius(options?.viewerWindowRadius, 2),
             };
         },
         async submitRoundResult() {
@@ -206,6 +209,8 @@ async function ensureLeaderboardSchema({ connectionString } = {}) {
                 game_mode text not null check (game_mode in ('bots', 'online')),
                 finish_reason text not null default '',
                 winner_label text not null default '',
+                did_win boolean not null default false,
+                vehicle_id text not null default '',
                 car_skin_id text not null default '',
                 created_at timestamptz not null default now()
             );
@@ -215,6 +220,12 @@ async function ensureLeaderboardSchema({ connectionString } = {}) {
 
             alter table public.${GLOBAL_LEADERBOARD_TABLE_NAME}
                 add column if not exists avatar_path text not null default '';
+
+            alter table public.${GLOBAL_LEADERBOARD_TABLE_NAME}
+                add column if not exists did_win boolean not null default false;
+
+            alter table public.${GLOBAL_LEADERBOARD_TABLE_NAME}
+                add column if not exists vehicle_id text not null default '';
 
             create index if not exists global_leaderboard_score_created_idx
                 on public.${GLOBAL_LEADERBOARD_TABLE_NAME} (score desc, collected_count desc, created_at asc);
@@ -266,6 +277,8 @@ function buildLeaderboardRecord(rawPayload = {}) {
         game_mode: payload.gameMode,
         finish_reason: payload.finishReason,
         winner_label: payload.winnerLabel,
+        did_win: payload.didWin,
+        vehicle_id: payload.vehicleId,
         car_skin_id: payload.carSkinId,
     };
 }
@@ -281,6 +294,8 @@ function sanitizeRoundResultPayload(rawPayload = {}) {
     const gameMode = sanitizeLeaderboardGameMode(payload.gameMode);
     const finishReason = sanitizeLeaderboardFinishReason(payload.finishReason);
     const winnerLabel = sanitizeLeaderboardWinnerLabel(payload.winnerLabel);
+    const didWin = Boolean(payload.didWin || payload.did_win);
+    const vehicleId = sanitizeLeaderboardVehicleId(payload.vehicleId);
     const carSkinId = sanitizeLeaderboardCarSkinId(payload.carSkinId);
     const avatarPath = sanitizeLeaderboardAvatarPath(payload.avatarPath || payload.avatar_path);
 
@@ -299,6 +314,8 @@ function sanitizeRoundResultPayload(rawPayload = {}) {
         gameMode,
         finishReason,
         winnerLabel,
+        didWin,
+        vehicleId,
         carSkinId,
     };
 }
@@ -319,8 +336,20 @@ function normalizeLeaderboardEntry(entry = {}) {
             'pickups-exhausted',
         winnerLabel:
             sanitizeLeaderboardWinnerLabel(entry?.winner_label || entry?.winnerLabel) || 'Driver',
+        vehicleId: sanitizeLeaderboardVehicleId(entry?.vehicle_id || entry?.vehicleId),
         carSkinId: sanitizeLeaderboardCarSkinId(entry?.car_skin_id || entry?.carSkinId),
         createdAt: sanitizeIsoTimestamp(entry?.created_at || entry?.createdAt),
+    };
+}
+
+function createEmptyViewerStats() {
+    return {
+        totalRounds: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        bestScore: 0,
+        averageScore: 0,
     };
 }
 
@@ -413,6 +442,7 @@ async function readLeaderboardViewFromDatabase({
                             game_mode,
                             finish_reason,
                             winner_label,
+                            vehicle_id,
                             car_skin_id,
                             created_at,
                             row_number() over (
@@ -437,6 +467,7 @@ async function readLeaderboardViewFromDatabase({
                         game_mode,
                         finish_reason,
                         winner_label,
+                        vehicle_id,
                         car_skin_id,
                         created_at,
                         row_number() over (
@@ -481,6 +512,7 @@ async function readLeaderboardViewFromDatabase({
                     game_mode,
                     finish_reason,
                     winner_label,
+                    vehicle_id,
                     car_skin_id,
                     created_at,
                     leaderboard_rank,
@@ -507,18 +539,68 @@ async function readLeaderboardViewFromDatabase({
                 sanitizeLeaderboardUserId(row?.user_id || row?.userId) === viewerUserId,
         }));
         const firstRow = rows[0] || null;
+        const viewerStats = await readViewerStatsFromDatabase(client, viewerUserId);
 
         return {
             entries,
             totalEntries: clampInteger(firstRow?.total_entries, 0, 1_000_000, entries.length),
             viewerRank: clampInteger(firstRow?.viewer_rank, 0, 1_000_000, 0),
             viewerHasEntry: Boolean(firstRow?.viewer_has_entry),
+            viewerStats,
             topLimit,
             viewerWindowRadius,
         };
     } finally {
         await client.end();
     }
+}
+
+async function readViewerStatsFromDatabase(client, viewerUserId = '') {
+    const normalizedViewerUserId = sanitizeLeaderboardUserId(viewerUserId);
+    if (!normalizedViewerUserId) {
+        return createEmptyViewerStats();
+    }
+
+    const statsResult = await client.query(
+        `
+            select
+                count(*)::int as total_rounds,
+                coalesce(sum(case when did_win then 1 else 0 end), 0)::int as wins,
+                coalesce(greatest(count(*) - sum(case when did_win then 1 else 0 end), 0), 0)::int as losses,
+                coalesce(max(score), 0)::int as best_score,
+                coalesce(round(avg(score))::int, 0) as average_score
+            from public.${GLOBAL_LEADERBOARD_TABLE_NAME}
+            where user_id = $1
+        `,
+        [normalizedViewerUserId]
+    );
+
+    const row = Array.isArray(statsResult?.rows) ? statsResult.rows[0] : null;
+    if (!row) {
+        return createEmptyViewerStats();
+    }
+
+    const totalRounds = clampInteger(row?.total_rounds, 0, 1_000_000, 0);
+    const wins = clampInteger(row?.wins, 0, totalRounds || 1_000_000, 0);
+    const losses = clampInteger(
+        row?.losses,
+        0,
+        totalRounds || 1_000_000,
+        Math.max(0, totalRounds - wins)
+    );
+    const bestScore = clampInteger(row?.best_score, 0, 10_000_000, 0);
+    const averageScore = clampInteger(row?.average_score, 0, 10_000_000, 0);
+    const winRate =
+        totalRounds > 0 ? clampInteger(Math.round((wins / totalRounds) * 100), 0, 100, 0) : 0;
+
+    return {
+        totalRounds,
+        wins,
+        losses,
+        winRate,
+        bestScore,
+        averageScore,
+    };
 }
 
 function sanitizeLeaderboardPlayerName(value) {
@@ -550,6 +632,18 @@ function sanitizeLeaderboardWinnerLabel(value) {
         .replace(/\s+/g, ' ')
         .replace(/[^\p{L}\p{N} _,.\-]/gu, '')
         .slice(0, WINNER_LABEL_MAX_LENGTH);
+    return normalized || '';
+}
+
+function sanitizeLeaderboardVehicleId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, VEHICLE_ID_MAX_LENGTH);
     return normalized || '';
 }
 
@@ -710,6 +804,7 @@ module.exports = {
     sanitizeLeaderboardPlayerName,
     sanitizeLeaderboardSegment,
     sanitizeLeaderboardUserId,
+    sanitizeLeaderboardVehicleId,
     sanitizeLeaderboardWindowRadius,
     sanitizeLeaderboardWinnerLabel,
     sanitizeRoundResultPayload,

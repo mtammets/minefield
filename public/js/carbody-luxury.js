@@ -32,6 +32,20 @@ const CAR_SKIN_TEXTURE_CACHE = new Map();
 const CAR_SKIN_BODY_TEXTURE_CACHE = new Map();
 const CAR_WRAP_TEXTURE_SET_CACHE = new Map();
 const CAR_WRAP_IMAGE_PROMISE_CACHE = new Map();
+const USER_WRAP_EMISSIVE_COLOR = new THREE.Color(0xffffff);
+const USER_WRAP_SURFACE_SCALES = Object.freeze({
+    topWidth: 0.92,
+    topDepth: 0.94,
+    sideDepth: 0.9,
+    sideHeight: 0.56,
+    frontWidth: 0.82,
+    frontHeight: 0.34,
+    rearWidth: 0.82,
+    rearHeight: 0.3,
+});
+const USER_WRAP_SOURCE_MAX_EDGE_PX = 2048;
+const USER_WRAP_OVERLAY_OPACITY = 0.84;
+const USER_WRAP_OVERLAY_BRIGHTNESS = 1.08;
 const DEFAULT_SKIN_MATERIAL = 'gloss-paint';
 const BODY_FINISH_PROFILES = Object.freeze({
     'gloss-paint': Object.freeze({
@@ -348,6 +362,8 @@ function addLuxuryBody(car, bodyConfig = {}) {
 
     const bodyPanels = [];
     const bodyPanelMaterials = [];
+    const bodyWrapOverlayMeshes = [];
+    const bodyWrapOverlayMaterials = [];
     const createBodyPanel = ({
         id,
         size,
@@ -380,9 +396,20 @@ function addLuxuryBody(car, bodyConfig = {}) {
         panel.castShadow = true;
         panel.receiveShadow = true;
         bodyShellGroup.add(panel);
+
+        const wrapOverlayMaterial = createProjectedWrapOverlayMaterial(size);
+        const wrapOverlay = new THREE.Mesh(geometry.clone(), wrapOverlayMaterial);
+        wrapOverlay.position.copy(panel.position);
+        wrapOverlay.scale.setScalar(1.0025);
+        wrapOverlay.visible = false;
+        wrapOverlay.renderOrder = 6;
+        bodyShellGroup.add(wrapOverlay);
+
         panelMaterial.userData.baseEmissiveIntensity = emissiveIntensity;
         panelMaterial.userData.basePanelRoughness = roughness;
         bodyPanelMaterials.push(panelMaterial);
+        bodyWrapOverlayMaterials.push(wrapOverlayMaterial);
+        bodyWrapOverlayMeshes.push(wrapOverlay);
 
         bodyPanels.push({
             id,
@@ -521,6 +548,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
                 bodyTexture
             );
         }
+        setProjectedWrapOverlay(null);
 
         skinController?.applySkin?.(nextSkinPreset, nextWrapUrl);
         wirelessChargeMarker?.setTheme?.(nextSkinPreset);
@@ -530,7 +558,7 @@ function addLuxuryBody(car, bodyConfig = {}) {
             return;
         }
 
-        void getUserWrapTextureSet(nextSkinPreset, nextWrapUrl)
+        void getUserWrapTextureSet(nextWrapUrl, bodyDimensions)
             .then((wrapTextureSet) => {
                 if (
                     requestId !== appearanceRequestId ||
@@ -540,18 +568,36 @@ function addLuxuryBody(car, bodyConfig = {}) {
                     return;
                 }
 
+                const wrapBodyColor = new THREE.Color(wrapTextureSet.baseColorHex);
+                const wrapBodyEmissive = wrapBodyColor.clone().multiplyScalar(0.045);
                 for (let i = 0; i < bodyPanelMaterials.length; i += 1) {
                     applySkinFinishToBodyMaterial(
                         bodyPanelMaterials[i],
                         finishProfile,
                         nextSkinPreset,
-                        nextColor,
-                        bodyEmissive,
-                        wrapTextureSet.bodyTexture
+                        wrapBodyColor,
+                        wrapBodyEmissive,
+                        null
                     );
                 }
+                setProjectedWrapOverlay(wrapTextureSet);
             })
             .catch(() => {});
+    }
+
+    function setProjectedWrapOverlay(wrapTextureSet = null) {
+        const projectedTexture = wrapTextureSet?.projectedTexture || null;
+        const imageAspect = Math.max(0.0001, Number(wrapTextureSet?.imageAspect) || 1);
+        for (let i = 0; i < bodyWrapOverlayMaterials.length; i += 1) {
+            const material = bodyWrapOverlayMaterials[i];
+            const mesh = bodyWrapOverlayMeshes[i];
+            if (!material || !mesh) {
+                continue;
+            }
+            material.uniforms.wrapMap.value = projectedTexture;
+            material.uniforms.wrapAspect.value = imageAspect;
+            mesh.visible = Boolean(projectedTexture);
+        }
     }
 }
 
@@ -1129,10 +1175,41 @@ function addPlayerNameDisplay(parent, playerName, bodyDimensions) {
     return badgeGroup;
 }
 
+function resolveUserWrapSurfaceLayout(bodyDimensions = DEFAULT_BODY_DIMENSIONS) {
+    const topWidth = bodyDimensions.width * USER_WRAP_SURFACE_SCALES.topWidth;
+    const topDepth = bodyDimensions.depth * USER_WRAP_SURFACE_SCALES.topDepth;
+    const sideDepth = bodyDimensions.depth * USER_WRAP_SURFACE_SCALES.sideDepth;
+    const sideHeight = bodyDimensions.height * USER_WRAP_SURFACE_SCALES.sideHeight;
+    const frontWidth = bodyDimensions.width * USER_WRAP_SURFACE_SCALES.frontWidth;
+    const frontHeight = bodyDimensions.height * USER_WRAP_SURFACE_SCALES.frontHeight;
+    const rearWidth = bodyDimensions.width * USER_WRAP_SURFACE_SCALES.rearWidth;
+    const rearHeight = bodyDimensions.height * USER_WRAP_SURFACE_SCALES.rearHeight;
+
+    return {
+        top: {
+            width: topWidth,
+            height: topDepth,
+        },
+        side: {
+            width: sideDepth,
+            height: sideHeight,
+        },
+        front: {
+            width: frontWidth,
+            height: frontHeight,
+        },
+        rear: {
+            width: rearWidth,
+            height: rearHeight,
+        },
+    };
+}
+
 function createBodySkinController(parent, bodyDimensions) {
     const overlayGroup = new THREE.Group();
     overlayGroup.name = 'body_skin_overlay_group';
     parent.add(overlayGroup);
+    const wrapSurfaceLayout = resolveUserWrapSurfaceLayout(bodyDimensions);
 
     const topMaterial = createSkinDecalMaterial();
     const sideLeftMaterial = createSkinDecalMaterial();
@@ -1159,7 +1236,7 @@ function createBodySkinController(parent, bodyDimensions) {
     const tailZ = bodyCenterZ - bodyDimensions.depth * 0.5 - 0.006;
 
     const topDecal = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.82, bodyDimensions.depth * 0.88),
+        new THREE.PlaneGeometry(wrapSurfaceLayout.top.width, wrapSurfaceLayout.top.height),
         topMaterial
     );
     topDecal.rotation.x = -Math.PI * 0.5;
@@ -1167,8 +1244,8 @@ function createBodySkinController(parent, bodyDimensions) {
     overlayGroup.add(topDecal);
 
     const sideGeometry = new THREE.PlaneGeometry(
-        bodyDimensions.depth * 0.82,
-        bodyDimensions.height * 0.46
+        wrapSurfaceLayout.side.width,
+        wrapSurfaceLayout.side.height
     );
     const leftSideDecal = new THREE.Mesh(sideGeometry, sideLeftMaterial);
     leftSideDecal.rotation.y = Math.PI * 0.5;
@@ -1181,14 +1258,14 @@ function createBodySkinController(parent, bodyDimensions) {
     overlayGroup.add(rightSideDecal);
 
     const frontDecal = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.74, bodyDimensions.height * 0.28),
+        new THREE.PlaneGeometry(wrapSurfaceLayout.front.width, wrapSurfaceLayout.front.height),
         frontMaterial
     );
     frontDecal.position.set(0, bodyCenterY + 0.01, noseZ);
     overlayGroup.add(frontDecal);
 
     const rearDecal = new THREE.Mesh(
-        new THREE.PlaneGeometry(bodyDimensions.width * 0.74, bodyDimensions.height * 0.24),
+        new THREE.PlaneGeometry(wrapSurfaceLayout.rear.width, wrapSurfaceLayout.rear.height),
         rearMaterial
     );
     rearDecal.rotation.y = Math.PI;
@@ -1209,6 +1286,7 @@ function createBodySkinController(parent, bodyDimensions) {
         skinId: DEFAULT_PLAYER_CAR_SKIN_ID,
         finishProfile: getSkinFinishProfile(getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID)),
         wrapUrl: '',
+        hasUserWrap: false,
         wrapRequestId: 0,
     };
 
@@ -1231,15 +1309,24 @@ function createBodySkinController(parent, bodyDimensions) {
             const secondaryPulse = 0.5 + 0.5 * Math.sin(skinState.phase * 1.6 + 0.55);
             const finishProfile = skinState.finishProfile;
 
-            topMaterial.emissiveIntensity =
-                (0.52 + pulse * 0.26 + activity * 0.2) * finishProfile.topPulseScale;
-            sideLeftMaterial.emissiveIntensity =
-                (0.34 + secondaryPulse * 0.18 + activity * 0.22) * finishProfile.sidePulseScale;
-            sideRightMaterial.emissiveIntensity = sideLeftMaterial.emissiveIntensity;
-            frontMaterial.emissiveIntensity =
-                (0.46 + secondaryPulse * 0.18 + activity * 0.16) * finishProfile.frontPulseScale;
-            rearMaterial.emissiveIntensity =
-                (0.5 + pulse * 0.22 + activity * 0.18) * finishProfile.rearPulseScale;
+            if (skinState.hasUserWrap) {
+                topMaterial.emissiveIntensity = 0.12;
+                sideLeftMaterial.emissiveIntensity = 0.1;
+                sideRightMaterial.emissiveIntensity = 0.1;
+                frontMaterial.emissiveIntensity = 0.1;
+                rearMaterial.emissiveIntensity = 0.1;
+            } else {
+                topMaterial.emissiveIntensity =
+                    (0.52 + pulse * 0.26 + activity * 0.2) * finishProfile.topPulseScale;
+                sideLeftMaterial.emissiveIntensity =
+                    (0.34 + secondaryPulse * 0.18 + activity * 0.22) * finishProfile.sidePulseScale;
+                sideRightMaterial.emissiveIntensity = sideLeftMaterial.emissiveIntensity;
+                frontMaterial.emissiveIntensity =
+                    (0.46 + secondaryPulse * 0.18 + activity * 0.16) *
+                    finishProfile.frontPulseScale;
+                rearMaterial.emissiveIntensity =
+                    (0.5 + pulse * 0.22 + activity * 0.18) * finishProfile.rearPulseScale;
+            }
             railLeftMaterial.emissiveIntensity =
                 (0.42 + pulse * 0.24 + activity * 0.3) * finishProfile.railPulseScale;
             railRightMaterial.emissiveIntensity = railLeftMaterial.emissiveIntensity;
@@ -1260,11 +1347,13 @@ function createBodySkinController(parent, bodyDimensions) {
         const stripeColor = new THREE.Color(preset.stripeColor);
         const glowColor = new THREE.Color(preset.glowColor);
         const safeWrapUrl = sanitizeUserWrapTextureUrl(wrapUrl);
+        const wrapRequestId = skinState.wrapRequestId + 1;
 
         skinState.skinId = preset.id;
         skinState.finishProfile = finishProfile;
         skinState.wrapUrl = safeWrapUrl;
-        skinState.wrapRequestId += 1;
+        skinState.hasUserWrap = Boolean(safeWrapUrl);
+        skinState.wrapRequestId = wrapRequestId;
 
         applySkinTexture(topMaterial, topTexture, accentColor, finishProfile, 'top');
         applySkinTexture(sideLeftMaterial, sideTexture, accentColor, finishProfile, 'side');
@@ -1281,6 +1370,10 @@ function createBodySkinController(parent, bodyDimensions) {
         railRightMaterial.roughness = finishProfile.railRoughness;
 
         if (!safeWrapUrl) {
+            return;
+        }
+
+        if (skinState.wrapRequestId !== wrapRequestId || skinState.wrapUrl !== safeWrapUrl) {
             return;
         }
 
@@ -1306,16 +1399,137 @@ function createSkinDecalMaterial() {
     });
 }
 
+function createProjectedWrapOverlayMaterial(panelSize) {
+    return new THREE.ShaderMaterial({
+        uniforms: {
+            wrapMap: { value: null },
+            wrapAspect: { value: 1 },
+            wrapOpacity: { value: USER_WRAP_OVERLAY_OPACITY },
+            wrapBrightness: { value: USER_WRAP_OVERLAY_BRIGHTNESS },
+            panelSize: {
+                value: new THREE.Vector3(
+                    Math.max(0.0001, Number(panelSize?.[0]) || DEFAULT_BODY_DIMENSIONS.width),
+                    Math.max(0.0001, Number(panelSize?.[1]) || DEFAULT_BODY_DIMENSIONS.height),
+                    Math.max(0.0001, Number(panelSize?.[2]) || DEFAULT_BODY_DIMENSIONS.depth)
+                ),
+            },
+        },
+        vertexShader: `
+            varying vec3 vLocalPosition;
+            varying vec3 vLocalNormal;
+            varying vec3 vWorldPosition;
+            varying vec3 vWorldNormal;
+
+            void main() {
+                vLocalPosition = position;
+                vLocalNormal = normalize(normal);
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                vWorldNormal = normalize(mat3(modelMatrix) * normal);
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+            }
+        `,
+        fragmentShader: `
+            uniform sampler2D wrapMap;
+            uniform vec3 panelSize;
+            uniform float wrapAspect;
+            uniform float wrapOpacity;
+            uniform float wrapBrightness;
+
+            varying vec3 vLocalPosition;
+            varying vec3 vLocalNormal;
+            varying vec3 vWorldPosition;
+            varying vec3 vWorldNormal;
+
+            vec2 coverUv(vec2 uv, float targetAspect, float sourceAspect) {
+                float safeTargetAspect = max(targetAspect, 0.0001);
+                float safeSourceAspect = max(sourceAspect, 0.0001);
+                vec2 fittedUv = uv;
+
+                if (safeSourceAspect > safeTargetAspect) {
+                    float scale = safeTargetAspect / safeSourceAspect;
+                    fittedUv.x = (uv.x - 0.5) * scale + 0.5;
+                } else {
+                    float scale = safeSourceAspect / safeTargetAspect;
+                    fittedUv.y = (uv.y - 0.5) * scale + 0.5;
+                }
+
+                return clamp(fittedUv, 0.0, 1.0);
+            }
+
+            void main() {
+                vec3 normalWeights = abs(normalize(vLocalNormal));
+                normalWeights = pow(normalWeights, vec3(5.5));
+                normalWeights /= max(normalWeights.x + normalWeights.y + normalWeights.z, 0.0001);
+
+                vec2 sideUv = coverUv(
+                    vec2(
+                        (vLocalPosition.z / panelSize.z) + 0.5,
+                        1.0 - ((vLocalPosition.y / panelSize.y) + 0.5)
+                    ),
+                    panelSize.z / panelSize.y,
+                    wrapAspect
+                );
+                vec2 topUv = coverUv(
+                    vec2(
+                        (vLocalPosition.x / panelSize.x) + 0.5,
+                        1.0 - ((vLocalPosition.z / panelSize.z) + 0.5)
+                    ),
+                    panelSize.x / panelSize.z,
+                    wrapAspect
+                );
+                vec2 frontUv = coverUv(
+                    vec2(
+                        (vLocalPosition.x / panelSize.x) + 0.5,
+                        1.0 - ((vLocalPosition.y / panelSize.y) + 0.5)
+                    ),
+                    panelSize.x / panelSize.y,
+                    wrapAspect
+                );
+
+                vec3 projectedColor =
+                    texture2D(wrapMap, sideUv).rgb * normalWeights.x +
+                    texture2D(wrapMap, topUv).rgb * normalWeights.y +
+                    texture2D(wrapMap, frontUv).rgb * normalWeights.z;
+
+                vec3 worldNormal = normalize(vWorldNormal);
+                vec3 viewDirection = normalize(cameraPosition - vWorldPosition);
+                vec3 keyLightDirection = normalize(vec3(0.32, 0.88, 0.24));
+                vec3 reflectedLight = reflect(-keyLightDirection, worldNormal);
+                float specular = pow(max(dot(reflectedLight, viewDirection), 0.0), 34.0);
+                float fresnel = pow(1.0 - max(dot(worldNormal, viewDirection), 0.0), 3.4);
+                vec3 gloss = vec3(specular * 0.24 + fresnel * 0.08);
+                vec3 finalColor = min(projectedColor * wrapBrightness + gloss, vec3(1.0));
+
+                gl_FragColor = vec4(finalColor, wrapOpacity);
+            }
+        `,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        side: THREE.FrontSide,
+        toneMapped: false,
+    });
+}
+
 function applySkinTexture(material, texture, emissiveColor, finishProfile, surface = 'side') {
+    const isUserWrapTexture = Boolean(texture?.userData?.isUserWrapTexture);
     material.map = texture;
     material.emissiveMap = texture;
-    material.emissive.copy(emissiveColor);
-    material.metalness = finishProfile.decalMetalness;
-    material.roughness = finishProfile.decalRoughness;
-    material.opacity =
-        surface === 'front' || surface === 'rear'
-            ? Math.min(1, finishProfile.decalOpacity + 0.04)
-            : finishProfile.decalOpacity;
+    material.emissive.copy(isUserWrapTexture ? USER_WRAP_EMISSIVE_COLOR : emissiveColor);
+    material.metalness = isUserWrapTexture
+        ? Math.min(finishProfile.decalMetalness, 0.08)
+        : finishProfile.decalMetalness;
+    material.roughness = isUserWrapTexture
+        ? Math.max(finishProfile.decalRoughness, 0.34)
+        : finishProfile.decalRoughness;
+    material.opacity = isUserWrapTexture
+        ? 1
+        : surface === 'front' || surface === 'rear'
+          ? Math.min(1, finishProfile.decalOpacity + 0.04)
+          : finishProfile.decalOpacity;
     material.needsUpdate = true;
 }
 
@@ -1432,24 +1646,25 @@ function createCarSkinTexture(skinPreset, surface = 'top') {
     return texture;
 }
 
-function getUserWrapTextureSet(skinPreset, wrapUrl) {
+function getUserWrapTextureSet(wrapUrl, bodyDimensions = DEFAULT_BODY_DIMENSIONS) {
     const safeWrapUrl = sanitizeUserWrapTextureUrl(wrapUrl);
     if (!safeWrapUrl) {
         return Promise.reject(new Error('Wrap URL is missing.'));
     }
 
-    const cacheKey = `${skinPreset.id}:${safeWrapUrl}`;
+    const layoutKey = [
+        bodyDimensions.width.toFixed(3),
+        bodyDimensions.height.toFixed(3),
+        bodyDimensions.depth.toFixed(3),
+    ].join('x');
+    const cacheKey = `${safeWrapUrl}:${layoutKey}`;
     if (CAR_WRAP_TEXTURE_SET_CACHE.has(cacheKey)) {
         return CAR_WRAP_TEXTURE_SET_CACHE.get(cacheKey);
     }
 
-    const textureSetPromise = loadUserWrapImage(safeWrapUrl).then((image) => ({
-        bodyTexture: createCarWrapCombinedBodyTexture(skinPreset, image),
-        topTexture: createCarWrapCombinedTexture(skinPreset, image, 'top'),
-        sideTexture: createCarWrapCombinedTexture(skinPreset, image, 'side'),
-        frontTexture: createCarWrapCombinedTexture(skinPreset, image, 'front'),
-        rearTexture: createCarWrapCombinedTexture(skinPreset, image, 'rear'),
-    }));
+    const textureSetPromise = loadUserWrapImage(safeWrapUrl).then((image) =>
+        createUserWrapTextureSetFromImage(image, bodyDimensions)
+    );
 
     CAR_WRAP_TEXTURE_SET_CACHE.set(cacheKey, textureSetPromise);
     return textureSetPromise.catch((error) => {
@@ -1458,128 +1673,86 @@ function getUserWrapTextureSet(skinPreset, wrapUrl) {
     });
 }
 
-function createCarWrapCombinedTexture(skinPreset, image, surface = 'top') {
-    const baseTexture = getCarSkinTexture(skinPreset, surface);
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, baseTexture?.image?.width || 1024);
-    canvas.height = Math.max(1, baseTexture?.image?.height || 1024);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-        return baseTexture;
-    }
+function createUserWrapTextureSetFromImage(image) {
+    const sourceCanvas = renderUserWrapSourceCanvas(image);
+    const baseColorHex = sampleAverageCanvasColor(sourceCanvas);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (baseTexture?.image) {
-        ctx.drawImage(baseTexture.image, 0, 0, canvas.width, canvas.height);
-    }
-    drawUserWrapOverlay(ctx, canvas.width, canvas.height, image, surface, skinPreset);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    texture.needsUpdate = true;
-    return texture;
+    return {
+        baseColorHex,
+        imageAspect: sourceCanvas.width / Math.max(1, sourceCanvas.height),
+        projectedTexture: finalizeUserWrapTexture(sourceCanvas, 'projection'),
+    };
 }
 
-function createCarWrapCombinedBodyTexture(skinPreset, image) {
-    const baseTexture = getCarSkinBodyTexture(skinPreset);
+function renderUserWrapSourceCanvas(image) {
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, baseTexture?.image?.width || 1024);
-    canvas.height = Math.max(1, baseTexture?.image?.height || 512);
+    const imageWidth = Math.max(1, image?.naturalWidth || image?.width || 1);
+    const imageHeight = Math.max(1, image?.naturalHeight || image?.height || 1);
+    const scale = Math.min(1, USER_WRAP_SOURCE_MAX_EDGE_PX / Math.max(imageWidth, imageHeight));
+    canvas.width = Math.max(1, Math.round(imageWidth * scale));
+    canvas.height = Math.max(1, Math.round(imageHeight * scale));
     const ctx = canvas.getContext('2d');
     if (!ctx) {
-        return baseTexture;
+        return canvas;
     }
 
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (baseTexture?.image) {
-        ctx.drawImage(baseTexture.image, 0, 0, canvas.width, canvas.height);
-    }
-    drawUserWrapOverlay(ctx, canvas.width, canvas.height, image, 'body', skinPreset);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas;
+}
 
+function finalizeUserWrapTexture(canvas, surface) {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
-    texture.repeat.set(1, 1);
-    texture.offset.set(0, 0);
     texture.anisotropy = 8;
+    texture.userData.isUserWrapTexture = true;
+    texture.userData.isUserWrapBodyTexture = false;
+    texture.userData.wrapSurface = surface;
     texture.needsUpdate = true;
     return texture;
 }
 
-function drawUserWrapOverlay(ctx, width, height, image, surface, skinPreset) {
-    const viewport = resolveUserWrapViewport(surface);
-    const imageWidth = Math.max(1, image?.naturalWidth || image?.width || 1);
-    const imageHeight = Math.max(1, image?.naturalHeight || image?.height || 1);
-    const sourceX = Math.max(0, Math.round(viewport.x * imageWidth));
-    const sourceY = Math.max(0, Math.round(viewport.y * imageHeight));
-    const sourceWidth = Math.max(1, Math.round(viewport.width * imageWidth));
-    const sourceHeight = Math.max(1, Math.round(viewport.height * imageHeight));
-    const overlayOpacity =
-        surface === 'top'
-            ? 0.96
-            : surface === 'side'
-              ? 0.9
-              : surface === 'body'
-                ? 0.72
-                : 0.86;
-
-    ctx.save();
-    ctx.globalAlpha = overlayOpacity;
-    drawImageCoverRegion(
-        ctx,
-        image,
-        sourceX,
-        sourceY,
-        sourceWidth,
-        sourceHeight,
-        0,
-        0,
-        width,
-        height
-    );
-    ctx.restore();
-
-    const glossGradient = ctx.createLinearGradient(0, 0, 0, height);
-    glossGradient.addColorStop(0, rgbaFromHex(skinPreset.stripeColor, 0.2));
-    glossGradient.addColorStop(0.28, 'rgba(255, 255, 255, 0.05)');
-    glossGradient.addColorStop(0.72, rgbaFromHex(skinPreset.accentColorSecondary, 0.08));
-    glossGradient.addColorStop(1, rgbaFromHex(skinPreset.glowColor, 0.18));
-    ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    ctx.fillStyle = glossGradient;
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-
-    const vignetteGradient = ctx.createLinearGradient(0, 0, width, 0);
-    vignetteGradient.addColorStop(0, 'rgba(5, 9, 14, 0.26)');
-    vignetteGradient.addColorStop(0.14, 'rgba(5, 9, 14, 0)');
-    vignetteGradient.addColorStop(0.86, 'rgba(5, 9, 14, 0)');
-    vignetteGradient.addColorStop(1, 'rgba(5, 9, 14, 0.26)');
-    ctx.save();
-    ctx.fillStyle = vignetteGradient;
-    ctx.fillRect(0, 0, width, height);
-    ctx.restore();
-}
-
-function resolveUserWrapViewport(surface = 'top') {
-    switch (surface) {
-        case 'body':
-            return { x: 0, y: 0, width: 1, height: 1 };
-        case 'side':
-            return { x: 0.06, y: 0.2, width: 0.88, height: 0.6 };
-        case 'front':
-            return { x: 0.18, y: 0.08, width: 0.64, height: 0.5 };
-        case 'rear':
-            return { x: 0.18, y: 0.42, width: 0.64, height: 0.5 };
-        case 'top':
-        default:
-            return { x: 0.08, y: 0.06, width: 0.84, height: 0.84 };
+function sampleAverageCanvasColor(canvas) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+        return 0x1f2937;
     }
+    const { width, height } = canvas;
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const step = Math.max(4, Math.round(Math.sqrt((width * height) / 4096)));
+    let totalR = 0;
+    let totalG = 0;
+    let totalB = 0;
+    let totalWeight = 0;
+
+    for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+            const index = (y * width + x) * 4;
+            const alpha = imageData.data[index + 3] / 255;
+            if (alpha <= 0) {
+                continue;
+            }
+            totalR += imageData.data[index] * alpha;
+            totalG += imageData.data[index + 1] * alpha;
+            totalB += imageData.data[index + 2] * alpha;
+            totalWeight += alpha;
+        }
+    }
+
+    if (totalWeight <= 0) {
+        return 0x1f2937;
+    }
+    const r = Math.max(0, Math.min(255, Math.round(totalR / totalWeight)));
+    const g = Math.max(0, Math.min(255, Math.round(totalG / totalWeight)));
+    const b = Math.max(0, Math.min(255, Math.round(totalB / totalWeight)));
+    return (r << 16) | (g << 8) | b;
 }
 
-function drawImageCoverRegion(
+function drawImageFitRegion(
     ctx,
     image,
     sourceX,
@@ -1589,12 +1762,38 @@ function drawImageCoverRegion(
     targetX,
     targetY,
     targetWidth,
-    targetHeight
+    targetHeight,
+    fitMode = 'cover'
 ) {
     const safeSourceWidth = Math.max(1, sourceWidth);
     const safeSourceHeight = Math.max(1, sourceHeight);
+    const safeTargetWidth = Math.max(1, targetWidth);
+    const safeTargetHeight = Math.max(1, targetHeight);
+    if (fitMode === 'contain') {
+        const drawScale = Math.min(
+            safeTargetWidth / safeSourceWidth,
+            safeTargetHeight / safeSourceHeight
+        );
+        const drawWidth = Math.max(1, safeSourceWidth * drawScale);
+        const drawHeight = Math.max(1, safeSourceHeight * drawScale);
+        const drawX = targetX + (safeTargetWidth - drawWidth) * 0.5;
+        const drawY = targetY + (safeTargetHeight - drawHeight) * 0.5;
+        ctx.drawImage(
+            image,
+            sourceX,
+            sourceY,
+            safeSourceWidth,
+            safeSourceHeight,
+            drawX,
+            drawY,
+            drawWidth,
+            drawHeight
+        );
+        return;
+    }
+
     const sourceAspectRatio = safeSourceWidth / safeSourceHeight;
-    const targetAspectRatio = Math.max(1, targetWidth) / Math.max(1, targetHeight);
+    const targetAspectRatio = safeTargetWidth / safeTargetHeight;
     let cropWidth = safeSourceWidth;
     let cropHeight = safeSourceHeight;
     let cropX = sourceX;
@@ -1616,8 +1815,8 @@ function drawImageCoverRegion(
         cropHeight,
         targetX,
         targetY,
-        targetWidth,
-        targetHeight
+        safeTargetWidth,
+        safeTargetHeight
     );
 }
 
@@ -2858,14 +3057,21 @@ function applySkinFinishToBodyMaterial(
     bodyEmissive,
     bodyTexture = null
 ) {
+    const isUserWrapTexture = Boolean(bodyTexture?.userData?.isUserWrapTexture);
     const baseEmissiveIntensity = Number(material?.userData?.baseEmissiveIntensity) || 0.3;
     material.color.setHex(bodyTexture ? 0xffffff : bodyColor.getHex());
     material.map = bodyTexture;
-    material.emissive.copy(bodyEmissive);
-    material.emissiveMap = null;
-    material.emissiveIntensity = baseEmissiveIntensity * finishProfile.panelEmissiveScale;
-    material.metalness = finishProfile.panelMetalness;
-    material.roughness = finishProfile.panelRoughness;
+    material.emissive.copy(isUserWrapTexture ? USER_WRAP_EMISSIVE_COLOR : bodyEmissive);
+    material.emissiveMap = isUserWrapTexture ? bodyTexture : null;
+    material.emissiveIntensity = isUserWrapTexture
+        ? baseEmissiveIntensity * (finishProfile.panelEmissiveScale + 0.16)
+        : baseEmissiveIntensity * finishProfile.panelEmissiveScale;
+    material.metalness = isUserWrapTexture
+        ? Math.min(finishProfile.panelMetalness, 0.68)
+        : finishProfile.panelMetalness;
+    material.roughness = isUserWrapTexture
+        ? Math.max(finishProfile.panelRoughness, 0.22)
+        : finishProfile.panelRoughness;
     material.clearcoat = finishProfile.panelClearcoat;
     material.clearcoatRoughness = finishProfile.panelClearcoatRoughness;
     material.reflectivity = finishProfile.panelReflectivity;

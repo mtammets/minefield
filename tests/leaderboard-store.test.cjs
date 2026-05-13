@@ -21,6 +21,8 @@ test('sanitizeRoundResultPayload keeps valid leaderboard rows', () => {
         gameMode: 'online',
         finishReason: 'pickups-exhausted',
         winnerLabel: 'Driver One',
+        didWin: false,
+        vehicleId: '',
         carSkinId: 'midnight-comet',
     });
 
@@ -35,6 +37,8 @@ test('sanitizeRoundResultPayload keeps valid leaderboard rows', () => {
         gameMode: 'online',
         finishReason: 'pickups-exhausted',
         winnerLabel: 'Driver One',
+        didWin: false,
+        vehicleId: '',
         carSkinId: 'midnight-comet',
     });
 });
@@ -63,6 +67,7 @@ test('buildLeaderboardRecord maps to database columns', () => {
         gameMode: 'bots',
         finishReason: 'opponents-eliminated',
         winnerLabel: 'Driver',
+        didWin: true,
         carSkinId: 'midnight-comet',
     });
 
@@ -72,6 +77,7 @@ test('buildLeaderboardRecord maps to database columns', () => {
     assert.equal(record.avatar_path, '123e4567-e89b-12d3-a456-426614174000/profile.webp');
     assert.equal(record.score, 1100);
     assert.equal(record.game_mode, 'bots');
+    assert.equal(record.did_win, true);
 });
 
 test('normalizeLeaderboardEntry converts public rows to browser shape', () => {
@@ -102,6 +108,7 @@ test('normalizeLeaderboardEntry converts public rows to browser shape', () => {
         gameMode: 'online',
         finishReason: 'pickups-exhausted',
         winnerLabel: 'Driver',
+        vehicleId: '',
         carSkinId: 'midnight-comet',
         createdAt: '2026-05-10T10:00:00.000Z',
     });

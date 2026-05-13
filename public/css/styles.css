@@ -6262,11 +6262,11 @@ body.race-intro-active #botPanel {
 
 .welcomeAuthAvatarFrame {
     appearance: none;
-    width: 104px;
-    height: 104px;
+    width: 118px;
+    height: 118px;
     padding: 0;
-    border: 1px solid rgba(166, 205, 229, 0.54);
-    border-radius: 28px;
+    border: 1px solid rgba(176, 213, 234, 0.68);
+    border-radius: 32px;
     overflow: hidden;
     position: relative;
     isolation: isolate;
@@ -6277,8 +6277,8 @@ body.race-intro-active #botPanel {
         linear-gradient(180deg, rgba(16, 37, 58, 0.96), rgba(8, 18, 29, 0.96));
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.08),
-        0 16px 30px rgba(4, 10, 18, 0.3),
-        0 0 0 1px rgba(88, 148, 214, 0.16);
+        0 22px 42px rgba(4, 10, 18, 0.34),
+        0 0 0 1px rgba(88, 148, 214, 0.22);
     cursor: pointer;
     transition:
         transform 140ms ease,
@@ -6301,34 +6301,7 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthAvatarFrame::after {
-    content: '+';
-    position: absolute;
-    right: 8px;
-    bottom: 8px;
-    z-index: 3;
-    width: 32px;
-    height: 32px;
-    border: 1px solid rgba(132, 198, 255, 0.78);
-    border-radius: 999px;
-    display: grid;
-    place-items: center;
-    font-family: 'Sora', sans-serif;
-    font-size: 19px;
-    font-weight: 800;
-    line-height: 1;
-    color: rgba(242, 249, 255, 0.98);
-    background:
-        linear-gradient(180deg, rgba(37, 97, 154, 0.96), rgba(17, 44, 77, 0.98)),
-        linear-gradient(90deg, rgba(128, 230, 190, 0.18), rgba(128, 230, 190, 0));
-    box-shadow:
-        0 8px 18px rgba(18, 55, 93, 0.34),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
-    pointer-events: none;
-    transition:
-        transform 140ms ease,
-        border-color 140ms ease,
-        box-shadow 140ms ease,
-        filter 140ms ease;
+    display: none;
 }
 
 .welcomeAuthAvatarFrame[data-interactive='true']:hover,
@@ -6337,7 +6310,7 @@ body.race-intro-active #botPanel {
     border-color: rgba(179, 220, 246, 0.82);
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.1),
-        0 18px 34px rgba(0, 0, 0, 0.22),
+        0 26px 44px rgba(0, 0, 0, 0.24),
         0 0 0 2px rgba(92, 161, 223, 0.16);
     filter: brightness(1.04);
 }
@@ -6345,15 +6318,6 @@ body.race-intro-active #botPanel {
 .welcomeAuthAvatarFrame[data-interactive='true']:hover::before,
 .welcomeAuthAvatarFrame[data-interactive='true']:focus-visible::before {
     opacity: 1;
-}
-
-.welcomeAuthAvatarFrame[data-interactive='true']:hover::after,
-.welcomeAuthAvatarFrame[data-interactive='true']:focus-visible::after {
-    transform: scale(1.08);
-    border-color: rgba(190, 229, 255, 0.94);
-    box-shadow:
-        0 10px 20px rgba(26, 74, 121, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 .welcomeAuthAvatarFrame[data-interactive='false'] {
@@ -6370,18 +6334,11 @@ body.race-intro-active #botPanel {
     outline: none;
 }
 
-.welcomeAuthAvatarFrame[data-has-image='false']::after {
-    background:
-        linear-gradient(180deg, rgba(29, 117, 80, 0.94), rgba(14, 54, 36, 0.96)),
-        linear-gradient(90deg, rgba(154, 242, 194, 0.16), rgba(154, 242, 194, 0));
-    border-color: rgba(146, 232, 188, 0.76);
-}
-
 .welcomeAuthAvatarFrame[data-has-image='true'] {
     box-shadow:
         inset 0 1px 0 rgba(255, 255, 255, 0.08),
-        0 18px 34px rgba(5, 12, 20, 0.34),
-        0 0 0 1px rgba(91, 152, 221, 0.16);
+        0 22px 42px rgba(5, 12, 20, 0.36),
+        0 0 0 1px rgba(91, 152, 221, 0.2);
 }
 
 .welcomeAuthAvatarImage {
@@ -6418,103 +6375,141 @@ body.race-intro-active #botPanel {
     display: grid;
     align-content: center;
     gap: 10px;
+    padding: 8px 0 8px 0;
 }
 
-.welcomeAuthProfileInlineActions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.welcomeAuthMetaActionBtn {
-    border: 1px solid rgba(209, 123, 123, 0.46);
-    border-radius: 999px;
-    min-height: 28px;
-    padding: 0 12px;
+.welcomeAuthProfileKicker {
     font-family: 'Sora', sans-serif;
     font-size: 10px;
     font-weight: 800;
-    letter-spacing: 1px;
+    letter-spacing: 1.5px;
     text-transform: uppercase;
-    color: rgba(255, 220, 220, 0.9);
-    background:
-        linear-gradient(180deg, rgba(76, 27, 35, 0.5), rgba(47, 15, 20, 0.54)),
-        linear-gradient(90deg, rgba(255, 162, 162, 0.08), rgba(255, 162, 162, 0));
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.05),
-        0 10px 20px rgba(38, 8, 12, 0.16);
-    cursor: pointer;
-    transition:
-        transform 120ms ease,
-        border-color 120ms ease,
-        background 120ms ease,
-        color 120ms ease;
+    color: rgba(168, 208, 236, 0.86);
 }
 
-.welcomeAuthMetaActionBtn:hover,
-.welcomeAuthMetaActionBtn:focus-visible {
-    transform: translateY(-1px);
-    border-color: rgba(232, 157, 157, 0.72);
-    background: rgba(112, 29, 36, 0.34);
-    color: rgba(255, 234, 234, 0.96);
-}
-
-.welcomeAuthMetaActionBtn:disabled {
-    opacity: 0.56;
-    cursor: not-allowed;
-    transform: none;
+.welcomeAuthProfileHint {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.42px;
+    color: rgba(176, 205, 224, 0.82);
 }
 
 .welcomeAuthSignedInName {
-    display: inline-flex;
-    align-items: center;
+    display: block;
+    position: relative;
     justify-self: start;
-    gap: 8px;
-    min-height: 34px;
-    padding: 0 16px;
-    border: 1px solid rgba(142, 236, 184, 0.7);
+    max-width: min(100%, 520px);
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(28px, 3vw, 38px);
+    font-weight: 900;
+    line-height: 0.96;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(241, 247, 252, 0.98);
+    background: linear-gradient(
+        104deg,
+        rgba(248, 250, 252, 0.98) 0%,
+        rgba(215, 232, 247, 0.98) 28%,
+        rgba(167, 210, 246, 0.98) 58%,
+        rgba(248, 222, 189, 0.98) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    box-shadow: none;
+    filter: drop-shadow(0 18px 36px rgba(0, 0, 0, 0.28));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.welcomeAuthProfileAccentRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 12px;
+}
+
+.welcomeAuthProfileRankBadge {
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 217, 149, 0.44);
     border-radius: 999px;
     font-family: 'Sora', sans-serif;
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 800;
     letter-spacing: 1.2px;
     text-transform: uppercase;
-    color: #ebfff7;
-    background: linear-gradient(180deg, rgba(28, 106, 71, 0.9), rgba(13, 48, 31, 0.94));
+    color: rgba(255, 234, 194, 0.98);
+    background:
+        linear-gradient(180deg, rgba(96, 66, 28, 0.82), rgba(48, 29, 11, 0.92)),
+        radial-gradient(circle at 30% 24%, rgba(255, 240, 204, 0.14), rgba(255, 240, 204, 0) 46%);
     box-shadow:
-        0 12px 24px rgba(21, 88, 56, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 10px 18px rgba(0, 0, 0, 0.14);
+}
+
+.welcomeAuthProfileSubline {
+    min-width: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    color: rgba(192, 218, 238, 0.86);
+}
+
+.welcomeAuthProfileStats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.welcomeAuthProfileStat {
+    min-width: 0;
+    padding: 12px 12px 11px;
+    border: 1px solid rgba(132, 187, 229, 0.28);
+    border-radius: 16px;
+    display: grid;
+    gap: 4px;
+    background:
+        linear-gradient(170deg, rgba(11, 27, 45, 0.88), rgba(7, 18, 30, 0.92)),
+        radial-gradient(circle at 20% 18%, rgba(92, 174, 238, 0.08), rgba(92, 174, 238, 0) 38%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 14px 22px rgba(0, 0, 0, 0.12);
+}
+
+.welcomeAuthProfileStatLabel {
+    font-family: 'Sora', sans-serif;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.15px;
+    text-transform: uppercase;
+    color: rgba(159, 204, 235, 0.78);
+}
+
+.welcomeAuthProfileStatValue {
+    min-width: 0;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(16px, 1.4vw, 20px);
+    font-weight: 800;
+    line-height: 1;
+    color: rgba(241, 247, 253, 0.98);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .welcomeAuthSignedInName::before {
-    content: '';
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: #9cf2c1;
-    box-shadow: 0 0 12px rgba(156, 242, 193, 0.75);
-    flex: 0 0 auto;
+    display: none;
 }
 
-.welcomeAuthSignedInEmail {
-    display: inline-flex;
-    align-items: center;
-    justify-self: start;
-    min-height: 34px;
-    max-width: min(100%, 440px);
-    padding: 0 13px;
-    border: 1px solid rgba(124, 170, 204, 0.28);
-    border-radius: 12px;
-    font-family: 'Sora', sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 0.32px;
-    color: rgba(214, 230, 241, 0.96);
-    background:
-        linear-gradient(180deg, rgba(13, 29, 45, 0.72), rgba(8, 18, 29, 0.84)),
-        linear-gradient(90deg, rgba(113, 184, 255, 0.08), rgba(113, 184, 255, 0));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    overflow-wrap: anywhere;
+.welcomeAuthSignedInName::after {
+    display: none;
 }
 
 .welcomeAuthSignedInShell {
@@ -6540,17 +6535,82 @@ body.race-intro-active #botPanel {
 .welcomeAuthSignedInShell .welcomeAuthProfileRow {
     position: relative;
     z-index: 1;
-    grid-template-columns: 104px minmax(0, 1fr);
+    grid-template-columns: 118px minmax(0, 1fr);
     gap: 18px;
-    align-items: center;
+    align-items: start;
     min-height: auto;
-    padding: 0 0 14px;
+    padding: 6px 0 20px;
     border: 0;
-    border-bottom: 1px solid rgba(136, 181, 211, 0.2);
     border-radius: 0;
     overflow: visible;
     background: transparent;
     box-shadow: none;
+}
+
+.welcomeAuthSignedInShell[data-mode='garage'] .welcomeAuthProfileRow {
+    display: none !important;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthSectionHeading {
+    display: none;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthSignedInView,
+.welcomeAuthSignedInShell[data-mode='garage'],
+.welcomeAuthPanel[data-account-mode='garage'] #welcomeAuthToolsSection[data-open='true'] {
+    min-height: 100%;
+    height: 100%;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthSectionStage {
+    width: 100%;
+    max-width: none;
+    min-height: 100%;
+    height: 100%;
+    padding: 0;
+    display: block;
+    justify-self: stretch;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGaragePanel {
+    width: 100%;
+    min-height: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageHero {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    width: auto;
+    transform: none;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageVehicleName {
+    font-size: clamp(20px, 1.7vw, 28px);
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapCard {
+    position: absolute;
+    right: clamp(20px, 2.4vw, 34px);
+    bottom: clamp(20px, 2.8vw, 34px);
+    z-index: 3;
+    width: auto;
+    grid-template-columns: auto;
+    align-items: start;
+    justify-items: end;
+    gap: 0;
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions {
+    grid-template-columns: repeat(2, auto);
+}
+
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageControlRow,
+.welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions,
+.welcomeAuthPanel[data-account-mode='garage'] .welcomePreviewLeaderboardHeaderActions {
+    pointer-events: auto;
 }
 
 .welcomeAuthSignedInShell .welcomeAuthProfileRow::before {
@@ -6565,6 +6625,190 @@ body.race-intro-active #botPanel {
 .welcomeAuthSignedInShell .welcomeAuthProfileMeta {
     position: relative;
     z-index: 1;
+}
+
+.welcomeAuthAvatarEditor {
+    display: grid;
+    gap: 16px;
+    padding: 16px;
+    border: 1px solid rgba(147, 190, 219, 0.28);
+    border-radius: 22px;
+    background:
+        linear-gradient(180deg, rgba(8, 20, 31, 0.84), rgba(7, 16, 26, 0.9)),
+        linear-gradient(135deg, rgba(101, 176, 242, 0.08), rgba(101, 176, 242, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 18px 34px rgba(2, 8, 15, 0.2);
+}
+
+.welcomeAuthAvatarEditor[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthAvatarEditorHeader {
+    display: grid;
+    gap: 0;
+}
+
+.welcomeAuthAvatarEditorTitle {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(243, 248, 252, 0.98);
+}
+
+.welcomeAuthAvatarEditorBody {
+    display: grid;
+    grid-template-columns: minmax(0, 236px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: center;
+}
+
+.welcomeAuthAvatarEditorViewport {
+    position: relative;
+    width: min(100%, 236px);
+    aspect-ratio: 1 / 1;
+    border: 1px solid rgba(154, 194, 220, 0.42);
+    border-radius: 32px;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 30% 24%, rgba(109, 176, 242, 0.18), transparent 56%),
+        linear-gradient(180deg, rgba(16, 34, 52, 0.96), rgba(8, 18, 29, 0.98));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 18px 32px rgba(3, 8, 15, 0.24);
+    justify-self: start;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.welcomeAuthAvatarEditorViewport::before {
+    content: '';
+    position: absolute;
+    inset: 10px;
+    border: 1px solid rgba(196, 227, 247, 0.3);
+    border-radius: 24px;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.welcomeAuthAvatarEditorViewport::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0)),
+        radial-gradient(circle at 76% 82%, rgba(101, 176, 242, 0.22), transparent 36%);
+    pointer-events: none;
+    z-index: 2;
+}
+
+.welcomeAuthAvatarEditorViewport[data-empty='true'] {
+    cursor: default;
+}
+
+.welcomeAuthAvatarEditorViewport[data-dragging='true'] {
+    cursor: grabbing;
+}
+
+.welcomeAuthAvatarEditorImage {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform-origin: center center;
+    will-change: transform;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.welcomeAuthAvatarEditorImage[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthAvatarEditorEmptyState {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    text-align: center;
+    font-family: 'Sora', sans-serif;
+    color: rgba(210, 231, 245, 0.84);
+}
+
+.welcomeAuthAvatarEditorEmptyState[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthAvatarEditorEmptyState span {
+    display: grid;
+    place-items: center;
+    width: 72px;
+    height: 72px;
+    border: 1px solid rgba(164, 203, 228, 0.42);
+    border-radius: 26px;
+    font-size: 42px;
+    font-weight: 600;
+    line-height: 1;
+    background:
+        linear-gradient(180deg, rgba(22, 48, 72, 0.86), rgba(11, 24, 39, 0.92)),
+        linear-gradient(135deg, rgba(128, 231, 191, 0.08), rgba(128, 231, 191, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 12px 24px rgba(2, 8, 15, 0.2);
+}
+
+.welcomeAuthAvatarEditorControls {
+    min-width: 0;
+    display: grid;
+    gap: 12px;
+    align-content: center;
+}
+
+.welcomeAuthAvatarEditorTopActions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 10px;
+}
+
+.welcomeAuthAvatarZoomHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.welcomeAuthAvatarZoomLabel,
+.welcomeAuthAvatarZoomValue {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: rgba(200, 224, 239, 0.92);
+}
+
+.welcomeAuthAvatarZoomInput {
+    width: 100%;
+    margin: 0;
+    accent-color: #8decc2;
+}
+
+.welcomeAuthAvatarZoomInput:disabled {
+    opacity: 0.46;
+    cursor: not-allowed;
+}
+
+#welcomeAuthToolsSection {
+    display: none;
+    gap: 12px;
+}
+
+#welcomeAuthToolsSection[data-open='true'] {
+    display: grid;
 }
 
 .welcomeAuthSectionHeading {
@@ -6679,6 +6923,255 @@ body.race-intro-active #botPanel {
     display: none !important;
 }
 
+.welcomeAuthGaragePanel {
+    position: relative;
+    min-height: 100%;
+    height: 100%;
+    gap: 16px;
+}
+
+.welcomeAuthGarageHero,
+.welcomeAuthGarageWrapCard {
+    position: relative;
+    display: grid;
+    gap: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+    isolation: auto;
+    background: none;
+    box-shadow: none;
+    pointer-events: none;
+}
+
+.welcomeAuthGarageHero::before,
+.welcomeAuthGarageWrapCard::before {
+    display: none;
+}
+
+.welcomeAuthGarageMeta {
+    position: absolute;
+    top: clamp(14px, 2.4vh, 24px);
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(calc(100% - 128px), 460px);
+    min-width: 0;
+    display: grid;
+    gap: 8px;
+    justify-items: center;
+    pointer-events: none;
+}
+
+.welcomeAuthGarageMeta::after {
+    content: '';
+    width: min(100%, 118px);
+    height: 1px;
+    border-radius: 999px;
+    background: linear-gradient(
+        90deg,
+        rgba(132, 186, 223, 0),
+        rgba(174, 218, 244, 0.96) 50%,
+        rgba(132, 186, 223, 0)
+    );
+    box-shadow: 0 0 20px rgba(109, 190, 248, 0.18);
+}
+
+.welcomeAuthGarageVehicleName {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(20px, 1.8vw, 30px);
+    font-weight: 900;
+    line-height: 0.96;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    text-align: center;
+    white-space: nowrap;
+    color: transparent;
+    background: linear-gradient(
+        108deg,
+        rgba(248, 251, 255, 0.98) 0%,
+        rgba(223, 238, 248, 0.98) 28%,
+        rgba(176, 213, 244, 0.98) 56%,
+        rgba(255, 223, 183, 0.98) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow:
+        0 0 14px rgba(150, 204, 244, 0.12),
+        0 8px 18px rgba(0, 0, 0, 0.14);
+}
+
+.welcomeAuthGarageVehiclePips {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+.welcomeAuthGarageVehiclePip {
+    width: 26px;
+    height: 3px;
+    border-radius: 999px;
+    background: rgba(129, 173, 205, 0.24);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition:
+        transform 180ms ease,
+        background 180ms ease,
+        box-shadow 180ms ease,
+        opacity 180ms ease;
+}
+
+.welcomeAuthGarageVehiclePip[data-active='true'] {
+    transform: scaleX(1.06);
+    background: linear-gradient(90deg, rgba(130, 238, 198, 0.96), rgba(117, 191, 251, 0.96));
+    box-shadow:
+        0 0 14px rgba(117, 191, 251, 0.26),
+        0 0 22px rgba(130, 238, 198, 0.14);
+}
+
+.welcomeAuthGarageControlRow {
+    position: relative;
+    width: 100%;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: clamp(10px, 1.4vw, 16px);
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageControlBtn,
+.welcomeAuthGarageActionBtn {
+    position: relative;
+    z-index: 1;
+    width: 42px;
+    height: 42px;
+    padding: 0;
+    border: 1px solid rgba(162, 210, 239, 0.32);
+    border-radius: 14px;
+    display: grid;
+    place-items: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+    color: rgba(238, 247, 255, 0.98);
+    background:
+        linear-gradient(180deg, rgba(13, 29, 46, 0.78), rgba(6, 16, 27, 0.84)),
+        radial-gradient(circle at 30% 24%, rgba(186, 234, 255, 0.14), rgba(186, 234, 255, 0) 44%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 14px 28px rgba(0, 0, 0, 0.22),
+        0 0 0 1px rgba(104, 184, 232, 0.06);
+    backdrop-filter: blur(16px) saturate(1.16);
+    cursor: pointer;
+    transition:
+        transform 160ms ease,
+        border-color 160ms ease,
+        box-shadow 160ms ease,
+        filter 160ms ease,
+        opacity 160ms ease;
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageActionBtn {
+    width: 40px;
+    height: 40px;
+    font-size: 19px;
+}
+
+.welcomeAuthGarageControlBtn:hover,
+.welcomeAuthGarageControlBtn:focus-visible,
+.welcomeAuthGarageActionBtn:hover,
+.welcomeAuthGarageActionBtn:focus-visible {
+    transform: translateY(-1px) scale(1.04);
+    border-color: rgba(215, 235, 248, 0.74);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.14),
+        0 18px 30px rgba(0, 0, 0, 0.24);
+    filter: brightness(1.08);
+}
+
+.welcomeAuthGarageControlBtn:disabled,
+.welcomeAuthGarageActionBtn:disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthGarageControlBtnPrimary,
+.welcomeAuthGarageActionBtnPrimary {
+    border-color: rgba(133, 205, 255, 0.52);
+    background:
+        linear-gradient(180deg, rgba(22, 63, 104, 0.82), rgba(12, 31, 52, 0.9)),
+        radial-gradient(circle at 24% 18%, rgba(129, 230, 191, 0.16), rgba(129, 230, 191, 0) 52%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 12px 22px rgba(21, 66, 112, 0.18);
+}
+
+.welcomeAuthGarageActionBtnDanger {
+    border-color: rgba(244, 163, 143, 0.42);
+    color: rgba(255, 233, 224, 0.98);
+    background:
+        linear-gradient(180deg, rgba(84, 37, 37, 0.9), rgba(41, 18, 18, 0.96)),
+        radial-gradient(circle at 24% 18%, rgba(255, 179, 140, 0.18), rgba(255, 179, 140, 0) 52%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 18px 28px rgba(63, 22, 22, 0.22);
+}
+
+.welcomeAuthGarageWrapCard {
+    align-items: start;
+    pointer-events: none;
+}
+
+.welcomeAuthGarageWrapStage {
+    display: none;
+}
+
+.welcomeAuthCarWrapFallbackGlyph {
+    display: none;
+}
+
+.welcomeAuthGarageWrapStatus {
+    display: none;
+}
+
+.welcomeAuthGarageWrapActions {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-columns: repeat(2, auto);
+    gap: 8px;
+    align-self: start;
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageWrapCard[data-wrap-state='custom'] .welcomeAuthGarageActionBtnPrimary {
+    border-color: rgba(255, 214, 145, 0.58);
+    color: rgba(255, 240, 212, 0.98);
+    background:
+        linear-gradient(180deg, rgba(96, 67, 28, 0.84), rgba(46, 29, 11, 0.92)),
+        radial-gradient(circle at 24% 18%, rgba(255, 238, 205, 0.14), rgba(255, 238, 205, 0) 52%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 12px 22px rgba(73, 49, 16, 0.18);
+}
+
+.welcomeAuthGarageActionBtn[hidden] {
+    display: none !important;
+}
+
 .welcomeAuthSecurityPanel {
     gap: 14px;
 }
@@ -6704,6 +7197,10 @@ body.race-intro-active #botPanel {
         0 12px 22px rgba(0, 0, 0, 0.14);
 }
 
+.welcomeAuthSecurityItemStatic {
+    grid-template-columns: minmax(0, 1fr);
+}
+
 .welcomeAuthSecurityCopy {
     min-width: 0;
     display: grid;
@@ -6725,6 +7222,27 @@ body.race-intro-active #botPanel {
     font-weight: 600;
     letter-spacing: 0.2px;
     color: rgba(173, 201, 220, 0.88);
+}
+
+.welcomeAuthSecurityValue {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    min-height: 34px;
+    max-width: min(100%, 420px);
+    padding: 0 13px;
+    border: 1px solid rgba(124, 170, 204, 0.28);
+    border-radius: 12px;
+    font-family: 'Sora', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.24px;
+    color: rgba(214, 230, 241, 0.96);
+    background:
+        linear-gradient(180deg, rgba(13, 29, 45, 0.72), rgba(8, 18, 29, 0.84)),
+        linear-gradient(90deg, rgba(113, 184, 255, 0.08), rgba(113, 184, 255, 0));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    overflow-wrap: anywhere;
 }
 
 .welcomeAuthCompactActionBtn {
@@ -7189,7 +7707,7 @@ body.race-intro-active #botPanel {
     .welcomeAuthSignedInShell .welcomeAuthProfileRow {
         grid-template-columns: 1fr;
         min-height: auto;
-        padding: 0 0 14px;
+        padding: 6px 0 14px;
         gap: 14px;
     }
 
@@ -7199,14 +7717,31 @@ body.race-intro-active #botPanel {
         border-radius: 24px;
     }
 
-    .welcomeAuthAvatarFrame::after {
-        width: 30px;
-        height: 30px;
-        font-size: 18px;
+    .welcomeAuthProfileMeta {
+        padding: 6px 0 6px;
+    }
+
+    .welcomeAuthSignedInName {
+        max-width: 100%;
+        padding: 0;
+        font-size: clamp(24px, 8vw, 32px);
+    }
+
+    .welcomeAuthProfileStats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .welcomeAuthInlineActions {
         grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthAvatarEditorBody,
+    .welcomeAuthAvatarEditorTopActions {
+        grid-template-columns: 1fr;
+    }
+
+    .welcomeAuthAvatarEditorViewport {
+        width: min(100%, 220px);
     }
 
     .welcomeAuthActionGrid {
@@ -7215,6 +7750,66 @@ body.race-intro-active #botPanel {
 
     .welcomeAuthSectionTabs {
         flex-direction: column;
+    }
+
+    .welcomeAuthGarageWrapActions {
+        grid-auto-flow: column;
+        grid-template-columns: repeat(2, auto);
+        width: auto;
+    }
+
+    .welcomeAuthGarageControlRow {
+        gap: 8px;
+    }
+
+    .welcomeAuthGarageMeta {
+        width: min(calc(100% - 72px), 420px);
+    }
+
+    .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions {
+        grid-column: auto;
+    }
+
+    .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthSectionStage {
+        width: 100%;
+        max-width: none;
+        min-height: 100%;
+        height: 100%;
+        padding-bottom: 0;
+    }
+
+    .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageHero {
+        inset: 0;
+        width: auto;
+    }
+
+    .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapCard {
+        left: auto;
+        right: 12px;
+        bottom: 12px;
+        width: auto;
+    }
+
+    .welcomeAuthGarageVehicleName {
+        font-size: clamp(18px, 4.8vw, 24px);
+        letter-spacing: 0.14em;
+    }
+
+    .welcomeAuthGarageVehiclePip {
+        width: 24px;
+    }
+
+    .welcomeAuthGarageControlBtn {
+        width: 38px;
+        height: 38px;
+        border-radius: 12px;
+        font-size: 20px;
+    }
+
+    .welcomeAuthGarageActionBtn {
+        width: 38px;
+        height: 38px;
+        font-size: 18px;
     }
 
     .welcomeAuthSecurityItem,
@@ -7250,6 +7845,17 @@ body.race-intro-active #botPanel {
 
     .welcomeAuthCarWrapPreviewFrame {
         width: min(100%, 220px);
+    }
+
+    .welcomePreviewAccountPanel[data-mode='garage'] .welcomePreviewAccountCard {
+        grid-template-rows: minmax(0, 1fr);
+        gap: 0;
+    }
+
+    .welcomePreviewAccountPanel[data-mode='garage'] .welcomePreviewLeaderboardHeader {
+        position: absolute;
+        top: 0;
+        right: 0;
     }
 }
 
@@ -7923,29 +8529,6 @@ body.race-intro-active #botPanel {
     filter: blur(1.5px) saturate(0.54) brightness(0.66);
 }
 
-.welcomeShowroomBay[data-preview-loading='true'] .welcomeVehicleNav {
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
-.welcomePreviewLabel {
-    position: absolute;
-    z-index: 4;
-    left: 14px;
-    top: 14px;
-    border: 1px solid rgba(166, 210, 234, 0.56);
-    border-radius: 999px;
-    padding: 6px 10px;
-    font-family: 'Sora', sans-serif;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    color: rgba(219, 236, 247, 0.96);
-    background: rgba(13, 27, 41, 0.6);
-    backdrop-filter: blur(3px);
-}
-
 #welcomeCarCanvas {
     position: relative;
     z-index: 3;
@@ -7955,6 +8538,15 @@ body.race-intro-active #botPanel {
     transition:
         opacity 220ms ease,
         filter 220ms ease;
+}
+
+#welcomeCarCanvas[data-garage-interactive='true'] {
+    cursor: grab;
+    touch-action: none;
+}
+
+#welcomeCarCanvas[data-dragging='true'] {
+    cursor: grabbing;
 }
 
 .welcomeBayRings {
@@ -8121,6 +8713,83 @@ body.race-intro-active #botPanel {
     background: linear-gradient(180deg, rgba(92, 66, 31, 0.88), rgba(50, 34, 15, 0.94));
 }
 
+.welcomePreviewLeaderboardActionBtn.is-gear {
+    position: relative;
+    width: 58px;
+    min-width: 58px;
+    min-height: 58px;
+    padding: 0;
+    place-items: center;
+    border: 0;
+    border-radius: 0;
+    color: rgba(232, 242, 250, 0.98);
+    background: transparent;
+    box-shadow: none;
+}
+
+.welcomePreviewLeaderboardActionBtn.is-gear::before {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border-radius: 999px;
+    background: radial-gradient(
+        circle,
+        rgba(95, 163, 219, 0.22) 0%,
+        rgba(95, 163, 219, 0.12) 38%,
+        rgba(95, 163, 219, 0) 72%
+    );
+    filter: blur(10px);
+    opacity: 0.62;
+    pointer-events: none;
+}
+
+.welcomePreviewLeaderboardActionBtn.is-gear span {
+    display: block;
+    font-size: 40px;
+    line-height: 1;
+    text-shadow:
+        0 0 18px rgba(118, 184, 236, 0.26),
+        0 10px 22px rgba(0, 0, 0, 0.24);
+    animation: welcomeAccountGearSpin 18s linear infinite;
+    transform-origin: 50% 50%;
+    pointer-events: none;
+}
+
+.welcomePreviewLeaderboardActionBtn.is-gear[data-open='true'] {
+    color: rgba(255, 226, 173, 0.99);
+}
+
+.welcomePreviewLeaderboardActionBtn.is-gear[data-open='true']::before {
+    background: radial-gradient(
+        circle,
+        rgba(255, 198, 107, 0.26) 0%,
+        rgba(255, 198, 107, 0.14) 38%,
+        rgba(255, 198, 107, 0) 72%
+    );
+    opacity: 0.88;
+}
+
+.welcomePreviewLeaderboardActionBtn.is-gear:hover,
+.welcomePreviewLeaderboardActionBtn.is-gear:focus-visible {
+    transform: scale(1.06);
+    filter: none;
+    border-color: transparent;
+}
+
+.welcomePreviewLeaderboardActionBtn.is-gear:hover span,
+.welcomePreviewLeaderboardActionBtn.is-gear:focus-visible span {
+    animation-duration: 12s;
+}
+
+@keyframes welcomeAccountGearSpin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
 .welcomePreviewLeaderboardActionBtn:hover,
 .welcomePreviewLeaderboardActionBtn:focus-visible {
     transform: translateY(-1px);
@@ -8176,7 +8845,7 @@ body.race-intro-active #botPanel {
     box-shadow: none;
     backdrop-filter: none;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
     gap: 12px;
     pointer-events: none;
 }
@@ -8206,16 +8875,50 @@ body.race-intro-active #botPanel {
     letter-spacing: 1.4px;
 }
 
+.welcomePreviewAccountPanel[data-mode='garage'] .welcomePreviewAccountCard {
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
+}
+
+.welcomePreviewAccountPanel[data-mode='garage'] .welcomePreviewLeaderboardHeader {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 2;
+    justify-content: flex-end;
+}
+
+.welcomePreviewAccountPanel[data-mode='garage'] .welcomePreviewLeaderboardHeading {
+    display: none;
+}
+
+.welcomePreviewAccountPanel[data-mode='garage'] .welcomePreviewAccountBody {
+    height: 100%;
+    align-content: stretch;
+    overflow: visible;
+    pointer-events: none;
+}
+
+.welcomePreviewAccountPanel[data-mode='garage'][data-preview-drag-enabled='true'] {
+    cursor: grab;
+    touch-action: none;
+}
+
+.welcomePreviewAccountPanel[data-mode='garage'][data-preview-dragging='true'] {
+    cursor: grabbing;
+}
+
 .welcomePreviewAccountTitle {
     margin-top: 0;
-    font-size: clamp(28px, 3.2vw, 38px);
+    font-size: clamp(24px, 2.8vw, 34px);
     line-height: 0.98;
-    letter-spacing: 0.35px;
+    letter-spacing: 0.8px;
     color: transparent;
     background: linear-gradient(108deg, #f7fbff 0%, #deeffb 34%, #ffffff 54%, #ffdcb2 100%);
     -webkit-background-clip: text;
     background-clip: text;
     text-shadow: 0 0 18px rgba(178, 216, 242, 0.1);
+    text-transform: uppercase;
 }
 
 .welcomePreviewSettingsTitle {
@@ -8231,6 +8934,11 @@ body.race-intro-active #botPanel {
     padding-right: 4px;
 }
 
+.welcomePreviewAccountBody[data-mode='garage'] {
+    overflow: visible;
+    padding-right: 0;
+}
+
 .welcomePreviewAccountBody .welcomeAuthPanel {
     width: min(100%, 640px);
     justify-self: center;
@@ -8240,6 +8948,255 @@ body.race-intro-active #botPanel {
     background: transparent;
     box-shadow: none;
     min-height: 0;
+}
+
+.welcomePreviewAccountBody[data-mode='garage'] .welcomeAuthPanel {
+    width: 100%;
+    max-width: none;
+    justify-self: stretch;
+    height: 100%;
+}
+
+.welcomePreviewCarWrapDock {
+    position: relative;
+    z-index: 1;
+    width: min(100%, 280px);
+    justify-self: center;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    padding: 0 0 4px;
+    pointer-events: auto;
+}
+
+.welcomePreviewCarWrapDock[hidden] {
+    display: none !important;
+}
+
+.welcomePreviewCarWrapSurface {
+    position: relative;
+    min-height: 76px;
+    padding: 10px 12px 10px 22px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    border: 1px solid rgba(149, 197, 230, 0.46);
+    border-radius: 999px;
+    background:
+        linear-gradient(180deg, rgba(8, 18, 31, 0.92), rgba(5, 12, 23, 0.96)),
+        radial-gradient(circle at 18% 50%, rgba(98, 189, 255, 0.12), rgba(98, 189, 255, 0) 42%),
+        radial-gradient(circle at 84% 26%, rgba(255, 186, 112, 0.14), rgba(255, 186, 112, 0) 28%);
+    box-shadow:
+        0 18px 36px rgba(0, 0, 0, 0.24),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    overflow: hidden;
+    transition:
+        transform 160ms ease,
+        border-color 160ms ease,
+        box-shadow 160ms ease,
+        filter 160ms ease;
+}
+
+.welcomePreviewCarWrapSurface::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(120deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 34%),
+        linear-gradient(90deg, rgba(147, 214, 255, 0.08), rgba(147, 214, 255, 0) 54%);
+    pointer-events: none;
+}
+
+.welcomePreviewCarWrapSurface:hover:not(:disabled),
+.welcomePreviewCarWrapSurface:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(195, 229, 250, 0.76);
+    box-shadow:
+        0 22px 40px rgba(0, 0, 0, 0.28),
+        inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    filter: brightness(1.03);
+}
+
+.welcomePreviewCarWrapSurface:disabled {
+    cursor: not-allowed;
+    opacity: 0.64;
+    transform: none;
+    filter: none;
+}
+
+.welcomePreviewCarWrapFrame {
+    display: none;
+}
+
+.welcomePreviewCarWrapFrame::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(140deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0) 48%);
+    pointer-events: none;
+}
+
+.welcomePreviewCarWrapPreview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.welcomePreviewCarWrapPreview[hidden] {
+    display: none !important;
+}
+
+.welcomePreviewCarWrapFallback {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    background:
+        linear-gradient(130deg, rgba(29, 64, 97, 0.88), rgba(10, 23, 39, 0.96)),
+        repeating-linear-gradient(
+            135deg,
+            rgba(128, 191, 240, 0.18) 0 10px,
+            rgba(128, 191, 240, 0.02) 10px 20px
+        );
+}
+
+.welcomePreviewCarWrapFallback::before {
+    content: '';
+    position: absolute;
+    width: 56px;
+    height: 56px;
+    border-radius: 999px;
+    border: 1px solid rgba(220, 240, 255, 0.22);
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0));
+    box-shadow: 0 0 0 10px rgba(126, 191, 239, 0.06);
+}
+
+.welcomePreviewCarWrapFallbackMark {
+    position: relative;
+    font-family: 'Sora', sans-serif;
+    font-size: 24px;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: 2px;
+    color: rgba(238, 247, 255, 0.96);
+    text-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
+}
+
+.welcomePreviewGarageMeta {
+    display: grid;
+    gap: 0;
+    min-width: 0;
+}
+
+.welcomePreviewGarageLabelRow {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.welcomePreviewGarageIcon {
+    flex: 0 0 auto;
+    font-size: clamp(24px, 2.4vw, 30px);
+    line-height: 1;
+    filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
+}
+
+.welcomePreviewGarageTitle {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(18px, 2vw, 22px);
+    font-weight: 800;
+    letter-spacing: 2.6px;
+    text-transform: uppercase;
+    color: rgba(236, 245, 252, 0.98);
+}
+
+.welcomePreviewGarageSubtitle {
+    display: none;
+}
+
+.welcomePreviewCarWrapGlyph,
+.welcomePreviewCarWrapIconBtn {
+    position: relative;
+    z-index: 1;
+    width: 50px;
+    height: 50px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-family: 'Sora', sans-serif;
+    font-size: 24px;
+    line-height: 1;
+    color: rgba(240, 248, 255, 0.98);
+    border: 1px solid rgba(155, 206, 236, 0.44);
+    background:
+        linear-gradient(180deg, rgba(34, 75, 108, 0.82), rgba(12, 30, 48, 0.92)),
+        radial-gradient(circle at 30% 24%, rgba(173, 230, 255, 0.14), rgba(173, 230, 255, 0) 46%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 14px 24px rgba(0, 0, 0, 0.16);
+}
+
+.welcomePreviewCarWrapIconBtn {
+    cursor: pointer;
+    transition:
+        transform 160ms ease,
+        border-color 160ms ease,
+        box-shadow 160ms ease,
+        filter 160ms ease,
+        opacity 160ms ease;
+}
+
+.welcomePreviewCarWrapIconBtn:hover:not(:disabled),
+.welcomePreviewCarWrapIconBtn:focus-visible {
+    transform: translateY(-1px);
+    border-color: rgba(244, 188, 188, 0.76);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 16px 26px rgba(0, 0, 0, 0.22);
+    filter: brightness(1.04);
+}
+
+.welcomePreviewCarWrapIconBtn:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+    transform: none;
+    filter: none;
+}
+
+.welcomePreviewCarWrapIconBtn span {
+    transform: translateY(-1px);
+}
+
+#welcomeAuthCarWrapCard[data-has-image='true'] .welcomePreviewCarWrapSurface {
+    border-color: rgba(175, 221, 250, 0.64);
+    background:
+        linear-gradient(180deg, rgba(7, 19, 31, 0.92), rgba(4, 10, 20, 0.96)),
+        radial-gradient(circle at 80% 24%, rgba(255, 183, 105, 0.14), rgba(255, 183, 105, 0) 28%),
+        radial-gradient(circle at 18% 50%, rgba(112, 214, 255, 0.1), rgba(112, 214, 255, 0) 38%);
+}
+
+#welcomeAuthCarWrapCard[data-has-image='true'] .welcomePreviewCarWrapGlyph {
+    color: rgba(255, 237, 206, 0.98);
+    border-color: rgba(255, 213, 153, 0.5);
+    background:
+        linear-gradient(180deg, rgba(119, 79, 35, 0.84), rgba(53, 31, 10, 0.92)),
+        radial-gradient(circle at 30% 24%, rgba(255, 234, 198, 0.14), rgba(255, 234, 198, 0) 46%);
+}
+
+.welcomePreviewCarWrapSurface[data-busy='true'] .welcomePreviewCarWrapGlyph,
+.welcomePreviewCarWrapIconBtn[data-busy='true'] {
+    animation: welcomePreviewCarWrapPulse 900ms ease-in-out infinite;
+}
+
+.welcomeShowroomBay[data-account-tools-open='true'] .welcomePreviewCarWrapDock,
+.welcomeShowroomBay[data-garage-open='true'] .welcomePreviewCarWrapDock {
+    display: none;
 }
 
 .welcomePreviewDonateCard {
@@ -8426,97 +9383,6 @@ body.race-intro-active #botPanel {
     filter: none;
 }
 
-.welcomeShowroomBay[data-leaderboard-open='true'] .welcomeVehicleNav {
-    opacity: 0 !important;
-    pointer-events: none !important;
-}
-
-.welcomeVehicleNav {
-    position: absolute;
-    z-index: 5;
-    top: 50%;
-    width: 52px;
-    height: 52px;
-    border: 1px solid rgba(205, 226, 240, 0.34);
-    border-radius: 50%;
-    padding: 0;
-    display: grid;
-    place-items: center;
-    color: rgba(236, 245, 252, 0.96);
-    font-family: 'Sora', sans-serif;
-    font-size: 24px;
-    font-weight: 600;
-    line-height: 1;
-    background: rgba(12, 24, 36, 0.58);
-    backdrop-filter: blur(8px) saturate(1.2);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(-50%) scale(0.94);
-    transition:
-        transform 140ms ease,
-        opacity 140ms ease,
-        background-color 140ms ease,
-        border-color 140ms ease,
-        box-shadow 140ms ease;
-}
-
-.welcomeVehicleNav::before {
-    content: none;
-}
-
-.welcomeVehicleNav::after {
-    content: none;
-}
-
-.welcomeVehicleNav span {
-    transform: translateY(-1px);
-    text-shadow: none;
-}
-
-.welcomeVehicleNavPrev {
-    left: 14px;
-}
-
-.welcomeVehicleNavNext {
-    right: 14px;
-}
-
-#welcomePreviewShell:hover .welcomeVehicleNav,
-#welcomePreviewShell:focus-within .welcomeVehicleNav {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(-50%) scale(1);
-}
-
-.welcomeVehicleNav:hover {
-    transform: translateY(-50%) scale(1.03);
-    background: rgba(18, 33, 48, 0.78);
-    border-color: rgba(218, 236, 248, 0.52);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.32);
-}
-
-.welcomeVehicleNav:active {
-    transform: translateY(-50%) scale(0.97);
-}
-
-.welcomeVehicleNav:focus-visible {
-    outline: none;
-    border-color: rgba(225, 243, 255, 0.74);
-    box-shadow:
-        0 0 0 2px rgba(151, 213, 248, 0.28),
-        0 8px 20px rgba(0, 0, 0, 0.28);
-}
-
-@media (hover: none), (pointer: coarse) {
-    .welcomeVehicleNav {
-        opacity: 1;
-        pointer-events: auto;
-        transform: translateY(-50%) scale(1);
-    }
-}
-
 @media (max-width: 1040px) {
     .welcomeShell {
         grid-template-columns: 1fr;
@@ -8654,6 +9520,51 @@ body.race-intro-active #botPanel {
         text-align: left;
     }
 
+    .welcomePreviewCarWrapDock {
+        width: min(100%, 260px);
+        gap: 8px;
+        padding-bottom: 2px;
+    }
+
+    .welcomePreviewCarWrapSurface {
+        min-height: 68px;
+        padding: 8px 10px 8px 18px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+    }
+
+    .welcomePreviewCarWrapFrame {
+        display: none;
+    }
+
+    .welcomePreviewGarageMeta {
+        gap: 0;
+    }
+
+    .welcomePreviewGarageLabelRow {
+        gap: 10px;
+    }
+
+    .welcomePreviewGarageIcon {
+        font-size: 24px;
+    }
+
+    .welcomePreviewGarageTitle {
+        font-size: 17px;
+        letter-spacing: 2.1px;
+    }
+
+    .welcomePreviewGarageSubtitle {
+        display: none;
+    }
+
+    .welcomePreviewCarWrapGlyph,
+    .welcomePreviewCarWrapIconBtn {
+        width: 42px;
+        height: 42px;
+        font-size: 20px;
+    }
+
     .welcomePreviewLoading {
         gap: 8px;
         padding: 16px;
@@ -8675,28 +9586,6 @@ body.race-intro-active #botPanel {
 
     .welcomePreviewLoadingPercent {
         font-size: 10px;
-    }
-
-    .welcomePreviewLabel {
-        left: 9px;
-        top: 9px;
-        font-size: 9px;
-        padding: 5px 8px;
-    }
-
-    .welcomeVehicleNav {
-        width: 42px;
-        height: 42px;
-        border-radius: 50%;
-        font-size: 22px;
-    }
-
-    .welcomeVehicleNavPrev {
-        left: 8px;
-    }
-
-    .welcomeVehicleNavNext {
-        right: 8px;
     }
 
     .welcomeLaunchCard {
@@ -8872,6 +9761,23 @@ body.race-intro-active #botPanel {
     100% {
         opacity: 0;
         transform: translateX(44%);
+    }
+}
+
+@keyframes welcomePreviewCarWrapPulse {
+    0%,
+    100% {
+        transform: scale(1);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.08),
+            0 14px 24px rgba(0, 0, 0, 0.16);
+    }
+
+    50% {
+        transform: scale(1.05);
+        box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.12),
+            0 18px 30px rgba(0, 0, 0, 0.22);
     }
 }
 

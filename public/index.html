@@ -179,8 +179,8 @@
                             </div>
                         </div>
                         <div id="welcomeAuthSignedInView" class="welcomeAuthSignedInView" hidden>
-                            <div class="welcomeAuthSignedInShell">
-                                <div class="welcomeAuthProfileRow">
+                            <div id="welcomeAuthSignedInShell" class="welcomeAuthSignedInShell">
+                                <div id="welcomeAuthProfileRow" class="welcomeAuthProfileRow">
                                     <button
                                         id="welcomeAuthAvatarFrame"
                                         class="welcomeAuthAvatarFrame"
@@ -203,25 +203,78 @@
                                     </button>
                                     <div class="welcomeAuthProfileMeta">
                                         <div
+                                            id="welcomeAuthProfileKicker"
+                                            class="welcomeAuthProfileKicker"
+                                        >
+                                            COMPETITIVE DRIVER
+                                        </div>
+                                        <div
                                             id="welcomeAuthSignedInName"
                                             class="welcomeAuthSignedInName"
                                         >
-                                            ONLINE
+                                            Driver
+                                        </div>
+                                        <div class="welcomeAuthProfileAccentRow">
+                                            <div
+                                                id="welcomeAuthProfileRankBadge"
+                                                class="welcomeAuthProfileRankBadge"
+                                            >
+                                                UNRANKED
+                                            </div>
+                                            <div
+                                                id="welcomeAuthProfileSubline"
+                                                class="welcomeAuthProfileSubline"
+                                            >
+                                                Sync your first finished run to unlock profile
+                                                stats.
+                                            </div>
                                         </div>
                                         <div
-                                            id="welcomeAuthSignedInEmail"
-                                            class="welcomeAuthSignedInEmail"
+                                            class="welcomeAuthProfileStats"
+                                            aria-label="Driver stats"
                                         >
-                                            driver@example.com
-                                        </div>
-                                        <div class="welcomeAuthProfileInlineActions">
-                                            <button
-                                                id="welcomeAuthAvatarRemoveBtn"
-                                                class="welcomeAuthMetaActionBtn"
-                                                type="button"
-                                            >
-                                                REMOVE
-                                            </button>
+                                            <div class="welcomeAuthProfileStat">
+                                                <div class="welcomeAuthProfileStatLabel">Wins</div>
+                                                <div
+                                                    id="welcomeAuthProfileWins"
+                                                    class="welcomeAuthProfileStatValue"
+                                                >
+                                                    0
+                                                </div>
+                                            </div>
+                                            <div class="welcomeAuthProfileStat">
+                                                <div class="welcomeAuthProfileStatLabel">
+                                                    Losses
+                                                </div>
+                                                <div
+                                                    id="welcomeAuthProfileLosses"
+                                                    class="welcomeAuthProfileStatValue"
+                                                >
+                                                    0
+                                                </div>
+                                            </div>
+                                            <div class="welcomeAuthProfileStat">
+                                                <div class="welcomeAuthProfileStatLabel">
+                                                    Win Rate
+                                                </div>
+                                                <div
+                                                    id="welcomeAuthProfileWinRate"
+                                                    class="welcomeAuthProfileStatValue"
+                                                >
+                                                    0%
+                                                </div>
+                                            </div>
+                                            <div class="welcomeAuthProfileStat">
+                                                <div class="welcomeAuthProfileStatLabel">
+                                                    Best Score
+                                                </div>
+                                                <div
+                                                    id="welcomeAuthProfileBestScore"
+                                                    class="welcomeAuthProfileStatValue"
+                                                >
+                                                    0
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -232,110 +285,91 @@
                                     accept="image/jpeg,image/png,image/webp"
                                     hidden
                                 />
-                                <div class="welcomeAuthSectionHeading">
-                                    <div class="welcomeAuthSectionEyebrow">ACCOUNT TOOLS</div>
-                                    <div
-                                        id="welcomeAuthSectionSecurityTitle"
-                                        class="welcomeAuthSectionTitle"
-                                    >
-                                        Security
+                                <section
+                                    id="welcomeAuthAvatarEditor"
+                                    class="welcomeAuthAvatarEditor"
+                                    aria-labelledby="welcomeAuthAvatarEditorTitle"
+                                    hidden
+                                >
+                                    <div class="welcomeAuthAvatarEditorHeader">
+                                        <div
+                                            id="welcomeAuthAvatarEditorTitle"
+                                            class="welcomeAuthAvatarEditorTitle"
+                                        >
+                                            Profile Photo
+                                        </div>
                                     </div>
-                                </div>
-                                <div class="welcomeAuthSectionStage">
-                                    <section
-                                        id="welcomeAuthSectionSecurityPanel"
-                                        class="welcomeAuthSectionPanel welcomeAuthSecurityPanel"
-                                        role="region"
-                                        aria-labelledby="welcomeAuthSectionSecurityTitle"
-                                        hidden
-                                    >
-                                        <div class="welcomeAuthSecurityRail">
-                                            <div class="welcomeAuthSecurityItem">
-                                                <div class="welcomeAuthSecurityCopy">
-                                                    <div class="welcomeAuthSecurityItemTitle">
-                                                        Password
-                                                    </div>
-                                                    <div class="welcomeAuthSecurityItemHint">
-                                                        Update it only when needed.
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    id="welcomeAuthChangePasswordToggleBtn"
-                                                    class="welcomeAuthCompactActionBtn welcomeAuthCompactActionBtnPrimary"
-                                                    type="button"
-                                                >
-                                                    CHANGE
-                                                </button>
-                                            </div>
-                                            <div class="welcomeAuthSecurityItem">
-                                                <div class="welcomeAuthSecurityCopy">
-                                                    <div class="welcomeAuthSecurityItemTitle">
-                                                        Session
-                                                    </div>
-                                                    <div class="welcomeAuthSecurityItemHint">
-                                                        Log out from this device.
-                                                    </div>
-                                                </div>
-                                                <button
-                                                    id="welcomeAuthSignOutBtn"
-                                                    class="welcomeAuthCompactActionBtn"
-                                                    type="button"
-                                                >
-                                                    LOG OUT
-                                                </button>
+                                    <div class="welcomeAuthAvatarEditorBody">
+                                        <div
+                                            id="welcomeAuthAvatarEditorViewport"
+                                            class="welcomeAuthAvatarEditorViewport"
+                                            data-empty="true"
+                                        >
+                                            <img
+                                                id="welcomeAuthAvatarEditorImage"
+                                                class="welcomeAuthAvatarEditorImage"
+                                                alt="Profile photo crop preview"
+                                                hidden
+                                            />
+                                            <div
+                                                id="welcomeAuthAvatarEditorEmptyState"
+                                                class="welcomeAuthAvatarEditorEmptyState"
+                                            >
+                                                <span aria-hidden="true">+</span>
                                             </div>
                                         </div>
-                                        <div
-                                            id="welcomeAuthPasswordChangePanel"
-                                            class="welcomeAuthPasswordChangePanel welcomeAuthPasswordSheet"
-                                            hidden
-                                        >
-                                            <div class="welcomeAuthFields">
-                                                <div class="welcomeAuthField">
-                                                    <label
-                                                        class="welcomeAuthLabel"
-                                                        for="welcomeAuthNewPasswordInput"
-                                                    >
-                                                        NEW PASSWORD
-                                                    </label>
-                                                    <input
-                                                        id="welcomeAuthNewPasswordInput"
-                                                        class="welcomeAuthInput"
-                                                        type="password"
-                                                        maxlength="256"
-                                                        autocomplete="new-password"
-                                                        placeholder="At least 6 characters"
-                                                    />
-                                                </div>
-                                                <div class="welcomeAuthField">
-                                                    <label
-                                                        class="welcomeAuthLabel"
-                                                        for="welcomeAuthConfirmNewPasswordInput"
-                                                    >
-                                                        CONFIRM NEW PASSWORD
-                                                    </label>
-                                                    <input
-                                                        id="welcomeAuthConfirmNewPasswordInput"
-                                                        class="welcomeAuthInput"
-                                                        type="password"
-                                                        maxlength="256"
-                                                        autocomplete="new-password"
-                                                        placeholder="Repeat your new password"
-                                                    />
+                                        <div class="welcomeAuthAvatarEditorControls">
+                                            <div class="welcomeAuthAvatarEditorTopActions">
+                                                <button
+                                                    id="welcomeAuthAvatarChooseBtn"
+                                                    class="welcomeAuthSecondaryBtn"
+                                                    type="button"
+                                                >
+                                                    UPLOAD PHOTO
+                                                </button>
+                                                <button
+                                                    id="welcomeAuthAvatarRemoveBtn"
+                                                    class="welcomeAuthDangerBtn"
+                                                    type="button"
+                                                >
+                                                    REMOVE PHOTO
+                                                </button>
+                                            </div>
+                                            <div class="welcomeAuthAvatarZoomHeader">
+                                                <label
+                                                    class="welcomeAuthAvatarZoomLabel"
+                                                    for="welcomeAuthAvatarZoomInput"
+                                                >
+                                                    Zoom
+                                                </label>
+                                                <div
+                                                    id="welcomeAuthAvatarZoomValue"
+                                                    class="welcomeAuthAvatarZoomValue"
+                                                >
+                                                    100%
                                                 </div>
                                             </div>
+                                            <input
+                                                id="welcomeAuthAvatarZoomInput"
+                                                class="welcomeAuthAvatarZoomInput"
+                                                type="range"
+                                                min="100"
+                                                max="300"
+                                                step="1"
+                                                value="100"
+                                            />
                                             <div
                                                 class="welcomeAuthActions welcomeAuthInlineActions"
                                             >
                                                 <button
-                                                    id="welcomeAuthPasswordChangeSubmitBtn"
+                                                    id="welcomeAuthAvatarSaveBtn"
                                                     class="welcomeAuthSubmitBtn"
                                                     type="button"
                                                 >
-                                                    UPDATE PASSWORD
+                                                    SAVE PHOTO
                                                 </button>
                                                 <button
-                                                    id="welcomeAuthPasswordChangeCancelBtn"
+                                                    id="welcomeAuthAvatarCancelBtn"
                                                     class="welcomeAuthSecondaryBtn"
                                                     type="button"
                                                 >
@@ -343,26 +377,265 @@
                                                 </button>
                                             </div>
                                         </div>
-                                        <div class="welcomeAuthDangerZone">
-                                            <div class="welcomeAuthDangerMeta">
-                                                <div class="welcomeAuthDangerTitle">
-                                                    Danger Zone
-                                                </div>
-                                                <div class="welcomeAuthDangerHint">
-                                                    Permanently remove this account and its saved
-                                                    leaderboard data.
+                                    </div>
+                                </section>
+                                <section id="welcomeAuthToolsSection" hidden>
+                                    <div class="welcomeAuthSectionHeading">
+                                        <div
+                                            id="welcomeAuthSectionEyebrow"
+                                            class="welcomeAuthSectionEyebrow"
+                                        >
+                                            ACCOUNT TOOLS
+                                        </div>
+                                        <div
+                                            id="welcomeAuthSectionTitle"
+                                            class="welcomeAuthSectionTitle"
+                                        >
+                                            Security
+                                        </div>
+                                    </div>
+                                    <div class="welcomeAuthSectionStage">
+                                        <section
+                                            id="welcomeAuthSectionGaragePanel"
+                                            class="welcomeAuthSectionPanel welcomeAuthGaragePanel"
+                                            role="region"
+                                            aria-labelledby="welcomeAuthSectionTitle"
+                                            hidden
+                                        >
+                                            <div class="welcomeAuthGarageHero">
+                                                <div class="welcomeAuthGarageMeta">
+                                                    <div class="welcomeAuthGarageControlRow">
+                                                        <button
+                                                            id="welcomeAuthGaragePrevBtn"
+                                                            class="welcomeAuthGarageControlBtn"
+                                                            type="button"
+                                                            aria-label="Previous chassis"
+                                                            title="Previous chassis"
+                                                        >
+                                                            <span aria-hidden="true">‹</span>
+                                                        </button>
+                                                        <div
+                                                            id="welcomeAuthGarageVehicleName"
+                                                            class="welcomeAuthGarageVehicleName"
+                                                        >
+                                                            Voltline Sled
+                                                        </div>
+                                                        <button
+                                                            id="welcomeAuthGarageNextBtn"
+                                                            class="welcomeAuthGarageControlBtn"
+                                                            type="button"
+                                                            aria-label="Next chassis"
+                                                            title="Next chassis"
+                                                        >
+                                                            <span aria-hidden="true">›</span>
+                                                        </button>
+                                                    </div>
+                                                    <div
+                                                        id="welcomeAuthGarageVehiclePips"
+                                                        class="welcomeAuthGarageVehiclePips"
+                                                        aria-hidden="true"
+                                                    ></div>
                                                 </div>
                                             </div>
-                                            <button
-                                                id="welcomeAuthDeleteAccountBtn"
-                                                class="welcomeAuthDangerInlineBtn"
-                                                type="button"
+                                            <div
+                                                id="welcomeAuthGarageWrapCard"
+                                                class="welcomeAuthGarageWrapCard"
                                             >
-                                                DELETE ACCOUNT
-                                            </button>
-                                        </div>
-                                    </section>
-                                </div>
+                                                <div class="welcomeAuthGarageWrapStage">
+                                                    <div class="welcomeAuthCarWrapPreviewFrame">
+                                                        <img
+                                                            id="welcomeAuthGarageWrapPreview"
+                                                            class="welcomeAuthCarWrapPreview"
+                                                            alt="Garage custom car wrap preview"
+                                                            hidden
+                                                        />
+                                                        <div
+                                                            id="welcomeAuthGarageWrapFallback"
+                                                            class="welcomeAuthCarWrapFallback"
+                                                        >
+                                                            <span
+                                                                class="welcomeAuthCarWrapFallbackGlyph"
+                                                                aria-hidden="true"
+                                                            >
+                                                                ✦
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div
+                                                        id="welcomeAuthGarageWrapStatus"
+                                                        class="welcomeAuthGarageWrapStatus"
+                                                        aria-hidden="true"
+                                                    ></div>
+                                                </div>
+                                                <div class="welcomeAuthGarageWrapActions">
+                                                    <button
+                                                        id="welcomeAuthGarageWrapUploadBtn"
+                                                        class="welcomeAuthGarageActionBtn welcomeAuthGarageActionBtnPrimary"
+                                                        type="button"
+                                                        aria-label="Upload wrap"
+                                                        title="Upload wrap"
+                                                    >
+                                                        <span
+                                                            id="welcomeAuthGarageWrapUploadIcon"
+                                                            aria-hidden="true"
+                                                        >
+                                                            +
+                                                        </span>
+                                                    </button>
+                                                    <button
+                                                        id="welcomeAuthGarageWrapRemoveBtn"
+                                                        class="welcomeAuthGarageActionBtn welcomeAuthGarageActionBtnDanger"
+                                                        type="button"
+                                                        aria-label="Remove wrap"
+                                                        title="Remove wrap"
+                                                    >
+                                                        <span
+                                                            id="welcomeAuthGarageWrapRemoveIcon"
+                                                            aria-hidden="true"
+                                                        >
+                                                            ×
+                                                        </span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </section>
+                                        <section
+                                            id="welcomeAuthSectionSecurityPanel"
+                                            class="welcomeAuthSectionPanel welcomeAuthSecurityPanel"
+                                            role="region"
+                                            aria-labelledby="welcomeAuthSectionTitle"
+                                            hidden
+                                        >
+                                            <div class="welcomeAuthSecurityRail">
+                                                <div
+                                                    class="welcomeAuthSecurityItem welcomeAuthSecurityItemStatic"
+                                                >
+                                                    <div class="welcomeAuthSecurityCopy">
+                                                        <div class="welcomeAuthSecurityItemTitle">
+                                                            Login Email
+                                                        </div>
+                                                        <div
+                                                            id="welcomeAuthSignedInEmail"
+                                                            class="welcomeAuthSecurityValue"
+                                                        >
+                                                            driver@example.com
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="welcomeAuthSecurityItem">
+                                                    <div class="welcomeAuthSecurityCopy">
+                                                        <div class="welcomeAuthSecurityItemTitle">
+                                                            Password
+                                                        </div>
+                                                        <div class="welcomeAuthSecurityItemHint">
+                                                            Update it only when needed.
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        id="welcomeAuthChangePasswordToggleBtn"
+                                                        class="welcomeAuthCompactActionBtn welcomeAuthCompactActionBtnPrimary"
+                                                        type="button"
+                                                    >
+                                                        CHANGE
+                                                    </button>
+                                                </div>
+                                                <div class="welcomeAuthSecurityItem">
+                                                    <div class="welcomeAuthSecurityCopy">
+                                                        <div class="welcomeAuthSecurityItemTitle">
+                                                            Session
+                                                        </div>
+                                                        <div class="welcomeAuthSecurityItemHint">
+                                                            Log out from this device.
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        id="welcomeAuthSignOutBtn"
+                                                        class="welcomeAuthCompactActionBtn"
+                                                        type="button"
+                                                    >
+                                                        LOG OUT
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div
+                                                id="welcomeAuthPasswordChangePanel"
+                                                class="welcomeAuthPasswordChangePanel welcomeAuthPasswordSheet"
+                                                hidden
+                                            >
+                                                <div class="welcomeAuthFields">
+                                                    <div class="welcomeAuthField">
+                                                        <label
+                                                            class="welcomeAuthLabel"
+                                                            for="welcomeAuthNewPasswordInput"
+                                                        >
+                                                            NEW PASSWORD
+                                                        </label>
+                                                        <input
+                                                            id="welcomeAuthNewPasswordInput"
+                                                            class="welcomeAuthInput"
+                                                            type="password"
+                                                            maxlength="256"
+                                                            autocomplete="new-password"
+                                                            placeholder="At least 6 characters"
+                                                        />
+                                                    </div>
+                                                    <div class="welcomeAuthField">
+                                                        <label
+                                                            class="welcomeAuthLabel"
+                                                            for="welcomeAuthConfirmNewPasswordInput"
+                                                        >
+                                                            CONFIRM NEW PASSWORD
+                                                        </label>
+                                                        <input
+                                                            id="welcomeAuthConfirmNewPasswordInput"
+                                                            class="welcomeAuthInput"
+                                                            type="password"
+                                                            maxlength="256"
+                                                            autocomplete="new-password"
+                                                            placeholder="Repeat your new password"
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div
+                                                    class="welcomeAuthActions welcomeAuthInlineActions"
+                                                >
+                                                    <button
+                                                        id="welcomeAuthPasswordChangeSubmitBtn"
+                                                        class="welcomeAuthSubmitBtn"
+                                                        type="button"
+                                                    >
+                                                        UPDATE PASSWORD
+                                                    </button>
+                                                    <button
+                                                        id="welcomeAuthPasswordChangeCancelBtn"
+                                                        class="welcomeAuthSecondaryBtn"
+                                                        type="button"
+                                                    >
+                                                        CANCEL
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div class="welcomeAuthDangerZone">
+                                                <div class="welcomeAuthDangerMeta">
+                                                    <div class="welcomeAuthDangerTitle">
+                                                        Danger Zone
+                                                    </div>
+                                                    <div class="welcomeAuthDangerHint">
+                                                        Permanently remove this account and its
+                                                        saved leaderboard data.
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    id="welcomeAuthDeleteAccountBtn"
+                                                    class="welcomeAuthDangerInlineBtn"
+                                                    type="button"
+                                                >
+                                                    DELETE ACCOUNT
+                                                </button>
+                                            </div>
+                                        </section>
+                                    </div>
+                                </section>
                             </div>
                         </div>
                         <div
@@ -478,22 +751,6 @@
                             0%
                         </div>
                     </div>
-                    <button
-                        id="welcomeVehiclePrevBtn"
-                        class="welcomeVehicleNav welcomeVehicleNavPrev"
-                        type="button"
-                        aria-label="Previous vehicle"
-                    >
-                        <span aria-hidden="true">‹</span>
-                    </button>
-                    <button
-                        id="welcomeVehicleNextBtn"
-                        class="welcomeVehicleNav welcomeVehicleNavNext"
-                        type="button"
-                        aria-label="Next vehicle"
-                    >
-                        <span aria-hidden="true">›</span>
-                    </button>
                     <canvas
                         id="welcomeCarCanvas"
                         width="560"
@@ -564,22 +821,25 @@
                             <div class="welcomePreviewLeaderboardHeader">
                                 <div class="welcomePreviewLeaderboardHeading">
                                     <div class="welcomePreviewLeaderboardEyebrow">
-                                        DRIVER PROFILE
+                                        PLAYER ACCOUNT
                                     </div>
                                     <div
                                         id="welcomePreviewAccountTitle"
                                         class="welcomePreviewLeaderboardTitle welcomePreviewAccountTitle"
                                     >
-                                        Account
+                                        DRIVER PROFILE
                                     </div>
                                 </div>
                                 <div class="welcomePreviewLeaderboardHeaderActions">
                                     <button
-                                        id="welcomePreviewAccountCloseBtn"
-                                        class="welcomePreviewLeaderboardActionBtn is-close"
+                                        id="welcomePreviewAccountToolsToggleBtn"
+                                        class="welcomePreviewLeaderboardActionBtn is-gear"
                                         type="button"
+                                        aria-label="Toggle account tools"
+                                        aria-controls="welcomeAuthToolsSection"
+                                        aria-expanded="false"
                                     >
-                                        CLOSE
+                                        <span aria-hidden="true">⚙</span>
                                     </button>
                                 </div>
                             </div>
@@ -587,6 +847,75 @@
                                 id="welcomePreviewAccountBody"
                                 class="welcomePreviewAccountBody"
                             ></div>
+                            <div
+                                id="welcomeAuthCarWrapCard"
+                                class="welcomePreviewCarWrapDock"
+                                hidden
+                            >
+                                <button
+                                    id="welcomeAuthCarWrapUploadBtn"
+                                    class="welcomePreviewCarWrapSurface"
+                                    type="button"
+                                    aria-label="Open garage"
+                                    title="Open garage"
+                                >
+                                    <span class="welcomePreviewCarWrapFrame">
+                                        <img
+                                            id="welcomeAuthCarWrapPreview"
+                                            class="welcomePreviewCarWrapPreview"
+                                            alt="Custom car wrap preview"
+                                            hidden
+                                        />
+                                        <span
+                                            id="welcomeAuthCarWrapFallback"
+                                            class="welcomePreviewCarWrapFallback"
+                                        >
+                                            <span
+                                                class="welcomePreviewCarWrapFallbackMark"
+                                                aria-hidden="true"
+                                            >
+                                                G
+                                            </span>
+                                        </span>
+                                    </span>
+                                    <span class="welcomePreviewGarageMeta">
+                                        <span class="welcomePreviewGarageLabelRow">
+                                            <span
+                                                class="welcomePreviewGarageIcon"
+                                                aria-hidden="true"
+                                            >
+                                                🔧
+                                            </span>
+                                            <span
+                                                id="welcomeAuthGarageDockTitle"
+                                                class="welcomePreviewGarageTitle"
+                                            >
+                                                GARAGE
+                                            </span>
+                                        </span>
+                                        <span
+                                            id="welcomeAuthGarageDockSubtitle"
+                                            class="welcomePreviewGarageSubtitle"
+                                        >
+                                            Switch chassis and manage your wrap
+                                        </span>
+                                    </span>
+                                    <span
+                                        id="welcomeAuthCarWrapUploadGlyph"
+                                        class="welcomePreviewCarWrapGlyph"
+                                        aria-hidden="true"
+                                    >
+                                        →
+                                    </span>
+                                </button>
+                                <input
+                                    id="welcomeAuthCarWrapInput"
+                                    class="welcomeAuthFileInput"
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    hidden
+                                />
+                            </div>
                         </div>
                     </aside>
                     <aside
@@ -640,60 +969,6 @@
                                                 aria-hidden="true"
                                             ></span>
                                         </span>
-                                    </div>
-                                    <div
-                                        id="welcomeAuthCarWrapCard"
-                                        class="welcomeAuthGameplayCard welcomeAuthGameplayCardWrap"
-                                        hidden
-                                    >
-                                        <div class="welcomeAuthGameplayMeta">
-                                            <span class="welcomeAuthGameplayLabel">
-                                                CUSTOM CAR WRAP
-                                            </span>
-                                            <span class="welcomeAuthGameplayHint">
-                                                Overlay your uploaded image across the car body.
-                                            </span>
-                                        </div>
-                                        <div class="welcomeAuthCarWrapControls">
-                                            <div class="welcomeAuthCarWrapPreviewFrame">
-                                                <img
-                                                    id="welcomeAuthCarWrapPreview"
-                                                    class="welcomeAuthCarWrapPreview"
-                                                    alt="Custom car wrap preview"
-                                                    hidden
-                                                />
-                                                <div
-                                                    id="welcomeAuthCarWrapFallback"
-                                                    class="welcomeAuthCarWrapFallback"
-                                                >
-                                                    WRAP
-                                                </div>
-                                            </div>
-                                            <div class="welcomeAuthCarWrapActions">
-                                                <button
-                                                    id="welcomeAuthCarWrapUploadBtn"
-                                                    class="welcomeAuthMetaActionBtn welcomeAuthCarWrapUploadBtn"
-                                                    type="button"
-                                                >
-                                                    UPLOAD WRAP
-                                                </button>
-                                                <button
-                                                    id="welcomeAuthCarWrapRemoveBtn"
-                                                    class="welcomeAuthMetaActionBtn"
-                                                    type="button"
-                                                    hidden
-                                                >
-                                                    REMOVE
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <input
-                                            id="welcomeAuthCarWrapInput"
-                                            class="welcomeAuthFileInput"
-                                            type="file"
-                                            accept="image/jpeg,image/png,image/webp"
-                                            hidden
-                                        />
                                     </div>
                                 </section>
                             </div>

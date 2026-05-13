@@ -13,6 +13,7 @@ const LEADERBOARD_SELECT_COLUMNS = [
     'game_mode',
     'finish_reason',
     'winner_label',
+    'vehicle_id',
     'car_skin_id',
     'created_at',
 ].join(',');
@@ -43,6 +44,7 @@ export function createGlobalLeaderboardController({
                     source: '',
                     statusText: 'Supabase global leaderboard is disabled.',
                     entries: [],
+                    viewerStats: createEmptyViewerStats(),
                 });
                 return getState();
             }
@@ -69,6 +71,7 @@ export function createGlobalLeaderboardController({
                     source: '',
                     statusText: 'Supabase global leaderboard is disabled.',
                     entries: state.entries,
+                    viewerStats: createEmptyViewerStats(),
                 });
                 return {
                     ok: false,
@@ -127,10 +130,14 @@ export function createGlobalLeaderboardController({
                 await refreshLeaderboardEntries(LEADERBOARD_DEFAULT_LIMIT);
                 return {
                     ok: true,
-                    entry: normalizePublicLeaderboardEntry(responsePayload?.entry, {}, {
-                        supabaseConfig,
-                        authState,
-                    }),
+                    entry: normalizePublicLeaderboardEntry(
+                        responsePayload?.entry,
+                        {},
+                        {
+                            supabaseConfig,
+                            authState,
+                        }
+                    ),
                 };
             } catch {
                 updateState({
@@ -166,6 +173,7 @@ export function createGlobalLeaderboardController({
         return {
             ...state,
             entries: state.entries.map((entry) => ({ ...entry })),
+            viewerStats: { ...state.viewerStats },
         };
     }
 
@@ -176,6 +184,10 @@ export function createGlobalLeaderboardController({
             entries: Array.isArray(nextState.entries)
                 ? nextState.entries.map((entry) => ({ ...entry }))
                 : state.entries,
+            viewerStats:
+                nextState.viewerStats !== undefined
+                    ? normalizeViewerStats(nextState.viewerStats)
+                    : state.viewerStats,
         };
         const snapshot = getState();
         onStateChanged?.(snapshot);
@@ -196,6 +208,7 @@ export function createGlobalLeaderboardController({
                 totalEntries: 0,
                 viewerRank: 0,
                 viewerHasEntry: false,
+                viewerStats: createEmptyViewerStats(),
             });
             return [];
         }
@@ -220,13 +233,18 @@ export function createGlobalLeaderboardController({
                 totalEntries: serverRead.totalEntries,
                 viewerRank: serverRead.viewerRank,
                 viewerHasEntry: serverRead.viewerHasEntry,
+                viewerStats: serverRead.viewerStats,
                 topLimit: serverRead.topLimit,
                 viewerWindowRadius: serverRead.viewerWindowRadius,
             });
             return serverRead.entries;
         }
 
-        const directRead = await readLeaderboardEntriesDirect(queryLimit, supabaseConfig, authState);
+        const directRead = await readLeaderboardEntriesDirect(
+            queryLimit,
+            supabaseConfig,
+            authState
+        );
         if (directRead.ok) {
             updateState({
                 enabled: true,
@@ -237,6 +255,7 @@ export function createGlobalLeaderboardController({
                 totalEntries: directRead.totalEntries,
                 viewerRank: directRead.viewerRank,
                 viewerHasEntry: directRead.viewerHasEntry,
+                viewerStats: directRead.viewerStats,
                 topLimit: directRead.topLimit,
                 viewerWindowRadius: directRead.viewerWindowRadius,
             });
@@ -252,6 +271,7 @@ export function createGlobalLeaderboardController({
             totalEntries: 0,
             viewerRank: 0,
             viewerHasEntry: false,
+            viewerStats: createEmptyViewerStats(),
         });
         return [];
     }
@@ -267,6 +287,7 @@ function createInitialLeaderboardState() {
         totalEntries: 0,
         viewerRank: 0,
         viewerHasEntry: false,
+        viewerStats: createEmptyViewerStats(),
         topLimit: LEADERBOARD_DEFAULT_LIMIT,
         viewerWindowRadius: LEADERBOARD_VIEWER_WINDOW_RADIUS,
     };
@@ -314,6 +335,7 @@ async function readLeaderboardEntriesDirect(limit, supabaseConfig = null, authSt
             totalEntries: uniqueEntries.length,
             viewerRank: 0,
             viewerHasEntry: false,
+            viewerStats: createEmptyViewerStats(),
             topLimit: limit,
             viewerWindowRadius: LEADERBOARD_VIEWER_WINDOW_RADIUS,
         };
@@ -373,6 +395,7 @@ async function readLeaderboardEntriesFromServer(
             totalEntries: clampInteger(payload.totalEntries, 0, 1_000_000, 0),
             viewerRank: clampInteger(payload.viewerRank, 0, 1_000_000, 0),
             viewerHasEntry: Boolean(payload.viewerHasEntry),
+            viewerStats: normalizeViewerStats(payload.viewerStats),
             topLimit: clampInteger(payload.topLimit, 1, LEADERBOARD_MAX_LIMIT, limit),
             viewerWindowRadius: clampInteger(
                 payload.viewerWindowRadius,
@@ -412,6 +435,8 @@ function normalizeSubmittedRoundResult(rawPayload = {}) {
     const gameMode = sanitizeGameMode(payload.gameMode);
     const finishReason = sanitizeFinishReason(payload.finishReason);
     const winnerLabel = sanitizeWinnerLabel(payload.winnerLabel);
+    const didWin = Boolean(payload.didWin || payload.did_win);
+    const vehicleId = sanitizeVehicleId(payload.vehicleId);
     const carSkinId = sanitizeCarSkinId(payload.carSkinId);
 
     if (!resolvedName || !gameMode || score <= 0) {
@@ -427,7 +452,49 @@ function normalizeSubmittedRoundResult(rawPayload = {}) {
         gameMode,
         finishReason,
         winnerLabel,
+        didWin,
+        vehicleId,
         carSkinId,
+    };
+}
+
+function createEmptyViewerStats() {
+    return {
+        totalRounds: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        bestScore: 0,
+        averageScore: 0,
+    };
+}
+
+function normalizeViewerStats(stats = null) {
+    const source = stats && typeof stats === 'object' ? stats : {};
+    const totalRounds = clampInteger(source.totalRounds ?? source.total_rounds, 0, 1_000_000, 0);
+    const wins = clampInteger(source.wins, 0, totalRounds || 1_000_000, 0);
+    const losses = clampInteger(
+        source.losses,
+        0,
+        totalRounds || 1_000_000,
+        Math.max(0, totalRounds - wins)
+    );
+    const bestScore = clampInteger(source.bestScore ?? source.best_score, 0, 10_000_000, 0);
+    const averageScore = clampInteger(
+        source.averageScore ?? source.average_score,
+        0,
+        10_000_000,
+        0
+    );
+    const computedWinRate = totalRounds > 0 ? Math.round((wins / totalRounds) * 100) : 0;
+    const winRate = clampInteger(source.winRate ?? source.win_rate, 0, 100, computedWinRate);
+    return {
+        totalRounds,
+        wins,
+        losses,
+        winRate,
+        bestScore,
+        averageScore,
     };
 }
 
@@ -442,7 +509,8 @@ function normalizePublicLeaderboardEntry(entry = null, fallbackMeta = {}, option
         return null;
     }
 
-    const authState = options?.authState && typeof options.authState === 'object' ? options.authState : null;
+    const authState =
+        options?.authState && typeof options.authState === 'object' ? options.authState : null;
     const supabaseConfig =
         options?.supabaseConfig && typeof options.supabaseConfig === 'object'
             ? options.supabaseConfig
@@ -476,9 +544,15 @@ function normalizePublicLeaderboardEntry(entry = null, fallbackMeta = {}, option
         gameMode: sanitizeGameMode(entry.gameMode || entry.game_mode) || 'bots',
         finishReason: sanitizeFinishReason(entry.finishReason || entry.finish_reason) || '',
         winnerLabel: sanitizeWinnerLabel(entry.winnerLabel || entry.winner_label),
+        vehicleId: sanitizeVehicleId(entry.vehicleId || entry.vehicle_id),
         carSkinId: sanitizeCarSkinId(entry.carSkinId || entry.car_skin_id),
         createdAt: sanitizeIsoTimestamp(entry.createdAt || entry.created_at),
-        rank: clampInteger(entry.rank, 1, 1_000_000, clampInteger(fallbackMeta.rank, 1, 1_000_000, 1)),
+        rank: clampInteger(
+            entry.rank,
+            1,
+            1_000_000,
+            clampInteger(fallbackMeta.rank, 1, 1_000_000, 1)
+        ),
         segment: sanitizeLeaderboardSegment(entry.segment || fallbackMeta.segment),
         isViewer: Boolean(entry.isViewer ?? fallbackMeta.isViewer),
     };
@@ -580,7 +654,10 @@ function sanitizeLeaderboardUserId(value) {
     if (typeof value !== 'string') {
         return '';
     }
-    const normalized = value.trim().replace(/[^a-z0-9-]/giu, '').slice(0, 128);
+    const normalized = value
+        .trim()
+        .replace(/[^a-z0-9-]/giu, '')
+        .slice(0, 128);
     return normalized || '';
 }
 
@@ -623,6 +700,18 @@ function sanitizeCarSkinId(value) {
         .toLowerCase()
         .replace(/[^a-z0-9_-]/g, '')
         .slice(0, 48);
+    return normalized || '';
+}
+
+function sanitizeVehicleId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, 32);
     return normalized || '';
 }
 

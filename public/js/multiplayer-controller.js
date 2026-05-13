@@ -46,6 +46,7 @@ export function createMultiplayerController(options = {}) {
         applyNetworkCollisionImpulse = () => false,
         getSelectedCarColorHex = () => 0x2d67a6,
         getSelectedCarSkinId = () => '',
+        getSelectedCarVehicleId = () => '',
         getPlayerCollectedCount = () => 0,
         getIsCarDestroyed = () => false,
         getAuthAccessToken = () => '',
@@ -1087,6 +1088,7 @@ export function createMultiplayerController(options = {}) {
         }
 
         const carRig = createCarRig({
+            vehicleId: playerSnapshot?.vehicleId || '',
             skinId: playerSnapshot?.skinId || '',
             bodyColor: playerSnapshot?.colorHex ?? 0x6cb3ff,
             wrapUrl: playerSnapshot?.carWrapUrl || '',
@@ -1108,6 +1110,8 @@ export function createMultiplayerController(options = {}) {
         const remote = {
             id: playerId,
             name: playerSnapshot?.name || 'Online',
+            vehicleId:
+                typeof playerSnapshot?.vehicleId === 'string' ? playerSnapshot.vehicleId : '',
             skinId: typeof playerSnapshot?.skinId === 'string' ? playerSnapshot.skinId : '',
             colorHex: (playerSnapshot?.colorHex ?? 0x6cb3ff) >>> 0,
             carWrapUrl: sanitizeMediaUrl(playerSnapshot?.carWrapUrl || ''),
@@ -1180,6 +1184,10 @@ export function createMultiplayerController(options = {}) {
     }
 
     function applyRemoteMeta(remote, playerSnapshot = {}) {
+        const nextVehicleId =
+            typeof playerSnapshot.vehicleId === 'string' && playerSnapshot.vehicleId.trim()
+                ? playerSnapshot.vehicleId.trim()
+                : remote.vehicleId || '';
         const nextSkinId =
             typeof playerSnapshot.skinId === 'string' && playerSnapshot.skinId.trim()
                 ? playerSnapshot.skinId.trim()
@@ -1190,15 +1198,18 @@ export function createMultiplayerController(options = {}) {
             : remote.colorHex || 0x6cb3ff;
         const nextCarWrapUrl = sanitizeMediaUrl(playerSnapshot?.carWrapUrl || '');
         if (
+            nextVehicleId !== remote.vehicleId ||
             nextColor !== remote.colorHex ||
             nextSkinId !== remote.skinId ||
             nextCarWrapUrl !== remote.carWrapUrl
         ) {
+            remote.vehicleId = nextVehicleId;
             remote.colorHex = nextColor;
             remote.skinId = nextSkinId;
             remote.carWrapUrl = nextCarWrapUrl;
             if (typeof remote.setAppearance === 'function') {
                 remote.setAppearance({
+                    vehicleId: nextVehicleId,
                     skinId: nextSkinId,
                     colorHex: nextColor,
                     wrapUrl: nextCarWrapUrl,
@@ -1207,6 +1218,8 @@ export function createMultiplayerController(options = {}) {
                 remote.setBodyColor?.(nextColor);
                 remote.setSkin?.(nextSkinId);
             }
+            remote.crashDebrisController?.initializeBodyPartBaselines?.();
+            remote.crashDebrisController?.resetPlayerDamageState?.();
         }
         if (typeof playerSnapshot.name === 'string' && playerSnapshot.name.trim()) {
             remote.name = playerSnapshot.name.trim();
@@ -1643,12 +1656,18 @@ export function createMultiplayerController(options = {}) {
             typeof getSelectedCarSkinId === 'function' && typeof getSelectedCarSkinId() === 'string'
                 ? getSelectedCarSkinId().trim()
                 : '';
+        const safeVehicleId =
+            typeof getSelectedCarVehicleId === 'function' &&
+            typeof getSelectedCarVehicleId() === 'string'
+                ? getSelectedCarVehicleId().trim()
+                : '';
         const authState = getAuthState?.() || null;
         const safeCarWrapPath = sanitizeStorageObjectPath(authState?.carWrapStoragePath || '');
         return {
             name: safeName,
             colorHex: safeColorHex,
             skinId: safeSkinId,
+            vehicleId: safeVehicleId,
             carWrapPath: safeCarWrapPath,
         };
     }

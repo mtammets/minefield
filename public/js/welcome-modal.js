@@ -1,6 +1,11 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { createCarRig } from './car.js';
-import { CAR_SKIN_PRESETS, DEFAULT_PLAYER_CAR_SKIN_ID, getCarSkinPresetById } from './car-skins.js';
+import { DEFAULT_PLAYER_CAR_SKIN_ID, getCarSkinPresetById } from './car-skins.js';
+import {
+    DEFAULT_PLAYER_VEHICLE_ID,
+    PLAYER_VEHICLE_PRESETS,
+    getPlayerVehiclePresetById,
+} from './car-vehicles.js';
 import {
     persistAutoFullscreenOnStart,
     readPersistedAutoFullscreenOnStart,
@@ -24,6 +29,13 @@ const ONLINE_ROOM_CODE_LENGTH = 6;
 const ONLINE_CODE_LOOKUP_DEBOUNCE_MS = 260;
 const ONLINE_PLAYER_NAME_MAX_LENGTH = 18;
 const AUTH_PASSWORD_MIN_LENGTH = 6;
+const USER_MEDIA_MAX_INPUT_BYTES = 10 * 1024 * 1024;
+const USER_MEDIA_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const AVATAR_EDITOR_VIEW_SIZE_PX = 236;
+const AVATAR_EDITOR_OUTPUT_SIZE_PX = 768;
+const AVATAR_EDITOR_OUTPUT_QUALITY = 0.92;
+const AVATAR_EDITOR_ZOOM_MIN = 1;
+const AVATAR_EDITOR_ZOOM_MAX = 3;
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
 const AUTH_SIGNED_IN_STATUS_TEXT = 'Signed in. Online rooms and score sync are unlocked.';
 const AUTH_SIGNED_OUT_STATUS_TEXT =
@@ -36,6 +48,10 @@ const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_PREVIEW_LOADING_MIN_VISIBLE_MS = 700;
 const WELCOME_PREVIEW_LOADING_FADE_MS = 420;
 const WELCOME_PREVIEW_LOADING_SOFT_CAP = 0.94;
+const WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY = 0.011;
+const WELCOME_GARAGE_PREVIEW_PITCH_DRAG_SENSITIVITY = 0.006;
+const WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MIN = -0.18;
+const WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MAX = 0.42;
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
 const WELCOME_DONATE_CLOSE_EVENT = 'silentdrift:welcome-donate-close';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
@@ -60,21 +76,31 @@ export function createWelcomeModalController({
     onAuthChangePassword,
     onAuthDeleteAccount,
     onRefreshGlobalLeaderboard,
-    onSkinChange,
+    onVehicleChange,
     initialSkinId,
     getCurrentSkinId,
+    initialVehicleId,
+    getCurrentVehicleId,
     getAuthState,
     resolvePlayerCarSkinId,
     getCarSkinPresetIndex,
+    resolvePlayerVehicleId,
+    getPlayerVehiclePresetIndex,
 } = {}) {
     const resolveSkinId =
         typeof resolvePlayerCarSkinId === 'function'
             ? resolvePlayerCarSkinId
             : (skinId) => getCarSkinPresetById(skinId || DEFAULT_PLAYER_CAR_SKIN_ID).id;
-    const resolvePresetIndex =
-        typeof getCarSkinPresetIndex === 'function' ? getCarSkinPresetIndex : () => 0;
+    const resolveVehicleId =
+        typeof resolvePlayerVehicleId === 'function'
+            ? resolvePlayerVehicleId
+            : (vehicleId) => getPlayerVehiclePresetById(vehicleId || DEFAULT_PLAYER_VEHICLE_ID).id;
+    const resolveVehiclePresetIndex =
+        typeof getPlayerVehiclePresetIndex === 'function' ? getPlayerVehiclePresetIndex : () => 0;
     const currentSkinGetter =
         typeof getCurrentSkinId === 'function' ? getCurrentSkinId : () => initialSkinId;
+    const currentVehicleGetter =
+        typeof getCurrentVehicleId === 'function' ? getCurrentVehicleId : () => initialVehicleId;
 
     const rootEl = document.getElementById('welcomeModal');
     const startActionsEl = rootEl?.querySelector?.('.welcomeStartActions') || null;
@@ -97,16 +123,54 @@ export function createWelcomeModalController({
     const authAvatarImageEl = document.getElementById('welcomeAuthAvatarImage');
     const authAvatarFallbackEl = document.getElementById('welcomeAuthAvatarFallback');
     const authAvatarInputEl = document.getElementById('welcomeAuthAvatarInput');
+    const authAvatarEditorEl = document.getElementById('welcomeAuthAvatarEditor');
+    const authAvatarEditorViewportEl = document.getElementById('welcomeAuthAvatarEditorViewport');
+    const authAvatarEditorImageEl = document.getElementById('welcomeAuthAvatarEditorImage');
+    const authAvatarEditorEmptyStateEl = document.getElementById(
+        'welcomeAuthAvatarEditorEmptyState'
+    );
+    const authAvatarChooseBtnEl = document.getElementById('welcomeAuthAvatarChooseBtn');
     const authAvatarRemoveBtnEl = document.getElementById('welcomeAuthAvatarRemoveBtn');
+    const authAvatarZoomInputEl = document.getElementById('welcomeAuthAvatarZoomInput');
+    const authAvatarZoomValueEl = document.getElementById('welcomeAuthAvatarZoomValue');
+    const authAvatarSaveBtnEl = document.getElementById('welcomeAuthAvatarSaveBtn');
+    const authAvatarCancelBtnEl = document.getElementById('welcomeAuthAvatarCancelBtn');
     const authCarWrapCardEl = document.getElementById('welcomeAuthCarWrapCard');
     const authCarWrapPreviewEl = document.getElementById('welcomeAuthCarWrapPreview');
     const authCarWrapFallbackEl = document.getElementById('welcomeAuthCarWrapFallback');
     const authCarWrapUploadBtnEl = document.getElementById('welcomeAuthCarWrapUploadBtn');
-    const authCarWrapRemoveBtnEl = document.getElementById('welcomeAuthCarWrapRemoveBtn');
+    const authCarWrapUploadGlyphEl = document.getElementById('welcomeAuthCarWrapUploadGlyph');
     const authCarWrapInputEl = document.getElementById('welcomeAuthCarWrapInput');
+    const authProfileKickerEl = document.getElementById('welcomeAuthProfileKicker');
+    const authProfileRankBadgeEl = document.getElementById('welcomeAuthProfileRankBadge');
+    const authProfileSublineEl = document.getElementById('welcomeAuthProfileSubline');
+    const authProfileWinsEl = document.getElementById('welcomeAuthProfileWins');
+    const authProfileLossesEl = document.getElementById('welcomeAuthProfileLosses');
+    const authProfileWinRateEl = document.getElementById('welcomeAuthProfileWinRate');
+    const authProfileBestScoreEl = document.getElementById('welcomeAuthProfileBestScore');
     const authSignedInNameEl = document.getElementById('welcomeAuthSignedInName');
     const authSignedInEmailEl = document.getElementById('welcomeAuthSignedInEmail');
+    const authSignedInShellEl = document.getElementById('welcomeAuthSignedInShell');
+    const authProfileRowEl = document.getElementById('welcomeAuthProfileRow');
+    const authToolsSectionEl = document.getElementById('welcomeAuthToolsSection');
+    const authSectionEyebrowEl = document.getElementById('welcomeAuthSectionEyebrow');
+    const authSectionTitleEl = document.getElementById('welcomeAuthSectionTitle');
+    const authSectionGaragePanelEl = document.getElementById('welcomeAuthSectionGaragePanel');
     const authSectionSecurityPanelEl = document.getElementById('welcomeAuthSectionSecurityPanel');
+    const authGarageVehicleNameEl = document.getElementById('welcomeAuthGarageVehicleName');
+    const authGarageVehiclePipsEl = document.getElementById('welcomeAuthGarageVehiclePips');
+    const authGaragePrevBtnEl = document.getElementById('welcomeAuthGaragePrevBtn');
+    const authGarageNextBtnEl = document.getElementById('welcomeAuthGarageNextBtn');
+    const authGarageWrapCardEl = document.getElementById('welcomeAuthGarageWrapCard');
+    const authGarageWrapPreviewEl = document.getElementById('welcomeAuthGarageWrapPreview');
+    const authGarageWrapFallbackEl = document.getElementById('welcomeAuthGarageWrapFallback');
+    const authGarageWrapStatusEl = document.getElementById('welcomeAuthGarageWrapStatus');
+    const authGarageWrapUploadBtnEl = document.getElementById('welcomeAuthGarageWrapUploadBtn');
+    const authGarageWrapUploadIconEl = document.getElementById('welcomeAuthGarageWrapUploadIcon');
+    const authGarageWrapRemoveBtnEl = document.getElementById('welcomeAuthGarageWrapRemoveBtn');
+    const authGarageWrapRemoveIconEl = document.getElementById('welcomeAuthGarageWrapRemoveIcon');
+    const authGarageDockTitleEl = document.getElementById('welcomeAuthGarageDockTitle');
+    const authGarageDockSubtitleEl = document.getElementById('welcomeAuthGarageDockSubtitle');
     const authChangePasswordToggleBtnEl = document.getElementById(
         'welcomeAuthChangePasswordToggleBtn'
     );
@@ -161,7 +225,9 @@ export function createWelcomeModalController({
     const previewAccountOverlayEl = document.getElementById('welcomePreviewAccountOverlay');
     const previewAccountTitleEl = document.getElementById('welcomePreviewAccountTitle');
     const previewAccountBodyEl = document.getElementById('welcomePreviewAccountBody');
-    const previewAccountCloseBtnEl = document.getElementById('welcomePreviewAccountCloseBtn');
+    const previewAccountToolsToggleBtnEl = document.getElementById(
+        'welcomePreviewAccountToolsToggleBtn'
+    );
     const previewSettingsOverlayEl = document.getElementById('welcomePreviewSettingsOverlay');
     const previewSettingsCloseBtnEl = document.getElementById('welcomePreviewSettingsCloseBtn');
     const previewDonateOverlayEl = document.getElementById('welcomePreviewDonateOverlay');
@@ -171,10 +237,11 @@ export function createWelcomeModalController({
     const previewOnlineCloseBtnEl = document.getElementById('welcomePreviewOnlineCloseBtn');
     const prevVehicleBtnEl = document.getElementById('welcomeVehiclePrevBtn');
     const nextVehicleBtnEl = document.getElementById('welcomeVehicleNextBtn');
+    const previewVehicleLabelEl = document.getElementById('welcomePreviewVehicleLabel');
     const taglineEl = document.getElementById('welcomeTagline');
 
     if (!rootEl || !startBtnEl || !previewCanvasEl) {
-        const fallbackSkinId = resolveSkinId(initialSkinId);
+        const fallbackVehicleId = resolveVehicleId(initialVehicleId);
         return {
             show() {},
             hide() {},
@@ -186,11 +253,11 @@ export function createWelcomeModalController({
             isAvailable() {
                 return false;
             },
-            getSelectedSkinId() {
-                return fallbackSkinId;
+            getSelectedVehicleId() {
+                return fallbackVehicleId;
             },
-            setSelectedSkinId() {},
-            selectNeighborSkin() {},
+            setSelectedVehicleId() {},
+            selectNeighborVehicle() {},
             getPreferredStartMode() {
                 return 'bots';
             },
@@ -252,7 +319,7 @@ export function createWelcomeModalController({
     const previewVehicles = [createPreviewVehicle(), createPreviewVehicle()];
     let activeVehicleIndex = 0;
     let previewSpinYaw = Math.PI * 0.32;
-    let selectedSkinIndex = resolvePresetIndex(initialSkinId);
+    let selectedVehicleIndex = resolveVehiclePresetIndex(initialVehicleId);
     let previewPulseTime = Math.random() * Math.PI * 2;
     let preferredStartMode = 'bots';
     let preferredOnlineRoomAction = '';
@@ -265,6 +332,9 @@ export function createWelcomeModalController({
     let authLocalStatusText = '';
     let authLocalStatusTone = 'muted';
     let authPasswordChangeOpen = false;
+    const avatarEditorState = createInitialAvatarEditorState();
+    let accountToolsOpen = false;
+    let garagePanelOpen = false;
     let welcomeLeaderboardOpen = false;
     let welcomeAccountOpen = false;
     let welcomeSettingsOpen = false;
@@ -338,6 +408,13 @@ export function createWelcomeModalController({
         terrainGrounded: 1,
         verticalSpeed: 0,
     };
+    const previewInteractionState = {
+        pointerId: null,
+        captureElement: null,
+        lastClientX: 0,
+        lastClientY: 0,
+        pitchOffset: 0,
+    };
 
     const previewBounds = new THREE.Box3().setFromObject(previewVehicles[0].car);
     const previewSize = previewBounds.getSize(new THREE.Vector3());
@@ -347,6 +424,15 @@ export function createWelcomeModalController({
         previewRadius * 1.48,
         previewRadius * 0.76,
         previewRadius * 1.85
+    );
+    const previewCameraBaseDistance = previewCameraBasePosition.length();
+    const previewCameraBaseAzimuth = Math.atan2(
+        previewCameraBasePosition.x,
+        previewCameraBasePosition.z
+    );
+    const previewCameraBasePitch = Math.atan2(
+        previewCameraBasePosition.y,
+        Math.hypot(previewCameraBasePosition.x, previewCameraBasePosition.z)
     );
     const swapOutgoingDistance = previewRadius * 3.6;
     const swapIncomingDistance = previewRadius * 3.8;
@@ -361,7 +447,7 @@ export function createWelcomeModalController({
         phase: 'idle',
         phaseTime: 0,
         direction: 1,
-        targetIndex: selectedSkinIndex,
+        targetIndex: selectedVehicleIndex,
         emitChange: true,
         outgoingVehicleIndex: 0,
         incomingVehicleIndex: 1,
@@ -383,6 +469,8 @@ export function createWelcomeModalController({
     if (previewShellEl) {
         previewShellEl.dataset.leaderboardOpen = 'false';
         previewShellEl.dataset.accountOpen = 'false';
+        previewShellEl.dataset.accountToolsOpen = 'false';
+        previewShellEl.dataset.garageOpen = 'false';
         previewShellEl.dataset.settingsOpen = 'false';
         previewShellEl.dataset.donateOpen = 'false';
         previewShellEl.dataset.onlineOpen = 'false';
@@ -395,11 +483,12 @@ export function createWelcomeModalController({
     }
     resetTransitionVisuals();
     setTaglineByIndex(0);
-    applySelectedPreset(selectedSkinIndex, false);
+    applySelectedPreset(selectedVehicleIndex, false);
     resetStartSequenceUi();
     syncAuthUi();
     syncWelcomeLeaderboardUi();
     syncWelcomeOnlineUi();
+    syncPreviewInteractionUi();
     bindVehicleButtons();
     initializePreviewLoadingUi();
     startPreviewLoadingAnimation();
@@ -490,39 +579,56 @@ export function createWelcomeModalController({
             handlePasswordChangeCancel();
         });
         authAvatarFrameEl?.addEventListener('click', () => {
-            if (
-                !authAvatarInputEl ||
-                authUiState.loading ||
-                !authUiState.authenticated ||
-                authAvatarFrameEl.disabled
-            ) {
+            if (authUiState.loading || !authUiState.authenticated || authAvatarFrameEl.disabled) {
+                return;
+            }
+            void openAvatarEditor();
+        });
+        authAvatarInputEl?.addEventListener('change', () => {
+            void handleProfileImageSelection();
+        });
+        authAvatarChooseBtnEl?.addEventListener('click', () => {
+            if (!authAvatarInputEl || authUiState.loading || authAvatarChooseBtnEl.disabled) {
                 return;
             }
             authAvatarInputEl.value = '';
             authAvatarInputEl.click();
         });
-        authAvatarInputEl?.addEventListener('change', () => {
-            void handleProfileImageSelection();
-        });
         authAvatarRemoveBtnEl?.addEventListener('click', () => {
             void handleProfileImageRemoval();
         });
+        authAvatarZoomInputEl?.addEventListener('input', () => {
+            handleAvatarEditorZoomInput();
+        });
+        authAvatarSaveBtnEl?.addEventListener('click', () => {
+            void handleAvatarEditorSave();
+        });
+        authAvatarCancelBtnEl?.addEventListener('click', () => {
+            closeAvatarEditor();
+        });
+        authAvatarEditorViewportEl?.addEventListener('pointerdown', handleAvatarEditorPointerDown);
+        authAvatarEditorViewportEl?.addEventListener('pointermove', handleAvatarEditorPointerMove);
+        authAvatarEditorViewportEl?.addEventListener('pointerup', handleAvatarEditorPointerUp);
+        authAvatarEditorViewportEl?.addEventListener('pointercancel', handleAvatarEditorPointerUp);
+        authAvatarEditorViewportEl?.addEventListener('lostpointercapture', () => {
+            stopAvatarEditorDrag();
+        });
         authCarWrapUploadBtnEl?.addEventListener('click', () => {
-            if (
-                !authCarWrapInputEl ||
-                authUiState.loading ||
-                !authUiState.authenticated ||
-                authCarWrapUploadBtnEl.disabled
-            ) {
-                return;
-            }
-            authCarWrapInputEl.value = '';
-            authCarWrapInputEl.click();
+            openGaragePanel();
+        });
+        authGaragePrevBtnEl?.addEventListener('click', () => {
+            requestGarageVehicleSwap(-1);
+        });
+        authGarageNextBtnEl?.addEventListener('click', () => {
+            requestGarageVehicleSwap(1);
+        });
+        authGarageWrapUploadBtnEl?.addEventListener('click', () => {
+            openCarWrapFilePicker();
         });
         authCarWrapInputEl?.addEventListener('change', () => {
             void handleCarWrapSelection();
         });
-        authCarWrapRemoveBtnEl?.addEventListener('click', () => {
+        authGarageWrapRemoveBtnEl?.addEventListener('click', () => {
             void handleCarWrapRemoval();
         });
         authAvatarImageEl?.addEventListener('error', () => {
@@ -547,6 +653,15 @@ export function createWelcomeModalController({
             }
             if (authCarWrapFallbackEl) {
                 authCarWrapFallbackEl.hidden = false;
+            }
+        });
+        authGarageWrapPreviewEl?.addEventListener('error', () => {
+            if (authGarageWrapPreviewEl) {
+                authGarageWrapPreviewEl.hidden = true;
+                authGarageWrapPreviewEl.removeAttribute('src');
+            }
+            if (authGarageWrapFallbackEl) {
+                authGarageWrapFallbackEl.hidden = false;
             }
         });
     }
@@ -641,12 +756,25 @@ export function createWelcomeModalController({
         setWelcomeLeaderboardOpen(false);
     });
     previewAccountOverlayEl?.addEventListener('click', (event) => {
-        if (event.target === previewAccountOverlayEl) {
+        if (event.target === previewAccountOverlayEl && !garagePanelOpen) {
             setWelcomeAccountOpen(false);
         }
     });
-    previewAccountCloseBtnEl?.addEventListener('click', () => {
-        setWelcomeAccountOpen(false);
+    previewAccountOverlayEl?.addEventListener('pointerdown', handlePreviewPointerDown);
+    previewAccountOverlayEl?.addEventListener('pointermove', handlePreviewPointerMove);
+    previewAccountOverlayEl?.addEventListener('pointerup', handlePreviewPointerUp);
+    previewAccountOverlayEl?.addEventListener('pointercancel', handlePreviewPointerUp);
+    previewAccountOverlayEl?.addEventListener('lostpointercapture', () => {
+        stopPreviewDrag({
+            releasePointerCapture: false,
+        });
+    });
+    previewAccountToolsToggleBtnEl?.addEventListener('click', () => {
+        if (accountToolsOpen) {
+            setAccountToolsOpen(false);
+            return;
+        }
+        openSecurityPanel();
     });
     previewSettingsOverlayEl?.addEventListener('click', (event) => {
         if (event.target === previewSettingsOverlayEl) {
@@ -672,6 +800,15 @@ export function createWelcomeModalController({
     previewOnlineCloseBtnEl?.addEventListener('click', () => {
         closeOnlineModeFlow({ clearSelection: true });
     });
+    previewCanvasEl.addEventListener('pointerdown', handlePreviewPointerDown);
+    previewCanvasEl.addEventListener('pointermove', handlePreviewPointerMove);
+    previewCanvasEl.addEventListener('pointerup', handlePreviewPointerUp);
+    previewCanvasEl.addEventListener('pointercancel', handlePreviewPointerUp);
+    previewCanvasEl.addEventListener('lostpointercapture', () => {
+        stopPreviewDrag({
+            releasePointerCapture: false,
+        });
+    });
 
     return {
         show() {
@@ -681,8 +818,9 @@ export function createWelcomeModalController({
             setAuthSignedInSection('security', { skipSync: true });
             syncAutoFullscreenPreferenceUi();
             setAuthState(getAuthState?.());
+            const shouldOpenProfileOnShow = Boolean(authUiState.authenticated);
             setWelcomeLeaderboardOpen(false, { skipSync: true });
-            setWelcomeAccountOpen(false, { skipSync: true });
+            setWelcomeAccountOpen(shouldOpenProfileOnShow, { skipSync: true });
             setWelcomeSettingsOpen(false, { skipSync: true });
             setWelcomeDonateOpen(false, { skipSync: true });
             syncWelcomeLeaderboardUi();
@@ -697,7 +835,7 @@ export function createWelcomeModalController({
             taglineRotation.elapsedSec = 0;
             resetTaglineTransition();
             setTaglineByIndex(taglineRotation.activeIndex);
-            forceSelectPreset(resolvePresetIndex(currentSkinGetter()), false);
+            forceSelectPreset(resolveVehiclePresetIndex(currentVehicleGetter()), false);
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
             updateShowroomAtmosphere(0);
@@ -715,6 +853,8 @@ export function createWelcomeModalController({
             requestWelcomeDonateClose();
             setWelcomeDonateOpen(false, { skipSync: true });
             closeOnlineModeFlow({ clearSelection: true });
+            stopPreviewDrag();
+            syncPreviewInteractionUi();
             rootEl.hidden = true;
         },
         resize() {
@@ -729,7 +869,7 @@ export function createWelcomeModalController({
                 return;
             }
             const frameDt = Math.min(Math.max(dt || 0, 0), 0.05);
-            if (!transition.active) {
+            if (!transition.active && !shouldPausePreviewSpin()) {
                 previewSpinYaw += frameDt * WELCOME_CAR_SPIN_SPEED;
             }
             updateTransition(frameDt);
@@ -746,16 +886,16 @@ export function createWelcomeModalController({
         isAvailable() {
             return true;
         },
-        getSelectedSkinId() {
-            return CAR_SKIN_PRESETS[selectedSkinIndex]?.id ?? DEFAULT_PLAYER_CAR_SKIN_ID;
+        getSelectedVehicleId() {
+            return PLAYER_VEHICLE_PRESETS[selectedVehicleIndex]?.id ?? DEFAULT_PLAYER_VEHICLE_ID;
         },
-        setSelectedSkinId(skinId, options = {}) {
+        setSelectedVehicleId(vehicleId, options = {}) {
             const { emitChange = true } = options;
-            forceSelectPreset(resolvePresetIndex(skinId), emitChange);
+            forceSelectPreset(resolveVehiclePresetIndex(vehicleId), emitChange);
         },
-        selectNeighborSkin(step = 1) {
+        selectNeighborVehicle(step = 1) {
             const direction = Math.sign(step || 1) || 1;
-            const baseIndex = transition.active ? transition.targetIndex : selectedSkinIndex;
+            const baseIndex = transition.active ? transition.targetIndex : selectedVehicleIndex;
             requestSwap(baseIndex + direction, direction, true);
         },
         getPreferredStartMode() {
@@ -809,6 +949,7 @@ export function createWelcomeModalController({
         setGlobalLeaderboard(nextState = {}) {
             welcomeGlobalLeaderboardState = normalizeWelcomeGlobalLeaderboardState(nextState);
             syncWelcomeLeaderboardUi();
+            syncSignedInProfileSummary();
         },
         focusAuthPanel(mode = 'sign-in', options = {}) {
             focusAuthPanel(mode, options);
@@ -1375,7 +1516,22 @@ export function createWelcomeModalController({
     }
 
     function setAuthState(nextState = null) {
-        authUiState = normalizeWelcomeAuthState(nextState);
+        const previousAuthUiState = authUiState;
+        const nextAuthUiState = normalizeWelcomeAuthState(nextState);
+        const didCompleteInteractiveAuth =
+            !previousAuthUiState.authenticated &&
+            previousAuthUiState.loading &&
+            (previousAuthUiState.pendingAction === 'sign-in' ||
+                previousAuthUiState.pendingAction === 'sign-up') &&
+            nextAuthUiState.authenticated;
+        const didRestorePersistedAuthSession =
+            !previousAuthUiState.authenticated &&
+            nextAuthUiState.authenticated &&
+            !didCompleteInteractiveAuth &&
+            (!previousAuthUiState.ready ||
+                (previousAuthUiState.loading && !previousAuthUiState.pendingAction));
+
+        authUiState = nextAuthUiState;
         if (authUiState.authenticated && authUiState.displayName) {
             writeStoredOnlinePlayerName(authUiState.displayName);
         }
@@ -1385,6 +1541,15 @@ export function createWelcomeModalController({
             });
             setPasswordChangeOpen(false, {
                 clearInputs: true,
+                skipSync: true,
+            });
+            setAccountToolsOpen(false, {
+                skipSync: true,
+            });
+            setGaragePanelOpen(false, {
+                skipSync: true,
+            });
+            closeAvatarEditor({
                 skipSync: true,
             });
         }
@@ -1397,6 +1562,12 @@ export function createWelcomeModalController({
         clearLocalAuthStatus();
         syncPreviewVehicleWrap();
         syncAuthUi();
+        if ((didCompleteInteractiveAuth || didRestorePersistedAuthSession) && !rootEl.hidden) {
+            focusAuthPanel('sign-in', {
+                preserveStatus: true,
+                skipFocus: didRestorePersistedAuthSession,
+            });
+        }
     }
 
     function syncAuthUi() {
@@ -1428,7 +1599,7 @@ export function createWelcomeModalController({
         const canManageCarWrap =
             authenticated &&
             enabled &&
-            Boolean(authUiState.carWrapEnabled && authCarWrapInputEl && authCarWrapUploadBtnEl);
+            Boolean(authUiState.carWrapEnabled && authCarWrapInputEl && authGarageWrapUploadBtnEl);
         const hasCarWrap = Boolean(authUiState.carWrapUrl);
         const localStatus = authLocalStatusText.trim();
         const remoteStatus =
@@ -1452,8 +1623,16 @@ export function createWelcomeModalController({
             availableSignedInSections
         );
         authSignedInSection = activeSignedInSection;
+        const garagePanelVisible = authenticated && garagePanelOpen;
+        const securityPanelVisible = authenticated && accountToolsOpen;
+        const accountMode = garagePanelVisible
+            ? 'garage'
+            : securityPanelVisible
+              ? 'security'
+              : 'profile';
 
         authPanelEl.dataset.authenticated = authenticated ? 'true' : 'false';
+        authPanelEl.dataset.accountMode = accountMode;
         authPanelEl.dataset.authMode = showSignUp ? 'sign-up' : 'sign-in';
         authSignInTabEl.dataset.selected = !showSignUp ? 'true' : 'false';
         authSignUpTabEl.dataset.selected = showSignUp ? 'true' : 'false';
@@ -1470,8 +1649,9 @@ export function createWelcomeModalController({
             authConfirmFieldEl.hidden = !showSignUp;
         }
         if (authSignedInNameEl) {
-            authSignedInNameEl.textContent = 'ONLINE';
+            authSignedInNameEl.textContent = authUiState.displayName || DEFAULT_ONLINE_PLAYER_NAME;
         }
+        syncSignedInProfileSummary();
         if (authSignedInEmailEl) {
             authSignedInEmailEl.textContent = authUiState.email || 'Authenticated session';
         }
@@ -1511,20 +1691,65 @@ export function createWelcomeModalController({
                 authCarWrapPreviewEl.removeAttribute('src');
             }
         }
+        if (authGarageWrapFallbackEl) {
+            authGarageWrapFallbackEl.hidden = hasCarWrap;
+        }
+        if (authGarageWrapPreviewEl) {
+            if (hasCarWrap) {
+                if (authGarageWrapPreviewEl.getAttribute('src') !== authUiState.carWrapUrl) {
+                    authGarageWrapPreviewEl.src = authUiState.carWrapUrl;
+                }
+                authGarageWrapPreviewEl.hidden = false;
+            } else {
+                authGarageWrapPreviewEl.hidden = true;
+                authGarageWrapPreviewEl.removeAttribute('src');
+            }
+        }
         if (previewAccountTitleEl) {
-            previewAccountTitleEl.textContent = authUiState.displayName || 'ACCOUNT';
+            previewAccountTitleEl.textContent = garagePanelVisible ? 'GARAGE' : 'DRIVER PROFILE';
+        }
+        if (previewAccountBodyEl) {
+            previewAccountBodyEl.dataset.mode = accountMode;
+        }
+        if (previewAccountOverlayEl) {
+            previewAccountOverlayEl.dataset.mode = accountMode;
+        }
+        if (authSignedInShellEl) {
+            authSignedInShellEl.dataset.mode = accountMode;
+        }
+        if (authProfileRowEl) {
+            authProfileRowEl.hidden = garagePanelVisible;
+        }
+        if (authSectionEyebrowEl) {
+            authSectionEyebrowEl.textContent = garagePanelVisible ? 'GARAGE BAY' : 'ACCOUNT TOOLS';
+        }
+        if (authSectionTitleEl) {
+            authSectionTitleEl.textContent = garagePanelVisible ? 'Garage' : 'Security';
+        }
+        if (authSectionGaragePanelEl) {
+            authSectionGaragePanelEl.hidden = !garagePanelVisible;
         }
         if (authSectionSecurityPanelEl) {
-            authSectionSecurityPanelEl.hidden =
-                !authenticated || activeSignedInSection !== 'security';
+            authSectionSecurityPanelEl.hidden = !securityPanelVisible;
         }
+        syncGaragePresentationUi({
+            authenticated,
+            busy,
+            canManageCarWrap,
+            hasCarWrap,
+        });
         if (authAvatarFrameEl) {
             authAvatarFrameEl.disabled = !canManageProfileImage || busy;
             authAvatarFrameEl.dataset.interactive =
                 canManageProfileImage && !busy ? 'true' : 'false';
+            authAvatarFrameEl.dataset.editing = avatarEditorState.open ? 'true' : 'false';
+            authAvatarFrameEl.setAttribute(
+                'aria-expanded',
+                avatarEditorState.open ? 'true' : 'false'
+            );
             authAvatarFrameEl.setAttribute(
                 'aria-label',
-                hasProfileImage ? 'Change profile photo' : 'Add profile photo'
+                hasProfileImage ? 'Edit profile photo' : 'Add profile photo'
             );
         }
         if (authChangePasswordToggleBtnEl) {
@@ -1540,39 +1765,25 @@ export function createWelcomeModalController({
         if (authAvatarInputEl) {
             authAvatarInputEl.disabled = !canManageProfileImage || busy;
         }
-        if (authAvatarRemoveBtnEl) {
-            authAvatarRemoveBtnEl.hidden =
-                !authenticated || !authUiState.profileImageEnabled || !hasProfileImage;
-            authAvatarRemoveBtnEl.disabled =
-                !canManageProfileImage ||
-                busy ||
-                !hasProfileImage ||
-                typeof onAuthRemoveProfileImage !== 'function';
-            authAvatarRemoveBtnEl.textContent =
-                busy && authUiState.pendingAction === 'remove-avatar' ? 'REMOVING...' : 'REMOVE';
-        }
+        syncAvatarEditorUi({
+            authenticated,
+            enabled,
+            busy,
+            canManageProfileImage,
+            hasProfileImage,
+        });
         if (authCarWrapInputEl) {
             authCarWrapInputEl.disabled = !canManageCarWrap || busy;
         }
         if (authCarWrapUploadBtnEl) {
-            authCarWrapUploadBtnEl.disabled = !canManageCarWrap || busy;
-            authCarWrapUploadBtnEl.textContent =
-                busy && authUiState.pendingAction === 'update-car-wrap'
-                    ? 'UPLOADING...'
-                    : hasCarWrap
-                      ? 'REPLACE WRAP'
-                      : 'UPLOAD WRAP';
+            authCarWrapUploadBtnEl.disabled = !authenticated || busy;
+            authCarWrapUploadBtnEl.dataset.hasImage = hasCarWrap ? 'true' : 'false';
+            authCarWrapUploadBtnEl.dataset.busy = 'false';
+            authCarWrapUploadBtnEl.setAttribute('aria-label', 'Open garage');
+            authCarWrapUploadBtnEl.setAttribute('title', 'Open garage');
         }
-        if (authCarWrapRemoveBtnEl) {
-            authCarWrapRemoveBtnEl.hidden =
-                !authenticated || !authUiState.carWrapEnabled || !hasCarWrap;
-            authCarWrapRemoveBtnEl.disabled =
-                !canManageCarWrap ||
-                busy ||
-                !hasCarWrap ||
-                typeof onAuthRemoveCarWrap !== 'function';
-            authCarWrapRemoveBtnEl.textContent =
-                busy && authUiState.pendingAction === 'remove-car-wrap' ? 'REMOVING...' : 'REMOVE';
+        if (authCarWrapUploadGlyphEl) {
+            authCarWrapUploadGlyphEl.textContent = '→';
         }
         if (authEmailInputEl && !authenticated && authUiState.email) {
             authEmailInputEl.value = sanitizeAuthEmailInput(authUiState.email);
@@ -1630,6 +1841,7 @@ export function createWelcomeModalController({
                     ? 'DELETING ACCOUNT...'
                     : 'DELETE ACCOUNT';
         }
+        syncAccountToolsUi();
         if (startOnlineBtnEl) {
             startOnlineBtnEl.dataset.authRequired = authenticated ? 'false' : 'true';
         }
@@ -1638,8 +1850,610 @@ export function createWelcomeModalController({
         }
     }
 
+    function syncSignedInProfileSummary() {
+        if (
+            !authProfileKickerEl ||
+            !authProfileRankBadgeEl ||
+            !authProfileSublineEl ||
+            !authProfileWinsEl ||
+            !authProfileLossesEl ||
+            !authProfileWinRateEl ||
+            !authProfileBestScoreEl
+        ) {
+            return;
+        }
+
+        const summary = resolveWelcomeProfileSummary({
+            authState: authUiState,
+            leaderboardState: welcomeGlobalLeaderboardState,
+            numberFormatter: leaderboardNumberFormatter,
+        });
+        authProfileKickerEl.textContent = summary.kicker;
+        authProfileRankBadgeEl.textContent = summary.rankBadge;
+        authProfileSublineEl.textContent = summary.subline;
+        authProfileWinsEl.textContent = summary.winsText;
+        authProfileLossesEl.textContent = summary.lossesText;
+        authProfileWinRateEl.textContent = summary.winRateText;
+        authProfileBestScoreEl.textContent = summary.bestScoreText;
+    }
+
+    function syncGarageVehiclePips(activeIndex = selectedVehicleIndex) {
+        if (!authGarageVehiclePipsEl) {
+            return;
+        }
+
+        const presetCount = PLAYER_VEHICLE_PRESETS.length;
+        const normalizedIndex = presetCount ? getWrappedIndex(activeIndex) : 0;
+
+        while (authGarageVehiclePipsEl.childElementCount < presetCount) {
+            const pipEl = document.createElement('span');
+            pipEl.className = 'welcomeAuthGarageVehiclePip';
+            authGarageVehiclePipsEl.appendChild(pipEl);
+        }
+        while (authGarageVehiclePipsEl.childElementCount > presetCount) {
+            authGarageVehiclePipsEl.lastElementChild?.remove();
+        }
+
+        for (let i = 0; i < authGarageVehiclePipsEl.children.length; i += 1) {
+            const pipEl = authGarageVehiclePipsEl.children[i];
+            pipEl.dataset.active = i === normalizedIndex ? 'true' : 'false';
+        }
+    }
+
+    function syncGaragePresentationUi({
+        authenticated = false,
+        busy = false,
+        canManageCarWrap = false,
+        hasCarWrap = false,
+    } = {}) {
+        const selectedPreset =
+            PLAYER_VEHICLE_PRESETS[selectedVehicleIndex] || PLAYER_VEHICLE_PRESETS[0] || null;
+        const vehicleName = selectedPreset?.name || 'Garage';
+        const vehicleCategory = selectedPreset?.category || 'Driver Build';
+        const vehicleDescription =
+            selectedPreset?.description ||
+            'Switch between your unlocked rides and tune the active build for the next run.';
+        const wrapFeatureEnabled = Boolean(authUiState.carWrapEnabled && authCarWrapInputEl);
+        const uploadBusy = Boolean(busy && authUiState.pendingAction === 'update-car-wrap');
+        const removeBusy = Boolean(busy && authUiState.pendingAction === 'remove-car-wrap');
+        const wrapState = !wrapFeatureEnabled ? 'disabled' : hasCarWrap ? 'custom' : 'stock';
+        const wrapActionLabel = hasCarWrap ? 'Replace wrap' : 'Upload wrap';
+        const wrapSummary = !wrapFeatureEnabled
+            ? `${vehicleName}. Wrap uploads unavailable on this server.`
+            : hasCarWrap
+              ? `${vehicleName}. Custom wrap equipped.`
+              : `${vehicleName}. Stock finish equipped.`;
+
+        if (authGarageVehicleNameEl) {
+            authGarageVehicleNameEl.textContent = vehicleName;
+            authGarageVehicleNameEl.setAttribute('title', vehicleName);
+        }
+        syncGarageVehiclePips(selectedVehicleIndex);
+        if (authSectionGaragePanelEl) {
+            authSectionGaragePanelEl.setAttribute(
+                'aria-label',
+                `${vehicleName}. ${vehicleCategory}. ${vehicleDescription}`
+            );
+            authSectionGaragePanelEl.dataset.wrapState = wrapState;
+        }
+        if (authGarageDockTitleEl) {
+            authGarageDockTitleEl.textContent = 'GARAGE';
+        }
+        if (authGarageDockSubtitleEl) {
+            authGarageDockSubtitleEl.textContent = hasCarWrap
+                ? `${vehicleName} • custom wrap equipped`
+                : `${vehicleName} • switch chassis and manage wrap`;
+        }
+        if (authGarageWrapCardEl) {
+            authGarageWrapCardEl.dataset.wrapState = wrapState;
+            authGarageWrapCardEl.setAttribute('title', wrapSummary);
+        }
+        if (authGarageWrapStatusEl) {
+            authGarageWrapStatusEl.dataset.state = wrapState;
+        }
+        if (authGaragePrevBtnEl) {
+            authGaragePrevBtnEl.disabled = !authenticated || busy;
+        }
+        if (authGarageNextBtnEl) {
+            authGarageNextBtnEl.disabled = !authenticated || busy;
+        }
+        if (authGarageWrapUploadBtnEl) {
+            authGarageWrapUploadBtnEl.hidden = !authenticated || !wrapFeatureEnabled;
+            authGarageWrapUploadBtnEl.disabled = !canManageCarWrap || busy;
+            authGarageWrapUploadBtnEl.setAttribute('aria-label', wrapActionLabel);
+            authGarageWrapUploadBtnEl.setAttribute('title', wrapActionLabel);
+            authGarageWrapUploadBtnEl.dataset.action = hasCarWrap ? 'replace' : 'upload';
+        }
+        if (authGarageWrapUploadIconEl) {
+            authGarageWrapUploadIconEl.textContent = uploadBusy ? '…' : hasCarWrap ? '↻' : '+';
+        }
+        if (authGarageWrapRemoveBtnEl) {
+            authGarageWrapRemoveBtnEl.hidden = !authenticated || !wrapFeatureEnabled || !hasCarWrap;
+            authGarageWrapRemoveBtnEl.disabled =
+                !canManageCarWrap ||
+                busy ||
+                !hasCarWrap ||
+                typeof onAuthRemoveCarWrap !== 'function';
+            authGarageWrapRemoveBtnEl.setAttribute('aria-label', 'Remove wrap');
+            authGarageWrapRemoveBtnEl.setAttribute('title', 'Remove wrap');
+        }
+        if (authGarageWrapRemoveIconEl) {
+            authGarageWrapRemoveIconEl.textContent = removeBusy ? '…' : '×';
+        }
+    }
+
+    function syncAvatarEditorUi({
+        authenticated = false,
+        enabled = false,
+        busy = false,
+        canManageProfileImage = false,
+        hasProfileImage = false,
+    } = {}) {
+        const visible = Boolean(authenticated && authAvatarEditorEl && avatarEditorState.open);
+        const hasSource = Boolean(avatarEditorState.image && avatarEditorState.objectUrl);
+        const editorBusy = Boolean(busy || avatarEditorState.loading || avatarEditorState.saving);
+        const canRemoveProfileImage =
+            authenticated &&
+            enabled &&
+            hasProfileImage &&
+            typeof onAuthRemoveProfileImage === 'function';
+
+        if (authAvatarEditorEl) {
+            authAvatarEditorEl.hidden = !visible;
+        }
+        if (authAvatarEditorViewportEl) {
+            authAvatarEditorViewportEl.dataset.empty = hasSource ? 'false' : 'true';
+            authAvatarEditorViewportEl.dataset.dragging =
+                avatarEditorState.dragPointerId !== null ? 'true' : 'false';
+        }
+        if (authAvatarEditorEmptyStateEl) {
+            authAvatarEditorEmptyStateEl.hidden = hasSource;
+        }
+        if (authAvatarEditorImageEl) {
+            if (hasSource) {
+                if (authAvatarEditorImageEl.getAttribute('src') !== avatarEditorState.objectUrl) {
+                    authAvatarEditorImageEl.src = avatarEditorState.objectUrl;
+                }
+                authAvatarEditorImageEl.hidden = false;
+                syncAvatarEditorPreviewTransform();
+            } else {
+                authAvatarEditorImageEl.hidden = true;
+                authAvatarEditorImageEl.removeAttribute('src');
+                authAvatarEditorImageEl.style.width = '';
+                authAvatarEditorImageEl.style.height = '';
+                authAvatarEditorImageEl.style.transform = '';
+            }
+        }
+        if (authAvatarChooseBtnEl) {
+            authAvatarChooseBtnEl.disabled = !canManageProfileImage || editorBusy;
+            authAvatarChooseBtnEl.textContent =
+                hasSource || hasProfileImage ? 'REPLACE PHOTO' : 'UPLOAD PHOTO';
+        }
+        if (authAvatarRemoveBtnEl) {
+            authAvatarRemoveBtnEl.hidden = !visible || !canRemoveProfileImage;
+            authAvatarRemoveBtnEl.disabled = !canRemoveProfileImage || editorBusy;
+            authAvatarRemoveBtnEl.textContent =
+                busy && authUiState.pendingAction === 'remove-avatar'
+                    ? 'REMOVING...'
+                    : 'REMOVE PHOTO';
+        }
+        if (authAvatarZoomInputEl) {
+            authAvatarZoomInputEl.disabled = !hasSource || editorBusy;
+            authAvatarZoomInputEl.value = String(
+                Math.round(clampNumber(avatarEditorState.zoom, 1, AVATAR_EDITOR_ZOOM_MAX) * 100)
+            );
+        }
+        if (authAvatarZoomValueEl) {
+            authAvatarZoomValueEl.textContent = `${Math.round(
+                clampNumber(avatarEditorState.zoom, 1, AVATAR_EDITOR_ZOOM_MAX) * 100
+            )}%`;
+        }
+        if (authAvatarSaveBtnEl) {
+            authAvatarSaveBtnEl.disabled =
+                !canManageProfileImage || editorBusy || !hasSource || !avatarEditorState.dirty;
+            authAvatarSaveBtnEl.textContent =
+                busy && authUiState.pendingAction === 'update-avatar'
+                    ? 'SAVING...'
+                    : avatarEditorState.saving
+                      ? 'SAVING...'
+                      : 'SAVE PHOTO';
+        }
+        if (authAvatarCancelBtnEl) {
+            authAvatarCancelBtnEl.disabled = editorBusy;
+        }
+    }
+
+    async function openAvatarEditor() {
+        if (
+            authUiState.loading ||
+            !authUiState.authenticated ||
+            !authUiState.profileImageEnabled ||
+            !authAvatarEditorEl
+        ) {
+            return;
+        }
+        if (avatarEditorState.open) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        avatarEditorState.open = true;
+        syncAuthUi();
+
+        try {
+            if (authUiState.avatarUrl) {
+                await loadAvatarEditorSourceFromUrl(authUiState.avatarUrl, {
+                    dirty: false,
+                });
+                return;
+            }
+        } catch (error) {
+            setLocalAuthStatus(
+                error?.message || 'Could not load the current profile photo.',
+                'error'
+            );
+            resetAvatarEditorDraft({
+                keepOpen: true,
+            });
+            syncAuthUi();
+            return;
+        }
+
+        resetAvatarEditorDraft({
+            keepOpen: true,
+        });
+        syncAuthUi();
+    }
+
+    function closeAvatarEditor({ skipSync = false } = {}) {
+        resetAvatarEditorDraft({
+            keepOpen: false,
+        });
+        if (!skipSync) {
+            syncAuthUi();
+        }
+    }
+
+    function resetAvatarEditorDraft({ keepOpen = true } = {}) {
+        avatarEditorState.loadToken += 1;
+        stopAvatarEditorDrag();
+        if (avatarEditorState.objectUrl) {
+            URL.revokeObjectURL(avatarEditorState.objectUrl);
+        }
+        avatarEditorState.open = Boolean(keepOpen);
+        avatarEditorState.loading = false;
+        avatarEditorState.saving = false;
+        avatarEditorState.dirty = false;
+        avatarEditorState.objectUrl = '';
+        avatarEditorState.image = null;
+        avatarEditorState.sourceWidth = 0;
+        avatarEditorState.sourceHeight = 0;
+        avatarEditorState.zoom = AVATAR_EDITOR_ZOOM_MIN;
+        avatarEditorState.offsetX = 0;
+        avatarEditorState.offsetY = 0;
+    }
+
+    async function loadAvatarEditorSourceFromFile(file, { dirty = true } = {}) {
+        validateAvatarEditorFile(file);
+        const objectUrl = URL.createObjectURL(file);
+        await applyAvatarEditorSource(objectUrl, {
+            dirty,
+        });
+    }
+
+    async function loadAvatarEditorSourceFromUrl(url, { dirty = false } = {}) {
+        if (typeof url !== 'string' || !url.trim()) {
+            resetAvatarEditorDraft({
+                keepOpen: true,
+            });
+            syncAuthUi();
+            return;
+        }
+        const response = await fetch(url, {
+            cache: 'no-store',
+        });
+        if (!response.ok) {
+            throw new Error('Could not load the current profile photo.');
+        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        await applyAvatarEditorSource(objectUrl, {
+            dirty,
+        });
+    }
+
+    async function applyAvatarEditorSource(objectUrl, { dirty = false } = {}) {
+        const loadToken = avatarEditorState.loadToken + 1;
+        avatarEditorState.loadToken = loadToken;
+        avatarEditorState.open = true;
+        avatarEditorState.loading = true;
+        avatarEditorState.saving = false;
+        syncAuthUi();
+
+        try {
+            const image = await loadImageFromObjectUrl(objectUrl);
+            if (avatarEditorState.loadToken !== loadToken) {
+                URL.revokeObjectURL(objectUrl);
+                return;
+            }
+            if (avatarEditorState.objectUrl) {
+                URL.revokeObjectURL(avatarEditorState.objectUrl);
+            }
+            avatarEditorState.objectUrl = objectUrl;
+            avatarEditorState.image = image;
+            avatarEditorState.sourceWidth = Math.max(1, image.naturalWidth || image.width || 1);
+            avatarEditorState.sourceHeight = Math.max(1, image.naturalHeight || image.height || 1);
+            avatarEditorState.zoom = AVATAR_EDITOR_ZOOM_MIN;
+            avatarEditorState.offsetX = 0;
+            avatarEditorState.offsetY = 0;
+            avatarEditorState.dirty = Boolean(dirty);
+            avatarEditorState.loading = false;
+            syncAuthUi();
+        } catch (error) {
+            if (avatarEditorState.loadToken === loadToken) {
+                URL.revokeObjectURL(objectUrl);
+                avatarEditorState.loading = false;
+                avatarEditorState.dirty = false;
+                avatarEditorState.image = null;
+                avatarEditorState.objectUrl = '';
+            }
+            throw error;
+        }
+    }
+
+    function syncAvatarEditorPreviewTransform() {
+        if (
+            !authAvatarEditorViewportEl ||
+            !authAvatarEditorImageEl ||
+            !avatarEditorState.image ||
+            !avatarEditorState.sourceWidth ||
+            !avatarEditorState.sourceHeight
+        ) {
+            return;
+        }
+
+        const viewportWidth = Math.max(
+            1,
+            Math.round(authAvatarEditorViewportEl.clientWidth || AVATAR_EDITOR_VIEW_SIZE_PX)
+        );
+        const viewportHeight = Math.max(
+            1,
+            Math.round(authAvatarEditorViewportEl.clientHeight || viewportWidth)
+        );
+        const baseScale = Math.max(
+            viewportWidth / avatarEditorState.sourceWidth,
+            viewportHeight / avatarEditorState.sourceHeight
+        );
+        const zoom = clampNumber(
+            avatarEditorState.zoom,
+            AVATAR_EDITOR_ZOOM_MIN,
+            AVATAR_EDITOR_ZOOM_MAX
+        );
+        const totalScale = baseScale * zoom;
+        const displayWidth = avatarEditorState.sourceWidth * totalScale;
+        const displayHeight = avatarEditorState.sourceHeight * totalScale;
+        const maxOffsetX = Math.max(0, (displayWidth - viewportWidth) * 0.5);
+        const maxOffsetY = Math.max(0, (displayHeight - viewportHeight) * 0.5);
+
+        avatarEditorState.zoom = zoom;
+        avatarEditorState.offsetX = clampNumber(avatarEditorState.offsetX, -maxOffsetX, maxOffsetX);
+        avatarEditorState.offsetY = clampNumber(avatarEditorState.offsetY, -maxOffsetY, maxOffsetY);
+
+        authAvatarEditorImageEl.style.width = `${avatarEditorState.sourceWidth}px`;
+        authAvatarEditorImageEl.style.height = `${avatarEditorState.sourceHeight}px`;
+        authAvatarEditorImageEl.style.transform =
+            `translate(-50%, -50%) translate(${avatarEditorState.offsetX}px, ${avatarEditorState.offsetY}px) ` +
+            `scale(${totalScale})`;
+    }
+
+    function handleAvatarEditorZoomInput() {
+        if (!avatarEditorState.image || !authAvatarZoomInputEl || authUiState.loading) {
+            return;
+        }
+
+        const nextZoom = clampNumber(
+            Number(authAvatarZoomInputEl.value) / 100,
+            AVATAR_EDITOR_ZOOM_MIN,
+            AVATAR_EDITOR_ZOOM_MAX
+        );
+        if (Math.abs(nextZoom - avatarEditorState.zoom) < 0.001) {
+            return;
+        }
+        avatarEditorState.zoom = nextZoom;
+        avatarEditorState.dirty = true;
+        syncAuthUi();
+    }
+
+    function handleAvatarEditorPointerDown(event) {
+        if (
+            !authAvatarEditorViewportEl ||
+            authUiState.loading ||
+            avatarEditorState.loading ||
+            avatarEditorState.saving ||
+            !avatarEditorState.image
+        ) {
+            return;
+        }
+
+        avatarEditorState.dragPointerId = event.pointerId;
+        avatarEditorState.dragStartX = event.clientX;
+        avatarEditorState.dragStartY = event.clientY;
+        avatarEditorState.dragOriginX = avatarEditorState.offsetX;
+        avatarEditorState.dragOriginY = avatarEditorState.offsetY;
+        authAvatarEditorViewportEl.setPointerCapture(event.pointerId);
+        syncAuthUi();
+    }
+
+    function handleAvatarEditorPointerMove(event) {
+        if (
+            avatarEditorState.dragPointerId === null ||
+            avatarEditorState.dragPointerId !== event.pointerId ||
+            !avatarEditorState.image
+        ) {
+            return;
+        }
+
+        avatarEditorState.offsetX =
+            avatarEditorState.dragOriginX + (event.clientX - avatarEditorState.dragStartX);
+        avatarEditorState.offsetY =
+            avatarEditorState.dragOriginY + (event.clientY - avatarEditorState.dragStartY);
+        avatarEditorState.dirty = true;
+        syncAvatarEditorPreviewTransform();
+        if (authAvatarEditorViewportEl) {
+            authAvatarEditorViewportEl.dataset.dragging = 'true';
+        }
+    }
+
+    function handleAvatarEditorPointerUp(event) {
+        if (
+            avatarEditorState.dragPointerId === null ||
+            avatarEditorState.dragPointerId !== event.pointerId
+        ) {
+            return;
+        }
+        stopAvatarEditorDrag();
+    }
+
+    function stopAvatarEditorDrag() {
+        avatarEditorState.dragPointerId = null;
+        avatarEditorState.dragStartX = 0;
+        avatarEditorState.dragStartY = 0;
+        avatarEditorState.dragOriginX = 0;
+        avatarEditorState.dragOriginY = 0;
+        if (authAvatarEditorViewportEl) {
+            authAvatarEditorViewportEl.dataset.dragging = 'false';
+        }
+    }
+
+    async function handleAvatarEditorSave() {
+        if (
+            authUiState.loading ||
+            avatarEditorState.loading ||
+            avatarEditorState.saving ||
+            !avatarEditorState.image ||
+            !avatarEditorState.dirty ||
+            typeof onAuthUpdateProfileImage !== 'function'
+        ) {
+            return;
+        }
+
+        clearLocalAuthStatus();
+        avatarEditorState.saving = true;
+        syncAuthUi();
+
+        try {
+            const uploadFile = await buildAvatarEditorUploadFile();
+            const response = await Promise.resolve(onAuthUpdateProfileImage(uploadFile)).catch(
+                (error) => ({
+                    ok: false,
+                    error: error?.message || 'Could not update the profile photo.',
+                })
+            );
+            if (!response?.ok && response?.error) {
+                setLocalAuthStatus(String(response.error), 'error');
+                return;
+            }
+            closeAvatarEditor({
+                skipSync: true,
+            });
+        } catch (error) {
+            setLocalAuthStatus(error?.message || 'Could not prepare the profile photo.', 'error');
+        } finally {
+            avatarEditorState.saving = false;
+            syncAuthUi();
+        }
+    }
+
+    async function buildAvatarEditorUploadFile() {
+        if (!avatarEditorState.image) {
+            throw new Error('Choose a profile photo first.');
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = AVATAR_EDITOR_OUTPUT_SIZE_PX;
+        canvas.height = AVATAR_EDITOR_OUTPUT_SIZE_PX;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+            throw new Error('Could not prepare the profile photo.');
+        }
+
+        const sourceCrop = resolveAvatarEditorSourceCrop();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(
+            avatarEditorState.image,
+            sourceCrop.x,
+            sourceCrop.y,
+            sourceCrop.width,
+            sourceCrop.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+
+        const blob =
+            (await canvasToBlob(canvas, 'image/webp', AVATAR_EDITOR_OUTPUT_QUALITY)) ||
+            (await canvasToBlob(canvas, 'image/jpeg', AVATAR_EDITOR_OUTPUT_QUALITY));
+        if (!blob) {
+            throw new Error('Could not encode the profile photo.');
+        }
+
+        const extension = blob.type === 'image/webp' ? 'webp' : 'jpg';
+        return new File([blob], `profile-photo.${extension}`, {
+            type: blob.type || 'image/jpeg',
+            lastModified: Date.now(),
+        });
+    }
+
+    function resolveAvatarEditorSourceCrop() {
+        const viewportWidth = Math.max(
+            1,
+            Math.round(authAvatarEditorViewportEl?.clientWidth || AVATAR_EDITOR_VIEW_SIZE_PX)
+        );
+        const viewportHeight = Math.max(
+            1,
+            Math.round(authAvatarEditorViewportEl?.clientHeight || viewportWidth)
+        );
+        const baseScale = Math.max(
+            viewportWidth / avatarEditorState.sourceWidth,
+            viewportHeight / avatarEditorState.sourceHeight
+        );
+        const totalScale =
+            baseScale *
+            clampNumber(avatarEditorState.zoom, AVATAR_EDITOR_ZOOM_MIN, AVATAR_EDITOR_ZOOM_MAX);
+        const imageLeft =
+            (viewportWidth - avatarEditorState.sourceWidth * totalScale) * 0.5 +
+            avatarEditorState.offsetX;
+        const imageTop =
+            (viewportHeight - avatarEditorState.sourceHeight * totalScale) * 0.5 +
+            avatarEditorState.offsetY;
+        const cropX = clampNumber(-imageLeft / totalScale, 0, avatarEditorState.sourceWidth - 1);
+        const cropY = clampNumber(-imageTop / totalScale, 0, avatarEditorState.sourceHeight - 1);
+        const cropWidth = Math.min(
+            avatarEditorState.sourceWidth - cropX,
+            viewportWidth / totalScale
+        );
+        const cropHeight = Math.min(
+            avatarEditorState.sourceHeight - cropY,
+            viewportHeight / totalScale
+        );
+
+        return {
+            x: cropX,
+            y: cropY,
+            width: Math.max(1, cropWidth),
+            height: Math.max(1, cropHeight),
+        };
+    }
+
     function handleWelcomeGlobalKeydown(event) {
         if (event.key !== 'Escape' || rootEl.hidden) {
+            return;
+        }
+        if (avatarEditorState.open) {
+            closeAvatarEditor();
             return;
         }
         if (hasOnlineStartFlow && !onlineModeFlowEl.hidden) {
@@ -1655,6 +2469,14 @@ export function createWelcomeModalController({
             return;
         }
         if (welcomeAccountOpen) {
+            if (accountToolsOpen) {
+                setAccountToolsOpen(false);
+                return;
+            }
+            if (garagePanelOpen) {
+                setGaragePanelOpen(false);
+                return;
+            }
             setWelcomeAccountOpen(false);
             return;
         }
@@ -1681,10 +2503,6 @@ export function createWelcomeModalController({
 
     function handleWelcomeAccountToggle() {
         if (launchSequenceState.active) {
-            return;
-        }
-        if (welcomeAccountOpen) {
-            setWelcomeAccountOpen(false);
             return;
         }
         setWelcomeLeaderboardOpen(false);
@@ -1715,6 +2533,60 @@ export function createWelcomeModalController({
 
     function requestWelcomeDonateClose() {
         document.dispatchEvent(new CustomEvent(WELCOME_DONATE_CLOSE_EVENT));
+    }
+
+    function openSecurityPanel() {
+        if (!welcomeAccountOpen || !authUiState.authenticated) {
+            return;
+        }
+        setGaragePanelOpen(false, {
+            skipSync: true,
+        });
+        setAuthSignedInSection('security', {
+            skipSync: true,
+        });
+        setAccountToolsOpen(true);
+    }
+
+    function openGaragePanel() {
+        if (!welcomeAccountOpen || !authUiState.authenticated) {
+            return;
+        }
+        setAccountToolsOpen(false, {
+            skipSync: true,
+        });
+        setAuthSignedInSection('garage', {
+            skipSync: true,
+        });
+        setGaragePanelOpen(true);
+    }
+
+    function requestGarageVehicleSwap(direction = 1) {
+        if (!authUiState.authenticated) {
+            return;
+        }
+        const baseIndex = transition.active ? transition.targetIndex : selectedVehicleIndex;
+        requestSwap(baseIndex + (direction < 0 ? -1 : 1), direction < 0 ? -1 : 1, true);
+    }
+
+    function openCarWrapFilePicker() {
+        if (
+            !authCarWrapInputEl ||
+            authUiState.loading ||
+            !authUiState.authenticated ||
+            authGarageWrapUploadBtnEl?.disabled
+        ) {
+            return;
+        }
+        authCarWrapInputEl.value = '';
+        authCarWrapInputEl.click();
+    }
+
+    function setGaragePanelOpen(nextOpen, options = {}) {
+        garagePanelOpen = Boolean(nextOpen && authToolsSectionEl && authUiState.authenticated);
+        if (!options.skipSync) {
+            syncAuthUi();
+        }
     }
 
     async function requestWelcomeLeaderboardRefresh() {
@@ -1798,6 +2670,27 @@ export function createWelcomeModalController({
             previewAccountBodyEl &&
             authPanelEl
         );
+        if (welcomeAccountOpen) {
+            setAccountToolsOpen(false, {
+                skipSync: true,
+            });
+            setGaragePanelOpen(false, {
+                skipSync: true,
+            });
+        }
+        if (!welcomeAccountOpen && avatarEditorState.open) {
+            closeAvatarEditor({
+                skipSync: true,
+            });
+        }
+        if (!welcomeAccountOpen) {
+            setAccountToolsOpen(false, {
+                skipSync: true,
+            });
+            setGaragePanelOpen(false, {
+                skipSync: true,
+            });
+        }
         if (!options.skipSync) {
             syncWelcomeAccountUi();
         }
@@ -1819,6 +2712,52 @@ export function createWelcomeModalController({
         accountBtnEl.dataset.open = welcomeAccountOpen ? 'true' : 'false';
         accountBtnEl.setAttribute('aria-expanded', welcomeAccountOpen ? 'true' : 'false');
         previewAccountOverlayEl.hidden = !welcomeAccountOpen;
+        syncAccountToolsUi();
+    }
+
+    function setAccountToolsOpen(nextOpen, options = {}) {
+        accountToolsOpen = Boolean(nextOpen && authToolsSectionEl && authUiState.authenticated);
+        if (accountToolsOpen) {
+            garagePanelOpen = false;
+        }
+        if (!accountToolsOpen) {
+            setPasswordChangeOpen(false, {
+                clearInputs: true,
+                skipSync: true,
+            });
+        }
+        if (!options.skipSync) {
+            syncAuthUi();
+        }
+    }
+
+    function syncAccountToolsUi() {
+        const canShowTools = Boolean(
+            welcomeAccountOpen && authUiState.authenticated && authToolsSectionEl
+        );
+        if (previewShellEl) {
+            previewShellEl.dataset.accountToolsOpen =
+                canShowTools && accountToolsOpen ? 'true' : 'false';
+            previewShellEl.dataset.garageOpen = canShowTools && garagePanelOpen ? 'true' : 'false';
+        }
+        if (authToolsSectionEl) {
+            authToolsSectionEl.dataset.open =
+                canShowTools && (accountToolsOpen || garagePanelOpen) ? 'true' : 'false';
+            authToolsSectionEl.dataset.mode =
+                canShowTools && garagePanelOpen ? 'garage' : 'security';
+            authToolsSectionEl.hidden = !canShowTools || (!accountToolsOpen && !garagePanelOpen);
+        }
+        if (previewAccountToolsToggleBtnEl) {
+            previewAccountToolsToggleBtnEl.hidden =
+                !welcomeAccountOpen || !authUiState.authenticated;
+            previewAccountToolsToggleBtnEl.dataset.open =
+                canShowTools && accountToolsOpen ? 'true' : 'false';
+            previewAccountToolsToggleBtnEl.setAttribute(
+                'aria-expanded',
+                canShowTools && accountToolsOpen ? 'true' : 'false'
+            );
+        }
+        syncPreviewInteractionUi();
     }
 
     function setWelcomeSettingsOpen(nextOpen, options = {}) {
@@ -1895,6 +2834,7 @@ export function createWelcomeModalController({
         if (!hasAuthPanel) {
             return;
         }
+        const skipFocus = Boolean(options.skipFocus);
         if (options.openOverlay !== false) {
             setWelcomeLeaderboardOpen(false);
             setWelcomeSettingsOpen(false);
@@ -1902,12 +2842,21 @@ export function createWelcomeModalController({
             closeOnlineModeFlow({ clearSelection: true });
             setWelcomeAccountOpen(true);
         }
+        if (authUiState.authenticated) {
+            setAccountToolsOpen(false, {
+                skipSync: true,
+            });
+        }
         setAuthMode(mode, {
             focusField: false,
             preserveStatus: Boolean(options.preserveStatus),
         });
+        if (skipFocus) {
+            return;
+        }
         if (authUiState.authenticated) {
             if (
+                accountToolsOpen &&
                 authPasswordChangeOpen &&
                 authNewPasswordInputEl &&
                 !authNewPasswordInputEl.disabled
@@ -1916,7 +2865,11 @@ export function createWelcomeModalController({
                 authNewPasswordInputEl.select?.();
                 return;
             }
-            authSignOutBtnEl?.focus();
+            if (previewAccountToolsToggleBtnEl && !previewAccountToolsToggleBtnEl.hidden) {
+                previewAccountToolsToggleBtnEl.focus();
+                return;
+            }
+            authAvatarFrameEl?.focus();
             return;
         }
         const focusTarget =
@@ -1930,7 +2883,10 @@ export function createWelcomeModalController({
             return;
         }
         if (!authUiState.enabled) {
-            setLocalAuthStatus('Supabase auth is unavailable on this server.', 'error');
+            setLocalAuthStatus(
+                authUiState.statusText || 'Player account is unavailable right now.',
+                authUiState.statusTone || 'muted'
+            );
             return;
         }
 
@@ -2009,7 +2965,7 @@ export function createWelcomeModalController({
             authUiState.loading ||
             !authUiState.authenticated ||
             !authUiState.profileImageEnabled ||
-            typeof onAuthUpdateProfileImage !== 'function'
+            !authAvatarEditorEl
         ) {
             if (authAvatarInputEl) {
                 authAvatarInputEl.value = '';
@@ -2023,22 +2979,18 @@ export function createWelcomeModalController({
         }
 
         clearLocalAuthStatus();
-        syncAuthUi();
-
-        const response = await Promise.resolve(onAuthUpdateProfileImage(file)).catch((error) => ({
-            ok: false,
-            error: error?.message || 'Could not update the profile photo.',
-        }));
-
-        if (authAvatarInputEl) {
-            authAvatarInputEl.value = '';
-        }
-        if (!response?.ok && response?.error) {
-            setLocalAuthStatus(String(response.error), 'error');
+        try {
+            await loadAvatarEditorSourceFromFile(file, {
+                dirty: true,
+            });
+        } catch (error) {
+            setLocalAuthStatus(error?.message || 'Could not load the selected photo.', 'error');
+        } finally {
+            if (authAvatarInputEl) {
+                authAvatarInputEl.value = '';
+            }
             syncAuthUi();
-            return;
         }
-        syncAuthUi();
     }
 
     async function handleProfileImageRemoval() {
@@ -2048,6 +3000,11 @@ export function createWelcomeModalController({
             !authUiState.avatarUrl ||
             typeof onAuthRemoveProfileImage !== 'function'
         ) {
+            return;
+        }
+
+        const confirmed = window.confirm('Remove the current profile photo?');
+        if (!confirmed) {
             return;
         }
 
@@ -2064,6 +3021,9 @@ export function createWelcomeModalController({
             syncAuthUi();
             return;
         }
+        closeAvatarEditor({
+            skipSync: true,
+        });
         syncAuthUi();
     }
 
@@ -2295,7 +3255,7 @@ export function createWelcomeModalController({
         if (!authenticated) {
             return [];
         }
-        return ['security'];
+        return ['garage', 'security'];
     }
 
     function resolveAuthSignedInSection(
@@ -2304,7 +3264,7 @@ export function createWelcomeModalController({
             authenticated: authUiState.authenticated,
         })
     ) {
-        const normalized = value === 'security' ? value : 'security';
+        const normalized = value === 'garage' || value === 'security' ? value : 'security';
         if (availableSections.includes(normalized)) {
             return normalized;
         }
@@ -2501,6 +3461,122 @@ export function createWelcomeModalController({
         previewCamera.updateProjectionMatrix();
     }
 
+    function isGarageShowcaseOpen() {
+        return Boolean(welcomeAccountOpen && garagePanelOpen);
+    }
+
+    function isPreviewInteractionEnabled() {
+        return Boolean(isGarageShowcaseOpen() && previewCanvasEl && !transition.active);
+    }
+
+    function shouldPausePreviewSpin() {
+        return isGarageShowcaseOpen() || previewInteractionState.pointerId !== null;
+    }
+
+    function syncPreviewInteractionUi() {
+        const interactive = isPreviewInteractionEnabled();
+        if (!interactive && previewInteractionState.pointerId !== null) {
+            stopPreviewDrag();
+        }
+        previewCanvasEl.dataset.garageInteractive = interactive ? 'true' : 'false';
+        previewCanvasEl.dataset.dragging =
+            previewInteractionState.pointerId !== null ? 'true' : 'false';
+        if (previewAccountOverlayEl) {
+            previewAccountOverlayEl.dataset.previewDragEnabled = interactive ? 'true' : 'false';
+            previewAccountOverlayEl.dataset.previewDragging =
+                previewInteractionState.pointerId !== null ? 'true' : 'false';
+        }
+    }
+
+    function shouldIgnorePreviewPointerTarget(target) {
+        if (!(target instanceof Element)) {
+            return false;
+        }
+        return Boolean(
+            target.closest('button, input, select, textarea, label, a, [role="button"]')
+        );
+    }
+
+    function handlePreviewPointerDown(event) {
+        if (
+            !isPreviewInteractionEnabled() ||
+            !event.isPrimary ||
+            event.button !== 0 ||
+            shouldIgnorePreviewPointerTarget(event.target)
+        ) {
+            return;
+        }
+        const captureElement =
+            event.currentTarget instanceof HTMLElement ? event.currentTarget : previewCanvasEl;
+        previewInteractionState.pointerId = event.pointerId;
+        previewInteractionState.captureElement = captureElement;
+        previewInteractionState.lastClientX = event.clientX;
+        previewInteractionState.lastClientY = event.clientY;
+        syncPreviewInteractionUi();
+        captureElement.setPointerCapture(event.pointerId);
+        event.preventDefault();
+    }
+
+    function handlePreviewPointerMove(event) {
+        if (
+            previewInteractionState.pointerId === null ||
+            previewInteractionState.pointerId !== event.pointerId
+        ) {
+            return;
+        }
+        if (!isPreviewInteractionEnabled()) {
+            stopPreviewDrag();
+            return;
+        }
+
+        const deltaX = event.clientX - previewInteractionState.lastClientX;
+        const deltaY = event.clientY - previewInteractionState.lastClientY;
+        previewInteractionState.lastClientX = event.clientX;
+        previewInteractionState.lastClientY = event.clientY;
+
+        previewSpinYaw += deltaX * WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY;
+        previewInteractionState.pitchOffset = clampNumber(
+            previewInteractionState.pitchOffset +
+                deltaY * WELCOME_GARAGE_PREVIEW_PITCH_DRAG_SENSITIVITY,
+            WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MIN,
+            WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MAX
+        );
+
+        applyPreviewPose();
+        renderPreview();
+        event.preventDefault();
+    }
+
+    function handlePreviewPointerUp(event) {
+        if (
+            previewInteractionState.pointerId === null ||
+            previewInteractionState.pointerId !== event.pointerId
+        ) {
+            return;
+        }
+        stopPreviewDrag({
+            releasePointerCapture: false,
+        });
+        event.preventDefault();
+    }
+
+    function stopPreviewDrag({ releasePointerCapture = true } = {}) {
+        const pointerId = previewInteractionState.pointerId;
+        const captureElement = previewInteractionState.captureElement;
+        if (
+            releasePointerCapture &&
+            pointerId !== null &&
+            captureElement?.hasPointerCapture?.(pointerId)
+        ) {
+            captureElement.releasePointerCapture(pointerId);
+        }
+        previewInteractionState.pointerId = null;
+        previewInteractionState.captureElement = null;
+        previewInteractionState.lastClientX = 0;
+        previewInteractionState.lastClientY = 0;
+        syncPreviewInteractionUi();
+    }
+
     function renderPreview() {
         previewRenderer.render(previewScene, previewCamera);
     }
@@ -2552,6 +3628,20 @@ export function createWelcomeModalController({
         showroomAtmosphere.accentHalo.material.opacity =
             0.08 + breath * 0.06 + transition.glowBoost * 0.05;
         showroomAtmosphere.accentHalo.scale.setScalar(1 + breath * 0.015);
+        showroomAtmosphere.starfieldGroup.position.x =
+            Math.sin(motionTime * 0.08 + 0.8) * showroomAtmosphere.starfieldDriftX -
+            transition.cameraKick * 0.04;
+        showroomAtmosphere.starfieldGroup.position.y =
+            showroomAtmosphere.starfieldBaseY +
+            Math.cos(motionTime * 0.06 - 0.25) * showroomAtmosphere.starfieldDriftY;
+        showroomAtmosphere.starfieldFar.rotation.y += safeDt * 0.005;
+        showroomAtmosphere.starfieldFar.rotation.x = Math.sin(motionTime * 0.1 + 0.2) * 0.014;
+        showroomAtmosphere.starfieldNear.rotation.y -= safeDt * 0.008;
+        showroomAtmosphere.starfieldNear.rotation.x = Math.cos(motionTime * 0.12 - 0.5) * 0.018;
+        showroomAtmosphere.starfieldFarMaterial.opacity =
+            0.26 + shimmer * 0.07 + transition.glowBoost * 0.02;
+        showroomAtmosphere.starfieldNearMaterial.opacity =
+            0.16 + breath * 0.06 + transition.glowBoost * 0.02;
 
         keyLight.intensity = 1.18 + breath * 0.08;
         rimLight.intensity = 0.9 + shimmer * 0.08;
@@ -2636,11 +3726,11 @@ export function createWelcomeModalController({
 
     function bindVehicleButtons() {
         prevVehicleBtnEl?.addEventListener('click', () => {
-            const baseIndex = transition.active ? transition.targetIndex : selectedSkinIndex;
+            const baseIndex = transition.active ? transition.targetIndex : selectedVehicleIndex;
             requestSwap(baseIndex - 1, -1, true);
         });
         nextVehicleBtnEl?.addEventListener('click', () => {
-            const baseIndex = transition.active ? transition.targetIndex : selectedSkinIndex;
+            const baseIndex = transition.active ? transition.targetIndex : selectedVehicleIndex;
             requestSwap(baseIndex + 1, 1, true);
         });
     }
@@ -2654,18 +3744,19 @@ export function createWelcomeModalController({
         transition.cameraKick = 0;
         transition.glowBoost = 0;
         resetTransitionVisuals();
+        syncPreviewInteractionUi();
         applySelectedPreset(wrappedIndex, emitChange);
     }
 
     function requestSwap(nextIndex, direction = 1, emitChange = true) {
-        if (!CAR_SKIN_PRESETS.length) {
+        if (!PLAYER_VEHICLE_PRESETS.length) {
             return;
         }
 
         const targetIndex = getWrappedIndex(nextIndex);
         const directionalSign = direction < 0 ? -1 : 1;
 
-        if (!transition.active && targetIndex === selectedSkinIndex) {
+        if (!transition.active && targetIndex === selectedVehicleIndex) {
             return;
         }
 
@@ -2686,9 +3777,13 @@ export function createWelcomeModalController({
         const incomingVehicleIndex = activeVehicleIndex === 0 ? 1 : 0;
         const outgoingVehicleIndex = activeVehicleIndex;
         const incomingVehicle = previewVehicles[incomingVehicleIndex];
-        const targetPreset = CAR_SKIN_PRESETS[targetIndex];
+        const targetPreset = PLAYER_VEHICLE_PRESETS[targetIndex];
+        const previewSkinId = resolveSkinId(currentSkinGetter() || targetPreset.defaultSkinId);
 
-        incomingVehicle.rig.setSkin(targetPreset.id);
+        incomingVehicle.rig.setAppearance({
+            vehicleId: targetPreset.id,
+            skinId: previewSkinId,
+        });
         incomingVehicle.car.visible = false;
 
         transition.active = true;
@@ -2708,6 +3803,7 @@ export function createWelcomeModalController({
         transition.turnYaw = swapTurnYaw;
         transition.settleDistance = swapSettleDistance;
         transition.settleYawOffset = swapSettleYawOffset;
+        syncPreviewInteractionUi();
 
         updateVehicleButtonLabels(targetIndex);
     }
@@ -2806,37 +3902,74 @@ export function createWelcomeModalController({
             previewVehicles[i].car.visible = isActiveVehicle;
         }
 
+        syncPreviewInteractionUi();
         applySelectedPreset(transition.targetIndex, transition.emitChange);
 
         if (transition.queue) {
             const queued = transition.queue;
             transition.queue = null;
-            if (queued.index !== selectedSkinIndex) {
+            if (queued.index !== selectedVehicleIndex) {
                 startSwap(queued.index, queued.direction, queued.emitChange);
             }
         }
     }
 
     function applySelectedPreset(nextIndex, emitChange = true) {
-        selectedSkinIndex = getWrappedIndex(nextIndex);
-        const selectedPreset = CAR_SKIN_PRESETS[selectedSkinIndex];
-        previewVehicles[activeVehicleIndex].rig.setSkin(selectedPreset.id);
+        selectedVehicleIndex = getWrappedIndex(nextIndex);
+        const selectedPreset = PLAYER_VEHICLE_PRESETS[selectedVehicleIndex];
+        const previewSkinId = resolveSkinId(currentSkinGetter() || selectedPreset.defaultSkinId);
+        previewVehicles[activeVehicleIndex].rig.setAppearance({
+            vehicleId: selectedPreset.id,
+            skinId: previewSkinId,
+        });
         updateVehicleButtonLabels();
+        updatePreviewVehicleLabel(selectedPreset);
+        syncGaragePresentationUi({
+            authenticated: authUiState.authenticated,
+            busy: Boolean(authUiState.loading),
+            canManageCarWrap: Boolean(
+                authUiState.authenticated &&
+                authUiState.enabled &&
+                authUiState.carWrapEnabled &&
+                authCarWrapInputEl &&
+                authGarageWrapUploadBtnEl
+            ),
+            hasCarWrap: Boolean(authUiState.carWrapUrl),
+        });
         if (emitChange) {
-            onSkinChange?.(resolveSkinId(selectedPreset.id), selectedPreset);
+            onVehicleChange?.(resolveVehicleId(selectedPreset.id), selectedPreset);
         }
     }
 
     function applyPreviewPose() {
         const cameraOffsetX = transition.cameraKick;
+        const garageShowcaseOpen = isGarageShowcaseOpen();
+        const accountProfileFramingLift = garageShowcaseOpen
+            ? previewRadius * 0.015
+            : welcomeAccountOpen
+              ? previewRadius * 0.18
+              : 0;
+        const accountProfileScale = garageShowcaseOpen ? 1 : welcomeAccountOpen ? 0.93 : 1;
+        const accountCameraHeightOffset = garageShowcaseOpen ? -previewRadius * 0.02 : 0;
+        const accountCameraDepthOffset = garageShowcaseOpen ? -previewRadius * 0.08 : 0;
+        const garageShowcaseBoost = garageShowcaseOpen ? 0.8 : 0;
+        const cameraPitch = clampNumber(
+            previewCameraBasePitch + (garageShowcaseOpen ? previewInteractionState.pitchOffset : 0),
+            previewCameraBasePitch + WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MIN,
+            previewCameraBasePitch + WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MAX
+        );
+        const cameraHorizontalRadius = Math.cos(cameraPitch) * previewCameraBaseDistance;
+        const cameraBaseX = Math.sin(previewCameraBaseAzimuth) * cameraHorizontalRadius;
+        const cameraBaseY = Math.sin(cameraPitch) * previewCameraBaseDistance;
+        const cameraBaseZ = Math.cos(cameraPitch) * cameraHorizontalRadius;
         previewCamera.position.set(
-            previewCameraBasePosition.x + cameraOffsetX,
-            previewCameraBasePosition.y,
-            previewCameraBasePosition.z
+            cameraBaseX + cameraOffsetX,
+            cameraBaseY + accountCameraHeightOffset,
+            cameraBaseZ + accountCameraDepthOffset
         );
         previewCamera.lookAt(
             previewLookAt.x + cameraOffsetX * 0.15,
-            previewLookAt.y,
+            previewLookAt.y + accountProfileFramingLift,
             previewLookAt.z
         );
 
@@ -2854,7 +3987,7 @@ export function createWelcomeModalController({
             const previewVehicle = previewVehicles[i];
             previewVehicle.car.position.set(0, 0, 0);
             previewVehicle.car.rotation.y = previewSpinYaw;
-            previewVehicle.car.scale.setScalar(1);
+            previewVehicle.car.scale.setScalar(accountProfileScale);
             if (!transition.active) {
                 previewVehicle.car.visible = i === activeVehicleIndex;
             }
@@ -2885,7 +4018,7 @@ export function createWelcomeModalController({
             outgoingVehicle.car.rotation.y =
                 transitionYaw +
                 THREE.MathUtils.lerp(0, transition.direction * transition.turnYaw, curveProgress);
-            outgoingVehicle.car.scale.setScalar(1);
+            outgoingVehicle.car.scale.setScalar(accountProfileScale);
             incomingVehicle.car.visible = false;
         }
 
@@ -2925,7 +4058,7 @@ export function createWelcomeModalController({
                     settleStartYawOffset,
                     laneProgress
                 );
-            incomingVehicle.car.scale.setScalar(1);
+            incomingVehicle.car.scale.setScalar(accountProfileScale);
             outgoingVehicle.car.visible = false;
         }
 
@@ -2947,20 +4080,29 @@ export function createWelcomeModalController({
             );
             incomingVehicle.car.rotation.y =
                 transitionYaw + THREE.MathUtils.lerp(settleStartYawOffset, 0, eased);
-            incomingVehicle.car.scale.setScalar(1);
+            incomingVehicle.car.scale.setScalar(accountProfileScale);
             outgoingVehicle.car.visible = false;
         }
 
-        underGlow.scale.setScalar(1 + transition.glowBoost * 0.26);
-        underGlow.material.opacity = 0.1 + transition.glowBoost * 0.12;
+        underGlow.scale.setScalar(1 + transition.glowBoost * 0.26 + garageShowcaseBoost * 0.08);
+        underGlow.material.opacity =
+            0.1 + transition.glowBoost * 0.12 + garageShowcaseBoost * 0.035;
 
-        showroomAtmosphere.contactShadow.scale.setScalar(1 + transition.glowBoost * 0.12);
+        showroomAtmosphere.contactShadow.scale.setScalar(
+            1 + transition.glowBoost * 0.12 + garageShowcaseBoost * 0.04
+        );
         showroomAtmosphere.contactShadow.material.opacity =
-            0.52 + Math.sin(previewPulseTime * 0.72 + 0.2) * 0.03 - transition.glowBoost * 0.04;
-        showroomAtmosphere.stageFloor.material.opacity = 0.95 + transition.glowBoost * 0.03;
+            0.52 +
+            Math.sin(previewPulseTime * 0.72 + 0.2) * 0.03 -
+            transition.glowBoost * 0.04 +
+            garageShowcaseBoost * 0.02;
+        showroomAtmosphere.stageFloor.material.opacity =
+            0.95 + transition.glowBoost * 0.03 + garageShowcaseBoost * 0.02;
     }
 
     function resetTransitionVisuals() {
+        const garageShowcaseOpen = welcomeAccountOpen && garagePanelOpen;
+        const accountProfileScale = garageShowcaseOpen ? 1 : welcomeAccountOpen ? 0.93 : 1;
         transition.active = false;
         transition.phase = 'idle';
         transition.phaseTime = 0;
@@ -2983,7 +4125,7 @@ export function createWelcomeModalController({
             previewVehicle.car.visible = i === activeVehicleIndex;
             previewVehicle.car.position.set(0, 0, 0);
             previewVehicle.car.rotation.y = previewSpinYaw;
-            previewVehicle.car.scale.setScalar(1);
+            previewVehicle.car.scale.setScalar(accountProfileScale);
         }
 
         underGlow.scale.setScalar(1);
@@ -2993,15 +4135,40 @@ export function createWelcomeModalController({
         showroomAtmosphere.stageFloor.material.opacity = 0.95;
     }
 
-    function updateVehicleButtonLabels(baseIndex = selectedSkinIndex) {
-        if (!CAR_SKIN_PRESETS.length) {
+    function updateVehicleButtonLabels(baseIndex = selectedVehicleIndex) {
+        if (!PLAYER_VEHICLE_PRESETS.length) {
             return;
         }
         const normalizedIndex = getWrappedIndex(baseIndex);
-        const previousPreset = CAR_SKIN_PRESETS[getWrappedIndex(normalizedIndex - 1)];
-        const nextPreset = CAR_SKIN_PRESETS[getWrappedIndex(normalizedIndex + 1)];
-        prevVehicleBtnEl?.setAttribute('aria-label', `Previous skin: ${previousPreset.name}`);
-        nextVehicleBtnEl?.setAttribute('aria-label', `Next skin: ${nextPreset.name}`);
+        const previousPreset = PLAYER_VEHICLE_PRESETS[getWrappedIndex(normalizedIndex - 1)];
+        const nextPreset = PLAYER_VEHICLE_PRESETS[getWrappedIndex(normalizedIndex + 1)];
+        prevVehicleBtnEl?.setAttribute('aria-label', `Previous vehicle: ${previousPreset.name}`);
+        nextVehicleBtnEl?.setAttribute('aria-label', `Next vehicle: ${nextPreset.name}`);
+        authGaragePrevBtnEl?.setAttribute('aria-label', `Previous chassis: ${previousPreset.name}`);
+        authGaragePrevBtnEl?.setAttribute('title', `Previous chassis: ${previousPreset.name}`);
+        authGarageNextBtnEl?.setAttribute('aria-label', `Next chassis: ${nextPreset.name}`);
+        authGarageNextBtnEl?.setAttribute('title', `Next chassis: ${nextPreset.name}`);
+    }
+
+    function updatePreviewVehicleLabel(vehiclePreset = null) {
+        if (!previewVehicleLabelEl) {
+            return;
+        }
+        const preset =
+            vehiclePreset && typeof vehiclePreset === 'object'
+                ? vehiclePreset
+                : PLAYER_VEHICLE_PRESETS[selectedVehicleIndex] || null;
+        if (!preset) {
+            previewVehicleLabelEl.textContent = '';
+            previewVehicleLabelEl.removeAttribute('title');
+            return;
+        }
+        const suffix = preset.previewLabel || preset.category || '';
+        previewVehicleLabelEl.textContent = preset.name;
+        previewVehicleLabelEl.setAttribute(
+            'title',
+            suffix ? `${preset.name} • ${suffix}` : preset.name
+        );
     }
 
     function createShowroomAtmosphere(scene, previewRadius) {
@@ -3041,6 +4208,40 @@ export function createWelcomeModalController({
         );
         backdropSoftLight.position.set(0, backdropY, backdropZ);
         backdropGroup.add(backdropSoftLight);
+
+        const starTexture = createStarParticleTexture();
+        const starfieldGroup = new THREE.Group();
+        const starfieldBaseY = previewRadius * 0.08;
+        starfieldGroup.position.set(0, starfieldBaseY, backdropZ - previewRadius * 0.12);
+        backdropGroup.add(starfieldGroup);
+
+        const starfieldFarLayer = createStarfieldLayer({
+            seed: 117,
+            count: 188,
+            texture: starTexture,
+            color: 0xe4efff,
+            opacity: 0.36,
+            size: 4.6,
+            spanX: previewRadius * 7.8,
+            minY: previewRadius * 0.42,
+            maxY: previewRadius * 2.74,
+            depth: previewRadius * 1.3,
+        });
+        starfieldGroup.add(starfieldFarLayer.points);
+
+        const starfieldNearLayer = createStarfieldLayer({
+            seed: 141,
+            count: 92,
+            texture: starTexture,
+            color: 0x93cbff,
+            opacity: 0.24,
+            size: 6.4,
+            spanX: previewRadius * 6.6,
+            minY: previewRadius * 0.54,
+            maxY: previewRadius * 2.38,
+            depth: previewRadius * 0.84,
+        });
+        starfieldGroup.add(starfieldNearLayer.points);
 
         const particlesGeometry = new THREE.BufferGeometry();
         const particleCount = 56;
@@ -3133,11 +4334,59 @@ export function createWelcomeModalController({
             backdropGroup,
             cycloramaMaterial,
             backdropSoftLightMaterial,
+            starfieldGroup,
+            starfieldBaseY,
+            starfieldDriftX: previewRadius * 0.04,
+            starfieldDriftY: previewRadius * 0.015,
+            starfieldFar: starfieldFarLayer.points,
+            starfieldFarMaterial: starfieldFarLayer.material,
+            starfieldNear: starfieldNearLayer.points,
+            starfieldNearMaterial: starfieldNearLayer.material,
             floorSheenMaterial,
             particles,
             stageFloor,
             accentHalo,
             contactShadow,
+        };
+    }
+
+    function createStarfieldLayer({
+        seed = 1,
+        count = 64,
+        texture = null,
+        color = 0xffffff,
+        opacity = 0.24,
+        size = 0.04,
+        spanX = 10,
+        minY = 0.5,
+        maxY = 3,
+        depth = 1,
+    } = {}) {
+        const geometry = new THREE.BufferGeometry();
+        const positions = new Float32Array(count * 3);
+        const random = createSeededRandom(seed);
+        for (let i = 0; i < count; i += 1) {
+            const idx = i * 3;
+            positions[idx] = (random() - 0.5) * spanX;
+            positions[idx + 1] = THREE.MathUtils.lerp(minY, maxY, Math.pow(random(), 0.72));
+            positions[idx + 2] = (random() - 0.5) * depth;
+        }
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({
+            map: texture || createStarParticleTexture(),
+            color,
+            transparent: true,
+            opacity,
+            size,
+            sizeAttenuation: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            alphaTest: 0.06,
+        });
+        const points = new THREE.Points(geometry, material);
+        return {
+            points,
+            material,
         };
     }
 
@@ -3280,6 +4529,36 @@ export function createWelcomeModalController({
         return texture;
     }
 
+    function createStarParticleTexture() {
+        const canvas = document.createElement('canvas');
+        canvas.width = 96;
+        canvas.height = 96;
+        const ctx = canvas.getContext('2d');
+        const center = canvas.width * 0.5;
+
+        const glow = ctx.createRadialGradient(center, center, 2, center, center, center);
+        glow.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        glow.addColorStop(0.18, 'rgba(231, 243, 255, 0.96)');
+        glow.addColorStop(0.44, 'rgba(163, 210, 255, 0.34)');
+        glow.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.56)';
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(center, center - 16);
+        ctx.lineTo(center, center + 16);
+        ctx.moveTo(center - 16, center);
+        ctx.lineTo(center + 16, center);
+        ctx.stroke();
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.needsUpdate = true;
+        return texture;
+    }
+
     function createContactShadowTexture() {
         const canvas = document.createElement('canvas');
         canvas.width = 512;
@@ -3329,9 +4608,12 @@ export function createWelcomeModalController({
     }
 
     function createPreviewVehicle() {
+        const defaultVehiclePreset = getPlayerVehiclePresetById(DEFAULT_PLAYER_VEHICLE_ID);
+        const defaultSkinId = resolveSkinId(defaultVehiclePreset.defaultSkinId);
         const rig = createCarRig({
-            skinId: DEFAULT_PLAYER_CAR_SKIN_ID,
-            bodyColor: getCarSkinPresetById(DEFAULT_PLAYER_CAR_SKIN_ID).bodyColor,
+            vehicleId: defaultVehiclePreset.id,
+            skinId: defaultSkinId,
+            bodyColor: getCarSkinPresetById(defaultSkinId).bodyColor,
             wrapUrl: '',
             displayName: 'MAREK',
             addLights: true,
@@ -3355,7 +4637,7 @@ export function createWelcomeModalController({
     }
 
     function getWrappedIndex(index) {
-        const count = CAR_SKIN_PRESETS.length;
+        const count = PLAYER_VEHICLE_PRESETS.length;
         return ((Math.round(index) % count) + count) % count;
     }
 
@@ -3373,6 +4655,58 @@ export function createWelcomeModalController({
     function easeOutCubic(value) {
         const inverse = 1 - value;
         return 1 - inverse * inverse * inverse;
+    }
+
+    function createInitialAvatarEditorState() {
+        return {
+            open: false,
+            loading: false,
+            saving: false,
+            dirty: false,
+            objectUrl: '',
+            image: null,
+            sourceWidth: 0,
+            sourceHeight: 0,
+            zoom: AVATAR_EDITOR_ZOOM_MIN,
+            offsetX: 0,
+            offsetY: 0,
+            dragPointerId: null,
+            dragStartX: 0,
+            dragStartY: 0,
+            dragOriginX: 0,
+            dragOriginY: 0,
+            loadToken: 0,
+        };
+    }
+
+    function validateAvatarEditorFile(file) {
+        if (!(file instanceof File)) {
+            throw new Error('Choose an image file first.');
+        }
+        if (!USER_MEDIA_ALLOWED_TYPES.has(file.type)) {
+            throw new Error('Only JPG, PNG, or WebP images are supported.');
+        }
+        if (!Number.isFinite(file.size) || file.size <= 0) {
+            throw new Error('The selected image is empty.');
+        }
+        if (file.size > USER_MEDIA_MAX_INPUT_BYTES) {
+            throw new Error('Choose an image smaller than 10 MB.');
+        }
+    }
+
+    function loadImageFromObjectUrl(objectUrl) {
+        return new Promise((resolve, reject) => {
+            const image = new Image();
+            image.onload = () => resolve(image);
+            image.onerror = () => reject(new Error('The selected file is not a valid image.'));
+            image.src = objectUrl;
+        });
+    }
+
+    function canvasToBlob(canvas, type, quality) {
+        return new Promise((resolve) => {
+            canvas.toBlob((blob) => resolve(blob || null), type, quality);
+        });
     }
 
     function normalizeWelcomeAuthState(state = null) {
@@ -3691,6 +5025,91 @@ function normalizeWelcomeGlobalLeaderboardState(state) {
         totalEntries: Math.max(0, Math.round(Number(source.totalEntries) || 0)),
         viewerRank: Math.max(0, Math.round(Number(source.viewerRank) || 0)),
         viewerHasEntry: Boolean(source.viewerHasEntry),
+        viewerStats: normalizeWelcomeProfileStats(source.viewerStats),
+    };
+}
+
+function createEmptyWelcomeProfileStats() {
+    return {
+        totalRounds: 0,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        bestScore: 0,
+        averageScore: 0,
+    };
+}
+
+function normalizeWelcomeProfileStats(stats) {
+    const source = stats && typeof stats === 'object' ? stats : {};
+    const totalRounds = Math.max(
+        0,
+        Math.round(Number(source.totalRounds ?? source.total_rounds) || 0)
+    );
+    const wins = Math.max(0, Math.round(Number(source.wins) || 0));
+    const losses = Math.max(
+        0,
+        Math.round(Number(source.losses) || Math.max(0, totalRounds - wins))
+    );
+    const bestScore = Math.max(0, Math.round(Number(source.bestScore ?? source.best_score) || 0));
+    const averageScore = Math.max(
+        0,
+        Math.round(Number(source.averageScore ?? source.average_score) || 0)
+    );
+    const computedWinRate = totalRounds > 0 ? Math.round((wins / totalRounds) * 100) : 0;
+    const winRate = Math.max(
+        0,
+        Math.min(100, Math.round(Number(source.winRate ?? source.win_rate) || computedWinRate))
+    );
+    return {
+        totalRounds,
+        wins,
+        losses,
+        winRate,
+        bestScore,
+        averageScore,
+    };
+}
+
+function resolveWelcomeProfileSummary({
+    authState = null,
+    leaderboardState = null,
+    numberFormatter = new Intl.NumberFormat('en-US'),
+} = {}) {
+    const authenticated = Boolean(authState?.authenticated);
+    const stats = normalizeWelcomeProfileStats(leaderboardState?.viewerStats);
+    const viewerRank = Math.max(0, Math.round(Number(leaderboardState?.viewerRank) || 0));
+    const totalEntries = Math.max(0, Math.round(Number(leaderboardState?.totalEntries) || 0));
+    const totalRounds = stats.totalRounds;
+    const wins = stats.wins;
+    const losses = stats.losses;
+    const bestScore = stats.bestScore;
+    const rankBadge =
+        viewerRank > 0
+            ? `RANK #${viewerRank}`
+            : totalRounds > 0
+              ? 'PLACED'
+              : authenticated
+                ? 'UNRANKED'
+                : 'OFFLINE';
+    const kicker = authenticated ? 'SEASON RECORD' : 'COMPETITIVE DRIVER';
+    const subline =
+        authenticated && totalRounds > 0
+            ? viewerRank > 0 && totalEntries > 0
+                ? `${numberFormatter.format(totalRounds)} synced runs • best ${numberFormatter.format(bestScore)} • ${numberFormatter.format(totalEntries)} ranked drivers`
+                : `${numberFormatter.format(totalRounds)} synced runs • best ${numberFormatter.format(bestScore)}`
+            : authenticated
+              ? 'Finish and sync a round to unlock wins, losses, and rank history.'
+              : 'Sign in to unlock your competitive record.';
+
+    return {
+        kicker,
+        rankBadge,
+        subline,
+        winsText: numberFormatter.format(wins),
+        lossesText: numberFormatter.format(losses),
+        winRateText: `${numberFormatter.format(stats.winRate)}%`,
+        bestScoreText: numberFormatter.format(bestScore),
     };
 }
 

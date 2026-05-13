@@ -14,9 +14,12 @@ export function createRuntimeUiControllers({
     statusDefaultText,
     resolvePlayerCarSkinId,
     getCarSkinPresetIndex,
+    resolvePlayerVehicleId,
+    getPlayerVehiclePresetIndex,
     getIsCarDestroyed,
     getSelectedCarColorHex,
     getSelectedCarSkinId,
+    getSelectedCarVehicleId,
     getGameSessionController,
     getInputController,
     getGameMode = () => 'bots',
@@ -79,8 +82,12 @@ export function createRuntimeUiControllers({
     const welcomeModalUi = createWelcomeModalController({
         initialSkinId: getSelectedCarSkinId(),
         getCurrentSkinId: getSelectedCarSkinId,
+        initialVehicleId: getSelectedCarVehicleId(),
+        getCurrentVehicleId: getSelectedCarVehicleId,
         resolvePlayerCarSkinId,
         getCarSkinPresetIndex,
+        resolvePlayerVehicleId,
+        getPlayerVehiclePresetIndex,
         onPrepareStart,
         onAuthSubmit,
         onAuthSignOut,
@@ -99,8 +106,8 @@ export function createRuntimeUiControllers({
             }
             getGameSessionController()?.requestGameplayFullscreen?.();
         },
-        onSkinChange(skinId) {
-            getGameSessionController()?.setSelectedPlayerCarSkin(skinId);
+        onVehicleChange(vehicleId) {
+            getGameSessionController()?.setSelectedPlayerCarVehicle?.(vehicleId);
         },
         onStart(mode, startContext = null) {
             getGameSessionController()?.dismissWelcomeModal(mode, startContext);

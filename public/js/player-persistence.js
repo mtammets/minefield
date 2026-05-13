@@ -2,6 +2,7 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.m
 import {
     CAR_COLOR_STORAGE_KEY,
     PLAYER_CAR_SKIN_STORAGE_KEY,
+    PLAYER_CAR_VEHICLE_STORAGE_KEY,
     PLAYER_TOP_SPEED_STORAGE_KEY,
     GRAPHICS_QUALITY_MODE_STORAGE_KEY,
     AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
@@ -17,6 +18,7 @@ import {
     getCarSkinPresetIndex,
     resolvePlayerCarSkinId,
 } from './car-skins.js';
+import { DEFAULT_PLAYER_VEHICLE_ID, resolvePlayerVehicleId } from './car-vehicles.js';
 
 export {
     CAR_SKIN_PRESETS,
@@ -26,6 +28,7 @@ export {
     getCarSkinPresetIndex,
     resolvePlayerCarSkinId,
 } from './car-skins.js';
+export { DEFAULT_PLAYER_VEHICLE_ID, resolvePlayerVehicleId } from './car-vehicles.js';
 
 const GRAPHICS_QUALITY_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
 const CHASE_CAMERA_SETTING_MIN = -1;
@@ -165,7 +168,29 @@ export function getCarColorPresetIndex(colorHex) {
     return 0;
 }
 
-export function readPersistedPlayerCarSkinId() {
+export function readPersistedPlayerCarVehicleId(fallbackVehicleId = DEFAULT_PLAYER_VEHICLE_ID) {
+    const fallback = resolvePlayerVehicleId(fallbackVehicleId || DEFAULT_PLAYER_VEHICLE_ID);
+    try {
+        const storedValue = window.localStorage.getItem(PLAYER_CAR_VEHICLE_STORAGE_KEY);
+        if (storedValue) {
+            return resolvePlayerVehicleId(storedValue);
+        }
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+    return fallback;
+}
+
+export function persistPlayerCarVehicleId(vehicleId) {
+    const resolvedVehicleId = resolvePlayerVehicleId(vehicleId || DEFAULT_PLAYER_VEHICLE_ID);
+    try {
+        window.localStorage.setItem(PLAYER_CAR_VEHICLE_STORAGE_KEY, resolvedVehicleId);
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedPlayerCarSkinId(fallbackSkinId = DEFAULT_PLAYER_CAR_SKIN_ID) {
     try {
         const storedValue = window.localStorage.getItem(PLAYER_CAR_SKIN_STORAGE_KEY);
         if (storedValue) {
@@ -174,7 +199,13 @@ export function readPersistedPlayerCarSkinId() {
     } catch {
         // localStorage can fail in restricted browsing modes.
     }
-    return getCarSkinPresetByColorHex(readPersistedPlayerCarColorHexLegacy()).id;
+    const resolvedFallbackSkinId = resolvePlayerCarSkinId(
+        fallbackSkinId || DEFAULT_PLAYER_CAR_SKIN_ID
+    );
+    const legacyFallbackSkinId = getCarSkinPresetByColorHex(
+        readPersistedPlayerCarColorHexLegacy()
+    ).id;
+    return resolvedFallbackSkinId || legacyFallbackSkinId;
 }
 
 export function readPersistedPlayerCarColorHex() {

@@ -7,13 +7,24 @@ let supabaseConfigPromise = null;
 let supabaseModulePromise = null;
 let supabaseClientPromise = null;
 
-export async function getSupabaseBrowserConfig() {
-    if (!supabaseConfigPromise) {
-        supabaseConfigPromise = Promise.resolve(fetchPublicConfig()).then((publicConfig) =>
-            normalizeSupabaseBrowserConfig(publicConfig?.supabase)
+export async function getSupabaseBrowserConfig(options = {}) {
+    const force = Boolean(options?.force);
+    if (!supabaseConfigPromise || force) {
+        supabaseConfigPromise = Promise.resolve(fetchPublicConfig({ force })).then((publicConfig) =>
+            normalizeSupabaseBrowserConfig(publicConfig?.supabase, {
+                publicConfigLoaded: Boolean(publicConfig && typeof publicConfig === 'object'),
+                pageProtocol:
+                    typeof window === 'object' && window?.location
+                        ? String(window.location.protocol || '')
+                        : '',
+            })
         );
     }
-    return supabaseConfigPromise;
+    const config = await supabaseConfigPromise;
+    if (!config?.enabled && config?.unavailableReason === 'config-unreachable') {
+        supabaseConfigPromise = null;
+    }
+    return config;
 }
 
 export async function getSupabaseBrowserClient() {
@@ -60,25 +71,65 @@ async function loadSupabaseBrowserModule() {
     }
 }
 
-function normalizeSupabaseBrowserConfig(config) {
+function normalizeSupabaseBrowserConfig(config, diagnostics = {}) {
     const source = config && typeof config === 'object' ? config : {};
     const url = sanitizeSupabasePublicUrl(source.url);
     const anonKey = sanitizeSupabasePublicKey(source.anonKey);
     const projectRef = sanitizeSupabaseProjectRef(source.projectRef);
     const profileImagesBucket = sanitizeSupabaseStorageBucketName(source.profileImagesBucket);
     const carWrapsBucket = sanitizeSupabaseStorageBucketName(source.carWrapsBucket);
+    const enabled = Boolean(source.enabled && url && anonKey);
+    const unavailableReason = resolveSupabaseBrowserUnavailableReason({
+        enabled,
+        publicConfigLoaded: Boolean(diagnostics?.publicConfigLoaded),
+        pageProtocol: diagnostics?.pageProtocol,
+    });
 
     return {
-        enabled: Boolean(source.enabled && url && anonKey),
+        enabled,
         url,
         anonKey,
         projectRef,
         profileImagesBucket,
-        profileImagesEnabled: Boolean(source.profileImagesEnabled && profileImagesBucket),
+        profileImagesEnabled: Boolean(
+            enabled && source.profileImagesEnabled && profileImagesBucket
+        ),
         carWrapsBucket,
-        carWrapsEnabled: Boolean(source.carWrapsEnabled && carWrapsBucket),
+        carWrapsEnabled: Boolean(enabled && source.carWrapsEnabled && carWrapsBucket),
         leaderboardEnabled: Boolean(source.leaderboardEnabled),
+        unavailableReason,
+        unavailableStatusText: resolveSupabaseBrowserUnavailableStatusText(unavailableReason),
     };
+}
+
+function resolveSupabaseBrowserUnavailableReason({
+    enabled = false,
+    publicConfigLoaded = false,
+    pageProtocol = '',
+} = {}) {
+    if (enabled) {
+        return '';
+    }
+    if (!publicConfigLoaded && String(pageProtocol || '').toLowerCase() === 'file:') {
+        return 'file-preview';
+    }
+    if (!publicConfigLoaded) {
+        return 'config-unreachable';
+    }
+    return 'server-disabled';
+}
+
+function resolveSupabaseBrowserUnavailableStatusText(reason) {
+    switch (reason) {
+        case 'file-preview':
+            return 'Player account needs the app server. Open the game through the local server.';
+        case 'config-unreachable':
+            return 'Player account is temporarily unavailable because the app server did not respond.';
+        case 'server-disabled':
+            return 'Player account is unavailable on this server.';
+        default:
+            return 'Player account is unavailable right now.';
+    }
 }
 
 function sanitizeSupabasePublicUrl(value) {

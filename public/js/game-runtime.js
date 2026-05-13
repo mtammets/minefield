@@ -97,6 +97,8 @@ import {
     persistGraphicsQualityMode,
     readPersistedChaseCameraSettings,
     persistChaseCameraSettings,
+    readPersistedPlayerCarVehicleId,
+    persistPlayerCarVehicleId,
     resolvePlayerCarColorHex,
     resolvePlayerCarSkinId,
     getCarSkinPresetIndex,
@@ -105,6 +107,11 @@ import {
     persistPlayerCarSkinId,
     persistPlayerCarColorHex,
 } from './player-persistence.js';
+import {
+    getPlayerVehiclePresetById,
+    getPlayerVehiclePresetIndex,
+    resolvePlayerVehicleId,
+} from './car-vehicles.js';
 import { readPersistedCrashDamageTuning, persistCrashDamageTuning } from './crash-damage-tuning.js';
 import { createRaceIntroController } from './race-intro.js';
 import {
@@ -186,7 +193,11 @@ const PLAYER_SPAWN_CLEARANCE = 3.4;
 const PLAYER_SPAWN_BOT_CLEARANCE = 14;
 const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5]);
 const crashParts = getPlayerCarCrashParts();
-const selectedCarSkinId = resolvePlayerCarSkinId(readPersistedPlayerCarSkinId());
+const selectedCarVehicleId = resolvePlayerVehicleId(readPersistedPlayerCarVehicleId());
+const selectedCarVehiclePreset = getPlayerVehiclePresetById(selectedCarVehicleId);
+const selectedCarSkinId = resolvePlayerCarSkinId(
+    readPersistedPlayerCarSkinId(selectedCarVehiclePreset.defaultSkinId)
+);
 const selectedCarSkinPreset = getCarSkinPresetById(selectedCarSkinId);
 const selectedCarColorHex = resolvePlayerCarColorHex(selectedCarSkinPreset.bodyColor);
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
@@ -198,6 +209,7 @@ const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persisted
 const runtimeState = createGameRuntimeState({
     selectedCarColorHex,
     selectedCarSkinId,
+    selectedCarVehicleId,
     batteryMax: BATTERY_MAX,
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
@@ -212,6 +224,7 @@ runtimeState.scorePopupController = createScorePopupController();
 const performanceDiagnosticsController = createNoopPerformanceDiagnosticsController();
 
 setPlayerCarAppearance({
+    vehicleId: runtimeState.selectedCarVehicleId,
     skinId: runtimeState.selectedCarSkinId,
     colorHex: runtimeState.selectedCarColorHex,
 });
@@ -238,9 +251,12 @@ const {
     statusDefaultText: STATUS_DEFAULT_TEXT,
     resolvePlayerCarSkinId,
     getCarSkinPresetIndex,
+    resolvePlayerVehicleId,
+    getPlayerVehiclePresetIndex,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
+    getSelectedCarVehicleId: () => runtimeState.selectedCarVehicleId,
     getGameSessionController: () => runtimeState.gameSessionController,
     getInputController: () => runtimeState.inputController,
     getGameMode: () => runtimeState.gameMode,
@@ -299,6 +315,7 @@ runtimeState.authController = createAuthController({
         });
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
         runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
+        void runtimeState.globalLeaderboardController?.refresh?.();
     },
 });
 welcomeModalUi.setAuthState?.(runtimeState.authController.getState?.());
@@ -2670,6 +2687,7 @@ runtimeState.multiplayerController = createMultiplayerController({
     applyNetworkCollisionImpulse: applyNetworkVehicleCollisionImpulse,
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
+    getSelectedCarVehicleId: () => runtimeState.selectedCarVehicleId,
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getAuthAccessToken: () => runtimeState.authController?.getAccessToken?.() || '',
@@ -2830,9 +2848,11 @@ runtimeState.gameSessionController = createGameSessionController({
     setPlayerCarAppearance,
     resolvePlayerCarColorHex,
     resolvePlayerCarSkinId,
+    resolvePlayerCarVehicleId: resolvePlayerVehicleId,
     getCarSkinPresetById,
     persistPlayerCarColorHex,
     persistPlayerCarSkinId,
+    persistPlayerCarVehicleId,
     objectiveUi,
     controlsHelpUi,
     botStatusUi,
@@ -2935,6 +2955,7 @@ runtimeState.gameSessionController = createGameSessionController({
         });
         const leaderboardSubmission = resolveLocalLeaderboardSubmission({
             event,
+            selectedCarVehicleId: runtimeState.selectedCarVehicleId,
             selectedCarSkinId: runtimeState.selectedCarSkinId,
             gameMode: runtimeState.gameMode,
             fallbackScore: runtimeState.playerScore,
@@ -3012,6 +3033,10 @@ runtimeState.gameSessionController = createGameSessionController({
     getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
     setSelectedCarSkinId(value) {
         runtimeState.selectedCarSkinId = resolvePlayerCarSkinId(value);
+    },
+    getSelectedCarVehicleId: () => runtimeState.selectedCarVehicleId,
+    setSelectedCarVehicleId(value) {
+        runtimeState.selectedCarVehicleId = resolvePlayerVehicleId(value);
     },
     getGameMode: () => runtimeState.gameMode,
     setGameMode(mode) {
@@ -3645,6 +3670,7 @@ runtimeState.gameLoopController.start();
 
 function resolveLocalLeaderboardSubmission({
     event = null,
+    selectedCarVehicleId = '',
     selectedCarSkinId = '',
     gameMode = 'bots',
     fallbackScore = 0,
@@ -3665,10 +3691,18 @@ function resolveLocalLeaderboardSubmission({
             return name === 'you';
         }) ||
         null;
+    const topScore = scoreboard.reduce(
+        (bestScore, entry) => Math.max(bestScore, Math.round(Number(entry?.score) || 0)),
+        0
+    );
+    const selfScore = Math.max(
+        0,
+        Math.round(Number(selfEntry?.score) || Number(fallbackScore) || 0)
+    );
 
     return {
         playerName: typeof selfEntry?.name === 'string' ? selfEntry.name : '',
-        score: Math.max(0, Math.round(Number(selfEntry?.score) || Number(fallbackScore) || 0)),
+        score: selfScore,
         collectedCount: Math.max(
             0,
             Math.round(Number(selfEntry?.collectedCount) || Number(fallbackCollectedCount) || 0)
@@ -3677,6 +3711,8 @@ function resolveLocalLeaderboardSubmission({
         totalScore: Math.max(0, Math.round(Number(event?.totalScore) || 0)),
         finishReason: typeof event?.finishReason === 'string' ? event.finishReason : '',
         winnerLabel: typeof event?.winnerLabel === 'string' ? event.winnerLabel : '',
+        didWin: Boolean(selfEntry && selfScore > 0 && selfScore >= topScore),
+        vehicleId: typeof selectedCarVehicleId === 'string' ? selectedCarVehicleId : '',
         carSkinId: typeof selectedCarSkinId === 'string' ? selectedCarSkinId : '',
         gameMode: typeof gameMode === 'string' ? gameMode : 'bots',
     };

@@ -1,8 +1,22 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 import { initializeWheels } from './wheels.js';
-import { addLightsToCar, addLuxuryBody, createSuspensionLinkage } from './carbody.js';
+import {
+    addFormulaBody,
+    addLightsToCar,
+    addLuxuryBody,
+    createSuspensionLinkage,
+} from './carbody.js';
 import { PLAYER_RIDE_HEIGHT } from './constants.js';
-import { DEFAULT_PLAYER_CAR_SKIN_ID } from './car-skins.js';
+import {
+    DEFAULT_PLAYER_CAR_SKIN_ID,
+    getCarSkinPresetById,
+    resolvePlayerCarSkinId,
+} from './car-skins.js';
+import {
+    DEFAULT_PLAYER_VEHICLE_ID,
+    getPlayerVehiclePresetById,
+    resolvePlayerVehicleId,
+} from './car-vehicles.js';
 
 const DEFAULT_CAR_BASE_RIDE_HEIGHT = PLAYER_RIDE_HEIGHT;
 const PLAYER_REAR_LIGHT_Z = 2.045;
@@ -76,6 +90,7 @@ export function createCarRig(options = {}) {
     const {
         bodyColor = 0x2d67a6,
         skinId = DEFAULT_PLAYER_CAR_SKIN_ID,
+        vehicleId = DEFAULT_PLAYER_VEHICLE_ID,
         wrapUrl = '',
         displayName = 'MAREK',
         addLights = true,
@@ -97,41 +112,28 @@ export function createCarRig(options = {}) {
     // Keep tire contact visually aligned with the raised road surface planes.
     car.position.y = carBaseRideHeight;
 
-    const bodyMeta = addLuxuryBody(bodyRig, {
-        bodyColor,
-        skinId,
-        wrapUrl,
-        displayName,
-        roofScreenDynamic,
-    });
     const wheelController = initializeWheels(wheelRig, { addWheelWellLights });
     const lightController = addLights ? addLightsToCar(lightRig, lightConfig) : null;
-    const suspensionLinkage = createSuspensionLinkage(car, bodyRig, wheelRig, bodyMeta);
-    const batteryIndicator = showBatteryIndicator
-        ? createBatteryIndicator(bodyRig, bodyMeta)
-        : null;
-    let batteryLevelNormalized = 1;
+    const lightEditableParts = lightController?.editableParts || [];
     const detachableWheels = wheelController?.getDetachableWheels?.() || [];
-    const detachableParts = [
-        ...(bodyMeta?.detachablePanels || []),
-        ...detachableWheels,
-        ...(suspensionLinkage?.detachableLinks || []),
-    ];
+    const detachableParts = [...detachableWheels];
+    let batteryLevelNormalized = 1;
     const missingWheelState = createMissingWheelState();
     const scrapeSparkSystem = createScrapeSparkSystem(car);
     const wheelEditGroups = wheelController?.getEditGroups?.() || {};
-    const editablePartDescriptors = buildEditablePartDescriptors({
-        detachableParts,
-        bodyMeta,
-        wheelEditGroups,
-        suspensionLinkage,
-        lightRig,
-        lightEditableParts: lightController?.editableParts || [],
-        batteryIndicator,
-    });
-    const editablePartIndex = new Map(
-        editablePartDescriptors.map((descriptor) => [descriptor.id, descriptor])
-    );
+    const appearanceState = {
+        vehicleId: resolvePlayerVehicleId(vehicleId),
+        skinId: resolvePlayerCarSkinId(skinId),
+        colorHex: normalizeAppearanceColorHex(bodyColor, DEFAULT_PLAYER_CAR_SKIN_ID),
+        wrapUrl: typeof wrapUrl === 'string' ? wrapUrl : '',
+        displayName: typeof displayName === 'string' && displayName.trim() ? displayName : 'MAREK',
+    };
+    let currentVehiclePreset = getPlayerVehiclePresetById(appearanceState.vehicleId);
+    let bodyMeta = null;
+    let suspensionLinkage = createNoopSuspensionLinkage();
+    let batteryIndicator = null;
+    let editablePartDescriptors = [];
+    let editablePartIndex = new Map();
 
     const suspensionState = {
         pitch: 0,
@@ -154,6 +156,8 @@ export function createCarRig(options = {}) {
         impactBlend: 0,
         blinkPhase: Math.random() * Math.PI * 2,
     };
+
+    rebuildVehicleBody();
 
     function clampSuspensionTuneLevel(level) {
         return THREE.MathUtils.clamp(level, SUSPENSION_TUNING.minLevel, SUSPENSION_TUNING.maxLevel);
@@ -448,6 +452,138 @@ export function createCarRig(options = {}) {
             suspensionState.heave + getSuspensionHeightOffset() * (1 - collapseBlend);
     }
 
+    function rebuildVehicleBody() {
+        const previousVisibility = captureEditablePartVisibilitySnapshot();
+        removeCurrentVehicleBody();
+
+        currentVehiclePreset = getPlayerVehiclePresetById(appearanceState.vehicleId);
+        bodyMeta = buildBodyMeta(currentVehiclePreset, appearanceState);
+        suspensionLinkage = createSuspensionLinkage(car, bodyRig, wheelRig, bodyMeta);
+        batteryIndicator = showBatteryIndicator ? createBatteryIndicator(bodyRig, bodyMeta) : null;
+        batteryIndicator?.setLevel?.(batteryLevelNormalized);
+        bodyMeta?.setBatteryLevel?.(batteryLevelNormalized);
+
+        replaceArrayContents(detachableParts, [
+            ...(bodyMeta?.detachablePanels || []),
+            ...detachableWheels,
+            ...(suspensionLinkage?.detachableLinks || []),
+        ]);
+        rebuildEditablePartDescriptors();
+        restoreEditablePartVisibilitySnapshot(previousVisibility);
+    }
+
+    function removeCurrentVehicleBody() {
+        const linkSources = suspensionLinkage?.detachableLinks || [];
+        for (let i = 0; i < linkSources.length; i += 1) {
+            const source = linkSources[i]?.source;
+            source?.parent?.remove?.(source);
+        }
+        suspensionLinkage = createNoopSuspensionLinkage();
+        batteryIndicator?.group?.parent?.remove?.(batteryIndicator.group);
+        batteryIndicator = null;
+
+        const children = bodyRig.children.slice();
+        for (let i = 0; i < children.length; i += 1) {
+            if (children[i] === lightRig) {
+                continue;
+            }
+            bodyRig.remove(children[i]);
+        }
+    }
+
+    function buildBodyMeta(vehiclePreset, nextAppearanceState) {
+        const commonConfig = {
+            bodyColor: nextAppearanceState.colorHex,
+            skinId: nextAppearanceState.skinId,
+            wrapUrl: nextAppearanceState.wrapUrl,
+            displayName: nextAppearanceState.displayName,
+            roofScreenDynamic,
+        };
+        if (vehiclePreset?.bodyStyle === 'formula') {
+            return addFormulaBody(bodyRig, commonConfig);
+        }
+        return addLuxuryBody(bodyRig, commonConfig);
+    }
+
+    function rebuildEditablePartDescriptors() {
+        editablePartDescriptors = buildEditablePartDescriptors({
+            detachableParts,
+            bodyMeta,
+            wheelEditGroups,
+            suspensionLinkage,
+            lightRig,
+            lightEditableParts,
+            batteryIndicator,
+        });
+        editablePartIndex = new Map(
+            editablePartDescriptors.map((descriptor) => [descriptor.id, descriptor])
+        );
+    }
+
+    function captureEditablePartVisibilitySnapshot() {
+        const snapshot = {};
+        for (let i = 0; i < editablePartDescriptors.length; i += 1) {
+            const descriptor = editablePartDescriptors[i];
+            snapshot[descriptor.id] = isEditablePartVisible(descriptor);
+        }
+        return snapshot;
+    }
+
+    function restoreEditablePartVisibilitySnapshot(snapshot = null) {
+        if (!snapshot || typeof snapshot !== 'object') {
+            return;
+        }
+        for (let i = 0; i < editablePartDescriptors.length; i += 1) {
+            const descriptor = editablePartDescriptors[i];
+            if (!(descriptor.id in snapshot)) {
+                continue;
+            }
+            setEditablePartVisibility(descriptor, snapshot[descriptor.id]);
+        }
+    }
+
+    function applyAppearance(appearance = null) {
+        const nextAppearance = appearance && typeof appearance === 'object' ? appearance : {};
+        const hasVehicleId = Object.prototype.hasOwnProperty.call(nextAppearance, 'vehicleId');
+        const hasSkinId = Object.prototype.hasOwnProperty.call(nextAppearance, 'skinId');
+        const hasColorHex = Object.prototype.hasOwnProperty.call(nextAppearance, 'colorHex');
+        const hasWrapUrl = Object.prototype.hasOwnProperty.call(nextAppearance, 'wrapUrl');
+        const nextVehicleId = hasVehicleId
+            ? resolvePlayerVehicleId(nextAppearance.vehicleId)
+            : appearanceState.vehicleId;
+        const nextSkinId = hasSkinId
+            ? resolvePlayerCarSkinId(nextAppearance.skinId)
+            : appearanceState.skinId;
+        const nextColorHex = hasColorHex
+            ? normalizeAppearanceColorHex(nextAppearance.colorHex, nextSkinId)
+            : hasSkinId
+              ? getCarSkinPresetById(nextSkinId).bodyColor >>> 0
+              : appearanceState.colorHex;
+        const nextWrapUrl = hasWrapUrl
+            ? String(nextAppearance.wrapUrl || '')
+            : appearanceState.wrapUrl;
+
+        const vehicleChanged = nextVehicleId !== appearanceState.vehicleId;
+        appearanceState.vehicleId = nextVehicleId;
+        appearanceState.skinId = nextSkinId;
+        appearanceState.colorHex = nextColorHex;
+        appearanceState.wrapUrl = nextWrapUrl;
+
+        if (vehicleChanged) {
+            rebuildVehicleBody();
+            return currentVehiclePreset?.id || appearanceState.vehicleId;
+        }
+
+        if (bodyMeta?.setAppearance) {
+            bodyMeta.setAppearance({
+                ...(hasSkinId ? { skinId: nextSkinId } : {}),
+                ...(hasColorHex ? { colorHex: nextColorHex } : {}),
+                ...(hasWrapUrl ? { wrapUrl: nextWrapUrl } : {}),
+            });
+        }
+        return currentVehiclePreset?.id || appearanceState.vehicleId;
+    }
+
     return {
         car,
         updateVisuals,
@@ -512,14 +648,20 @@ export function createCarRig(options = {}) {
         getRoofMenuMode() {
             return bodyMeta?.getRoofMenuMode?.() || null;
         },
+        getVehicleId() {
+            return appearanceState.vehicleId;
+        },
         setBodyColor(colorHex) {
-            bodyMeta?.setBodyColor?.(colorHex);
+            applyAppearance({ colorHex });
         },
         setSkin(nextSkinId) {
-            bodyMeta?.setSkin?.(nextSkinId);
+            applyAppearance({ skinId: nextSkinId });
+        },
+        setVehicle(nextVehicleId) {
+            return applyAppearance({ vehicleId: nextVehicleId });
         },
         setAppearance(appearance = null) {
-            bodyMeta?.setAppearance?.(appearance);
+            return applyAppearance(appearance);
         },
         getEditableParts() {
             return editablePartDescriptors.map((descriptor) => ({
@@ -543,24 +685,10 @@ export function createCarRig(options = {}) {
             }
         },
         captureEditablePartVisibility() {
-            const snapshot = {};
-            for (let i = 0; i < editablePartDescriptors.length; i += 1) {
-                const descriptor = editablePartDescriptors[i];
-                snapshot[descriptor.id] = isEditablePartVisible(descriptor);
-            }
-            return snapshot;
+            return captureEditablePartVisibilitySnapshot();
         },
         restoreEditablePartVisibility(snapshot = null) {
-            if (!snapshot || typeof snapshot !== 'object') {
-                return;
-            }
-            for (let i = 0; i < editablePartDescriptors.length; i += 1) {
-                const descriptor = editablePartDescriptors[i];
-                if (!(descriptor.id in snapshot)) {
-                    continue;
-                }
-                setEditablePartVisibility(descriptor, snapshot[descriptor.id]);
-            }
+            restoreEditablePartVisibilitySnapshot(snapshot);
         },
     };
 
@@ -739,6 +867,31 @@ function createMissingWheelState() {
         rear_left: false,
         rear_right: false,
     };
+}
+
+function createNoopSuspensionLinkage() {
+    return {
+        update() {},
+        consumeScrapeContacts() {
+            return [];
+        },
+        detachableLinks: [],
+    };
+}
+
+function replaceArrayContents(target, nextItems = []) {
+    target.length = 0;
+    for (let i = 0; i < nextItems.length; i += 1) {
+        target.push(nextItems[i]);
+    }
+}
+
+function normalizeAppearanceColorHex(value, fallbackSkinId = DEFAULT_PLAYER_CAR_SKIN_ID) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+        return Math.max(0, Math.min(0xffffff, Math.round(numeric))) >>> 0;
+    }
+    return getCarSkinPresetById(fallbackSkinId).bodyColor >>> 0;
 }
 
 function collectMissingWheelState(wheelParts, outState) {

@@ -24,6 +24,18 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
     let currentSession = null;
     let browserConfig = createInitialBrowserConfig();
 
+    function resolveAuthUnavailableMessage() {
+        const statusText =
+            typeof browserConfig?.unavailableStatusText === 'string'
+                ? browserConfig.unavailableStatusText.trim()
+                : '';
+        return statusText || 'Player account is unavailable on this server.';
+    }
+
+    function resolveAuthUnavailableTone() {
+        return browserConfig?.unavailableReason === 'server-disabled' ? 'error' : 'muted';
+    }
+
     return {
         async initialize() {
             if (!initializePromise) {
@@ -40,12 +52,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async signIn(credentials = {}) {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -95,12 +107,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async signUp(credentials = {}) {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -217,12 +229,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async changePassword(credentials = {}) {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -282,12 +294,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async deleteAccount() {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -337,12 +349,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async updateProfileImage(file) {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -430,12 +442,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async removeProfileImage() {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -493,12 +505,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async updateCarWrap(file) {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -586,12 +598,12 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         async removeCarWrap() {
             await initializeInternalSafe();
             if (!supabaseClient || !state.enabled) {
-                const errorMessage = 'Supabase auth is unavailable on this server.';
+                const errorMessage = resolveAuthUnavailableMessage();
                 updateState({
                     loading: false,
                     pendingAction: '',
                     statusText: errorMessage,
-                    statusTone: 'error',
+                    statusTone: resolveAuthUnavailableTone(),
                 });
                 return {
                     ok: false,
@@ -651,7 +663,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             if (!supabaseClient || !state.enabled) {
                 return {
                     ok: false,
-                    error: 'Supabase auth is unavailable on this server.',
+                    error: resolveAuthUnavailableMessage(),
                 };
             }
 
@@ -731,6 +743,9 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 initializePromise = initializeInternal();
             }
             await initializePromise;
+            if (!state.enabled && browserConfig?.unavailableReason === 'config-unreachable') {
+                initializePromise = null;
+            }
         } catch {
             initializePromise = null;
             // The state is already updated with the failure details.
@@ -738,7 +753,10 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
     }
 
     async function initializeInternal() {
-        const config = await getSupabaseBrowserConfig();
+        let config = await getSupabaseBrowserConfig();
+        if (!config?.enabled && config?.unavailableReason === 'config-unreachable') {
+            config = await getSupabaseBrowserConfig({ force: true });
+        }
         browserConfig =
             config && typeof config === 'object' ? config : createInitialBrowserConfig();
         if (!config.enabled) {
@@ -754,8 +772,8 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 avatarStoragePath: '',
                 carWrapUrl: '',
                 carWrapStoragePath: '',
-                statusText: 'Supabase auth is unavailable on this server.',
-                statusTone: 'error',
+                statusText: resolveAuthUnavailableMessage(),
+                statusTone: resolveAuthUnavailableTone(),
             });
             return getStateSnapshot();
         }
@@ -1080,6 +1098,8 @@ function createInitialBrowserConfig() {
         carWrapsBucket: '',
         carWrapsEnabled: false,
         leaderboardEnabled: false,
+        unavailableReason: '',
+        unavailableStatusText: '',
     };
 }
 
@@ -1303,6 +1323,7 @@ async function prepareCarWrapUpload(file) {
         outputWidth: CAR_WRAP_OUTPUT_WIDTH_PX,
         outputHeight: CAR_WRAP_OUTPUT_HEIGHT_PX,
         outputQuality: CAR_WRAP_OUTPUT_QUALITY,
+        fitMode: 'scale-down',
         emptyMessage: 'Could not prepare the selected wrap.',
     });
 }
@@ -1313,6 +1334,7 @@ async function prepareUserMediaUpload(
         outputWidth = PROFILE_IMAGE_OUTPUT_SIZE_PX,
         outputHeight = PROFILE_IMAGE_OUTPUT_SIZE_PX,
         outputQuality = PROFILE_IMAGE_OUTPUT_QUALITY,
+        fitMode = 'cover',
         emptyMessage = 'Could not prepare the selected image.',
     } = {}
 ) {
@@ -1340,22 +1362,55 @@ async function prepareUserMediaUpload(
 
     const sourceWidth = Math.max(1, image.naturalWidth || image.width || 1);
     const sourceHeight = Math.max(1, image.naturalHeight || image.height || 1);
-    const targetAspectRatio = canvas.width / Math.max(1, canvas.height);
-    const sourceAspectRatio = sourceWidth / sourceHeight;
-    let cropWidth = sourceWidth;
-    let cropHeight = sourceHeight;
-    if (sourceAspectRatio > targetAspectRatio) {
-        cropWidth = Math.max(1, sourceHeight * targetAspectRatio);
-    } else {
-        cropHeight = Math.max(1, sourceWidth / targetAspectRatio);
-    }
-    const cropX = Math.max(0, (sourceWidth - cropWidth) * 0.5);
-    const cropY = Math.max(0, (sourceHeight - cropHeight) * 0.5);
-
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, canvas.width, canvas.height);
+    if (fitMode === 'scale-down') {
+        const scale = Math.min(
+            1,
+            outputWidth / Math.max(1, sourceWidth),
+            outputHeight / Math.max(1, sourceHeight)
+        );
+        const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+        const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+        if (canvas.width !== drawWidth || canvas.height !== drawHeight) {
+            canvas.width = drawWidth;
+            canvas.height = drawHeight;
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+        }
+        ctx.drawImage(image, 0, 0, drawWidth, drawHeight);
+    } else if (fitMode === 'contain') {
+        const containScale = Math.min(canvas.width / sourceWidth, canvas.height / sourceHeight);
+        const drawWidth = Math.max(1, sourceWidth * containScale);
+        const drawHeight = Math.max(1, sourceHeight * containScale);
+        const drawX = (canvas.width - drawWidth) * 0.5;
+        const drawY = (canvas.height - drawHeight) * 0.5;
+        ctx.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+    } else {
+        const targetAspectRatio = canvas.width / Math.max(1, canvas.height);
+        const sourceAspectRatio = sourceWidth / sourceHeight;
+        let cropWidth = sourceWidth;
+        let cropHeight = sourceHeight;
+        if (sourceAspectRatio > targetAspectRatio) {
+            cropWidth = Math.max(1, sourceHeight * targetAspectRatio);
+        } else {
+            cropHeight = Math.max(1, sourceWidth / targetAspectRatio);
+        }
+        const cropX = Math.max(0, (sourceWidth - cropWidth) * 0.5);
+        const cropY = Math.max(0, (sourceHeight - cropHeight) * 0.5);
+        ctx.drawImage(
+            image,
+            cropX,
+            cropY,
+            cropWidth,
+            cropHeight,
+            0,
+            0,
+            canvas.width,
+            canvas.height
+        );
+    }
 
     const webpBlob = await canvasToBlob(canvas, 'image/webp', outputQuality);
     const jpegBlob = webpBlob || (await canvasToBlob(canvas, 'image/jpeg', outputQuality));
