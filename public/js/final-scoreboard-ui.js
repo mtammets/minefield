@@ -1,3 +1,5 @@
+import { formatPlayerCredits } from './player-economy.js';
+
 export function createFinalScoreboardController({
     onRestart,
     onExit,
@@ -269,8 +271,8 @@ export function createFinalScoreboardController({
         economyMetaEl.hidden = false;
         economyMetaEl.textContent =
             creditsEarned > 0
-                ? `Wallet +${numberFormatter.format(creditsEarned)} CR • balance ${numberFormatter.format(balanceAfter)} CR`
-                : `Wallet ${numberFormatter.format(balanceAfter)} CR`;
+                ? `Wallet ${formatPlayerCredits(creditsEarned, { formatter: numberFormatter, includePlusSign: true })} • balance ${formatPlayerCredits(balanceAfter, { formatter: numberFormatter })}`
+                : `Wallet ${formatPlayerCredits(balanceAfter, { formatter: numberFormatter })}`;
         renderEconomyBreakdown(reward?.breakdown);
     }
 
@@ -294,7 +296,7 @@ export function createFinalScoreboardController({
                 (entry) =>
                     `<div class="leaderboardEconomyBreakdownRow">` +
                     `<span class="leaderboardEconomyBreakdownLabel">${escapeHtml(entry.label)}</span>` +
-                    `<span class="leaderboardEconomyBreakdownValue">+${numberFormatter.format(entry.credits)} CR</span>` +
+                    `<span class="leaderboardEconomyBreakdownValue">${escapeHtml(formatPlayerCredits(entry.credits, { formatter: numberFormatter, includePlusSign: true }))}</span>` +
                     `</div>`
             )
             .join('');

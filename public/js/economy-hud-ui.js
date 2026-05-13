@@ -1,3 +1,5 @@
+import { formatPlayerCredits } from './player-economy.js';
+
 export function createEconomyHudController() {
     const rootEl = document.getElementById('economyHud');
     const syncBadgeEl = document.getElementById('economyHudSyncBadge');
@@ -44,8 +46,13 @@ export function createEconomyHudController() {
 
     function renderState(nextState = null) {
         const normalized = normalizeEconomyHudState(nextState);
-        balanceEl.textContent = `${numberFormatter.format(normalized.walletCredits)} CR`;
-        runDeltaEl.textContent = `RUN +${numberFormatter.format(normalized.runCredits)} CR`;
+        balanceEl.textContent = formatPlayerCredits(normalized.walletCredits, {
+            formatter: numberFormatter,
+        });
+        runDeltaEl.textContent = `RUN ${formatPlayerCredits(normalized.runCredits, {
+            formatter: numberFormatter,
+            includePlusSign: true,
+        })}`;
         syncBadgeEl.textContent = normalized.syncLabel;
         syncBadgeEl.dataset.tone = normalized.syncTone;
         targetLabelEl.textContent = normalized.targetLabel;

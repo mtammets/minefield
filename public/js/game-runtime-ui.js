@@ -40,6 +40,7 @@ export function createRuntimeUiControllers({
     getAuthState = () => null,
     getPlayerEconomyState = () => null,
     onPurchaseVehicle = null,
+    onBuyCredits = null,
     onDownloadPerformanceLog = null,
 }) {
     const objectiveUi = createObjectiveHudController({
@@ -104,6 +105,7 @@ export function createRuntimeUiControllers({
         getAuthState,
         getPlayerEconomyState,
         onPurchaseVehicle,
+        onBuyCredits,
         toCssHex,
         onStartRequested() {
             getGameSessionController()?.requestGameplayFullscreen?.();

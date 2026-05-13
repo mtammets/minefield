@@ -7,11 +7,11 @@ import {
     getPlayerVehiclePresetById,
 } from './car-vehicles.js';
 import {
+    formatPlayerCredits,
     getOwnedVehicleCountForEconomy,
     getVehiclePurchaseAvailability,
     isVehicleUnlockedForEconomy,
     normalizePlayerEconomyState,
-    PLAYER_CREDITS_LABEL,
     resolveNextVehicleUnlockTarget,
 } from './player-economy.js';
 import {
@@ -92,6 +92,7 @@ export function createWelcomeModalController({
     onRefreshGlobalLeaderboard,
     onVehicleChange,
     onPurchaseVehicle,
+    onBuyCredits,
     initialSkinId,
     getCurrentSkinId,
     initialVehicleId,
@@ -402,6 +403,8 @@ export function createWelcomeModalController({
     let playerEconomyState = normalizePlayerEconomyState(getPlayerEconomyState?.());
     const leaderboardNumberFormatter = new Intl.NumberFormat('en-US');
     const creditsFormatter = new Intl.NumberFormat('en-US');
+    const formatCredits = (value, options = {}) =>
+        formatPlayerCredits(value, { formatter: creditsFormatter, ...options });
     const launchSequenceState = {
         active: false,
         token: 0,
@@ -852,6 +855,14 @@ export function createWelcomeModalController({
     authWalletToggleBtnEl?.addEventListener('click', () => {
         setWalletPanelOpen(!walletPanelOpen);
     });
+    const handleWalletCreditsCtaClick = () => {
+        if (launchSequenceState.active) {
+            return;
+        }
+        void onBuyCredits?.();
+    };
+    authWalletSyncStateEl?.addEventListener('click', handleWalletCreditsCtaClick);
+    guestWalletSyncStateEl?.addEventListener('click', handleWalletCreditsCtaClick);
     previewSettingsOverlayEl?.addEventListener('click', (event) => {
         if (event.target === previewSettingsOverlayEl) {
             setWelcomeSettingsOpen(false);
@@ -2033,13 +2044,7 @@ export function createWelcomeModalController({
                 : 'local';
         const syncTone =
             syncSource === 'server' ? 'success' : syncSource === 'pending' ? 'info' : 'muted';
-        const syncLabel = !authUiState.authenticated
-            ? 'LOCAL GARAGE'
-            : syncSource === 'server'
-              ? 'SUPABASE SYNCED'
-              : syncSource === 'pending'
-                ? 'SYNCING WALLET'
-                : 'LOCAL CACHE';
+        const walletCtaLabel = 'BUY 1500 CREDITS / €1';
         const lifetimeEarned = Math.max(
             0,
             Math.round(Number(authUiState.economyLifetimeEarned) || 0)
@@ -2050,10 +2055,10 @@ export function createWelcomeModalController({
         );
         const walletSubline = nextUnlock.unlocked
             ? `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis owned. Garage complete.`
-            : `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis owned • ${creditsFormatter.format(nextUnlock.creditsShort)} ${PLAYER_CREDITS_LABEL} to ${nextUnlock.vehicleName}.`;
+            : `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis owned • ${formatCredits(nextUnlock.creditsShort)} to ${nextUnlock.vehicleName}.`;
         const projectedProgressText = nextUnlock.unlocked
             ? 'ALL CHASSIS ONLINE'
-            : `${creditsFormatter.format(Math.min(walletCredits, nextUnlock.unlockPriceCredits))}/${creditsFormatter.format(nextUnlock.unlockPriceCredits)} ${PLAYER_CREDITS_LABEL}`;
+            : `${creditsFormatter.format(Math.min(walletCredits, nextUnlock.unlockPriceCredits))}/${formatCredits(nextUnlock.unlockPriceCredits)}`;
 
         const nextUnlockLabel = nextUnlock.unlocked ? 'Garage Completion' : nextUnlock.vehicleName;
         const nextUnlockState = nextUnlock.unlocked
@@ -2075,12 +2080,14 @@ export function createWelcomeModalController({
         }
 
         if (hasPrimaryWalletBoard) {
-            authWalletBalanceEl.textContent = `${creditsFormatter.format(walletCredits)} ${PLAYER_CREDITS_LABEL}`;
-            authWalletSyncStateEl.textContent = syncLabel;
-            authWalletSyncStateEl.dataset.tone = syncTone;
+            authWalletBalanceEl.textContent = formatCredits(walletCredits);
+            authWalletSyncStateEl.textContent = walletCtaLabel;
+            authWalletSyncStateEl.dataset.tone = 'cta';
+            authWalletSyncStateEl.setAttribute('aria-label', 'Buy 1500 Credits for 1 euro');
+            authWalletSyncStateEl.setAttribute('title', 'Buy 1500 Credits for 1 euro');
             authWalletSublineEl.textContent = walletSubline;
-            authWalletEarnedEl.textContent = `${creditsFormatter.format(lifetimeEarned)} ${PLAYER_CREDITS_LABEL}`;
-            authWalletSpentEl.textContent = `${creditsFormatter.format(lifetimeSpent)} ${PLAYER_CREDITS_LABEL}`;
+            authWalletEarnedEl.textContent = formatCredits(lifetimeEarned);
+            authWalletSpentEl.textContent = formatCredits(lifetimeSpent);
             authWalletOwnedEl.textContent = `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)}`;
             authWalletNextUnlockLabelEl.textContent = nextUnlockLabel;
             authWalletNextUnlockValueEl.textContent = projectedProgressText;
@@ -2090,12 +2097,14 @@ export function createWelcomeModalController({
         }
 
         if (hasGuestWalletBoard) {
-            guestWalletBalanceEl.textContent = `${creditsFormatter.format(walletCredits)} ${PLAYER_CREDITS_LABEL}`;
-            guestWalletSyncStateEl.textContent = syncLabel;
-            guestWalletSyncStateEl.dataset.tone = syncTone;
+            guestWalletBalanceEl.textContent = formatCredits(walletCredits);
+            guestWalletSyncStateEl.textContent = walletCtaLabel;
+            guestWalletSyncStateEl.dataset.tone = 'cta';
+            guestWalletSyncStateEl.setAttribute('aria-label', 'Buy 1500 Credits for 1 euro');
+            guestWalletSyncStateEl.setAttribute('title', 'Buy 1500 Credits for 1 euro');
             guestWalletSublineEl.textContent = nextUnlock.unlocked
                 ? 'All chassis are unlocked in this local garage.'
-                : `${creditsFormatter.format(nextUnlock.creditsShort)} ${PLAYER_CREDITS_LABEL} to unlock ${nextUnlock.vehicleName}.`;
+                : `${formatCredits(nextUnlock.creditsShort)} to unlock ${nextUnlock.vehicleName}.`;
             guestWalletNextUnlockLabelEl.textContent = nextUnlockLabel;
             guestWalletNextUnlockValueEl.textContent = projectedProgressText;
             guestWalletNextUnlockValueEl.dataset.state = nextUnlockState;
@@ -2124,7 +2133,7 @@ export function createWelcomeModalController({
             const deltaEl = document.createElement('div');
             deltaEl.className = 'welcomeAuthWalletActivityDelta';
             deltaEl.dataset.tone = entry.creditsDelta < 0 ? 'spend' : 'earn';
-            deltaEl.textContent = `${entry.creditsDelta < 0 ? '-' : '+'}${creditsFormatter.format(Math.abs(Math.round(Number(entry.creditsDelta) || 0)))} ${PLAYER_CREDITS_LABEL}`;
+            deltaEl.textContent = formatCredits(entry.creditsDelta, { includePlusSign: true });
 
             const copyEl = document.createElement('div');
             copyEl.className = 'welcomeAuthWalletActivityCopy';
@@ -2135,7 +2144,7 @@ export function createWelcomeModalController({
 
             const metaEl = document.createElement('div');
             metaEl.className = 'welcomeAuthWalletActivityMeta';
-            metaEl.textContent = `${formatWalletActivityTime(entry.createdAt)} • balance ${creditsFormatter.format(Math.max(0, Math.round(Number(entry.balanceAfter) || 0)))} ${PLAYER_CREDITS_LABEL}`;
+            metaEl.textContent = `${formatWalletActivityTime(entry.createdAt)} • balance ${formatCredits(Math.max(0, Math.round(Number(entry.balanceAfter) || 0)))}`;
 
             copyEl.append(titleEl, metaEl);
             itemEl.append(deltaEl, copyEl);
@@ -2198,7 +2207,7 @@ export function createWelcomeModalController({
                 : 'stock';
         const wrapActionLabel = hasCarWrap ? 'Replace wrap' : 'Upload wrap';
         const wrapSummary = !vehicleUnlocked
-            ? `${vehicleName}. Locked chassis. Unlock cost: ${creditsFormatter.format(purchaseAvailability.unlockPriceCredits)} ${PLAYER_CREDITS_LABEL}.`
+            ? `${vehicleName}. Locked chassis. Unlock cost: ${formatCredits(purchaseAvailability.unlockPriceCredits)}.`
             : !wrapFeatureEnabled
               ? `${vehicleName}. Wrap uploads unavailable on this server.`
               : hasCarWrap
@@ -2206,8 +2215,8 @@ export function createWelcomeModalController({
                 : `${vehicleName}. Stock finish equipped.`;
         const defaultGarageHint = !vehicleUnlocked
             ? purchaseAvailability.canAfford
-                ? `Spend ${creditsFormatter.format(purchaseAvailability.unlockPriceCredits)} ${PLAYER_CREDITS_LABEL} to bring this chassis into the next run.`
-                : `Earn ${creditsFormatter.format(purchaseAvailability.creditsShort)} more ${PLAYER_CREDITS_LABEL} in races to unlock this chassis.`
+                ? `Spend ${formatCredits(purchaseAvailability.unlockPriceCredits)} to bring this chassis into the next run.`
+                : `Earn ${formatCredits(purchaseAvailability.creditsShort)} more in races to unlock this chassis.`
             : authenticated
               ? 'Unlocked and ready. Custom wraps stay tied to this signed-in profile.'
               : 'Unlocked locally. Sign in later if you want this garage synced to your account.';
@@ -2217,9 +2226,6 @@ export function createWelcomeModalController({
             : !vehicleUnlocked
               ? 'info'
               : 'muted';
-        const showWrapUploadAction = vehicleUnlocked && authenticated && wrapFeatureEnabled;
-        const showWrapRemoveAction =
-            vehicleUnlocked && authenticated && wrapFeatureEnabled && hasCarWrap;
 
         if (authGarageVehicleNameEl) {
             authGarageVehicleNameEl.textContent = vehicleName;
@@ -2238,18 +2244,18 @@ export function createWelcomeModalController({
         }
         if (authGarageDockSubtitleEl) {
             authGarageDockSubtitleEl.textContent = !vehicleUnlocked
-                ? `${vehicleName} • locked • ${creditsFormatter.format(purchaseAvailability.unlockPriceCredits)} ${PLAYER_CREDITS_LABEL}`
+                ? `${vehicleName} • locked • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`
                 : hasCarWrap
                   ? `${vehicleName} • custom wrap equipped`
-                  : `${vehicleName} • wallet ${creditsFormatter.format(walletCredits)} ${PLAYER_CREDITS_LABEL}`;
+                  : `${vehicleName} • wallet ${formatCredits(walletCredits)}`;
         }
         if (authGarageWalletValueEl) {
-            authGarageWalletValueEl.textContent = `${creditsFormatter.format(walletCredits)} ${PLAYER_CREDITS_LABEL}`;
+            authGarageWalletValueEl.textContent = formatCredits(walletCredits);
         }
         if (authGarageVehicleStatusEl) {
             authGarageVehicleStatusEl.textContent = vehicleUnlocked
                 ? 'OWNED'
-                : `LOCKED • ${creditsFormatter.format(purchaseAvailability.unlockPriceCredits)} ${PLAYER_CREDITS_LABEL}`;
+                : `LOCKED • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`;
             authGarageVehicleStatusEl.dataset.state = vehicleUnlocked ? 'owned' : 'locked';
         }
         if (authGarageHintEl) {
@@ -2264,13 +2270,12 @@ export function createWelcomeModalController({
                 vehicleUnlocked || busy || garagePurchasePending || !purchaseAvailability.canAfford;
             authGaragePurchaseBtnEl.textContent = garagePurchasePending
                 ? 'UNLOCKING...'
-                : `UNLOCK ${creditsFormatter.format(purchaseAvailability.unlockPriceCredits)} ${PLAYER_CREDITS_LABEL}`;
+                : `UNLOCK ${formatCredits(purchaseAvailability.unlockPriceCredits)}`;
         }
         if (authGarageWrapCardEl) {
             authGarageWrapCardEl.dataset.wrapState = wrapState;
             authGarageWrapCardEl.dataset.locked = vehicleUnlocked ? 'false' : 'true';
             authGarageWrapCardEl.setAttribute('title', wrapSummary);
-            authGarageWrapCardEl.hidden = !showWrapUploadAction && !showWrapRemoveAction;
         }
         if (authGarageWrapStatusEl) {
             authGarageWrapStatusEl.dataset.state = wrapState;
@@ -2282,7 +2287,8 @@ export function createWelcomeModalController({
             authGarageNextBtnEl.disabled = busy || garagePurchasePending;
         }
         if (authGarageWrapUploadBtnEl) {
-            authGarageWrapUploadBtnEl.hidden = !showWrapUploadAction;
+            authGarageWrapUploadBtnEl.hidden =
+                !vehicleUnlocked || !authenticated || !wrapFeatureEnabled;
             authGarageWrapUploadBtnEl.disabled =
                 !vehicleUnlocked || !canManageCarWrap || busy || garagePurchasePending;
             authGarageWrapUploadBtnEl.setAttribute('aria-label', wrapActionLabel);
@@ -2293,7 +2299,8 @@ export function createWelcomeModalController({
             authGarageWrapUploadIconEl.textContent = uploadBusy ? '…' : hasCarWrap ? '↻' : '+';
         }
         if (authGarageWrapRemoveBtnEl) {
-            authGarageWrapRemoveBtnEl.hidden = !showWrapRemoveAction;
+            authGarageWrapRemoveBtnEl.hidden =
+                !vehicleUnlocked || !authenticated || !wrapFeatureEnabled || !hasCarWrap;
             authGarageWrapRemoveBtnEl.disabled =
                 !vehicleUnlocked ||
                 !canManageCarWrap ||
@@ -2977,7 +2984,7 @@ export function createWelcomeModalController({
         }
         if (!purchaseAvailability.canAfford) {
             setGarageNotice(
-                `Need ${creditsFormatter.format(purchaseAvailability.creditsShort)} more ${PLAYER_CREDITS_LABEL} to unlock this chassis.`,
+                `Need ${formatCredits(purchaseAvailability.creditsShort)} more to unlock this chassis.`,
                 'error'
             );
             syncAuthUi();

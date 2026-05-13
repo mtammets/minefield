@@ -115,6 +115,7 @@ import {
 import {
     arePlayerEconomyStatesEqual,
     awardCreditsToEconomy,
+    formatPlayerCredits,
     mergePlayerEconomyStates,
     normalizePlayerEconomyState,
     PLAYER_MINE_KILL_CREDIT_VALUE,
@@ -320,6 +321,9 @@ const {
     onPurchaseVehicle(vehicleId) {
         return purchaseVehicleUnlock(vehicleId);
     },
+    onBuyCredits() {
+        return runtimeState.authController?.purchaseCreditsPack?.();
+    },
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
 });
 runtimeState.authController = createAuthController({
@@ -403,7 +407,7 @@ function buildRuntimeEconomyHudState() {
         : `${Math.min(
               projectedEconomyState.credits,
               nextUnlock.unlockPriceCredits
-          )}/${nextUnlock.unlockPriceCredits} CR`;
+          )}/${formatPlayerCredits(nextUnlock.unlockPriceCredits)}`;
     return {
         walletCredits,
         runCredits,
@@ -434,7 +438,7 @@ function previewRuntimeEconomyDelta({ creditsDelta = 0, label = '' } = {}) {
     runtimeState.playerEconomyActivityNonce += 1;
     runtimeState.playerEconomyLastActivity = {
         id: `economy-${runtimeState.playerEconomyActivityNonce}`,
-        text: `${label || 'Wallet'} +${normalizedDelta} CR`,
+        text: `${label || 'Wallet'} ${formatPlayerCredits(normalizedDelta, { includePlusSign: true })}`,
     };
     syncRuntimeEconomyHud();
 }
@@ -447,18 +451,18 @@ function buildRuntimeRoundEconomySummary(reward = null) {
     const finishReason =
         typeof reward?.finishReason === 'string' ? reward.finishReason.trim().toLowerCase() : '';
     if (finishReason === 'campaign-complete') {
-        return `Campaign clear +${creditsEarned} CR`;
+        return `Campaign clear ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`;
     }
     if (finishReason === 'mission-failed') {
-        return `Run settled +${creditsEarned} CR`;
+        return `Run settled ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`;
     }
     if (finishReason === 'opponents-eliminated') {
-        return `Sector sweep +${creditsEarned} CR`;
+        return `Sector sweep ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`;
     }
     if (reward?.isWinner) {
-        return `Victory payout +${creditsEarned} CR`;
+        return `Victory payout ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`;
     }
-    return `Round payout +${creditsEarned} CR`;
+    return `Round payout ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`;
 }
 
 function reconcileRuntimeSelectedVehicleWithEconomy(economyState = null) {

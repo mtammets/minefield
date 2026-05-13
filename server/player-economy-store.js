@@ -38,6 +38,9 @@ const PLAYER_ECONOMY_TRANSACTION_SUMMARY_MAX_LENGTH = 160;
 
 function createPlayerEconomyStore(config = {}) {
     const supabaseClient = createSupabaseServiceClient(config);
+    const databaseConnectionString = sanitizeDatabaseConnectionString(
+        config?.databaseConnectionString || config?.dbPoolerUrl || config?.dbUrl || ''
+    );
     if (!supabaseClient) {
         return createNoopPlayerEconomyStore();
     }
@@ -165,6 +168,67 @@ function createPlayerEconomyStore(config = {}) {
                 exists: true,
             });
         },
+        async applyCreditsPurchaseByUserId(userId, rawPurchase = {}) {
+            const normalizedUserId = sanitizeSupabaseUserId(userId);
+            const purchase = normalizeCreditsPurchase(rawPurchase);
+            if (!normalizedUserId || !purchase.checkoutSessionId || purchase.creditsAmount <= 0) {
+                return {
+                    ok: false,
+                    applied: false,
+                    reason: 'invalid-purchase',
+                    profile: await this.readProfileByUserId(normalizedUserId),
+                };
+            }
+
+            if (databaseConnectionString) {
+                const applied = await applyCreditsPurchaseAtomic(
+                    databaseConnectionString,
+                    normalizedUserId,
+                    purchase
+                );
+                return {
+                    ok: true,
+                    applied,
+                    creditsGranted: purchase.creditsAmount,
+                    profile: await this.readProfileByUserId(normalizedUserId),
+                };
+            }
+
+            const existingTransaction = await readTransactionByCheckoutSessionId(
+                supabaseClient,
+                normalizedUserId,
+                purchase.checkoutSessionId
+            );
+            if (existingTransaction) {
+                return {
+                    ok: true,
+                    applied: false,
+                    creditsGranted: purchase.creditsAmount,
+                    profile: await this.readProfileByUserId(normalizedUserId),
+                };
+            }
+
+            const currentProfile = await this.readProfileByUserId(normalizedUserId, {
+                recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_DEFAULT,
+            });
+            const profile = await this.syncProfileByUserId(normalizedUserId, {
+                credits: clampCredits(currentProfile.credits + purchase.creditsAmount),
+                unlockedVehicleIds: currentProfile.unlockedVehicleIds,
+                recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_DEFAULT,
+                transaction: {
+                    kind: 'purchase',
+                    creditsDelta: purchase.creditsAmount,
+                    summary: purchase.summary,
+                    metadata: purchase.metadata,
+                },
+            });
+            return {
+                ok: true,
+                applied: true,
+                creditsGranted: purchase.creditsAmount,
+                profile,
+            };
+        },
         async deleteProfileByUserId(userId) {
             const normalizedUserId = sanitizeSupabaseUserId(userId);
             if (!normalizedUserId) {
@@ -223,6 +287,16 @@ function createNoopPlayerEconomyStore() {
                 credits: clampCredits(rawPayload?.credits),
                 unlockedVehicleIds: normalizeUnlockedVehicleIds(rawPayload?.unlockedVehicleIds),
             });
+        },
+        async applyCreditsPurchaseByUserId() {
+            return {
+                ok: false,
+                applied: false,
+                reason: 'not-configured',
+                profile: createDefaultPlayerEconomyProfile({
+                    exists: false,
+                }),
+            };
         },
         async deleteProfileByUserId() {
             return {
@@ -321,6 +395,28 @@ async function readRecentTransactions(supabaseClient, userId, recentLimit) {
     return Array.isArray(data)
         ? data.map((entry) => normalizeTransactionRecord(entry)).filter(Boolean)
         : [];
+}
+
+async function readTransactionByCheckoutSessionId(supabaseClient, userId, checkoutSessionId) {
+    const safeUserId = sanitizeSupabaseUserId(userId);
+    const safeCheckoutSessionId = sanitizeCheckoutSessionId(checkoutSessionId);
+    if (!safeUserId || !safeCheckoutSessionId) {
+        return null;
+    }
+
+    const { data, error } = await supabaseClient
+        .from(PLAYER_ECONOMY_TRANSACTIONS_TABLE_NAME)
+        .select(PLAYER_ECONOMY_TRANSACTION_SELECT_COLUMNS)
+        .eq('user_id', safeUserId)
+        .contains('metadata_json', {
+            checkoutSessionId: safeCheckoutSessionId,
+        })
+        .order('created_at', { ascending: false })
+        .limit(1);
+    if (error) {
+        throw error;
+    }
+    return Array.isArray(data) && data.length > 0 ? normalizeTransactionRecord(data[0]) : null;
 }
 
 function createDefaultPlayerEconomyProfile(overrides = {}) {
@@ -437,9 +533,44 @@ function normalizePlayerEconomyTransaction(value = null, currentCredits = 0, nex
         summary:
             summary ||
             (creditsDelta < 0
-                ? `Spent ${Math.abs(creditsDelta)} CR`
-                : `Earned ${Math.abs(creditsDelta)} CR`),
+                ? `Spent ${Math.abs(creditsDelta)} ${Math.abs(creditsDelta) === 1 ? 'Credit' : 'Credits'}`
+                : `Earned ${Math.abs(creditsDelta)} ${Math.abs(creditsDelta) === 1 ? 'Credit' : 'Credits'}`),
         metadata: sanitizeTransactionMetadata(value.metadata),
+    };
+}
+
+function normalizeCreditsPurchase(value = null) {
+    const source = value && typeof value === 'object' ? value : {};
+    const checkoutSessionId = sanitizeCheckoutSessionId(
+        source.checkoutSessionId || source.sessionId || source.checkout_session_id
+    );
+    const creditsAmount = clampCredits(
+        source.creditsAmount || source.credits || source.credits_delta
+    );
+    const amountCents = clampCredits(source.amountCents || source.amount_cents);
+    const currencyCode = sanitizeCurrencyCode(source.currencyCode || source.currency || 'eur');
+    const purchasePackId = sanitizeLabel(
+        source.purchasePackId || source.packId || source.purchase_pack_id,
+        48
+    );
+    const summary =
+        sanitizeTransactionSummary(source.summary) ||
+        (creditsAmount > 0
+            ? `Purchased ${creditsAmount} ${creditsAmount === 1 ? 'Credit' : 'Credits'}`
+            : '');
+    return {
+        checkoutSessionId,
+        creditsAmount,
+        amountCents,
+        currencyCode,
+        purchasePackId,
+        summary,
+        metadata: sanitizeTransactionMetadata({
+            checkoutSessionId,
+            purchasePackId,
+            amountCents,
+            currencyCode,
+        }),
     };
 }
 
@@ -508,6 +639,30 @@ function sanitizeTransactionMetadata(value = null) {
             .filter(Boolean);
         if (breakdown.length > 0) {
             metadata.breakdown = breakdown;
+        }
+    }
+    if (typeof source.checkoutSessionId === 'string') {
+        const checkoutSessionId = sanitizeCheckoutSessionId(source.checkoutSessionId);
+        if (checkoutSessionId) {
+            metadata.checkoutSessionId = checkoutSessionId;
+        }
+    }
+    if (typeof source.purchasePackId === 'string') {
+        const purchasePackId = sanitizeLabel(source.purchasePackId, 48);
+        if (purchasePackId) {
+            metadata.purchasePackId = purchasePackId;
+        }
+    }
+    if (source.amountCents != null) {
+        const amountCents = clampCredits(source.amountCents);
+        if (amountCents > 0) {
+            metadata.amountCents = amountCents;
+        }
+    }
+    if (typeof source.currencyCode === 'string') {
+        const currencyCode = sanitizeCurrencyCode(source.currencyCode);
+        if (currencyCode) {
+            metadata.currencyCode = currencyCode;
         }
     }
 
@@ -580,6 +735,22 @@ function sanitizeLabel(value, maxLength = 64) {
     return value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
 }
 
+function sanitizeCheckoutSessionId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return /^cs_[a-z0-9_]{12,255}$/iu.test(normalized) ? normalized : '';
+}
+
+function sanitizeCurrencyCode(value, fallback = '') {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    return /^[a-z]{3}$/u.test(normalized) ? normalized : fallback;
+}
+
 function sanitizeIsoDate(value) {
     if (typeof value !== 'string') {
         return '';
@@ -625,6 +796,182 @@ function resolvePostgresClientOptions(connectionString) {
             rejectUnauthorized: false,
         },
     };
+}
+
+function sanitizeDatabaseConnectionString(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return normalized ? normalized : '';
+}
+
+async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
+    const client = new PostgresClient(resolvePostgresClientOptions(connectionString));
+    await client.connect();
+
+    try {
+        await client.query('begin');
+        const transactionId = createDeterministicTransactionId(
+            `credits-purchase:${purchase.checkoutSessionId}`
+        );
+        const transactionInsertResult = await client.query(
+            `
+                insert into public.${PLAYER_ECONOMY_TRANSACTIONS_TABLE_NAME} (
+                    id,
+                    user_id,
+                    kind,
+                    credits_delta,
+                    balance_after,
+                    summary,
+                    metadata_json
+                )
+                values ($1, $2, $3, $4, 0, $5, $6::jsonb)
+                on conflict (id) do nothing
+                returning id
+            `,
+            [
+                transactionId,
+                userId,
+                'purchase',
+                purchase.creditsAmount,
+                purchase.summary,
+                JSON.stringify(purchase.metadata),
+            ]
+        );
+
+        if (
+            !Array.isArray(transactionInsertResult?.rows) ||
+            transactionInsertResult.rows.length === 0
+        ) {
+            await client.query('rollback');
+            return false;
+        }
+
+        const walletResult = await client.query(
+            `
+                select
+                    user_id,
+                    credits,
+                    unlocked_vehicle_ids,
+                    lifetime_earned,
+                    lifetime_spent,
+                    transaction_count,
+                    last_transaction_kind,
+                    last_transaction_summary
+                from public.${PLAYER_ECONOMY_WALLETS_TABLE_NAME}
+                where user_id = $1
+                for update
+            `,
+            [userId]
+        );
+        const currentWallet = Array.isArray(walletResult?.rows)
+            ? walletResult.rows[0] || null
+            : null;
+        const currentProfile = normalizeWalletRecord({
+            ...(currentWallet || {}),
+            user_id: userId,
+            unlocked_vehicle_ids:
+                currentWallet?.unlocked_vehicle_ids || DEFAULT_UNLOCKED_VEHICLE_IDS,
+        });
+        const nextCredits = clampCredits(currentProfile.credits + purchase.creditsAmount);
+        const nextLifetimeEarned = clampCredits(
+            currentProfile.lifetimeEarned + purchase.creditsAmount
+        );
+        const nextTransactionCount = clampCredits(currentProfile.transactionCount + 1);
+        const nowIso = new Date().toISOString();
+
+        if (currentWallet) {
+            await client.query(
+                `
+                    update public.${PLAYER_ECONOMY_WALLETS_TABLE_NAME}
+                    set
+                        credits = $2,
+                        unlocked_vehicle_ids = $3::jsonb,
+                        lifetime_earned = $4,
+                        transaction_count = $5,
+                        last_transaction_kind = $6,
+                        last_transaction_summary = $7,
+                        last_synced_at = $8,
+                        updated_at = $8
+                    where user_id = $1
+                `,
+                [
+                    userId,
+                    nextCredits,
+                    JSON.stringify(currentProfile.unlockedVehicleIds),
+                    nextLifetimeEarned,
+                    nextTransactionCount,
+                    'purchase',
+                    purchase.summary,
+                    nowIso,
+                ]
+            );
+        } else {
+            await client.query(
+                `
+                    insert into public.${PLAYER_ECONOMY_WALLETS_TABLE_NAME} (
+                        user_id,
+                        credits,
+                        unlocked_vehicle_ids,
+                        lifetime_earned,
+                        lifetime_spent,
+                        transaction_count,
+                        last_transaction_kind,
+                        last_transaction_summary,
+                        last_synced_at,
+                        created_at,
+                        updated_at
+                    )
+                    values ($1, $2, $3::jsonb, $4, 0, $5, $6, $7, $8, $8, $8)
+                `,
+                [
+                    userId,
+                    nextCredits,
+                    JSON.stringify(currentProfile.unlockedVehicleIds),
+                    nextLifetimeEarned,
+                    nextTransactionCount,
+                    'purchase',
+                    purchase.summary,
+                    nowIso,
+                ]
+            );
+        }
+
+        await client.query(
+            `
+                update public.${PLAYER_ECONOMY_TRANSACTIONS_TABLE_NAME}
+                set balance_after = $2
+                where id = $1
+            `,
+            [transactionId, nextCredits]
+        );
+        await client.query('commit');
+        return true;
+    } catch (error) {
+        try {
+            await client.query('rollback');
+        } catch {
+            // Rollback best effort.
+        }
+        throw error;
+    } finally {
+        await client.end();
+    }
+}
+
+function createDeterministicTransactionId(seed = '') {
+    const hash = crypto.createHash('sha256').update(String(seed || '')).digest('hex');
+    const variantNibble = (((parseInt(hash.slice(16, 18), 16) || 0) & 0x3f) | 0x80)
+        .toString(16)
+        .padStart(2, '0');
+    return [
+        hash.slice(0, 8),
+        hash.slice(8, 12),
+        `4${hash.slice(13, 16)}`,
+        `${variantNibble}${hash.slice(18, 20)}`,
+        hash.slice(20, 32),
+    ].join('-');
 }
 
 module.exports = {

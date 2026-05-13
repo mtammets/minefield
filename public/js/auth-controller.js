@@ -1,6 +1,7 @@
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from './supabase-browser.js';
 import {
     createDefaultPlayerEconomyState,
+    formatPlayerCredits,
     mergePlayerEconomyStates,
     normalizePlayerEconomyState,
     resolvePlayerEconomyStateFromSource,
@@ -13,7 +14,11 @@ const AUTH_PASSWORD_MIN_LENGTH = 6;
 const AUTH_DELETE_ACCOUNT_ENDPOINT_PATH = '/api/auth/account';
 const PLAYER_ECONOMY_PROFILE_ENDPOINT_PATH = '/api/player-economy/profile';
 const PLAYER_ECONOMY_SYNC_ENDPOINT_PATH = '/api/player-economy/sync';
+const PLAYER_ECONOMY_CREDITS_CHECKOUT_ENDPOINT_PATH = '/api/player-economy/credits-checkout-session';
+const PLAYER_ECONOMY_CREDITS_STATUS_ENDPOINT_PATH = '/api/player-economy/credits-session-status';
 const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT = 6;
+const PLAYER_ECONOMY_CREDITS_QUERY_KEY = 'credits-purchase';
+const PLAYER_ECONOMY_CREDITS_SESSION_QUERY_KEY = 'credits_session_id';
 const USER_MEDIA_MAX_INPUT_BYTES = 10 * 1024 * 1024;
 const PROFILE_IMAGE_OUTPUT_SIZE_PX = 512;
 const CAR_WRAP_OUTPUT_WIDTH_PX = 2048;
@@ -32,6 +37,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
     let authSubscription = null;
     let currentSession = null;
     let browserConfig = createInitialBrowserConfig();
+    let creditsPurchaseReturnPromise = null;
 
     function resolveAuthUnavailableMessage() {
         const statusText =
@@ -341,6 +347,57 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     ok: false,
                     error: normalizeSupabaseEconomyError(error),
                 };
+            }
+        },
+        async purchaseCreditsPack() {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                const errorMessage = resolveAuthUnavailableMessage();
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: errorMessage,
+                    statusTone: resolveAuthUnavailableTone(),
+                });
+                return {
+                    ok: false,
+                    error: errorMessage,
+                };
+            }
+
+            if (!state.authenticated || !currentSession?.access_token) {
+                return updateValidationFailure('Sign in before buying credits.');
+            }
+
+            updateState({
+                loading: true,
+                pendingAction: 'buy-credits',
+                statusText: 'Opening secure credits checkout...',
+                statusTone: 'info',
+                requiresEmailConfirmation: false,
+            });
+
+            try {
+                const payload = await createCreditsPurchaseCheckoutSession(
+                    currentSession.access_token
+                );
+                if (typeof payload?.checkoutUrl !== 'string' || !payload.checkoutUrl) {
+                    throw new Error('Could not start secure credits checkout.');
+                }
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: 'Redirecting to secure €1 checkout...',
+                    statusTone: 'info',
+                });
+                window.location.assign(payload.checkoutUrl);
+                return {
+                    ok: true,
+                    redirecting: true,
+                    checkoutUrl: payload.checkoutUrl,
+                };
+            } catch (error) {
+                return updateRequestFailure(error);
             }
         },
         async deleteAccount() {
@@ -1164,6 +1221,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                         ? 'success'
                         : 'muted',
         });
+        void queueCreditsPurchaseReturnResolution();
         if (authenticated) {
             void refreshPlayerEconomyProfile({
                 legacyFallback: playerEconomyState,
@@ -1255,6 +1313,143 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             });
         } catch {
             // Toast callbacks must not interrupt auth state updates.
+        }
+    }
+
+    function queueCreditsPurchaseReturnResolution() {
+        const returnContext = readCreditsPurchaseReturnContext();
+        if (!returnContext) {
+            return null;
+        }
+        if (creditsPurchaseReturnPromise) {
+            return creditsPurchaseReturnPromise;
+        }
+        creditsPurchaseReturnPromise = resolveCreditsPurchaseReturn(returnContext).finally(() => {
+            creditsPurchaseReturnPromise = null;
+        });
+        return creditsPurchaseReturnPromise;
+    }
+
+    async function resolveCreditsPurchaseReturn(returnContext = null) {
+        if (!returnContext) {
+            return {
+                ok: false,
+                ignored: true,
+            };
+        }
+
+        if (returnContext.state === 'cancel') {
+            clearCreditsPurchaseReturnContext();
+            updateState({
+                loading: false,
+                pendingAction: '',
+                statusText: 'Credits checkout was canceled.',
+                statusTone: 'info',
+            });
+            notifyToast('Credits checkout was canceled.', 'info');
+            return {
+                ok: false,
+                canceled: true,
+            };
+        }
+
+        if (!returnContext.sessionId) {
+            clearCreditsPurchaseReturnContext();
+            updateState({
+                loading: false,
+                pendingAction: '',
+                statusText: 'Credits checkout could not be verified.',
+                statusTone: 'error',
+            });
+            return {
+                ok: false,
+                error: 'Missing Stripe checkout session ID.',
+            };
+        }
+
+        if (!currentSession?.access_token) {
+            clearCreditsPurchaseReturnContext();
+            updateState({
+                loading: false,
+                pendingAction: '',
+                statusText: 'Credits purchase returned. Sign in to refresh the wallet.',
+                statusTone: 'info',
+            });
+            notifyToast('Credits purchase returned. Sign in to refresh the wallet.', 'info');
+            return {
+                ok: false,
+                requiresSignIn: true,
+            };
+        }
+
+        updateState({
+            loading: true,
+            pendingAction: 'verify-credits',
+            statusText: 'Verifying credits purchase...',
+            statusTone: 'info',
+        });
+
+        try {
+            const payload = await requestCreditsPurchaseSessionStatus(
+                currentSession.access_token,
+                returnContext.sessionId
+            );
+            clearCreditsPurchaseReturnContext();
+            if (payload?.profile) {
+                applyPlayerEconomyProfileState(payload.profile, {
+                    source: 'server',
+                });
+            }
+            const creditsGranted = clampEconomyInteger(payload?.creditsGranted);
+            const purchaseStatus = sanitizeCreditsPurchaseStatus(payload?.status);
+            if (purchaseStatus === 'paid') {
+                const successMessage =
+                    creditsGranted > 0
+                        ? `${formatPlayerCredits(creditsGranted)} added to your wallet.`
+                        : 'Credits purchase confirmed.';
+                updateState({
+                    loading: false,
+                    pendingAction: '',
+                    statusText: successMessage,
+                    statusTone: 'success',
+                });
+                notifyToast(successMessage, 'success', 4200);
+                return {
+                    ok: true,
+                    paid: true,
+                    profile: payload?.profile || null,
+                };
+            }
+
+            const statusMessage = resolveCreditsPurchaseStatusMessage(purchaseStatus);
+            updateState({
+                loading: false,
+                pendingAction: '',
+                statusText: statusMessage,
+                statusTone: purchaseStatus === 'expired' ? 'error' : 'info',
+            });
+            notifyToast(
+                statusMessage,
+                purchaseStatus === 'expired' ? 'error' : 'info',
+                3600
+            );
+            return {
+                ok: false,
+                status: purchaseStatus,
+            };
+        } catch (error) {
+            clearCreditsPurchaseReturnContext();
+            const errorMessage = normalizeSupabaseEconomyError(error);
+            updateState({
+                loading: false,
+                pendingAction: '',
+                statusText: errorMessage,
+                statusTone: 'error',
+            });
+            return {
+                ok: false,
+                error: errorMessage,
+            };
         }
     }
 
@@ -1740,6 +1935,40 @@ async function readJsonResponse(response) {
     }
 }
 
+function readCreditsPurchaseReturnContext() {
+    try {
+        const pageUrl = new URL(window.location.href);
+        const state = sanitizeCreditsPurchaseStatus(
+            pageUrl.searchParams.get(PLAYER_ECONOMY_CREDITS_QUERY_KEY)
+        );
+        if (!state) {
+            return null;
+        }
+        return {
+            state,
+            sessionId: sanitizeCreditsCheckoutSessionId(
+                pageUrl.searchParams.get(PLAYER_ECONOMY_CREDITS_SESSION_QUERY_KEY)
+            ),
+        };
+    } catch {
+        return null;
+    }
+}
+
+function clearCreditsPurchaseReturnContext() {
+    try {
+        const pageUrl = new URL(window.location.href);
+        pageUrl.searchParams.delete(PLAYER_ECONOMY_CREDITS_QUERY_KEY);
+        pageUrl.searchParams.delete(PLAYER_ECONOMY_CREDITS_SESSION_QUERY_KEY);
+        const nextRelativeUrl = `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`;
+        if (nextRelativeUrl !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+            window.history.replaceState(null, '', nextRelativeUrl);
+        }
+    } catch {
+        // History cleanup is optional.
+    }
+}
+
 async function requestPlayerEconomyProfile(accessToken = '') {
     const response = await window.fetch(PLAYER_ECONOMY_PROFILE_ENDPOINT_PATH, {
         method: 'GET',
@@ -1754,6 +1983,56 @@ async function requestPlayerEconomyProfile(accessToken = '') {
     const payload = await readJsonResponse(response);
     if (!response.ok || !payload?.ok) {
         throw new Error(payload?.error || 'Could not load wallet progress.');
+    }
+    return payload;
+}
+
+async function createCreditsPurchaseCheckoutSession(accessToken = '') {
+    const response = await window.fetch(PLAYER_ECONOMY_CREDITS_CHECKOUT_ENDPOINT_PATH, {
+        method: 'POST',
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: accessToken
+            ? {
+                  Authorization: `Bearer ${accessToken}`,
+                  'Content-Type': 'application/json',
+              }
+            : {
+                  'Content-Type': 'application/json',
+              },
+        body: JSON.stringify({}),
+    });
+    const payload = await readJsonResponse(response);
+    if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Could not start secure credits checkout.');
+    }
+    return payload;
+}
+
+async function requestCreditsPurchaseSessionStatus(accessToken = '', checkoutSessionId = '') {
+    const safeSessionId = sanitizeCreditsCheckoutSessionId(checkoutSessionId);
+    if (!safeSessionId) {
+        throw new Error('A valid Stripe checkout session is required.');
+    }
+
+    const response = await window.fetch(
+        `${PLAYER_ECONOMY_CREDITS_STATUS_ENDPOINT_PATH}?session_id=${encodeURIComponent(
+            safeSessionId
+        )}`,
+        {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'same-origin',
+            headers: accessToken
+                ? {
+                      Authorization: `Bearer ${accessToken}`,
+                  }
+                : {},
+        }
+    );
+    const payload = await readJsonResponse(response);
+    if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || 'Could not verify credits checkout.');
     }
     return payload;
 }
@@ -1837,8 +2116,8 @@ function normalizePlayerEconomyRecentTransaction(value = null) {
         summary:
             summary ||
             (creditsDelta < 0
-                ? `Spent ${Math.abs(creditsDelta)} CR`
-                : `Earned ${Math.abs(creditsDelta)} CR`),
+                ? `Spent ${formatPlayerCredits(Math.abs(creditsDelta))}`
+                : `Earned ${formatPlayerCredits(Math.abs(creditsDelta))}`),
         creditsDelta,
         balanceAfter,
         createdAt: sanitizeIsoDateString(value.createdAt || value.created_at),
@@ -1975,4 +2254,41 @@ function clampSignedEconomyInteger(value, maxValue = Number.MAX_SAFE_INTEGER) {
         return 0;
     }
     return Math.max(-maxValue, Math.min(maxValue, numeric));
+}
+
+function sanitizeCreditsPurchaseStatus(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === 'success' ||
+        normalized === 'cancel' ||
+        normalized === 'paid' ||
+        normalized === 'processing' ||
+        normalized === 'expired' ||
+        normalized === 'open'
+        ? normalized
+        : '';
+}
+
+function resolveCreditsPurchaseStatusMessage(status = '') {
+    switch (sanitizeCreditsPurchaseStatus(status)) {
+        case 'processing':
+        case 'open':
+            return 'Payment is processing. The wallet will refresh shortly.';
+        case 'expired':
+            return 'Credits checkout expired. Try again.';
+        case 'cancel':
+            return 'Credits checkout was canceled.';
+        default:
+            return 'Credits checkout could not be verified.';
+    }
+}
+
+function sanitizeCreditsCheckoutSessionId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim();
+    return /^cs_[a-z0-9_]{12,255}$/iu.test(normalized) ? normalized : '';
 }

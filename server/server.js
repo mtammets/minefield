@@ -109,6 +109,13 @@ const DONATE_PRODUCT_NAME = sanitizeCheckoutText(
     process.env.STRIPE_DONATE_PRODUCT_NAME || 'Support Minefield Drift'
 );
 const DONATE_PUBLIC_BASE_URL = sanitizeHttpOrigin(process.env.STRIPE_DONATE_BASE_URL || '');
+const PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS = 100;
+const PLAYER_CREDITS_PURCHASE_GRANT = 1500;
+const PLAYER_CREDITS_PURCHASE_PACK_ID = 'credits-pack-1500';
+const PLAYER_CREDITS_PURCHASE_PRODUCT_NAME = sanitizeCheckoutText(
+    process.env.STRIPE_CREDITS_PRODUCT_NAME ||
+        `${PLAYER_CREDITS_PURCHASE_GRANT} Minefield Drift Credits`
+);
 const STRIPE_SECRET_KEY = sanitizeStripeSecretKey(process.env.STRIPE_SECRET_KEY || '');
 const STRIPE_WEBHOOK_SECRET = sanitizeStripeWebhookSecret(process.env.STRIPE_WEBHOOK_SECRET || '');
 const stripeClient = createStripeClient(STRIPE_SECRET_KEY);
@@ -181,6 +188,10 @@ const HTTP_PLAYER_ECONOMY_READ_WINDOW_MS = 10_000;
 const HTTP_PLAYER_ECONOMY_READ_MAX = 60;
 const HTTP_PLAYER_ECONOMY_SYNC_WINDOW_MS = 60_000;
 const HTTP_PLAYER_ECONOMY_SYNC_MAX = 30;
+const HTTP_PLAYER_ECONOMY_PURCHASE_WINDOW_MS = 5 * 60_000;
+const HTTP_PLAYER_ECONOMY_PURCHASE_MAX = 8;
+const HTTP_PLAYER_ECONOMY_PURCHASE_VERIFY_WINDOW_MS = 60_000;
+const HTTP_PLAYER_ECONOMY_PURCHASE_VERIFY_MAX = 20;
 const ONLINE_AUTH_REQUIRED_ERROR = 'Sign in is required for online rooms.';
 const ONLINE_AUTH_SERVER_ERROR = 'Online auth is not configured on this server.';
 const USER_STORAGE_LIST_LIMIT = 100;
@@ -238,8 +249,8 @@ app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', HTTP_CONTENT_SECURITY_POLICY);
     next();
 });
-app.post('/api/donate/stripe-webhook', express.raw({ type: 'application/json' }), (req, res) => {
-    handleStripeDonateWebhook(req, res);
+app.post('/api/donate/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    await handleStripeDonateWebhook(req, res);
 });
 app.get('/api/billboard-content', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -566,6 +577,213 @@ app.post('/api/player-economy/sync', express.json({ limit: '64kb' }), async (req
         res.status(502).json({
             ok: false,
             error: 'Could not sync wallet progress right now.',
+        });
+    }
+});
+
+app.post('/api/player-economy/credits-checkout-session', express.json({ limit: '16kb' }), async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!stripeClient) {
+        res.status(503).json({
+            ok: false,
+            error: 'Credits checkout is not configured on this server.',
+        });
+        return;
+    }
+    if (!playerEconomyStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Player wallet sync is not configured on this server.',
+        });
+        return;
+    }
+    if (
+        !consumeHttpRequestQuota(
+            req,
+            'player-economy-purchase',
+            HTTP_PLAYER_ECONOMY_PURCHASE_WINDOW_MS,
+            HTTP_PLAYER_ECONOMY_PURCHASE_MAX
+        )
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many checkout attempts. Try again shortly.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        if (!authIdentity?.userId) {
+            res.status(401).json({
+                ok: false,
+                error: 'Sign in before buying credits.',
+            });
+            return;
+        }
+
+        const checkoutBaseUrl = resolveDonateBaseUrl(req);
+        const successUrl = createCreditsPurchaseReturnUrl(checkoutBaseUrl, 'success', {
+            includeSessionId: true,
+        });
+        const cancelUrl = createCreditsPurchaseReturnUrl(checkoutBaseUrl, 'cancel');
+        if (!successUrl || !cancelUrl) {
+            res.status(500).json({
+                ok: false,
+                error: 'Could not determine checkout return URL.',
+            });
+            return;
+        }
+
+        const checkoutSession = await stripeClient.checkout.sessions.create({
+            mode: 'payment',
+            locale: 'en',
+            payment_method_types: ['card'],
+            client_reference_id: authIdentity.userId,
+            customer_email: authIdentity.email || undefined,
+            line_items: [
+                {
+                    quantity: 1,
+                    price_data: {
+                        currency: DONATE_CURRENCY,
+                        unit_amount: PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS,
+                        product_data: {
+                            name: PLAYER_CREDITS_PURCHASE_PRODUCT_NAME,
+                        },
+                    },
+                },
+            ],
+            success_url: successUrl,
+            cancel_url: cancelUrl,
+            metadata: {
+                integration: 'minefield-drift',
+                checkoutPurpose: 'credits-purchase',
+                purchasePackId: PLAYER_CREDITS_PURCHASE_PACK_ID,
+                userId: authIdentity.userId,
+                creditsAmount: String(PLAYER_CREDITS_PURCHASE_GRANT),
+                amountCents: String(PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS),
+                currencyCode: DONATE_CURRENCY,
+            },
+        });
+        if (typeof checkoutSession?.url !== 'string' || !checkoutSession.url) {
+            throw new Error('Stripe did not return a checkout URL.');
+        }
+
+        res.status(201).json({
+            ok: true,
+            sessionId: checkoutSession.id,
+            checkoutUrl: checkoutSession.url,
+            pack: {
+                creditsGranted: PLAYER_CREDITS_PURCHASE_GRANT,
+                amountCents: PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS,
+                currency: DONATE_CURRENCY,
+            },
+        });
+    } catch (error) {
+        console.error('Credits checkout session creation failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not start secure credits checkout. Try again.',
+        });
+    }
+});
+
+app.get('/api/player-economy/credits-session-status', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!stripeClient) {
+        res.status(503).json({
+            ok: false,
+            error: 'Credits checkout is not configured on this server.',
+        });
+        return;
+    }
+    if (!playerEconomyStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Player wallet sync is not configured on this server.',
+        });
+        return;
+    }
+    if (
+        !consumeHttpRequestQuota(
+            req,
+            'player-economy-purchase-verify',
+            HTTP_PLAYER_ECONOMY_PURCHASE_VERIFY_WINDOW_MS,
+            HTTP_PLAYER_ECONOMY_PURCHASE_VERIFY_MAX
+        )
+    ) {
+        res.status(429).json({
+            ok: false,
+            error: 'Too many checkout verification requests. Try again shortly.',
+        });
+        return;
+    }
+
+    const checkoutSessionId = normalizeStripeCheckoutSessionId(
+        typeof req.query?.session_id === 'string' ? req.query.session_id : req.query?.sessionId
+    );
+    if (!checkoutSessionId) {
+        res.status(400).json({
+            ok: false,
+            error: 'A valid Stripe Checkout session ID is required.',
+        });
+        return;
+    }
+
+    try {
+        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+        if (!authIdentity?.userId) {
+            res.status(401).json({
+                ok: false,
+                error: 'Sign in before verifying a credits purchase.',
+            });
+            return;
+        }
+
+        const checkoutSession = await stripeClient.checkout.sessions.retrieve(checkoutSessionId);
+        if (!isCreditsPurchaseCheckoutSession(checkoutSession)) {
+            res.status(404).json({
+                ok: false,
+                error: 'Credits checkout session was not found.',
+            });
+            return;
+        }
+
+        const purchase = normalizeCreditsPurchaseFromCheckoutSession(checkoutSession);
+        if (!purchase?.userId || purchase.userId !== authIdentity.userId) {
+            res.status(403).json({
+                ok: false,
+                error: 'This credits checkout does not belong to the signed-in account.',
+            });
+            return;
+        }
+
+        const status = resolveCreditsPurchaseCheckoutStatus(checkoutSession);
+        let purchaseResult = null;
+        if (status === 'paid') {
+            purchaseResult = await playerEconomyStore.applyCreditsPurchaseByUserId(
+                authIdentity.userId,
+                purchase
+            );
+        }
+
+        res.json({
+            ok: true,
+            sessionId: checkoutSessionId,
+            status,
+            paid: status === 'paid',
+            final: isCreditsPurchaseStatusFinal(status),
+            applied: Boolean(purchaseResult?.applied),
+            creditsGranted: purchase.creditsAmount,
+            amountCents: purchase.amountCents,
+            currency: purchase.currencyCode,
+            profile: purchaseResult?.profile || null,
+        });
+    } catch (error) {
+        console.error('Credits checkout session verification failed:', error);
+        res.status(502).json({
+            ok: false,
+            error: 'Could not verify credits checkout. Try again shortly.',
         });
     }
 });
@@ -1993,9 +2211,31 @@ function createDonateReturnUrl(baseUrl, state, options = {}) {
     }
 }
 
-function handleStripeDonateWebhook(req, res) {
+function createCreditsPurchaseReturnUrl(baseUrl, state, options = {}) {
+    if (!baseUrl) {
+        return '';
+    }
+    const normalizedState = typeof state === 'string' ? state.trim().toLowerCase() : '';
+    if (normalizedState !== 'success' && normalizedState !== 'cancel') {
+        return '';
+    }
+    try {
+        const origin = new URL(baseUrl).origin;
+        const includeSessionId =
+            Boolean(options?.includeSessionId) && normalizedState === 'success';
+        const queryParts = [`credits-purchase=${encodeURIComponent(normalizedState)}`];
+        if (includeSessionId) {
+            queryParts.push('credits_session_id={CHECKOUT_SESSION_ID}');
+        }
+        return `${origin}/?${queryParts.join('&')}`;
+    } catch {
+        return '';
+    }
+}
+
+async function handleStripeDonateWebhook(req, res) {
     if (!stripeClient || !STRIPE_WEBHOOK_SECRET) {
-        res.status(503).send('Donations are not configured on this server.');
+        res.status(503).send('Stripe checkout is not configured on this server.');
         return;
     }
     const signatureHeader = req?.headers?.['stripe-signature'];
@@ -2027,7 +2267,7 @@ function handleStripeDonateWebhook(req, res) {
     }
 
     try {
-        processStripeDonateWebhookEvent(stripeEvent);
+        await processStripeDonateWebhookEvent(stripeEvent);
         donateSessionStore.markEventProcessed(stripeEvent.id);
         res.status(200).send('ok');
     } catch (error) {
@@ -2036,13 +2276,23 @@ function handleStripeDonateWebhook(req, res) {
     }
 }
 
-function processStripeDonateWebhookEvent(stripeEvent) {
+async function processStripeDonateWebhookEvent(stripeEvent) {
     const eventType = typeof stripeEvent?.type === 'string' ? stripeEvent.type : '';
     if (!eventType || !eventType.startsWith('checkout.session.')) {
         return;
     }
     const checkoutSession = stripeEvent?.data?.object;
     if (!checkoutSession || typeof checkoutSession !== 'object') {
+        return;
+    }
+    if (isCreditsPurchaseCheckoutSession(checkoutSession)) {
+        const status = resolveCreditsPurchaseCheckoutStatus(checkoutSession);
+        if (status === 'paid') {
+            const purchase = normalizeCreditsPurchaseFromCheckoutSession(checkoutSession);
+            if (purchase?.userId) {
+                await playerEconomyStore.applyCreditsPurchaseByUserId(purchase.userId, purchase);
+            }
+        }
         return;
     }
     const statusOverride = resolveDonationStatusFromStripeEventType(eventType);
@@ -2066,6 +2316,89 @@ function resolveDonationStatusFromStripeEventType(eventType) {
     }
 }
 
+function isCreditsPurchaseCheckoutSession(checkoutSession = null) {
+    if (!checkoutSession || typeof checkoutSession !== 'object') {
+        return false;
+    }
+    const metadata =
+        checkoutSession?.metadata && typeof checkoutSession.metadata === 'object'
+            ? checkoutSession.metadata
+            : {};
+    return (
+        sanitizeCheckoutMetadataValue(metadata.integration) === 'minefield-drift' &&
+        sanitizeCheckoutMetadataValue(metadata.checkoutPurpose) === 'credits-purchase'
+    );
+}
+
+function normalizeCreditsPurchaseFromCheckoutSession(checkoutSession = null) {
+    if (!isCreditsPurchaseCheckoutSession(checkoutSession)) {
+        return null;
+    }
+    const metadata =
+        checkoutSession?.metadata && typeof checkoutSession.metadata === 'object'
+            ? checkoutSession.metadata
+            : {};
+    const checkoutSessionId = normalizeStripeCheckoutSessionId(checkoutSession?.id);
+    const userId = sanitizeSupabaseUserId(
+        metadata.userId || metadata.user_id || checkoutSession?.client_reference_id || ''
+    );
+    const creditsAmount = Math.max(
+        0,
+        Math.round(
+            Number(
+                metadata.creditsAmount ||
+                    metadata.credits ||
+                    PLAYER_CREDITS_PURCHASE_GRANT
+            ) || 0
+        )
+    );
+    const amountCents = Math.max(
+        0,
+        Math.round(
+            Number(
+                metadata.amountCents ||
+                    checkoutSession?.amount_total ||
+                    PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS
+            ) || 0
+        )
+    );
+    const currencyCode = sanitizeCurrencyCode(
+        checkoutSession?.currency || metadata.currencyCode || DONATE_CURRENCY,
+        DONATE_CURRENCY
+    );
+    const purchasePackId = sanitizeCheckoutMetadataValue(
+        metadata.purchasePackId || PLAYER_CREDITS_PURCHASE_PACK_ID
+    );
+    return {
+        userId,
+        checkoutSessionId,
+        creditsAmount,
+        amountCents,
+        currencyCode,
+        purchasePackId,
+        summary: `Purchased ${creditsAmount} ${creditsAmount === 1 ? 'Credit' : 'Credits'}`,
+    };
+}
+
+function resolveCreditsPurchaseCheckoutStatus(checkoutSession = null) {
+    const status = sanitizeCheckoutMetadataValue(checkoutSession?.status);
+    const paymentStatus = sanitizeCheckoutMetadataValue(checkoutSession?.payment_status);
+    if (status === 'expired') {
+        return 'expired';
+    }
+    if (paymentStatus === 'paid' || paymentStatus === 'no_payment_required') {
+        return 'paid';
+    }
+    if (status === 'complete') {
+        return 'processing';
+    }
+    return 'open';
+}
+
+function isCreditsPurchaseStatusFinal(status = '') {
+    return status === 'paid' || status === 'expired';
+}
+
 function buildDonateSessionStatusResponse(sessionState, options = {}) {
     return {
         ok: true,
@@ -2084,6 +2417,13 @@ function buildDonateSessionStatusResponse(sessionState, options = {}) {
             ? Math.max(0, Math.round(sessionState.updatedAtMs))
             : Date.now(),
     };
+}
+
+function sanitizeCheckoutMetadataValue(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value.trim().toLowerCase();
 }
 
 function resolveRequestProtocol(req) {

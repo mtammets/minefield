@@ -190,7 +190,7 @@
                                             id="welcomeGuestWalletBalance"
                                             class="welcomeAuthWalletBalance"
                                         >
-                                            0 CR
+                                            0 Credits
                                         </div>
                                         <div
                                             id="welcomeGuestWalletSubline"
@@ -199,13 +199,16 @@
                                             Earn credits in local runs and unlock new chassis.
                                         </div>
                                     </div>
-                                    <div
+                                    <button
                                         id="welcomeGuestWalletSyncState"
                                         class="welcomeAuthWalletSyncState"
-                                        data-tone="muted"
+                                        data-tone="cta"
+                                        type="button"
+                                        aria-label="Buy 1500 Credits for 1 euro"
+                                        title="Buy 1500 Credits for 1 euro"
                                     >
-                                        LOCAL GARAGE
-                                    </div>
+                                        BUY 1500 CREDITS / €1
+                                    </button>
                                 </div>
                                 <div class="welcomeAuthWalletProgress">
                                     <div class="welcomeAuthWalletProgressMeta">
@@ -219,7 +222,7 @@
                                             id="welcomeGuestWalletNextUnlockValue"
                                             class="welcomeAuthWalletProgressValue"
                                         >
-                                            0/180 CR
+                                            0/180 Credits
                                         </span>
                                     </div>
                                     <div class="welcomeAuthWalletProgressTrack" aria-hidden="true">
@@ -369,7 +372,7 @@
                                                 id="welcomeAuthWalletBalance"
                                                 class="welcomeAuthWalletBalance"
                                             >
-                                                0 CR
+                                                0 Credits
                                             </div>
                                             <div
                                                 id="welcomeAuthWalletSubline"
@@ -378,13 +381,16 @@
                                                 1/2 chassis owned.
                                             </div>
                                         </div>
-                                        <div
+                                        <button
                                             id="welcomeAuthWalletSyncState"
                                             class="welcomeAuthWalletSyncState"
-                                            data-tone="muted"
+                                            data-tone="cta"
+                                            type="button"
+                                            aria-label="Buy 1500 Credits for 1 euro"
+                                            title="Buy 1500 Credits for 1 euro"
                                         >
-                                            LOCAL GARAGE
-                                        </div>
+                                            BUY 1500 CREDITS / €1
+                                        </button>
                                     </div>
                                     <div class="welcomeAuthWalletStats" aria-label="Wallet stats">
                                         <div class="welcomeAuthWalletStat">
@@ -393,7 +399,7 @@
                                                 id="welcomeAuthWalletEarned"
                                                 class="welcomeAuthWalletStatValue"
                                             >
-                                                0 CR
+                                                0 Credits
                                             </div>
                                         </div>
                                         <div class="welcomeAuthWalletStat">
@@ -402,7 +408,7 @@
                                                 id="welcomeAuthWalletSpent"
                                                 class="welcomeAuthWalletStatValue"
                                             >
-                                                0 CR
+                                                0 Credits
                                             </div>
                                         </div>
                                         <div class="welcomeAuthWalletStat">
@@ -427,7 +433,7 @@
                                                 id="welcomeAuthWalletNextUnlockValue"
                                                 class="welcomeAuthWalletProgressValue"
                                             >
-                                                0/180 CR
+                                                0/180 Credits
                                             </span>
                                         </div>
                                         <div
@@ -636,140 +642,138 @@
                                             hidden
                                         >
                                             <div class="welcomeAuthGarageHero">
-                                                <div class="welcomeAuthGarageDock">
-                                                    <div class="welcomeAuthGarageMeta">
-                                                        <div class="welcomeAuthGarageControlRow">
-                                                            <button
-                                                                id="welcomeAuthGaragePrevBtn"
-                                                                class="welcomeAuthGarageControlBtn"
-                                                                type="button"
-                                                                aria-label="Previous chassis"
-                                                                title="Previous chassis"
-                                                            >
-                                                                <span aria-hidden="true">‹</span>
-                                                            </button>
-                                                            <div
-                                                                id="welcomeAuthGarageVehicleName"
-                                                                class="welcomeAuthGarageVehicleName"
-                                                            >
-                                                                Voltline Sled
-                                                            </div>
-                                                            <button
-                                                                id="welcomeAuthGarageNextBtn"
-                                                                class="welcomeAuthGarageControlBtn"
-                                                                type="button"
-                                                                aria-label="Next chassis"
-                                                                title="Next chassis"
-                                                            >
-                                                                <span aria-hidden="true">›</span>
-                                                            </button>
-                                                        </div>
-                                                        <div
-                                                            id="welcomeAuthGarageVehiclePips"
-                                                            class="welcomeAuthGarageVehiclePips"
-                                                            aria-hidden="true"
-                                                        ></div>
-                                                        <div class="welcomeAuthGarageStatsRow">
-                                                            <div class="welcomeAuthGarageStat">
-                                                                <div class="welcomeAuthGarageStatLabel">
-                                                                    Wallet
-                                                                </div>
-                                                                <div
-                                                                    id="welcomeAuthGarageWalletValue"
-                                                                    class="welcomeAuthGarageStatValue"
-                                                                >
-                                                                    0 CR
-                                                                </div>
-                                                            </div>
-                                                            <div class="welcomeAuthGarageStat">
-                                                                <div class="welcomeAuthGarageStatLabel">
-                                                                    Status
-                                                                </div>
-                                                                <div
-                                                                    id="welcomeAuthGarageVehicleStatus"
-                                                                    class="welcomeAuthGarageStatValue"
-                                                                >
-                                                                    OWNED
-                                                                </div>
-                                                            </div>
-                                                        </div>
+                                                <div class="welcomeAuthGarageMeta">
+                                                    <div class="welcomeAuthGarageControlRow">
                                                         <button
-                                                            id="welcomeAuthGaragePurchaseBtn"
-                                                            class="welcomeAuthGaragePurchaseBtn"
+                                                            id="welcomeAuthGaragePrevBtn"
+                                                            class="welcomeAuthGarageControlBtn"
                                                             type="button"
-                                                            hidden
+                                                            aria-label="Previous chassis"
+                                                            title="Previous chassis"
                                                         >
-                                                            UNLOCK 0 CR
+                                                            <span aria-hidden="true">‹</span>
                                                         </button>
                                                         <div
-                                                            id="welcomeAuthGarageHint"
-                                                            class="welcomeAuthGarageHint"
-                                                            data-tone="muted"
+                                                            id="welcomeAuthGarageVehicleName"
+                                                            class="welcomeAuthGarageVehicleName"
                                                         >
-                                                            Earn credits in races to unlock new chassis.
+                                                            Voltline Sled
+                                                        </div>
+                                                        <button
+                                                            id="welcomeAuthGarageNextBtn"
+                                                            class="welcomeAuthGarageControlBtn"
+                                                            type="button"
+                                                            aria-label="Next chassis"
+                                                            title="Next chassis"
+                                                        >
+                                                            <span aria-hidden="true">›</span>
+                                                        </button>
+                                                    </div>
+                                                    <div
+                                                        id="welcomeAuthGarageVehiclePips"
+                                                        class="welcomeAuthGarageVehiclePips"
+                                                        aria-hidden="true"
+                                                    ></div>
+                                                    <div class="welcomeAuthGarageStatsRow">
+                                                        <div class="welcomeAuthGarageStat">
+                                                            <div class="welcomeAuthGarageStatLabel">
+                                                                Wallet
+                                                            </div>
+                                                            <div
+                                                                id="welcomeAuthGarageWalletValue"
+                                                                class="welcomeAuthGarageStatValue"
+                                                            >
+                                                                0 Credits
+                                                            </div>
+                                                        </div>
+                                                        <div class="welcomeAuthGarageStat">
+                                                            <div class="welcomeAuthGarageStatLabel">
+                                                                Status
+                                                            </div>
+                                                            <div
+                                                                id="welcomeAuthGarageVehicleStatus"
+                                                                class="welcomeAuthGarageStatValue"
+                                                            >
+                                                                OWNED
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        id="welcomeAuthGaragePurchaseBtn"
+                                                        class="welcomeAuthGaragePurchaseBtn"
+                                                        type="button"
+                                                        hidden
+                                                    >
+                                                        UNLOCK 0 Credits
+                                                    </button>
+                                                    <div
+                                                        id="welcomeAuthGarageHint"
+                                                        class="welcomeAuthGarageHint"
+                                                        data-tone="muted"
+                                                    >
+                                                        Earn credits in races to unlock new chassis.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div
+                                                id="welcomeAuthGarageWrapCard"
+                                                class="welcomeAuthGarageWrapCard"
+                                            >
+                                                <div class="welcomeAuthGarageWrapStage">
+                                                    <div class="welcomeAuthCarWrapPreviewFrame">
+                                                        <img
+                                                            id="welcomeAuthGarageWrapPreview"
+                                                            class="welcomeAuthCarWrapPreview"
+                                                            alt="Garage custom car wrap preview"
+                                                            hidden
+                                                        />
+                                                        <div
+                                                            id="welcomeAuthGarageWrapFallback"
+                                                            class="welcomeAuthCarWrapFallback"
+                                                        >
+                                                            <span
+                                                                class="welcomeAuthCarWrapFallbackGlyph"
+                                                                aria-hidden="true"
+                                                            >
+                                                                ✦
+                                                            </span>
                                                         </div>
                                                     </div>
                                                     <div
-                                                        id="welcomeAuthGarageWrapCard"
-                                                        class="welcomeAuthGarageWrapCard"
+                                                        id="welcomeAuthGarageWrapStatus"
+                                                        class="welcomeAuthGarageWrapStatus"
+                                                        aria-hidden="true"
+                                                    ></div>
+                                                </div>
+                                                <div class="welcomeAuthGarageWrapActions">
+                                                    <button
+                                                        id="welcomeAuthGarageWrapUploadBtn"
+                                                        class="welcomeAuthGarageActionBtn welcomeAuthGarageActionBtnPrimary"
+                                                        type="button"
+                                                        aria-label="Upload wrap"
+                                                        title="Upload wrap"
                                                     >
-                                                        <div class="welcomeAuthGarageWrapStage">
-                                                            <div class="welcomeAuthCarWrapPreviewFrame">
-                                                                <img
-                                                                    id="welcomeAuthGarageWrapPreview"
-                                                                    class="welcomeAuthCarWrapPreview"
-                                                                    alt="Garage custom car wrap preview"
-                                                                    hidden
-                                                                />
-                                                                <div
-                                                                    id="welcomeAuthGarageWrapFallback"
-                                                                    class="welcomeAuthCarWrapFallback"
-                                                                >
-                                                                    <span
-                                                                        class="welcomeAuthCarWrapFallbackGlyph"
-                                                                        aria-hidden="true"
-                                                                    >
-                                                                        ✦
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                            <div
-                                                                id="welcomeAuthGarageWrapStatus"
-                                                                class="welcomeAuthGarageWrapStatus"
-                                                                aria-hidden="true"
-                                                            ></div>
-                                                        </div>
-                                                        <div class="welcomeAuthGarageWrapActions">
-                                                            <button
-                                                                id="welcomeAuthGarageWrapUploadBtn"
-                                                                class="welcomeAuthGarageActionBtn welcomeAuthGarageActionBtnPrimary"
-                                                                type="button"
-                                                                aria-label="Upload wrap"
-                                                                title="Upload wrap"
-                                                            >
-                                                                <span
-                                                                    id="welcomeAuthGarageWrapUploadIcon"
-                                                                    aria-hidden="true"
-                                                                >
-                                                                    +
-                                                                </span>
-                                                            </button>
-                                                            <button
-                                                                id="welcomeAuthGarageWrapRemoveBtn"
-                                                                class="welcomeAuthGarageActionBtn welcomeAuthGarageActionBtnDanger"
-                                                                type="button"
-                                                                aria-label="Remove wrap"
-                                                                title="Remove wrap"
-                                                            >
-                                                                <span
-                                                                    id="welcomeAuthGarageWrapRemoveIcon"
-                                                                    aria-hidden="true"
-                                                                >
-                                                                    ×
-                                                                </span>
-                                                            </button>
-                                                        </div>
-                                                    </div>
+                                                        <span
+                                                            id="welcomeAuthGarageWrapUploadIcon"
+                                                            aria-hidden="true"
+                                                        >
+                                                            +
+                                                        </span>
+                                                    </button>
+                                                    <button
+                                                        id="welcomeAuthGarageWrapRemoveBtn"
+                                                        class="welcomeAuthGarageActionBtn welcomeAuthGarageActionBtnDanger"
+                                                        type="button"
+                                                        aria-label="Remove wrap"
+                                                        title="Remove wrap"
+                                                    >
+                                                        <span
+                                                            id="welcomeAuthGarageWrapRemoveIcon"
+                                                            aria-hidden="true"
+                                                        >
+                                                            ×
+                                                        </span>
+                                                    </button>
                                                 </div>
                                             </div>
                                         </section>
@@ -1413,8 +1417,8 @@
                     </div>
                 </div>
                 <div class="economyHudBalanceRow">
-                    <div id="economyHudBalance" class="economyHudBalance">0 CR</div>
-                    <div id="economyHudRunDelta" class="economyHudRunDelta">RUN +0 CR</div>
+                    <div id="economyHudBalance" class="economyHudBalance">0 Credits</div>
+                    <div id="economyHudRunDelta" class="economyHudRunDelta">RUN +0 Credits</div>
                 </div>
                 <div class="economyHudProgressMeta">
                     <span id="economyHudTargetLabel" class="economyHudTargetLabel">
@@ -1427,7 +1431,7 @@
                 <div class="economyHudProgressTrack" aria-hidden="true">
                     <div id="economyHudProgressFill" class="economyHudProgressFill"></div>
                 </div>
-                <div id="economyHudActivity" class="economyHudActivity" hidden>Pickup +1 CR</div>
+                <div id="economyHudActivity" class="economyHudActivity" hidden>Pickup +1 Credit</div>
             </aside>
             <div id="botPanel" aria-label="Player HUD">
                 <div id="botList"></div>
@@ -1479,7 +1483,7 @@
                             class="leaderboardPlayerSummaryMeta leaderboardPlayerSummaryEconomy"
                             hidden
                         >
-                            Wallet 0 CR
+                            Wallet 0 Credits
                         </div>
                         <div
                             id="leaderboardEconomyBreakdown"

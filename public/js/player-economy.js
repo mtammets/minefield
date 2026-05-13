@@ -7,11 +7,12 @@ import {
 export const PLAYER_ECONOMY_STORAGE_KEY = 'silentdrift-player-economy-v1';
 export const PLAYER_ECONOMY_METADATA_CREDITS_KEY = 'economy_credits';
 export const PLAYER_ECONOMY_METADATA_UNLOCKS_KEY = 'economy_unlocked_vehicle_ids';
-export const PLAYER_CREDITS_LABEL = 'CR';
+export const PLAYER_CREDITS_LABEL = 'Credits';
 export const PLAYER_PICKUP_CREDIT_VALUE = 1;
 export const PLAYER_MINE_KILL_CREDIT_VALUE = 3;
 
 const PLAYER_ECONOMY_MAX_CREDITS = Number.MAX_SAFE_INTEGER;
+const PLAYER_CREDITS_NUMBER_FORMATTER = new Intl.NumberFormat('en-US');
 const PICKUP_CREDIT_VALUE = PLAYER_PICKUP_CREDIT_VALUE;
 const MINE_KILL_CREDIT_VALUE = PLAYER_MINE_KILL_CREDIT_VALUE;
 const ROUND_SETTLEMENT_CREDIT_BONUS = 2;
@@ -21,6 +22,19 @@ const ONLINE_FINISH_CREDIT_BONUS = 3;
 const CAMPAIGN_COMPLETE_CREDIT_BONUS = 15;
 
 const DEFAULT_UNLOCKED_VEHICLE_IDS = Object.freeze(resolveDefaultUnlockedVehicleIds());
+
+export function formatPlayerCredits(value = 0, { formatter = null, includePlusSign = false } = {}) {
+    const numericValue = Math.round(Number(value) || 0);
+    const absoluteValue = Math.abs(numericValue);
+    const resolvedFormatter =
+        formatter && typeof formatter.format === 'function'
+            ? formatter
+            : PLAYER_CREDITS_NUMBER_FORMATTER;
+    const prefix =
+        numericValue < 0 ? '-' : includePlusSign && numericValue > 0 ? '+' : '';
+    const unitLabel = absoluteValue === 1 ? 'Credit' : PLAYER_CREDITS_LABEL;
+    return `${prefix}${resolvedFormatter.format(absoluteValue)} ${unitLabel}`;
+}
 
 export function createDefaultPlayerEconomyState() {
     return {
