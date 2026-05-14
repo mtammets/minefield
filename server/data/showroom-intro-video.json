@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "updatedAt": "2026-05-14T21:55:06.493Z",
+  "customVideo": {
+    "fileName": "Demo.mp4",
+    "originalFileName": "Screen Recording 2026-05-14 at 22.00.30.mov",
+    "uploadedMimeType": "video/quicktime",
+    "mimeType": "video/mp4",
+    "sizeBytes": 13051526,
+    "width": 1680,
+    "height": 900,
+    "frameRate": 30,
+    "updatedAt": "2026-05-14T21:55:06.493Z",
+    "revision": "20260514215506493"
+  }
+}

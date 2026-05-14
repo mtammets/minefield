@@ -3,4 +3,3 @@ node_modules/
 .DS_Store
 public/assets/billboards/*.mov
 public/assets/Demo/Demo.mov
-public/uploads/showroom-intro/
