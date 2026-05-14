@@ -14,6 +14,7 @@ import {
 const AUDIO_PREFS_STORAGE_KEY = 'silentdrift-audio-prefs-v1';
 const AUDIO_PREFS_DEFAULTS_API_PATH = '/api/audio-prefs/defaults';
 const AUDIO_PREFS_DEFAULTS_SAVE_DEBOUNCE_MS = 500;
+const WELCOME_MENU_MUSIC_SOUND_ID = 'welcomeMenuSnr2Loop01';
 const MONUMENT_MUSIC_SOUND_ID = 'monumentHookusPookusInstrumentalLoop01';
 const UFO_DISKO_STORE_MUSIC_SOUND_ID = 'ufoDiskoNebulaStore01';
 
@@ -266,6 +267,12 @@ const SOUND_DEFINITIONS = Object.freeze({
         gain: 0.32,
         loop: true,
     },
+    welcomeMenuSnr2Loop01: {
+        src: '/audio/music/welcome_menu_snr2_loop_01.mp3',
+        bus: 'music',
+        gain: 0.92,
+        loop: true,
+    },
     monumentHookusPookusInstrumentalLoop01: {
         src: '/audio/ambience/monument_hookus_pookus_instrumental_loop_01.mp3',
         bus: 'music',
@@ -281,10 +288,14 @@ const SOUND_DEFINITIONS = Object.freeze({
     },
 });
 const SOUND_DEFINITION_IDS = Object.freeze(Object.keys(SOUND_DEFINITIONS));
+const EXCLUDED_PRIMED_LOOP_SOUND_IDS = Object.freeze(
+    new Set([WELCOME_MENU_MUSIC_SOUND_ID, MONUMENT_MUSIC_SOUND_ID])
+);
 const LOOP_SOUND_IDS = Object.freeze(
     SOUND_DEFINITION_IDS.filter(
         (soundId) =>
-            Boolean(SOUND_DEFINITIONS[soundId]?.loop) && soundId !== MONUMENT_MUSIC_SOUND_ID
+            Boolean(SOUND_DEFINITIONS[soundId]?.loop) &&
+            !EXCLUDED_PRIMED_LOOP_SOUND_IDS.has(soundId)
     )
 );
 const EMPTY_ARRAY = Object.freeze([]);
@@ -328,28 +339,28 @@ const MIXER_SLIDERS = Object.freeze([
         label: 'Master',
     },
     {
-        key: 'vehiclesVolume',
-        label: 'Vehicles',
-    },
-    {
-        key: 'botVehiclesVolume',
-        label: 'Bots',
-    },
-    {
-        key: 'effectsVolume',
-        label: 'Effects',
-    },
-    {
-        key: 'ambienceVolume',
-        label: 'Ambience',
-    },
-    {
         key: 'musicVolume',
         label: 'Music',
     },
     {
+        key: 'effectsVolume',
+        label: 'SFX',
+    },
+    {
+        key: 'ambienceVolume',
+        label: 'World',
+    },
+    {
         key: 'uiVolume',
-        label: 'UI',
+        label: 'Interface',
+    },
+    {
+        key: 'vehiclesVolume',
+        label: 'Engine',
+    },
+    {
+        key: 'botVehiclesVolume',
+        label: 'Traffic',
     },
 ]);
 
@@ -365,6 +376,7 @@ const EVENT_COOLDOWNS = Object.freeze({
 const AUDIO_FETCH_CACHE_MODES = Object.freeze(['default', 'reload']);
 const WELCOME_MENU_AMBIENCE_GAIN = 0;
 const WELCOME_MENU_CROWD_GAIN = 0;
+const WELCOME_MENU_MUSIC_GAIN = 0.01;
 const AUDIO_PRELOAD_BATCH_SIZE = 2;
 const MONUMENT_AUDIO_CONFIG = Object.freeze({
     x: centralParkingLot.centerX,
@@ -613,6 +625,7 @@ export function createAudioSystem({ camera = null } = {}) {
         getMixerSnapshot,
         setMixerVolume,
         toggleMute,
+        resetMixerToDefaults,
         prepareForGameplay,
         getPreloadState,
         isGameplayReady() {
@@ -653,12 +666,18 @@ export function createAudioSystem({ camera = null } = {}) {
         ensureAudioContext();
         void loadRuntimeAudioDefaults();
         void preloadBuffersByIds(UI_SOUND_IDS);
+        void loadBuffer(WELCOME_MENU_MUSIC_SOUND_ID);
         if (preloadEnabled) {
             startPreload();
         }
         ui = createAudioUi(prefs, {
             onToggleMute() {
                 toggleMute();
+            },
+            onResetMix() {
+                resetMixerToDefaults({
+                    playFeedback: true,
+                });
             },
             onVolumeChanged(key, normalizedValue) {
                 setMixerVolume(key, normalizedValue);
@@ -731,6 +750,9 @@ export function createAudioSystem({ camera = null } = {}) {
             startPreload();
         }
         applyBusVolumes();
+        updateWelcomeMenuMusic({
+            welcomeVisible: runtime.welcomeVisible,
+        });
         refreshUi();
         if (waitForPreload && preloadPromise) {
             await preloadPromise;
@@ -1259,14 +1281,37 @@ export function createAudioSystem({ camera = null } = {}) {
         return getMixerSnapshot();
     }
 
+    function resetMixerToDefaults(options = {}) {
+        applyResolvedAudioPrefs(runtimeDefaultPrefs);
+        persistAudioPrefs(prefs, runtimeDefaultPrefs);
+        markRuntimeDefaultsDirty();
+        applyBusVolumes();
+        refreshUi();
+        if (options?.playFeedback) {
+            void unlockAudio().then((unlockedNow) => {
+                if (!unlockedNow) {
+                    return;
+                }
+                playVariant('uiClickSoft', {
+                    gain: 0.55,
+                });
+            });
+        }
+        return getMixerSnapshot();
+    }
+
     function refreshUi() {
         if (!ui) {
             return;
         }
 
-        const uiState = resolveAudioUiState();
+        const uiState = resolveAudioUiState({
+            embedded: Boolean(ui.embedded),
+        });
         ui.root.dataset.tone = uiState.statusTone;
-        ui.muteBtn.textContent = prefs.muted ? 'UNMUTE' : 'MUTE';
+        ui.controlsRow.dataset.unlocked = unlocked ? 'true' : 'false';
+        ui.unlockButton.hidden = unlocked;
+        ui.muteBtn.textContent = prefs.muted ? 'UNMUTE ALL' : 'MUTE ALL';
         ui.status.textContent = uiState.statusText;
 
         for (let i = 0; i < MIXER_SLIDERS.length; i += 1) {
@@ -1276,12 +1321,15 @@ export function createAudioSystem({ camera = null } = {}) {
                 continue;
             }
             const value = clampNumber(prefs[slider.key], 0, 1, runtimeDefaultPrefs[slider.key]);
-            row.input.value = String(Math.round(value * 100));
-            row.value.textContent = `${Math.round(value * 100)}%`;
+            const percent = Math.round(value * 100);
+            row.input.value = String(percent);
+            row.input.style.setProperty('--audio-slider-fill', `${percent}%`);
+            row.value.textContent = formatAudioSliderPercentLabel(percent);
         }
     }
 
-    function resolveAudioUiState() {
+    function resolveAudioUiState(options = {}) {
+        const embedded = Boolean(options?.embedded);
         const preloadState = getPreloadState();
         const filesTotal = preloadState.filesTotal;
         const filesReady = preloadState.filesReady;
@@ -1295,23 +1343,33 @@ export function createAudioSystem({ camera = null } = {}) {
         if (canUseAudio && !unlocked) {
             statusTone = context?.state === 'suspended' ? 'locked' : 'offline';
             statusLabel = 'Locked';
-            statusText = 'Tap/click to unlock audio';
+            statusText = embedded
+                ? 'Click any control to activate sound. Your mix saves automatically.'
+                : 'Tap/click to unlock audio';
         } else if (canUseAudio && preloadPromise && !preloadState.complete) {
             statusTone = 'priming';
             statusLabel = 'Loading';
-            statusText = `Preparing gameplay audio (${filesReady}/${filesTotal})`;
+            statusText = embedded
+                ? `Live mix active. Loading remaining audio (${filesReady}/${filesTotal}).`
+                : `Preparing gameplay audio (${filesReady}/${filesTotal})`;
         } else if (canUseAudio && gameplayReady) {
             statusTone = 'ready';
             statusLabel = 'Ready';
-            statusText = `Audio ready (${filesReady}/${filesTotal})`;
+            statusText = embedded
+                ? 'Live mix active. Changes save automatically.'
+                : `Audio ready (${filesReady}/${filesTotal})`;
         } else if (canUseAudio) {
             statusTone = 'priming';
             statusLabel = 'Primed';
-            statusText = `Audio primed (${filesReady}/${filesTotal})`;
+            statusText = embedded
+                ? 'Audio active. Fine-tune the mix for menus and gameplay.'
+                : `Audio primed (${filesReady}/${filesTotal})`;
         }
 
         if (filesFailed > 0) {
-            statusText += ` | Missing/invalid: ${filesFailed}`;
+            statusText += embedded
+                ? ` Missing files: ${filesFailed}.`
+                : ` | Missing/invalid: ${filesFailed}`;
         }
 
         return {
@@ -1562,7 +1620,16 @@ export function createAudioSystem({ camera = null } = {}) {
 
         const editModeActive = Boolean(frameState.editModeActive);
         if (ui?.root) {
-            ui.root.hidden = !editModeActive;
+            ui.root.hidden = ui.embedded ? false : !editModeActive;
+        }
+
+        const welcomeVisible = Boolean(frameState.welcomeVisible);
+        runtime.welcomeVisible = welcomeVisible;
+
+        if (isAudioOutputReady()) {
+            updateWelcomeMenuMusic({
+                welcomeVisible,
+            });
         }
 
         const dt = Math.min(Math.max(deltaTime || 0, 0), 0.05);
@@ -1580,7 +1647,6 @@ export function createAudioSystem({ camera = null } = {}) {
         const burnout = clampNumber(vehicleState.burnout, 0, 1, 0);
 
         const isPaused = Boolean(frameState.isPaused);
-        const welcomeVisible = Boolean(frameState.welcomeVisible);
         const isCarDestroyed = Boolean(frameState.isCarDestroyed);
         const pickupRoundFinished = Boolean(
             frameState.pickupRoundFinished ?? frameState.roundFinished
@@ -1752,6 +1818,22 @@ export function createAudioSystem({ camera = null } = {}) {
             lowerLevelSilenceFactor,
             undergroundParkingIsolationActive,
         });
+    }
+
+    function updateWelcomeMenuMusic(frameState = {}) {
+        const shouldBeAudible = Boolean(frameState.welcomeVisible);
+        const instance =
+            loopInstances.get(WELCOME_MENU_MUSIC_SOUND_ID) ||
+            (shouldBeAudible ? ensureLoopInstance(WELCOME_MENU_MUSIC_SOUND_ID) : null);
+        if (!instance || !context) {
+            return;
+        }
+        const definitionGain = SOUND_DEFINITIONS[WELCOME_MENU_MUSIC_SOUND_ID]?.gain || 1;
+        instance.gain.gain.setTargetAtTime(
+            (shouldBeAudible ? WELCOME_MENU_MUSIC_GAIN : 0) * definitionGain,
+            context.currentTime,
+            shouldBeAudible ? 0.42 : 0.18
+        );
     }
 
     function onVehicleCollisionContacts(contacts = []) {
@@ -2770,7 +2852,7 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function ensureLoopInstance(soundId) {
-        if (!isRealtimeAudioReady()) {
+        if (!isAudioOutputReady()) {
             return null;
         }
 
@@ -4574,11 +4656,22 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 }
 
+function formatAudioSliderPercentLabel(percentValue = 0) {
+    const safePercent = Math.max(0, Math.min(100, Math.round(Number(percentValue) || 0)));
+    return safePercent <= 0 ? 'OFF' : `${safePercent}%`;
+}
+
 function createAudioUi(prefs, handlers) {
+    const embeddedMount = document.getElementById('welcomeAudioSettingsMount');
+    const embedded = embeddedMount instanceof Element;
+
     const root = document.createElement('section');
     root.className = 'audioControlPanel';
+    if (embedded) {
+        root.classList.add('audioControlPanel--embedded');
+    }
     root.dataset.tone = 'locked';
-    root.hidden = true;
+    root.hidden = !embedded;
 
     const heading = document.createElement('div');
     heading.className = 'audioControlPanelHeading';
@@ -4594,7 +4687,7 @@ function createAudioUi(prefs, handlers) {
     const unlockButton = document.createElement('button');
     unlockButton.type = 'button';
     unlockButton.className = 'audioControlButton';
-    unlockButton.textContent = 'UNLOCK';
+    unlockButton.textContent = 'ACTIVATE AUDIO';
     unlockButton.addEventListener('click', () => {
         handlers.onUnlockAudio();
     });
@@ -4602,13 +4695,22 @@ function createAudioUi(prefs, handlers) {
     const muteBtn = document.createElement('button');
     muteBtn.type = 'button';
     muteBtn.className = 'audioControlButton';
-    muteBtn.textContent = prefs.muted ? 'UNMUTE' : 'MUTE';
+    muteBtn.textContent = prefs.muted ? 'UNMUTE ALL' : 'MUTE ALL';
     muteBtn.addEventListener('click', () => {
         handlers.onUnlockAudio();
         handlers.onToggleMute();
     });
 
-    controlsRow.append(unlockButton, muteBtn);
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'audioControlButton audioControlButton--secondary';
+    resetBtn.textContent = 'RESET MIX';
+    resetBtn.addEventListener('click', () => {
+        handlers.onUnlockAudio();
+        handlers.onResetMix?.();
+    });
+
+    controlsRow.append(unlockButton, muteBtn, resetBtn);
 
     const slidersWrap = document.createElement('div');
     slidersWrap.className = 'audioControlPanelSliders';
@@ -4619,6 +4721,7 @@ function createAudioUi(prefs, handlers) {
         const sliderDef = MIXER_SLIDERS[i];
         const row = document.createElement('label');
         row.className = 'audioControlSliderRow';
+        row.dataset.key = sliderDef.key;
 
         const title = document.createElement('span');
         title.className = 'audioControlSliderLabel';
@@ -4630,7 +4733,10 @@ function createAudioUi(prefs, handlers) {
         input.min = '0';
         input.max = '100';
         input.step = '1';
-        input.value = String(Math.round((prefs[sliderDef.key] || 0) * 100));
+        const initialPercent = Math.round((prefs[sliderDef.key] || 0) * 100);
+        input.value = String(initialPercent);
+        input.style.setProperty('--audio-slider-fill', `${initialPercent}%`);
+        input.setAttribute('aria-label', `${sliderDef.label} volume`);
         input.addEventListener('input', () => {
             const normalized = clampNumber(Number(input.value) / 100, 0, 1, 1);
             handlers.onVolumeChanged(sliderDef.key, normalized);
@@ -4639,7 +4745,7 @@ function createAudioUi(prefs, handlers) {
 
         const value = document.createElement('span');
         value.className = 'audioControlSliderValue';
-        value.textContent = `${Math.round((prefs[sliderDef.key] || 0) * 100)}%`;
+        value.textContent = formatAudioSliderPercentLabel(initialPercent);
 
         row.append(title, input, value);
         slidersWrap.append(row);
@@ -4652,13 +4758,20 @@ function createAudioUi(prefs, handlers) {
     }
 
     root.append(heading, status, controlsRow, slidersWrap);
-    document.body.append(root);
+    if (embedded && embeddedMount instanceof Element) {
+        embeddedMount.append(root);
+    } else {
+        document.body.append(root);
+    }
 
     return {
         root,
+        embedded,
         status,
         muteBtn,
         unlockButton,
+        resetBtn,
+        controlsRow,
         sliderRows,
     };
 }
@@ -4841,6 +4954,9 @@ function createNoopAudioSystem() {
             return getOfflineMixerSnapshot();
         },
         toggleMute() {
+            return getOfflineMixerSnapshot();
+        },
+        resetMixerToDefaults() {
             return getOfflineMixerSnapshot();
         },
         prepareForGameplay() {
