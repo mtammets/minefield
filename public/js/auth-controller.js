@@ -14,7 +14,8 @@ const AUTH_PASSWORD_MIN_LENGTH = 6;
 const AUTH_DELETE_ACCOUNT_ENDPOINT_PATH = '/api/auth/account';
 const PLAYER_ECONOMY_PROFILE_ENDPOINT_PATH = '/api/player-economy/profile';
 const PLAYER_ECONOMY_SYNC_ENDPOINT_PATH = '/api/player-economy/sync';
-const PLAYER_ECONOMY_CREDITS_CHECKOUT_ENDPOINT_PATH = '/api/player-economy/credits-checkout-session';
+const PLAYER_ECONOMY_CREDITS_CHECKOUT_ENDPOINT_PATH =
+    '/api/player-economy/credits-checkout-session';
 const PLAYER_ECONOMY_CREDITS_STATUS_ENDPOINT_PATH = '/api/player-economy/credits-session-status';
 const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT = 6;
 const PLAYER_ECONOMY_CREDITS_QUERY_KEY = 'credits-purchase';
@@ -956,7 +957,8 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             if (error) {
                 throw error;
             }
-            applySession(data?.session || null, {
+            const hydratedSession = await refreshSessionUser(data?.session || null);
+            applySession(hydratedSession, {
                 preserveStatus: false,
             });
             return getStateSnapshot();
@@ -1428,11 +1430,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 statusText: statusMessage,
                 statusTone: purchaseStatus === 'expired' ? 'error' : 'info',
             });
-            notifyToast(
-                statusMessage,
-                purchaseStatus === 'expired' ? 'error' : 'info',
-                3600
-            );
+            notifyToast(statusMessage, purchaseStatus === 'expired' ? 'error' : 'info', 3600);
             return {
                 ok: false,
                 status: purchaseStatus,
@@ -1467,17 +1465,46 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         }
     }
 
+    async function refreshSessionUser(session = null) {
+        if (!supabaseClient?.auth?.getUser || !session || typeof session !== 'object') {
+            return session;
+        }
+
+        const accessToken =
+            typeof session.access_token === 'string'
+                ? session.access_token.trim().slice(0, 4096)
+                : '';
+        const sessionUserId = sanitizeUserId(session?.user?.id || '');
+        if (!accessToken || !sessionUserId) {
+            return session;
+        }
+
+        try {
+            const { data, error } = await supabaseClient.auth.getUser(accessToken);
+            if (error || sanitizeUserId(data?.user?.id || '') !== sessionUserId) {
+                return session;
+            }
+            return mergeSessionUser(session, data.user);
+        } catch {
+            return session;
+        }
+    }
+
     function mergeCurrentSessionUser(nextUser = null) {
-        if (!currentSession || typeof currentSession !== 'object') {
-            return currentSession;
+        return mergeSessionUser(currentSession, nextUser);
+    }
+
+    function mergeSessionUser(session = null, nextUser = null) {
+        if (!session || typeof session !== 'object') {
+            return session;
         }
         return {
-            ...currentSession,
+            ...session,
             user:
                 nextUser && typeof nextUser === 'object'
                     ? nextUser
-                    : currentSession.user && typeof currentSession.user === 'object'
-                      ? currentSession.user
+                    : session.user && typeof session.user === 'object'
+                      ? session.user
                       : null,
         };
     }
@@ -1961,7 +1988,10 @@ function clearCreditsPurchaseReturnContext() {
         pageUrl.searchParams.delete(PLAYER_ECONOMY_CREDITS_QUERY_KEY);
         pageUrl.searchParams.delete(PLAYER_ECONOMY_CREDITS_SESSION_QUERY_KEY);
         const nextRelativeUrl = `${pageUrl.pathname}${pageUrl.search}${pageUrl.hash}`;
-        if (nextRelativeUrl !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+        if (
+            nextRelativeUrl !==
+            `${window.location.pathname}${window.location.search}${window.location.hash}`
+        ) {
             window.history.replaceState(null, '', nextRelativeUrl);
         }
     } catch {

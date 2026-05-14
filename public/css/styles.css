@@ -3155,6 +3155,10 @@ body.edit-mode-active #starterControlsHud {
     object-fit: cover;
 }
 
+.speedometerDriverAvatarImage[hidden] {
+    display: none !important;
+}
+
 .speedometerDriverAvatarFallback {
     display: grid;
     width: 100%;

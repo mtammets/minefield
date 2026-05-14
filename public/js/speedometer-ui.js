@@ -121,11 +121,14 @@ export function createSpeedometerController({ getAuthState = () => null } = {}) 
     };
 
     driverAvatarImageEl?.addEventListener('error', () => {
+        rootEl.dataset.driverHasImage = 'false';
         if (driverPodEl) {
             driverPodEl.dataset.hasImage = 'false';
         }
         if (driverAvatarImageEl) {
             driverAvatarImageEl.hidden = true;
+            driverAvatarImageEl.removeAttribute('src');
+            driverAvatarImageEl.alt = 'Driver profile photo';
         }
     });
 
