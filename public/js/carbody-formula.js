@@ -305,25 +305,25 @@ export function addFormulaBody(car, bodyConfig = {}) {
     centerLeg.receiveShadow = true;
     haloGroup.add(centerLeg);
 
-    const canopyMaterial = new THREE.MeshPhysicalMaterial({
+    // Transmission forces an extra full-scene render pass in Three.js and was
+    // the main FPS hit unique to the formula chassis.
+    const canopyMaterial = new THREE.MeshStandardMaterial({
         color: 0x0b1622,
         emissive: 0x10273b,
         emissiveIntensity: 0.28,
-        metalness: 0.16,
-        roughness: 0.12,
-        transmission: 0.1,
+        metalness: 0.22,
+        roughness: 0.18,
         transparent: true,
-        opacity: 0.9,
-        clearcoat: 1,
-        clearcoatRoughness: 0.06,
+        opacity: 0.82,
+        depthWrite: false,
     });
     cockpitGlassMaterials.push(canopyMaterial);
-    const canopy = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.44, 6, 10), canopyMaterial);
+    const canopy = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.44, 4, 8), canopyMaterial);
     canopy.position.set(0, 0.82, -0.18);
     canopy.rotation.z = Math.PI * 0.5;
     canopy.rotation.x = 0.08;
-    canopy.castShadow = true;
-    canopy.receiveShadow = true;
+    canopy.castShadow = false;
+    canopy.receiveShadow = false;
     roofAssemblyGroup.add(canopy);
 
     const energyStripMaterial = createMaterial({
