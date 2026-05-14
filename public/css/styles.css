@@ -6724,6 +6724,60 @@ body.race-intro-active #botPanel {
     color: rgba(186, 210, 226, 0.95);
 }
 
+.welcomeBrandLockup {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    min-height: clamp(154px, 18vw, 232px);
+    padding: 0 0 2px;
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.welcomeBrandLogo {
+    position: relative;
+    z-index: 0;
+    display: block;
+    width: min(112%, 520px);
+    max-width: none;
+    height: auto;
+    margin: -24px 0 -38px;
+    opacity: 0.985;
+    filter:
+        drop-shadow(0 16px 26px rgba(0, 0, 0, 0.28))
+        drop-shadow(0 0 10px rgba(255, 144, 74, 0.08))
+        drop-shadow(0 0 8px rgba(88, 196, 255, 0.05));
+    -webkit-mask-image: radial-gradient(
+        ellipse at 50% 46%,
+        rgba(0, 0, 0, 1) 72%,
+        rgba(0, 0, 0, 0.98) 82%,
+        rgba(0, 0, 0, 0.88) 90%,
+        rgba(0, 0, 0, 0.42) 96%,
+        rgba(0, 0, 0, 0) 100%
+    );
+    mask-image: radial-gradient(
+        ellipse at 50% 46%,
+        rgba(0, 0, 0, 1) 72%,
+        rgba(0, 0, 0, 0.98) 82%,
+        rgba(0, 0, 0, 0.88) 90%,
+        rgba(0, 0, 0, 0.42) 96%,
+        rgba(0, 0, 0, 0) 100%
+    );
+}
+
+.welcomeVisuallyHidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 #welcomeGameName {
     margin: 0;
     font-family: 'Sora', sans-serif;
@@ -9488,206 +9542,404 @@ body.race-intro-active #botPanel {
     }
 }
 
-#welcomeStartBtn,
-#welcomeStartOnlineBtn,
-#welcomeLeaderboardBtn,
-#welcomeAccountBtn,
-#welcomeDonateBtn,
-#welcomeSettingsBtn {
+.welcomeActionButton {
+    --action-text: rgba(223, 242, 255, 0.98);
+    --action-border: rgba(79, 179, 241, 0.52);
+    --action-accent-rgb: 77, 207, 255;
+    --action-bg-top: rgba(8, 14, 28, 0.96);
+    --action-bg-bottom: rgba(3, 6, 16, 0.99);
+    --action-badge-text: rgba(235, 247, 255, 0.98);
+    --action-badge-border: rgba(98, 201, 255, 0.32);
+    --action-badge-top: rgba(9, 20, 39, 0.95);
+    --action-badge-bottom: rgba(5, 10, 23, 0.99);
+    --action-badge-min-width: 104px;
     position: relative;
-    border: 1px solid rgba(175, 207, 225, 0.54);
-    border-radius: 14px;
-    min-height: 62px;
-    padding: 0 18px;
-    font-family: 'Sora', sans-serif;
-    font-size: 13px;
-    font-weight: 800;
-    letter-spacing: 1.1px;
+    overflow: hidden;
+    isolation: isolate;
+    border: 1px solid var(--action-border);
+    clip-path: polygon(
+        0 12px,
+        12px 0,
+        calc(100% - 18px) 0,
+        100% 18px,
+        100% calc(100% - 12px),
+        calc(100% - 12px) 100%,
+        18px 100%,
+        0 calc(100% - 18px)
+    );
+    min-height: 68px;
+    padding: 0 14px 0 18px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.65px;
     text-transform: uppercase;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     cursor: pointer;
+    color: var(--action-text);
+    background:
+        linear-gradient(
+            90deg,
+            rgba(var(--action-accent-rgb), 0.22),
+            rgba(var(--action-accent-rgb), 0.08) 16%,
+            rgba(255, 255, 255, 0) 42%
+        ),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0) 46%),
+        radial-gradient(
+            circle at 100% 50%,
+            rgba(var(--action-accent-rgb), 0.08),
+            rgba(var(--action-accent-rgb), 0) 34%
+        ),
+        linear-gradient(180deg, var(--action-bg-top), var(--action-bg-bottom));
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 14px 0 24px rgba(var(--action-accent-rgb), 0.08),
+        0 0 0 1px rgba(var(--action-accent-rgb), 0.12),
+        0 14px 26px rgba(0, 0, 0, 0.34),
+        0 0 22px rgba(var(--action-accent-rgb), 0.1);
+    text-shadow: 0 0 12px rgba(var(--action-accent-rgb), 0.14);
     transition:
-        transform 140ms ease,
-        filter 140ms ease,
-        border-color 140ms ease,
-        box-shadow 140ms ease;
+        transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 180ms ease,
+        box-shadow 180ms ease,
+        filter 180ms ease,
+        background 180ms ease;
 }
 
-#welcomeStartBtn::before,
-#welcomeStartOnlineBtn::before,
-#welcomeLeaderboardBtn::before,
-#welcomeAccountBtn::before,
-#welcomeDonateBtn::before,
-#welcomeSettingsBtn::before {
+.welcomeActionButton::before {
     content: '';
     position: absolute;
-    left: 1px;
-    right: 1px;
-    top: 1px;
-    height: 34%;
-    border-radius: 10px 10px 8px 8px;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0));
+    inset: 1px;
+    background:
+        linear-gradient(
+            90deg,
+            rgba(var(--action-accent-rgb), 0.74),
+            rgba(var(--action-accent-rgb), 0) 28%
+        )
+        top / 100% 1px no-repeat,
+        linear-gradient(
+            90deg,
+            rgba(var(--action-accent-rgb), 0),
+            rgba(var(--action-accent-rgb), 0.56) 82%,
+            rgba(var(--action-accent-rgb), 0.82) 100%
+        )
+        bottom / 100% 1px no-repeat,
+        repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.045) 0 1px, transparent 1px 18px),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 48%);
+    opacity: 0.52;
     pointer-events: none;
 }
 
-#welcomeStartBtn {
-    color: #e8fff0;
-    border-color: rgba(142, 236, 184, 0.72);
-    background: linear-gradient(180deg, rgba(28, 106, 71, 0.9), rgba(13, 48, 31, 0.94));
-    box-shadow:
-        0 8px 16px rgba(34, 133, 89, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+.welcomeActionButton::after {
+    content: '';
+    position: absolute;
+    top: -30%;
+    bottom: -30%;
+    left: -36%;
+    width: 28%;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0),
+        rgba(var(--action-accent-rgb), 0.26),
+        rgba(255, 255, 255, 0)
+    );
+    transform: translateX(-140%) skewX(-24deg);
+    opacity: 0;
+    pointer-events: none;
+    transition:
+        transform 320ms ease,
+        opacity 220ms ease;
 }
 
-#welcomeStartOnlineBtn {
-    color: #eaf7ff;
-    border-color: rgba(131, 212, 255, 0.72);
-    background: linear-gradient(180deg, rgba(30, 93, 146, 0.88), rgba(14, 41, 67, 0.94));
-    box-shadow:
-        0 8px 16px rgba(35, 112, 174, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+.welcomeActionButtonLabel {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 auto;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-#welcomeStartOnlineBtn[data-open='true'] {
-    border-color: rgba(154, 223, 255, 0.88);
-    background: linear-gradient(180deg, rgba(33, 108, 167, 0.94), rgba(15, 53, 87, 0.97));
-    box-shadow:
-        0 10px 20px rgba(24, 95, 150, 0.28),
-        inset 0 1px 0 rgba(235, 247, 255, 0.18);
+.welcomeActionButtonLabel::before {
+    content: '';
+    width: 12px;
+    height: 10px;
+    flex: 0 0 auto;
+    border-left: 2px solid rgba(var(--action-accent-rgb), 0.84);
+    border-top: 2px solid rgba(var(--action-accent-rgb), 0.84);
+    box-shadow: 0 0 10px rgba(var(--action-accent-rgb), 0.24);
+    opacity: 0.94;
 }
 
-#welcomeLeaderboardBtn {
-    color: rgba(246, 242, 255, 0.98);
-    border-color: rgba(193, 183, 255, 0.68);
-    background: linear-gradient(180deg, rgba(76, 72, 142, 0.9), rgba(29, 26, 67, 0.95));
+.welcomeActionButtonBadge {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+    min-width: min(var(--action-badge-min-width), 108px);
+    height: 42px;
+    padding: 0 15px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    clip-path: polygon(
+        0 9px,
+        9px 0,
+        calc(100% - 12px) 0,
+        100% 12px,
+        100% calc(100% - 9px),
+        calc(100% - 9px) 100%,
+        12px 100%,
+        0 calc(100% - 12px)
+    );
+    border: 1px solid var(--action-badge-border);
+    background:
+        linear-gradient(
+            90deg,
+            rgba(var(--action-accent-rgb), 0.2),
+            rgba(var(--action-accent-rgb), 0.04) 48%,
+            rgba(255, 255, 255, 0) 100%
+        ),
+        linear-gradient(180deg, var(--action-badge-top), var(--action-badge-bottom));
     box-shadow:
-        0 8px 16px rgba(56, 50, 117, 0.24),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+        0 0 16px rgba(var(--action-accent-rgb), 0.12);
+    color: var(--action-badge-text);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.7px;
+    text-shadow: 0 0 12px rgba(var(--action-accent-rgb), 0.18);
+    transition:
+        transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        border-color 180ms ease,
+        box-shadow 180ms ease,
+        background 180ms ease,
+        color 180ms ease;
 }
 
-#welcomeAccountBtn {
-    color: rgba(236, 248, 255, 0.98);
-    border-color: rgba(133, 220, 242, 0.72);
-    background: linear-gradient(180deg, rgba(22, 109, 133, 0.9), rgba(10, 47, 61, 0.95));
-    box-shadow:
-        0 8px 16px rgba(15, 97, 118, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-#welcomeLeaderboardBtn[data-open='true'] {
-    border-color: rgba(255, 221, 144, 0.84);
-    background: linear-gradient(180deg, rgba(108, 80, 28, 0.92), rgba(56, 39, 13, 0.96));
-    box-shadow:
-        0 10px 20px rgba(92, 64, 18, 0.28),
-        inset 0 1px 0 rgba(255, 244, 216, 0.16);
-}
-
-#welcomeAccountBtn[data-open='true'] {
-    border-color: rgba(163, 241, 217, 0.82);
-    background: linear-gradient(180deg, rgba(27, 103, 90, 0.92), rgba(12, 49, 43, 0.96));
-    box-shadow:
-        0 10px 20px rgba(18, 88, 78, 0.26),
-        inset 0 1px 0 rgba(236, 255, 247, 0.16);
-}
-
-#welcomeDonateBtn {
-    color: rgba(230, 246, 255, 0.99);
-    border-color: rgba(124, 200, 242, 0.82);
-    background: linear-gradient(180deg, rgba(25, 103, 137, 0.91), rgba(13, 56, 82, 0.95));
-    box-shadow:
-        0 8px 16px rgba(22, 84, 115, 0.22),
-        inset 0 1px 0 rgba(219, 241, 255, 0.2);
-}
-
-#welcomeDonateBtn[data-open='true'] {
-    border-color: rgba(255, 214, 154, 0.84);
-    background: linear-gradient(180deg, rgba(120, 77, 33, 0.92), rgba(58, 35, 13, 0.96));
-    box-shadow:
-        0 10px 20px rgba(104, 63, 18, 0.28),
-        inset 0 1px 0 rgba(255, 240, 215, 0.16);
-}
-
-#welcomeSettingsBtn {
-    color: rgba(244, 244, 255, 0.98);
-    border-color: rgba(214, 190, 255, 0.7);
-    background: linear-gradient(180deg, rgba(88, 72, 144, 0.9), rgba(39, 29, 76, 0.95));
-    box-shadow:
-        0 8px 16px rgba(67, 53, 122, 0.22),
-        inset 0 1px 0 rgba(255, 255, 255, 0.14);
-}
-
-#welcomeSettingsBtn[data-open='true'] {
-    border-color: rgba(191, 233, 255, 0.84);
-    background: linear-gradient(180deg, rgba(46, 108, 160, 0.92), rgba(18, 48, 80, 0.96));
-    box-shadow:
-        0 10px 20px rgba(28, 82, 132, 0.28),
-        inset 0 1px 0 rgba(235, 247, 255, 0.16);
-}
-
-#welcomeStartBtn span,
-#welcomeStartOnlineBtn span,
-#welcomeLeaderboardBtn span,
-#welcomeAccountBtn span,
-#welcomeDonateBtn span,
-#welcomeSettingsBtn span {
+.welcomeActionButtonBadge--icon {
+    min-width: 50px;
+    width: 50px;
+    padding: 0;
     font-size: 18px;
-    transform: translateY(-1px);
+    letter-spacing: 0.4px;
 }
 
-#welcomeStartBtn:hover,
-#welcomeStartOnlineBtn:hover,
-#welcomeLeaderboardBtn:hover,
-#welcomeAccountBtn:hover,
-#welcomeDonateBtn:hover,
-#welcomeSettingsBtn:hover {
-    transform: translateY(-1px);
-    filter: brightness(1.03);
-    border-color: rgba(214, 232, 246, 0.88);
+.welcomeActionButton:hover {
+    transform: translateY(-2px);
+    border-color: rgba(var(--action-accent-rgb), 0.9);
+    filter: brightness(1.04);
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 18px 0 30px rgba(var(--action-accent-rgb), 0.12),
+        0 0 0 1px rgba(var(--action-accent-rgb), 0.18),
+        0 18px 32px rgba(0, 0, 0, 0.38),
+        0 0 28px rgba(var(--action-accent-rgb), 0.2);
 }
 
-#welcomeStartBtn:active,
-#welcomeStartOnlineBtn:active,
-#welcomeLeaderboardBtn:active,
-#welcomeAccountBtn:active,
-#welcomeDonateBtn:active,
-#welcomeSettingsBtn:active {
-    transform: translateY(0);
+.welcomeActionButton:hover::after {
+    transform: translateX(420%) skewX(-24deg);
+    opacity: 0.7;
+}
+
+.welcomeActionButton:hover .welcomeActionButtonBadge {
+    transform: translateX(-3px);
+    border-color: rgba(var(--action-accent-rgb), 0.64);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 0 20px rgba(var(--action-accent-rgb), 0.22);
+}
+
+.welcomeActionButton:focus-visible {
+    outline: none;
+    border-color: rgba(var(--action-accent-rgb), 0.94);
+    box-shadow:
+        0 0 0 2px rgba(var(--action-accent-rgb), 0.26),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        inset 18px 0 30px rgba(var(--action-accent-rgb), 0.12),
+        0 18px 32px rgba(0, 0, 0, 0.38),
+        0 0 30px rgba(var(--action-accent-rgb), 0.24);
+}
+
+.welcomeActionButton:active {
+    transform: translateY(0) scale(0.996);
     filter: brightness(0.98);
 }
 
-#welcomeDonateBtn:hover {
-    border-color: rgba(182, 225, 249, 0.96);
-    box-shadow:
-        0 10px 18px rgba(22, 84, 115, 0.28),
-        inset 0 1px 0 rgba(226, 245, 255, 0.26);
+.welcomeActionButton:active .welcomeActionButtonBadge {
+    transform: translateX(-1px) scale(0.985);
 }
 
-#welcomeDonateBtn:focus-visible {
-    outline: none;
-    border-color: rgba(196, 232, 251, 0.98);
+.welcomeActionButton[data-open='true'] {
+    border-color: rgba(var(--action-accent-rgb), 0.92);
     box-shadow:
-        0 0 0 2px rgba(130, 196, 236, 0.24),
-        0 10px 18px rgba(22, 84, 115, 0.28),
-        inset 0 1px 0 rgba(226, 245, 255, 0.26);
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        inset 18px 0 30px rgba(var(--action-accent-rgb), 0.12),
+        0 0 0 1px rgba(var(--action-accent-rgb), 0.16),
+        0 16px 30px rgba(0, 0, 0, 0.38),
+        0 0 28px rgba(var(--action-accent-rgb), 0.22);
 }
 
-#welcomeStartBtn:disabled,
-#welcomeStartOnlineBtn:disabled,
-#welcomeLeaderboardBtn:disabled,
-#welcomeAccountBtn:disabled,
-#welcomeDonateBtn:disabled,
-#welcomeSettingsBtn:disabled {
-    opacity: 0.5;
+.welcomeActionButton[data-open='true'] .welcomeActionButtonBadge {
+    border-color: rgba(var(--action-accent-rgb), 0.72);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+        0 0 22px rgba(var(--action-accent-rgb), 0.24);
+}
+
+.welcomeActionButton:disabled {
+    opacity: 0.48;
     cursor: wait;
     transform: none;
     filter: none;
     box-shadow: none;
 }
 
-#welcomeDonateBtn span {
-    color: rgba(202, 232, 251, 0.98);
+.welcomeActionButton:disabled::after {
+    opacity: 0.08;
+}
+
+#welcomeStartBtn {
+    --action-text: rgba(233, 255, 242, 0.98);
+    --action-border: rgba(94, 244, 168, 0.62);
+    --action-accent-rgb: 88, 243, 164;
+    --action-bg-top: rgba(7, 25, 18, 0.96);
+    --action-bg-bottom: rgba(3, 10, 8, 0.99);
+    --action-badge-border: rgba(91, 244, 168, 0.34);
+    --action-badge-top: rgba(8, 30, 21, 0.95);
+    --action-badge-bottom: rgba(4, 14, 10, 0.99);
+    --action-badge-text: rgba(235, 255, 243, 0.98);
+    --action-badge-min-width: 58px;
+}
+
+#welcomeStartOnlineBtn {
+    --action-text: rgba(233, 247, 255, 0.98);
+    --action-border: rgba(82, 198, 255, 0.64);
+    --action-accent-rgb: 71, 196, 255;
+    --action-bg-top: rgba(8, 19, 37, 0.96);
+    --action-bg-bottom: rgba(3, 8, 18, 0.99);
+    --action-badge-border: rgba(76, 202, 255, 0.34);
+    --action-badge-top: rgba(9, 22, 43, 0.95);
+    --action-badge-bottom: rgba(4, 10, 22, 0.99);
+    --action-badge-text: rgba(235, 248, 255, 0.98);
+    --action-badge-min-width: 58px;
+}
+
+#welcomeLeaderboardBtn {
+    --action-text: rgba(245, 240, 255, 0.98);
+    --action-border: rgba(156, 119, 255, 0.62);
+    --action-accent-rgb: 158, 104, 255;
+    --action-bg-top: rgba(15, 10, 34, 0.96);
+    --action-bg-bottom: rgba(6, 4, 17, 0.99);
+    --action-badge-border: rgba(160, 111, 255, 0.34);
+    --action-badge-top: rgba(19, 14, 46, 0.95);
+    --action-badge-bottom: rgba(8, 6, 24, 0.99);
+    --action-badge-text: rgba(245, 240, 255, 0.98);
+    --action-badge-min-width: 104px;
+}
+
+#welcomeAccountBtn {
+    --action-text: rgba(233, 253, 255, 0.98);
+    --action-border: rgba(73, 236, 224, 0.62);
+    --action-accent-rgb: 60, 230, 214;
+    --action-bg-top: rgba(7, 28, 31, 0.96);
+    --action-bg-bottom: rgba(3, 11, 13, 0.99);
+    --action-badge-border: rgba(72, 236, 221, 0.34);
+    --action-badge-top: rgba(9, 34, 37, 0.95);
+    --action-badge-bottom: rgba(4, 14, 15, 0.99);
+    --action-badge-text: rgba(235, 255, 252, 0.98);
+    --action-badge-min-width: 112px;
+}
+
+#welcomeDonateBtn {
+    --action-text: rgba(255, 239, 231, 0.99);
+    --action-border: rgba(255, 143, 104, 0.62);
+    --action-accent-rgb: 255, 136, 94;
+    --action-bg-top: rgba(34, 15, 12, 0.96);
+    --action-bg-bottom: rgba(15, 5, 4, 0.99);
+    --action-badge-border: rgba(255, 153, 112, 0.34);
+    --action-badge-top: rgba(42, 18, 15, 0.95);
+    --action-badge-bottom: rgba(18, 7, 6, 0.99);
+    --action-badge-text: rgba(255, 239, 231, 0.99);
+    --action-badge-min-width: 52px;
+}
+
+#welcomeSettingsBtn {
+    --action-text: rgba(245, 238, 255, 0.98);
+    --action-border: rgba(222, 118, 255, 0.62);
+    --action-accent-rgb: 224, 105, 255;
+    --action-bg-top: rgba(22, 10, 34, 0.96);
+    --action-bg-bottom: rgba(10, 4, 17, 0.99);
+    --action-badge-border: rgba(225, 111, 255, 0.34);
+    --action-badge-top: rgba(28, 14, 44, 0.95);
+    --action-badge-bottom: rgba(12, 6, 22, 0.99);
+    --action-badge-text: rgba(248, 240, 255, 0.98);
+    --action-badge-min-width: 108px;
+}
+
+#welcomeStartOnlineBtn[data-open='true'] {
+    --action-border: rgba(108, 214, 255, 0.88);
+    --action-accent-rgb: 94, 215, 255;
+    --action-bg-top: rgba(11, 28, 51, 0.98);
+    --action-bg-bottom: rgba(4, 12, 26, 0.99);
+    --action-badge-border: rgba(102, 215, 255, 0.42);
+    --action-badge-top: rgba(11, 28, 52, 0.96);
+    --action-badge-bottom: rgba(5, 13, 27, 0.99);
+}
+
+#welcomeLeaderboardBtn[data-open='true'] {
+    --action-border: rgba(186, 130, 255, 0.88);
+    --action-accent-rgb: 182, 122, 255;
+    --action-bg-top: rgba(21, 13, 47, 0.98);
+    --action-bg-bottom: rgba(8, 5, 23, 0.99);
+    --action-badge-border: rgba(191, 137, 255, 0.42);
+    --action-badge-top: rgba(24, 16, 53, 0.96);
+    --action-badge-bottom: rgba(9, 6, 26, 0.99);
+}
+
+#welcomeAccountBtn[data-open='true'] {
+    --action-border: rgba(98, 244, 227, 0.88);
+    --action-accent-rgb: 88, 240, 220;
+    --action-bg-top: rgba(10, 34, 37, 0.98);
+    --action-bg-bottom: rgba(4, 14, 15, 0.99);
+    --action-badge-border: rgba(97, 244, 227, 0.42);
+    --action-badge-top: rgba(11, 37, 39, 0.96);
+    --action-badge-bottom: rgba(5, 15, 16, 0.99);
+}
+
+#welcomeDonateBtn[data-open='true'] {
+    --action-border: rgba(255, 162, 118, 0.88);
+    --action-accent-rgb: 255, 153, 109;
+    --action-bg-top: rgba(40, 18, 14, 0.98);
+    --action-bg-bottom: rgba(17, 7, 6, 0.99);
+    --action-badge-border: rgba(255, 165, 124, 0.42);
+    --action-badge-top: rgba(43, 19, 15, 0.96);
+    --action-badge-bottom: rgba(18, 8, 6, 0.99);
+}
+
+#welcomeSettingsBtn[data-open='true'] {
+    --action-border: rgba(234, 139, 255, 0.88);
+    --action-accent-rgb: 234, 127, 255;
+    --action-bg-top: rgba(29, 13, 45, 0.98);
+    --action-bg-bottom: rgba(12, 6, 23, 0.99);
+    --action-badge-border: rgba(237, 144, 255, 0.42);
+    --action-badge-top: rgba(31, 14, 48, 0.96);
+    --action-badge-bottom: rgba(13, 6, 24, 0.99);
+}
+
+#welcomeDonateBtn .welcomeActionButtonBadge--icon {
+    font-size: 16px;
 }
 
 #welcomeModal[data-launching='true'] .welcomeShell {
@@ -11152,6 +11404,16 @@ body.race-intro-active #botPanel {
         gap: 8px;
     }
 
+    .welcomeBrandLockup {
+        min-height: 0;
+        padding: 0;
+    }
+
+    .welcomeBrandLogo {
+        width: min(116%, 390px);
+        margin: -16px 0 -24px;
+    }
+
     #welcomeGameName {
         font-size: clamp(34px, 10.8vw, 54px);
         letter-spacing: 0.8px;
@@ -11179,23 +11441,34 @@ body.race-intro-active #botPanel {
         grid-template-columns: 1fr;
     }
 
-    #welcomeStartBtn,
-    #welcomeStartOnlineBtn,
-    #welcomeLeaderboardBtn,
-    #welcomeAccountBtn,
-    #welcomeDonateBtn,
-    #welcomeSettingsBtn {
-        min-height: 54px;
-        padding: 0 14px;
-        font-size: 11px;
+    .welcomeActionButton {
+        min-height: 56px;
+        padding: 0 12px 0 14px;
+        font-size: 10.5px;
+        letter-spacing: 1.1px;
+        gap: 10px;
     }
 
-    #welcomeStartBtn span,
-    #welcomeStartOnlineBtn span,
-    #welcomeLeaderboardBtn span,
-    #welcomeAccountBtn span,
-    #welcomeDonateBtn span,
-    #welcomeSettingsBtn span {
+    .welcomeActionButtonLabel {
+        gap: 8px;
+    }
+
+    .welcomeActionButtonLabel::before {
+        width: 8px;
+    }
+
+    .welcomeActionButtonBadge {
+        min-width: min(var(--action-badge-min-width), 94px);
+        height: 38px;
+        padding: 0 12px;
+        font-size: 10px;
+        letter-spacing: 1.15px;
+    }
+
+    .welcomeActionButtonBadge--icon {
+        min-width: 46px;
+        width: 46px;
+        padding: 0;
         font-size: 16px;
     }
 

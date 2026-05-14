@@ -23,57 +23,73 @@
             <div class="welcomeScanlines" aria-hidden="true"></div>
             <div class="welcomeShell">
                 <section class="welcomeCommandDeck">
-                    <div class="welcomeSerial">Quick Start</div>
-                    <h1 id="welcomeGameName">Minefield Drift</h1>
-                    <div class="welcomeTaglineFrame">
-                        <div id="welcomeTagline">
-                            Master precision driving across high-stakes circuits. Tune your car,
-                            out-drift rivals, and climb the online leaderboard.
-                        </div>
+                    <div class="welcomeBrandLockup">
+                        <h1 class="welcomeVisuallyHidden">Minefield Drift</h1>
+                        <img
+                            class="welcomeBrandLogo"
+                            src="/assets/Logo/minefield_drift_transparent.png"
+                            alt=""
+                            aria-hidden="true"
+                            width="1536"
+                            height="1024"
+                            decoding="async"
+                            fetchpriority="high"
+                        />
                     </div>
                     <div class="welcomeStartActions">
-                        <button id="welcomeStartBtn" type="button">
-                            PLAY WITH BOTS <span aria-hidden="true">→</span>
+                        <button id="welcomeStartBtn" class="welcomeActionButton" type="button">
+                            <span class="welcomeActionButtonLabel">PLAY WITH BOTS</span>
+                            <span class="welcomeActionButtonBadge welcomeActionButtonBadge--icon" aria-hidden="true">→</span>
                         </button>
                         <button
                             id="welcomeStartOnlineBtn"
+                            class="welcomeActionButton"
                             type="button"
                             aria-controls="welcomePreviewOnlineOverlay"
                             aria-expanded="false"
                         >
-                            PLAY ONLINE <span aria-hidden="true">↗</span>
+                            <span class="welcomeActionButtonLabel">PLAY ONLINE</span>
+                            <span class="welcomeActionButtonBadge welcomeActionButtonBadge--icon" aria-hidden="true">↗</span>
                         </button>
                         <button
                             id="welcomeLeaderboardBtn"
+                            class="welcomeActionButton"
                             type="button"
                             aria-controls="welcomePreviewLeaderboardOverlay"
                             aria-expanded="false"
                         >
-                            VIEW LEADERBOARD <span aria-hidden="true">RANKS</span>
+                            <span class="welcomeActionButtonLabel">VIEW LEADERBOARD</span>
+                            <span class="welcomeActionButtonBadge" aria-hidden="true">RANKS</span>
                         </button>
                         <button
                             id="welcomeAccountBtn"
+                            class="welcomeActionButton"
                             type="button"
                             aria-controls="welcomePreviewAccountOverlay"
                             aria-expanded="false"
                         >
-                            ACCOUNT <span aria-hidden="true">PROFILE</span>
+                            <span class="welcomeActionButtonLabel">ACCOUNT</span>
+                            <span class="welcomeActionButtonBadge" aria-hidden="true">PROFILE</span>
                         </button>
                         <button
                             id="welcomeDonateBtn"
+                            class="welcomeActionButton"
                             type="button"
                             aria-label="Open donation panel"
                             hidden
                         >
-                            SUPPORT THE GAME <span aria-hidden="true">❤</span>
+                            <span class="welcomeActionButtonLabel">SUPPORT THE GAME</span>
+                            <span class="welcomeActionButtonBadge welcomeActionButtonBadge--icon" aria-hidden="true">❤</span>
                         </button>
                         <button
                             id="welcomeSettingsBtn"
+                            class="welcomeActionButton"
                             type="button"
                             aria-controls="welcomePreviewSettingsOverlay"
                             aria-expanded="false"
                         >
-                            SETTINGS <span aria-hidden="true">SYSTEM</span>
+                            <span class="welcomeActionButtonLabel">SETTINGS</span>
+                            <span class="welcomeActionButtonBadge" aria-hidden="true">SYSTEM</span>
                         </button>
                     </div>
                     <section id="welcomeAuthPanel" class="welcomeAuthPanel" aria-label="Account">
