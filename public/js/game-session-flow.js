@@ -284,7 +284,7 @@ export function createGameSessionController({
         carEditModeController.setActive(false);
         welcomeModalUi.hide();
         objectiveUi.setGameplayVisible?.(true);
-        economyHudUi?.setGameplayVisible?.(true);
+        economyHudUi?.setGameplayVisible?.(Boolean(getAuthState()?.authenticated));
         controlsHelpUi?.setGameplayVisible?.(true);
         audioController?.onWelcomeVisibilityChanged?.(false);
         restartGameWithCountdown();
@@ -386,6 +386,9 @@ export function createGameSessionController({
     function handleAuthStateChanged(authState = null) {
         clearPendingChaseCameraProfileSave();
         const authenticated = Boolean(authState?.authenticated);
+        economyHudUi?.setGameplayVisible?.(
+            authenticated && !getIsWelcomeModalVisible()
+        );
         const nextSettings = authenticated
             ? normalizeChaseCameraSettings(authState?.chaseCameraSettings)
             : normalizeChaseCameraSettings(readGuestChaseCameraSettings());

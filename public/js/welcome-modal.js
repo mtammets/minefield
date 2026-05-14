@@ -135,6 +135,7 @@ export function createWelcomeModalController({
     const authConfirmFieldEl = document.getElementById('welcomeAuthConfirmField');
     const authConfirmPasswordInputEl = document.getElementById('welcomeAuthConfirmPasswordInput');
     const authSubmitBtnEl = document.getElementById('welcomeAuthSubmitBtn');
+    const guestWalletBoardEl = rootEl?.querySelector?.('.welcomeGuestWalletBoard') || null;
     const guestWalletBalanceEl = document.getElementById('welcomeGuestWalletBalance');
     const guestWalletSyncStateEl = document.getElementById('welcomeGuestWalletSyncState');
     const guestWalletSublineEl = document.getElementById('welcomeGuestWalletSubline');
@@ -272,6 +273,8 @@ export function createWelcomeModalController({
     const previewAccountOverlayEl = document.getElementById('welcomePreviewAccountOverlay');
     const previewAccountEyebrowEl = document.getElementById('welcomePreviewAccountEyebrow');
     const previewAccountTitleEl = document.getElementById('welcomePreviewAccountTitle');
+    const previewAccountHeadingEl =
+        previewAccountOverlayEl?.querySelector?.('.welcomePreviewLeaderboardHeading') || null;
     const previewAccountBodyEl = document.getElementById('welcomePreviewAccountBody');
     const previewAccountToolsToggleBtnEl = document.getElementById(
         'welcomePreviewAccountToolsToggleBtn'
@@ -1753,6 +1756,10 @@ export function createWelcomeModalController({
         authSignUpTabEl.disabled = busy || !enabled || authenticated;
         authSignedOutViewEl.hidden = authenticated || garagePanelVisible;
         authSignedInViewEl.hidden = !authenticated && !garagePanelVisible;
+        if (guestWalletBoardEl) {
+            guestWalletBoardEl.hidden = true;
+            guestWalletBoardEl.setAttribute('aria-hidden', 'true');
+        }
         if ((!authenticated || garagePanelVisible || securityPanelVisible) && walletPanelOpen) {
             walletPanelOpen = false;
         }
@@ -1788,8 +1795,13 @@ export function createWelcomeModalController({
                 authAvatarImageEl.removeAttribute('src');
             }
         }
+        const showGarageDock =
+            authenticated &&
+            accountMode === 'profile' &&
+            !walletPanelOpen &&
+            !avatarEditorState.open;
         if (authCarWrapCardEl) {
-            authCarWrapCardEl.hidden = false;
+            authCarWrapCardEl.hidden = !showGarageDock;
             authCarWrapCardEl.dataset.hasImage = hasCarWrap ? 'true' : 'false';
         }
         if (authCarWrapFallbackEl) {
@@ -1828,10 +1840,25 @@ export function createWelcomeModalController({
         if (previewAccountTitleEl) {
             previewAccountTitleEl.textContent = garagePanelVisible ? 'GARAGE' : 'DRIVER PROFILE';
         }
+        const showPreviewAccountHeading = authenticated || garagePanelVisible;
+        if (previewAccountHeadingEl) {
+            previewAccountHeadingEl.hidden = !showPreviewAccountHeading;
+            previewAccountHeadingEl.setAttribute(
+                'aria-hidden',
+                showPreviewAccountHeading ? 'false' : 'true'
+            );
+        }
         if (previewAccountBodyEl) {
             previewAccountBodyEl.dataset.mode = accountMode;
         }
         if (previewAccountOverlayEl) {
+            if (showPreviewAccountHeading) {
+                previewAccountOverlayEl.setAttribute('aria-labelledby', 'welcomePreviewAccountTitle');
+                previewAccountOverlayEl.removeAttribute('aria-label');
+            } else {
+                previewAccountOverlayEl.removeAttribute('aria-labelledby');
+                previewAccountOverlayEl.setAttribute('aria-label', 'Account');
+            }
             previewAccountOverlayEl.dataset.mode = accountMode;
         }
         if (authSignedInShellEl) {
@@ -2096,7 +2123,7 @@ export function createWelcomeModalController({
             authWalletNextUnlockFillEl.dataset.state = nextUnlockState;
         }
 
-        if (hasGuestWalletBoard) {
+        if (hasGuestWalletBoard && !guestWalletBoardEl?.hidden) {
             guestWalletBalanceEl.textContent = formatCredits(walletCredits);
             guestWalletSyncStateEl.textContent = walletCtaLabel;
             guestWalletSyncStateEl.dataset.tone = 'cta';
@@ -2194,7 +2221,9 @@ export function createWelcomeModalController({
             selectedVehicleId
         );
         const vehicleUnlocked = purchaseAvailability.unlocked;
-        const walletCredits = Math.max(0, Math.round(Number(playerEconomyState?.credits) || 0));
+        const walletCredits = authenticated
+            ? Math.max(0, Math.round(Number(playerEconomyState?.credits) || 0))
+            : 0;
         const wrapFeatureEnabled = Boolean(authUiState.carWrapEnabled && authCarWrapInputEl);
         const uploadBusy = Boolean(busy && authUiState.pendingAction === 'update-car-wrap');
         const removeBusy = Boolean(busy && authUiState.pendingAction === 'remove-car-wrap');
@@ -2207,19 +2236,23 @@ export function createWelcomeModalController({
                 : 'stock';
         const wrapActionLabel = hasCarWrap ? 'Replace wrap' : 'Upload wrap';
         const wrapSummary = !vehicleUnlocked
-            ? `${vehicleName}. Locked chassis. Unlock cost: ${formatCredits(purchaseAvailability.unlockPriceCredits)}.`
+            ? authenticated
+                ? `${vehicleName}. Locked chassis. Unlock cost: ${formatCredits(purchaseAvailability.unlockPriceCredits)}.`
+                : `${vehicleName}. Locked chassis. Sign in to unlock it.`
             : !wrapFeatureEnabled
               ? `${vehicleName}. Wrap uploads unavailable on this server.`
               : hasCarWrap
                 ? `${vehicleName}. Custom wrap equipped.`
                 : `${vehicleName}. Stock finish equipped.`;
         const defaultGarageHint = !vehicleUnlocked
-            ? purchaseAvailability.canAfford
-                ? `Spend ${formatCredits(purchaseAvailability.unlockPriceCredits)} to bring this chassis into the next run.`
-                : `Earn ${formatCredits(purchaseAvailability.creditsShort)} more in races to unlock this chassis.`
+            ? !authenticated
+                ? 'Sign in to unlock additional chassis and earn credits.'
+                : purchaseAvailability.canAfford
+                  ? `Spend ${formatCredits(purchaseAvailability.unlockPriceCredits)} to bring this chassis into the next run.`
+                  : `Earn ${formatCredits(purchaseAvailability.creditsShort)} more in races to unlock this chassis.`
             : authenticated
               ? 'Unlocked and ready. Custom wraps stay tied to this signed-in profile.'
-              : 'Unlocked locally. Sign in later if you want this garage synced to your account.';
+              : 'Starter chassis only. Sign in to unlock more vehicles and save progression.';
         const garageHint = garageNoticeText || defaultGarageHint;
         const garageHintTone = garageNoticeText
             ? garageNoticeTone
@@ -2244,18 +2277,28 @@ export function createWelcomeModalController({
         }
         if (authGarageDockSubtitleEl) {
             authGarageDockSubtitleEl.textContent = !vehicleUnlocked
-                ? `${vehicleName} • locked • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`
+                ? authenticated
+                    ? `${vehicleName} • locked • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`
+                    : `${vehicleName} • sign in to unlock`
                 : hasCarWrap
                   ? `${vehicleName} • custom wrap equipped`
-                  : `${vehicleName} • wallet ${formatCredits(walletCredits)}`;
+                  : authenticated
+                    ? `${vehicleName} • wallet ${formatCredits(walletCredits)}`
+                    : `${vehicleName} • guest garage`;
         }
         if (authGarageWalletValueEl) {
-            authGarageWalletValueEl.textContent = formatCredits(walletCredits);
+            authGarageWalletValueEl.textContent = authenticated
+                ? formatCredits(walletCredits)
+                : 'SIGN IN';
         }
         if (authGarageVehicleStatusEl) {
             authGarageVehicleStatusEl.textContent = vehicleUnlocked
-                ? 'OWNED'
-                : `LOCKED • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`;
+                ? authenticated
+                    ? 'OWNED'
+                    : 'STARTER'
+                : authenticated
+                  ? `LOCKED • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`
+                  : 'LOCKED • SIGN IN';
             authGarageVehicleStatusEl.dataset.state = vehicleUnlocked ? 'owned' : 'locked';
         }
         if (authGarageHintEl) {
@@ -2265,7 +2308,7 @@ export function createWelcomeModalController({
         }
         if (authGaragePurchaseBtnEl) {
             authGaragePurchaseBtnEl.hidden =
-                vehicleUnlocked || typeof onPurchaseVehicle !== 'function';
+                vehicleUnlocked || typeof onPurchaseVehicle !== 'function' || !authenticated;
             authGaragePurchaseBtnEl.disabled =
                 vehicleUnlocked || busy || garagePurchasePending || !purchaseAvailability.canAfford;
             authGaragePurchaseBtnEl.textContent = garagePurchasePending
@@ -2422,6 +2465,11 @@ export function createWelcomeModalController({
         }
 
         clearLocalAuthStatus();
+        if (walletPanelOpen) {
+            setWalletPanelOpen(false, {
+                skipSync: true,
+            });
+        }
         avatarEditorState.open = true;
         syncAuthUi();
 
@@ -2943,7 +2991,7 @@ export function createWelcomeModalController({
     }
 
     function openGaragePanel() {
-        if (!welcomeAccountOpen) {
+        if (!welcomeAccountOpen || !authUiState.authenticated) {
             return;
         }
         setAccountToolsOpen(false, {
@@ -2967,6 +3015,13 @@ export function createWelcomeModalController({
             authUiState.loading ||
             typeof onPurchaseVehicle !== 'function'
         ) {
+            return;
+        }
+        if (!authUiState.authenticated) {
+            setWelcomeAccountOpen(true);
+            openGaragePanel();
+            setGarageNotice('Sign in to unlock additional chassis.', 'info');
+            syncAuthUi();
             return;
         }
 
@@ -3028,7 +3083,12 @@ export function createWelcomeModalController({
         }
         setWelcomeAccountOpen(true);
         openGaragePanel();
-        setGarageNotice('Unlock this chassis before starting a run.', 'info');
+        setGarageNotice(
+            authUiState.authenticated
+                ? 'Unlock this chassis before starting a run.'
+                : 'Sign in to unlock and drive this chassis.',
+            'info'
+        );
         syncAuthUi();
         return true;
     }
@@ -3057,7 +3117,7 @@ export function createWelcomeModalController({
     }
 
     function setWalletPanelOpen(nextOpen, options = {}) {
-        walletPanelOpen = Boolean(
+        const shouldOpenWallet = Boolean(
             nextOpen &&
             authUiState.authenticated &&
             authWalletBoardEl &&
@@ -3065,6 +3125,12 @@ export function createWelcomeModalController({
             !garagePanelOpen &&
             !accountToolsOpen
         );
+        if (shouldOpenWallet && avatarEditorState.open) {
+            closeAvatarEditor({
+                skipSync: true,
+            });
+        }
+        walletPanelOpen = shouldOpenWallet;
         if (!options.skipSync) {
             syncAuthUi();
         }
@@ -3751,7 +3817,7 @@ export function createWelcomeModalController({
 
     function resolveAvailableAuthSignedInSections({ authenticated = false } = {}) {
         if (!authenticated) {
-            return ['garage'];
+            return ['security'];
         }
         return ['garage', 'security'];
     }

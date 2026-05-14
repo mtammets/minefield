@@ -113,6 +113,7 @@ import {
     resolvePlayerVehicleId,
 } from './car-vehicles.js';
 import {
+    createDefaultPlayerEconomyState,
     arePlayerEconomyStatesEqual,
     awardCreditsToEconomy,
     formatPlayerCredits,
@@ -208,7 +209,7 @@ const PLAYER_SPAWN_CLEARANCE = 3.4;
 const PLAYER_SPAWN_BOT_CLEARANCE = 14;
 const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5]);
 const crashParts = getPlayerCarCrashParts();
-const initialPlayerEconomyState = readPersistedPlayerEconomyState();
+const initialPlayerEconomyState = createDefaultPlayerEconomyState();
 const selectedCarVehicleId = resolveOwnedVehicleIdForEconomy(
     readPersistedPlayerCarVehicleId(),
     initialPlayerEconomyState
@@ -427,6 +428,9 @@ function resetRuntimeEconomyRoundPreview() {
 }
 
 function previewRuntimeEconomyDelta({ creditsDelta = 0, label = '' } = {}) {
+    if (!runtimeState.authController?.isAuthenticated?.()) {
+        return;
+    }
     const normalizedDelta = Math.max(0, Math.round(Number(creditsDelta) || 0));
     if (normalizedDelta <= 0) {
         return;
@@ -494,6 +498,14 @@ function reconcileRuntimeSelectedVehicleWithEconomy(economyState = null) {
 }
 
 function handleRuntimeAuthEconomyStateChanged(authState = null) {
+    if (!authState?.authenticated) {
+        resetRuntimeEconomyRoundPreview();
+        syncRuntimePlayerEconomyState(createDefaultPlayerEconomyState(), {
+            persistLocal: false,
+            reconcileVehicle: true,
+        });
+        return;
+    }
     const mergedEconomyState = mergePlayerEconomyStates(
         readPersistedPlayerEconomyState(),
         authState
@@ -512,6 +524,14 @@ function handleRuntimeAuthEconomyStateChanged(authState = null) {
 }
 
 async function awardRuntimeRoundEconomyReward(event = null) {
+    if (!runtimeState.authController?.isAuthenticated?.()) {
+        finalScoreboardUi.setEconomyReward?.(null);
+        resetRuntimeEconomyRoundPreview();
+        return {
+            reward: null,
+            economy: runtimeState.playerEconomy,
+        };
+    }
     const reward = resolveRoundEconomyReward({
         event,
         gameMode: runtimeState.gameMode,
@@ -550,6 +570,12 @@ async function awardRuntimeRoundEconomyReward(event = null) {
 }
 
 async function purchaseVehicleUnlock(vehicleId = '') {
+    if (!runtimeState.authController?.isAuthenticated?.()) {
+        return {
+            ok: false,
+            error: 'Sign in to unlock additional chassis.',
+        };
+    }
     const purchaseResult = purchaseVehicleWithEconomy(runtimeState.playerEconomy, vehicleId);
     if (!purchaseResult?.ok) {
         return purchaseResult;

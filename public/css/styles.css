@@ -7078,6 +7078,10 @@ body.race-intro-active #botPanel {
         0 20px 28px rgba(0, 0, 0, 0.14);
 }
 
+.welcomeAuthWalletBoard[hidden] {
+    display: none;
+}
+
 .welcomeAuthSignedInShell > .welcomeAuthWalletBoard {
     position: relative;
     isolation: isolate;
@@ -10099,6 +10103,10 @@ body.race-intro-active #botPanel {
 .welcomePreviewAccountCard .welcomePreviewLeaderboardHeading {
     display: grid;
     gap: 2px;
+}
+
+.welcomePreviewLeaderboardHeading[hidden] {
+    display: none;
 }
 
 .welcomePreviewAccountCard .welcomePreviewLeaderboardEyebrow {
