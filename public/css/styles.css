@@ -10492,7 +10492,7 @@ body.race-intro-active #botPanel {
 .welcomePreviewLeaderboardOverlay {
     position: absolute;
     inset: clamp(16px, 2.4vw, 28px);
-    z-index: 8;
+    z-index: 9;
     display: grid;
     align-items: center;
     padding: clamp(12px, 2vw, 22px);

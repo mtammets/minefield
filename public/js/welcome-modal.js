@@ -1015,7 +1015,7 @@ export function createWelcomeModalController({
             applyPreviewPose();
             renderPreview();
             schedulePreviewLoadingReady();
-            requestShowIntroVideoOverlay();
+            syncIntroVideoOverlayForCurrentView();
         },
         hide() {
             cancelStartSequence();
@@ -1185,12 +1185,31 @@ export function createWelcomeModalController({
             if (
                 requestToken !== introVideoState.requestToken ||
                 rootEl.hidden ||
-                introVideoState.dismissed
+                introVideoState.dismissed ||
+                shouldHideIntroVideoForCurrentView()
             ) {
                 return;
             }
             showIntroVideoOverlay();
         })();
+    }
+
+    function shouldHideIntroVideoForCurrentView() {
+        return Boolean(authUiState.authenticated && welcomeAccountOpen && !accountToolsOpen);
+    }
+
+    function syncIntroVideoOverlayForCurrentView() {
+        if (!introVideoState.available) {
+            return;
+        }
+        if (rootEl.hidden || launchSequenceState.active || shouldHideIntroVideoForCurrentView()) {
+            hideIntroVideoOverlay({ markDismissed: false, resetPlayback: true });
+            return;
+        }
+        if (introVideoState.active && !introVideoOverlayEl.hidden) {
+            return;
+        }
+        requestShowIntroVideoOverlay();
     }
 
     function initializePreviewLoadingUi() {
@@ -1350,7 +1369,8 @@ export function createWelcomeModalController({
         if (
             !introVideoState.available ||
             !introVideoState.sourceAvailable ||
-            introVideoState.dismissed
+            introVideoState.dismissed ||
+            shouldHideIntroVideoForCurrentView()
         ) {
             return;
         }
@@ -1424,28 +1444,9 @@ export function createWelcomeModalController({
         }
     }
 
-    function bindIntroVideoDismissListeners() {
-        if (!introVideoState.available || introVideoState.listenersBound) {
-            return;
-        }
-        document.addEventListener('pointerdown', handleIntroVideoDismissInteraction, true);
-        introVideoState.listenersBound = true;
-    }
+    function bindIntroVideoDismissListeners() {}
 
-    function unbindIntroVideoDismissListeners() {
-        if (!introVideoState.listenersBound) {
-            return;
-        }
-        document.removeEventListener('pointerdown', handleIntroVideoDismissInteraction, true);
-        introVideoState.listenersBound = false;
-    }
-
-    function handleIntroVideoDismissInteraction() {
-        if (!introVideoState.active || rootEl.hidden) {
-            return;
-        }
-        hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
-    }
+    function unbindIntroVideoDismissListeners() {}
 
     function handleIntroVideoError() {
         hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
@@ -1554,7 +1555,7 @@ export function createWelcomeModalController({
         if (launchSequenceState.active) {
             return;
         }
-        hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+        hideIntroVideoOverlay({ markDismissed: false, resetPlayback: true });
         const normalizedMode = mode === 'online' ? 'online' : 'bots';
         const hasLaunchUi = Boolean(
             launchOverlayEl &&
@@ -2036,6 +2037,7 @@ export function createWelcomeModalController({
                 skipFocus: didRestorePersistedAuthSession,
             });
         }
+        syncIntroVideoOverlayForCurrentView();
     }
 
     function syncAuthUi() {
@@ -3526,6 +3528,7 @@ export function createWelcomeModalController({
         }
         if (!options.skipSync) {
             syncAuthUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
@@ -3546,6 +3549,7 @@ export function createWelcomeModalController({
         walletPanelOpen = shouldOpenWallet;
         if (!options.skipSync) {
             syncAuthUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
@@ -3571,6 +3575,7 @@ export function createWelcomeModalController({
         );
         if (!options.skipSync) {
             syncWelcomeLeaderboardUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
@@ -3659,6 +3664,7 @@ export function createWelcomeModalController({
         }
         if (!options.skipSync) {
             syncWelcomeAccountUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
@@ -3695,6 +3701,7 @@ export function createWelcomeModalController({
         }
         if (!options.skipSync) {
             syncAuthUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
@@ -3739,6 +3746,7 @@ export function createWelcomeModalController({
         );
         if (!options.skipSync) {
             syncWelcomeSettingsUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
@@ -3766,6 +3774,7 @@ export function createWelcomeModalController({
         );
         if (!options.skipSync) {
             syncWelcomeDonateUi();
+            syncIntroVideoOverlayForCurrentView();
         }
     }
 
