@@ -127,6 +127,18 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
     };
 }
 
+function listSupabasePublicAuthConfigGaps(config = {}) {
+    const runtimeConfig = config && typeof config === 'object' ? config : {};
+    const gaps = [];
+    if (!sanitizeSupabaseUrl(runtimeConfig.url || '')) {
+        gaps.push('SUPABASE_URL');
+    }
+    if (!sanitizeSupabaseKey(runtimeConfig.anonKey || '')) {
+        gaps.push('SUPABASE_ANON_KEY');
+    }
+    return gaps;
+}
+
 function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) {
     const source = publicConfig && typeof publicConfig === 'object' ? publicConfig : {};
     const enabled = Boolean(source.enabled);
@@ -194,6 +206,7 @@ module.exports = {
     applySupabaseStorageAvailability,
     buildSupabasePublicConfig,
     createSupabaseServiceClient,
+    listSupabasePublicAuthConfigGaps,
     resolveSupabaseConnectOrigin,
     resolveSupabaseRuntimeConfig,
     sanitizePostgresConnectionString,

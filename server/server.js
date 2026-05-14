@@ -21,6 +21,7 @@ const {
     applySupabaseStorageAvailability,
     buildSupabasePublicConfig,
     createSupabaseServiceClient,
+    listSupabasePublicAuthConfigGaps,
     resolveSupabaseConnectOrigin,
     resolveSupabaseRuntimeConfig,
     sanitizeSupabaseStorageBucketName,
@@ -1933,7 +1934,15 @@ async function startServer() {
         if (playerEconomyStore.isConfigured()) {
             console.log('Supabase player economy API is enabled.');
         }
-        if (supabaseRuntimeConfig.publicEnabled && !supabaseServiceClient) {
+        if (!supabaseRuntimeConfig.publicEnabled) {
+            const publicAuthConfigGaps = listSupabasePublicAuthConfigGaps(supabaseRuntimeConfig);
+            const publicAuthGapSummary = publicAuthConfigGaps.length
+                ? ` Missing or invalid env vars: ${publicAuthConfigGaps.join(', ')}.`
+                : '';
+            console.warn(
+                `Supabase public auth is disabled. Browser sign-in and player account sync will be unavailable.${publicAuthGapSummary}`
+            );
+        } else if (!supabaseServiceClient) {
             console.warn(
                 'Supabase public auth is enabled, but server-side token validation is not.'
             );

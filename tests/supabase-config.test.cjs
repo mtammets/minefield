@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const {
     applySupabaseStorageAvailability,
     buildSupabasePublicConfig,
+    listSupabasePublicAuthConfigGaps,
     resolveSupabaseRuntimeConfig,
     sanitizePostgresConnectionString,
     sanitizeSupabaseProjectRef,
@@ -152,6 +153,23 @@ test('buildSupabasePublicConfig exposes car wrap storage settings', () => {
         carWrapsEnabled: true,
         leaderboardEnabled: false,
     });
+});
+
+test('listSupabasePublicAuthConfigGaps reports missing browser auth env vars', () => {
+    assert.deepEqual(
+        listSupabasePublicAuthConfigGaps({
+            url: '',
+            anonKey: '',
+        }),
+        ['SUPABASE_URL', 'SUPABASE_ANON_KEY']
+    );
+    assert.deepEqual(
+        listSupabasePublicAuthConfigGaps({
+            url: 'https://uffldlrjjvxzbjftgyxg.supabase.co',
+            anonKey: 'public-key-value-public-key-value-public-key-value',
+        }),
+        []
+    );
 });
 
 test('applySupabaseStorageAvailability disables missing buckets without exposing them', () => {
