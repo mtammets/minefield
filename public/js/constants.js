@@ -25,6 +25,7 @@ export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
 export const GRAPHICS_QUALITY_MODE_STORAGE_KEY = 'silentdrift-graphics-quality-mode';
 export const AUTO_FULLSCREEN_ON_START_STORAGE_KEY = 'silentdrift-auto-fullscreen-on-start';
 export const HIDE_GAMEPLAY_PANELS_STORAGE_KEY = 'silentdrift-hide-gameplay-panels';
+export const PROFILE_SCREENSAVER_ENABLED_STORAGE_KEY = 'silentdrift-profile-screensaver-enabled';
 export const CHASE_CAMERA_SETTINGS_STORAGE_KEY = 'silentdrift-chase-camera-settings-v1';
 export const PLAYER_TOP_SPEED_LIMIT_STEP_KPH = 5;
 export const PLAYER_TOP_SPEED_LIMIT_MIN_KPH = 50;

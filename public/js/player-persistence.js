@@ -7,6 +7,7 @@ import {
     GRAPHICS_QUALITY_MODE_STORAGE_KEY,
     AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
     HIDE_GAMEPLAY_PANELS_STORAGE_KEY,
+    PROFILE_SCREENSAVER_ENABLED_STORAGE_KEY,
     CHASE_CAMERA_SETTINGS_STORAGE_KEY,
     CAR_COLOR_PRESETS,
     DEFAULT_PLAYER_CAR_COLOR_HEX,
@@ -124,6 +125,27 @@ export function readPersistedHideGameplayPanels(fallback = false) {
 export function persistHideGameplayPanels(enabled) {
     try {
         window.localStorage.setItem(HIDE_GAMEPLAY_PANELS_STORAGE_KEY, enabled ? 'true' : 'false');
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedProfileScreensaverEnabled(fallback = true) {
+    const fallbackValue = fallback !== false;
+    try {
+        const storedValue = window.localStorage.getItem(PROFILE_SCREENSAVER_ENABLED_STORAGE_KEY);
+        return resolveStoredBoolean(storedValue, fallbackValue);
+    } catch {
+        return fallbackValue;
+    }
+}
+
+export function persistProfileScreensaverEnabled(enabled) {
+    try {
+        window.localStorage.setItem(
+            PROFILE_SCREENSAVER_ENABLED_STORAGE_KEY,
+            enabled ? 'true' : 'false'
+        );
     } catch {
         // localStorage can fail in restricted browsing modes.
     }

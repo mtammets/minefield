@@ -19,6 +19,8 @@ import {
     readPersistedAutoFullscreenOnStart,
     persistHideGameplayPanels,
     readPersistedHideGameplayPanels,
+    persistProfileScreensaverEnabled,
+    readPersistedProfileScreensaverEnabled,
 } from './player-persistence.js';
 import {
     SHOWROOM_INTRO_VIDEO_UPDATED_EVENT,
@@ -76,6 +78,10 @@ const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_PREVIEW_LOADING_MIN_VISIBLE_MS = 700;
 const WELCOME_PREVIEW_LOADING_FADE_MS = 420;
 const WELCOME_INTRO_VIDEO_FADE_MS = 320;
+const WELCOME_PROFILE_SCREENSAVER_IDLE_MS = 5000;
+const WELCOME_PROFILE_SCREENSAVER_VIDEO_DWELL_MS = 5000;
+const WELCOME_PROFILE_SCREENSAVER_LEADERBOARD_DWELL_MS = 10000;
+const WELCOME_PROFILE_SCREENSAVER_RETURN_VIDEO_DWELL_MS = 5000;
 const WELCOME_PREVIEW_LOADING_SOFT_CAP = 0.94;
 const WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT = 3;
 const WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY = 0.011;
@@ -246,6 +252,7 @@ export function createWelcomeModalController({
     const authDeleteAccountBtnEl = document.getElementById('welcomeAuthDeleteAccountBtn');
     const autoFullscreenInputEl = document.getElementById('welcomeAutoFullscreenInput');
     const hideGameplayPanelsInputEl = document.getElementById('welcomeHideGameplayPanelsInput');
+    const profileScreensaverInputEl = document.getElementById('welcomeProfileScreensaverInput');
     const authPasswordChangePanelEl = document.getElementById('welcomeAuthPasswordChangePanel');
     const authNewPasswordInputEl = document.getElementById('welcomeAuthNewPasswordInput');
     const authConfirmNewPasswordInputEl = document.getElementById(
@@ -312,6 +319,9 @@ export function createWelcomeModalController({
     const settingsPanelEl = document.getElementById('welcomeSettingsPanel');
     const settingsFullscreenCardEl = document.getElementById('welcomeSettingsFullscreenCard');
     const settingsHidePanelsCardEl = document.getElementById('welcomeSettingsHidePanelsCard');
+    const settingsProfileScreensaverCardEl = document.getElementById(
+        'welcomeSettingsProfileScreensaverCard'
+    );
     const previewDonateOverlayEl = document.getElementById('welcomePreviewDonateOverlay');
     const previewDonateCloseBtnEl = document.getElementById('welcomePreviewDonateCloseBtn');
     const previewOnlineOverlayEl = document.getElementById('welcomePreviewOnlineOverlay');
@@ -413,6 +423,7 @@ export function createWelcomeModalController({
     let authSignedInSection = 'security';
     let autoFullscreenOnStart = readPersistedAutoFullscreenOnStart(true);
     let hideGameplayPanels = readPersistedHideGameplayPanels(false);
+    let profileScreensaverEnabled = readPersistedProfileScreensaverEnabled(true);
     let authLocalStatusText = '';
     let authLocalStatusTone = 'muted';
     let garageNoticeText = '';
@@ -464,6 +475,13 @@ export function createWelcomeModalController({
         hideTimeoutHandle: null,
         listenersBound: false,
         requestToken: 0,
+    };
+    const profileScreensaverState = {
+        active: false,
+        phase: 'idle',
+        timeoutHandle: null,
+        cycleToken: 0,
+        automationDepth: 0,
     };
     let showroomIntroVideoConfig = getShowroomIntroVideoConfig();
     const hasOnlineStartFlow = Boolean(
@@ -625,6 +643,12 @@ export function createWelcomeModalController({
         setWelcomeDonateOpen(false);
     });
     document.addEventListener('keydown', handleWelcomeGlobalKeydown);
+    rootEl.addEventListener('pointermove', handleWelcomeActivitySignal);
+    rootEl.addEventListener('click', handleWelcomeActivitySignal);
+    rootEl.addEventListener('wheel', handleWelcomeActivitySignal, { passive: true });
+    rootEl.addEventListener('input', handleWelcomeActivitySignal);
+    rootEl.addEventListener('focusin', handleWelcomeActivitySignal);
+    rootEl.addEventListener('keydown', handleWelcomeActivityKeydown);
     autoFullscreenInputEl?.addEventListener('change', () => {
         autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
         persistAutoFullscreenOnStart(autoFullscreenOnStart);
@@ -638,6 +662,12 @@ export function createWelcomeModalController({
             persistHideGameplayPanels(hideGameplayPanels);
         }
         syncGameplayPanelsPreferenceUi();
+    });
+    profileScreensaverInputEl?.addEventListener('change', () => {
+        profileScreensaverEnabled = Boolean(profileScreensaverInputEl.checked);
+        persistProfileScreensaverEnabled(profileScreensaverEnabled);
+        syncProfileScreensaverPreferenceUi();
+        syncWelcomeProfileScreensaverForCurrentView();
     });
     if (hasAuthPanel) {
         authSignInTabEl.addEventListener('click', () => {
@@ -990,6 +1020,7 @@ export function createWelcomeModalController({
             setWalletPanelOpen(false, { skipSync: true });
             syncAutoFullscreenPreferenceUi();
             syncGameplayPanelsPreferenceUi();
+            syncProfileScreensaverPreferenceUi();
             setAuthState(getAuthState?.());
             const shouldOpenProfileOnShow = Boolean(authUiState.authenticated);
             setWelcomeLeaderboardOpen(false, { skipSync: true });
@@ -1016,6 +1047,7 @@ export function createWelcomeModalController({
             renderPreview();
             schedulePreviewLoadingReady();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         },
         hide() {
             cancelStartSequence();
@@ -1032,6 +1064,7 @@ export function createWelcomeModalController({
             stopPreviewDrag();
             syncPreviewInteractionUi();
             rootEl.hidden = true;
+            stopWelcomeProfileScreensaver();
         },
         resize() {
             syncPreviewSize();
@@ -1164,6 +1197,16 @@ export function createWelcomeModalController({
         settingsHidePanelsCardEl?.setAttribute('data-state', panelState);
     }
 
+    function syncProfileScreensaverPreferenceUi() {
+        profileScreensaverEnabled = readPersistedProfileScreensaverEnabled(profileScreensaverEnabled);
+        if (profileScreensaverInputEl) {
+            profileScreensaverInputEl.checked = profileScreensaverEnabled;
+        }
+        const screensaverState = profileScreensaverEnabled ? 'enabled' : 'disabled';
+        settingsPanelEl?.setAttribute('data-profile-screensaver', screensaverState);
+        settingsProfileScreensaverCardEl?.setAttribute('data-state', screensaverState);
+    }
+
     async function refreshManagedShowroomIntroVideoSource() {
         const config = await refreshShowroomIntroVideoConfig();
         applyShowroomIntroVideoConfig(config, {
@@ -1198,11 +1241,20 @@ export function createWelcomeModalController({
         return Boolean(authUiState.authenticated && welcomeAccountOpen && !accountToolsOpen);
     }
 
+    function shouldDeferIntroVideoUntilAuthReady() {
+        return Boolean(hasAuthPanel && !authUiState.ready);
+    }
+
     function syncIntroVideoOverlayForCurrentView() {
         if (!introVideoState.available) {
             return;
         }
-        if (rootEl.hidden || launchSequenceState.active || shouldHideIntroVideoForCurrentView()) {
+        if (
+            rootEl.hidden ||
+            launchSequenceState.active ||
+            shouldDeferIntroVideoUntilAuthReady() ||
+            shouldHideIntroVideoForCurrentView()
+        ) {
             hideIntroVideoOverlay({ markDismissed: false, resetPlayback: true });
             return;
         }
@@ -1210,6 +1262,210 @@ export function createWelcomeModalController({
             return;
         }
         requestShowIntroVideoOverlay();
+    }
+
+    function isWelcomeOnlineOverlayOpen() {
+        return Boolean(hasOnlineStartFlow && onlineModeFlowEl && !onlineModeFlowEl.hidden);
+    }
+
+    function clearWelcomeProfileScreensaverTimeout() {
+        if (profileScreensaverState.timeoutHandle == null) {
+            return;
+        }
+        window.clearTimeout(profileScreensaverState.timeoutHandle);
+        profileScreensaverState.timeoutHandle = null;
+    }
+
+    function withWelcomeProfileScreensaverAutomation(callback) {
+        profileScreensaverState.automationDepth += 1;
+        try {
+            callback?.();
+        } finally {
+            profileScreensaverState.automationDepth = Math.max(
+                0,
+                profileScreensaverState.automationDepth - 1
+            );
+        }
+    }
+
+    function canRunWelcomeProfileScreensaver() {
+        return Boolean(
+            !rootEl.hidden &&
+                profileScreensaverEnabled &&
+                authUiState.authenticated &&
+                !launchSequenceState.active &&
+                !welcomeSettingsOpen &&
+                !welcomeDonateOpen &&
+                !avatarEditorState.open &&
+                !isWelcomeOnlineOverlayOpen() &&
+                !accountToolsOpen &&
+                !garagePanelOpen &&
+                !walletPanelOpen
+        );
+    }
+
+    function isWelcomeProfileScreensaverHomeView() {
+        return Boolean(
+            canRunWelcomeProfileScreensaver() && welcomeAccountOpen && !welcomeLeaderboardOpen
+        );
+    }
+
+    function scheduleWelcomeProfileScreensaverStep(delayMs, callback) {
+        clearWelcomeProfileScreensaverTimeout();
+        const token = profileScreensaverState.cycleToken;
+        profileScreensaverState.timeoutHandle = window.setTimeout(() => {
+            profileScreensaverState.timeoutHandle = null;
+            if (token !== profileScreensaverState.cycleToken) {
+                return;
+            }
+            callback();
+        }, Math.max(0, Math.round(Number(delayMs) || 0)));
+    }
+
+    function stopWelcomeProfileScreensaver({ restoreProfile = false } = {}) {
+        clearWelcomeProfileScreensaverTimeout();
+        profileScreensaverState.cycleToken += 1;
+        const activePhase = profileScreensaverState.phase;
+        profileScreensaverState.active = false;
+        profileScreensaverState.phase = 'idle';
+
+        const shouldRestoreProfile =
+            restoreProfile &&
+            (activePhase === 'video' || activePhase === 'return-video') &&
+            !rootEl.hidden &&
+            authUiState.authenticated &&
+            !launchSequenceState.active &&
+            !welcomeSettingsOpen &&
+            !welcomeDonateOpen &&
+            !isWelcomeOnlineOverlayOpen();
+        if (!shouldRestoreProfile) {
+            return;
+        }
+
+        withWelcomeProfileScreensaverAutomation(() => {
+            setWelcomeLeaderboardOpen(false);
+            setWelcomeAccountOpen(true);
+        });
+    }
+
+    function startWelcomeProfileScreensaverCycle() {
+        if (!isWelcomeProfileScreensaverHomeView()) {
+            return;
+        }
+
+        clearWelcomeProfileScreensaverTimeout();
+        profileScreensaverState.cycleToken += 1;
+        profileScreensaverState.active = true;
+        profileScreensaverState.phase = 'video';
+
+        withWelcomeProfileScreensaverAutomation(() => {
+            setWelcomeLeaderboardOpen(false);
+            setWelcomeAccountOpen(false);
+        });
+
+        scheduleWelcomeProfileScreensaverStep(
+            WELCOME_PROFILE_SCREENSAVER_VIDEO_DWELL_MS,
+            showWelcomeProfileScreensaverLeaderboard
+        );
+    }
+
+    function showWelcomeProfileScreensaverLeaderboard() {
+        if (!profileScreensaverState.active) {
+            return;
+        }
+        if (!canRunWelcomeProfileScreensaver()) {
+            stopWelcomeProfileScreensaver();
+            return;
+        }
+
+        profileScreensaverState.phase = 'leaderboard';
+        withWelcomeProfileScreensaverAutomation(() => {
+            setWelcomeAccountOpen(false);
+            setWelcomeLeaderboardOpen(true);
+        });
+        void requestWelcomeLeaderboardRefresh();
+
+        scheduleWelcomeProfileScreensaverStep(
+            WELCOME_PROFILE_SCREENSAVER_LEADERBOARD_DWELL_MS,
+            showWelcomeProfileScreensaverReturnVideo
+        );
+    }
+
+    function showWelcomeProfileScreensaverReturnVideo() {
+        if (!profileScreensaverState.active) {
+            return;
+        }
+        if (!canRunWelcomeProfileScreensaver()) {
+            stopWelcomeProfileScreensaver();
+            return;
+        }
+
+        profileScreensaverState.phase = 'return-video';
+        withWelcomeProfileScreensaverAutomation(() => {
+            setWelcomeLeaderboardOpen(false);
+            setWelcomeAccountOpen(false);
+        });
+
+        scheduleWelcomeProfileScreensaverStep(
+            WELCOME_PROFILE_SCREENSAVER_RETURN_VIDEO_DWELL_MS,
+            finishWelcomeProfileScreensaverCycle
+        );
+    }
+
+    function finishWelcomeProfileScreensaverCycle() {
+        if (!canRunWelcomeProfileScreensaver()) {
+            stopWelcomeProfileScreensaver();
+            return;
+        }
+
+        withWelcomeProfileScreensaverAutomation(() => {
+            setWelcomeLeaderboardOpen(false);
+            setWelcomeAccountOpen(true);
+        });
+
+        profileScreensaverState.active = false;
+        profileScreensaverState.phase = 'idle';
+        syncWelcomeProfileScreensaverForCurrentView();
+    }
+
+    function syncWelcomeProfileScreensaverForCurrentView() {
+        if (profileScreensaverState.automationDepth > 0) {
+            return;
+        }
+        if (!canRunWelcomeProfileScreensaver()) {
+            stopWelcomeProfileScreensaver();
+            return;
+        }
+        if (profileScreensaverState.active) {
+            return;
+        }
+
+        clearWelcomeProfileScreensaverTimeout();
+        if (!isWelcomeProfileScreensaverHomeView()) {
+            return;
+        }
+
+        scheduleWelcomeProfileScreensaverStep(
+            WELCOME_PROFILE_SCREENSAVER_IDLE_MS,
+            startWelcomeProfileScreensaverCycle
+        );
+    }
+
+    function handleWelcomeActivitySignal() {
+        if (rootEl.hidden || profileScreensaverState.automationDepth > 0) {
+            return;
+        }
+        stopWelcomeProfileScreensaver({ restoreProfile: true });
+        syncWelcomeProfileScreensaverForCurrentView();
+    }
+
+    function handleWelcomeActivityKeydown(event) {
+        if (event.key === 'Escape') {
+            stopWelcomeProfileScreensaver();
+            syncWelcomeProfileScreensaverForCurrentView();
+            return;
+        }
+        handleWelcomeActivitySignal();
     }
 
     function initializePreviewLoadingUi() {
@@ -1573,6 +1829,7 @@ export function createWelcomeModalController({
         launchSequenceState.token = token;
         launchSequenceState.active = true;
         launchSequenceState.progress = 0;
+        syncWelcomeProfileScreensaverForCurrentView();
         setStartButtonsDisabled(true);
         setStartSequenceUiVisible(true);
         setLaunchCopy(normalizedMode, 0, null);
@@ -1677,6 +1934,7 @@ export function createWelcomeModalController({
             launchSequenceState.active = false;
             setStartButtonsDisabled(false);
             resetStartSequenceUi();
+            syncWelcomeProfileScreensaverForCurrentView();
             return;
         }
 
@@ -1690,6 +1948,7 @@ export function createWelcomeModalController({
 
         launchSequenceState.active = false;
         setStartButtonsDisabled(false);
+        syncWelcomeProfileScreensaverForCurrentView();
         onStart?.(normalizedMode, startContext);
         if (!rootEl.hidden) {
             resetStartSequenceUi();
@@ -1713,6 +1972,7 @@ export function createWelcomeModalController({
         launchSequenceState.progress = 0;
         setStartButtonsDisabled(false);
         resetStartSequenceUi();
+        syncWelcomeProfileScreensaverForCurrentView();
     }
 
     function resetStartSequenceUi() {
@@ -1966,16 +2226,18 @@ export function createWelcomeModalController({
         syncAuthUi();
     }
 
-    function clearGarageWrapSelection() {
+    function clearGarageWrapSelection({ emitWrapChange = true } = {}) {
         revokeGarageWrapObjectUrlIfNeeded();
         garageWrapState.mode = 'none';
         garageWrapState.url = '';
         garageWrapState.presetPath = '';
         garageWrapState.ownsObjectUrl = false;
-        onWrapChange?.('', {
-            mode: 'none',
-            presetPath: '',
-        });
+        if (emitWrapChange) {
+            onWrapChange?.('', {
+                mode: 'none',
+                presetPath: '',
+            });
+        }
         syncPreviewVehicleWrap();
         syncAuthUi();
     }
@@ -2038,6 +2300,7 @@ export function createWelcomeModalController({
             });
         }
         syncIntroVideoOverlayForCurrentView();
+        syncWelcomeProfileScreensaverForCurrentView();
     }
 
     function syncAuthUi() {
@@ -3529,6 +3792,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncAuthUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -3550,6 +3814,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncAuthUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -3576,6 +3841,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncWelcomeLeaderboardUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -3665,6 +3931,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncWelcomeAccountUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -3702,6 +3969,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncAuthUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -3747,6 +4015,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncWelcomeSettingsUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -3759,6 +4028,8 @@ export function createWelcomeModalController({
         }
 
         syncAutoFullscreenPreferenceUi();
+        syncGameplayPanelsPreferenceUi();
+        syncProfileScreensaverPreferenceUi();
         if (previewSettingsCloseBtnEl) {
             previewSettingsCloseBtnEl.hidden = !authUiState.authenticated;
         }
@@ -3775,6 +4046,7 @@ export function createWelcomeModalController({
         if (!options.skipSync) {
             syncWelcomeDonateUi();
             syncIntroVideoOverlayForCurrentView();
+            syncWelcomeProfileScreensaverForCurrentView();
         }
     }
 
@@ -4036,6 +4308,26 @@ export function createWelcomeModalController({
                 mode: 'upload',
                 ownsObjectUrl: true,
             });
+
+            if (authUiState.authenticated && typeof onAuthUpdateCarWrap === 'function') {
+                const response = await Promise.resolve(onAuthUpdateCarWrap(file)).catch((error) => ({
+                    ok: false,
+                    error: error?.message || 'Could not save the car wrap to your account.',
+                }));
+                if (!response?.ok) {
+                    setGarageNotice(
+                        response?.error ||
+                            'Could not save the car wrap to your account. Preview kept locally.',
+                        'error'
+                    );
+                    syncAuthUi();
+                    return;
+                }
+
+                clearGarageWrapSelection({
+                    emitWrapChange: true,
+                });
+            }
         } catch (error) {
             if (objectUrl) {
                 URL.revokeObjectURL(objectUrl);
@@ -4366,6 +4658,7 @@ export function createWelcomeModalController({
             preferredStartMode = 'bots';
         }
         syncWelcomeOnlineUi();
+        syncWelcomeProfileScreensaverForCurrentView();
         document.dispatchEvent(new CustomEvent(WELCOME_ONLINE_CLOSE_EVENT));
     }
 
