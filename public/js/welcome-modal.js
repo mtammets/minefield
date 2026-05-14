@@ -62,6 +62,7 @@ const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_PREVIEW_LOADING_MIN_VISIBLE_MS = 700;
 const WELCOME_PREVIEW_LOADING_FADE_MS = 420;
 const WELCOME_PREVIEW_LOADING_SOFT_CAP = 0.94;
+const WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT = 3;
 const WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY = 0.011;
 const WELCOME_GARAGE_PREVIEW_PITCH_DRAG_SENSITIVITY = 0.006;
 const WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MIN = -0.18;
@@ -1853,7 +1854,10 @@ export function createWelcomeModalController({
         }
         if (previewAccountOverlayEl) {
             if (showPreviewAccountHeading) {
-                previewAccountOverlayEl.setAttribute('aria-labelledby', 'welcomePreviewAccountTitle');
+                previewAccountOverlayEl.setAttribute(
+                    'aria-labelledby',
+                    'welcomePreviewAccountTitle'
+                );
                 previewAccountOverlayEl.removeAttribute('aria-label');
             } else {
                 previewAccountOverlayEl.removeAttribute('aria-labelledby');
@@ -2153,7 +2157,7 @@ export function createWelcomeModalController({
             return;
         }
 
-        recentTransactions.slice(0, 4).forEach((entry) => {
+        recentTransactions.slice(0, WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT).forEach((entry) => {
             const itemEl = document.createElement('div');
             itemEl.className = 'welcomeAuthWalletActivityItem';
 
