@@ -43,6 +43,8 @@ export function createRuntimeUiControllers({
     onBuyCredits = null,
     onWrapChange = null,
     onDownloadPerformanceLog = null,
+    getHideGameplayPanels = () => false,
+    onHideGameplayPanelsChange = null,
 }) {
     const objectiveUi = createObjectiveHudController({
         statusDefaultText: '',
@@ -109,6 +111,8 @@ export function createRuntimeUiControllers({
         onBuyCredits,
         onWrapChange,
         toCssHex,
+        getHideGameplayPanels,
+        onHideGameplayPanelsChange,
         onStartRequested() {
             getGameSessionController()?.requestGameplayFullscreen?.();
         },

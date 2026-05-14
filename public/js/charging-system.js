@@ -112,6 +112,7 @@ export function createChargingProgressHudController(scene, camera, options = {})
         displayPercent: THREE.MathUtils.clamp(getBatteryPercent(), 0, 100),
         time: Math.random() * 11.7,
         scanPhase: Math.random() * Math.PI * 2,
+        worldHudEnabled: Boolean(showWorldHud),
         lowBatteryReminderActive: false,
         criticalBatteryAlertActive: false,
         chargeCompleteLatched: false,
@@ -171,7 +172,7 @@ export function createChargingProgressHudController(scene, camera, options = {})
                 state.chargeCompleteLatched = false;
                 state.chargedHoldTimer = 0;
             }
-            if (!showWorldHud) {
+            if (!state.worldHudEnabled) {
                 state.visibleBlend = 0;
                 state.displayPercent = batteryPercent;
                 state.hasLastChargingAnchor = false;
@@ -276,6 +277,15 @@ export function createChargingProgressHudController(scene, camera, options = {})
             );
             panelTexture.needsUpdate = true;
             return frameSnapshot;
+        },
+        setWorldHudEnabled(enabled) {
+            state.worldHudEnabled = enabled !== false;
+            if (state.worldHudEnabled) {
+                return;
+            }
+            state.visibleBlend = 0;
+            state.hasLastChargingAnchor = false;
+            root.visible = false;
         },
         reset() {
             state.visibleBlend = 0;

@@ -46,6 +46,9 @@ export function createCarEditModeController({
     onUploadBillboardGroupMedia,
     onResetBillboardGroupMedia,
     onSetBillboardGroupPlaybackEnabled,
+    getShowroomIntroVideoConfig,
+    onUploadShowroomIntroVideo,
+    onResetShowroomIntroVideo,
 } = {}) {
     if (!camera || !car || !canvas) {
         return createNoopController();
@@ -80,6 +83,14 @@ export function createCarEditModeController({
         typeof onSetBillboardGroupPlaybackEnabled === 'function'
             ? onSetBillboardGroupPlaybackEnabled
             : null;
+    const readShowroomIntroVideoConfig =
+        typeof getShowroomIntroVideoConfig === 'function'
+            ? getShowroomIntroVideoConfig
+            : () => null;
+    const uploadShowroomIntroVideo =
+        typeof onUploadShowroomIntroVideo === 'function' ? onUploadShowroomIntroVideo : null;
+    const resetShowroomIntroVideo =
+        typeof onResetShowroomIntroVideo === 'function' ? onResetShowroomIntroVideo : null;
     const pointerState = {
         active: false,
         id: null,
@@ -180,6 +191,40 @@ export function createCarEditModeController({
             }
             ui.setBillboardGroupBusy(groupId, false);
         },
+        onUploadShowroomIntroVideo: async (file) => {
+            if (!uploadShowroomIntroVideo) {
+                return;
+            }
+            ui.setShowroomIntroVideoBusy(true, 'Converting video for showroom...');
+            try {
+                const config = await uploadShowroomIntroVideo(file);
+                await refreshShowroomIntroVideoCard(config);
+                onStatus?.('Showroom demo video updated.');
+            } catch (error) {
+                const message = error?.message || 'Showroom demo upload failed.';
+                ui.setShowroomIntroVideoBusy(false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setShowroomIntroVideoBusy(false);
+        },
+        onResetShowroomIntroVideo: async () => {
+            if (!resetShowroomIntroVideo) {
+                return;
+            }
+            ui.setShowroomIntroVideoBusy(true, 'Restoring built-in showroom demo...');
+            try {
+                const config = await resetShowroomIntroVideo();
+                await refreshShowroomIntroVideoCard(config);
+                onStatus?.('Showroom demo video reset to default.');
+            } catch (error) {
+                const message = error?.message || 'Showroom demo reset failed.';
+                ui.setShowroomIntroVideoBusy(false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setShowroomIntroVideoBusy(false);
+        },
     });
 
     let active = false;
@@ -275,6 +320,7 @@ export function createCarEditModeController({
             renderPartList();
             refreshCrashDamageTuning();
             renderBillboardGroupList();
+            void refreshShowroomIntroVideoCard();
             onStatus?.('Edit mode active. Mouse: left rotate, right pan, wheel zoom.');
         } else {
             restoreEditablePartVisibility?.(savedPartVisibility);
@@ -315,6 +361,15 @@ export function createCarEditModeController({
             ? readBillboardContentGroups()
             : [];
         ui.renderBillboardGroups(groups);
+    }
+
+    async function refreshShowroomIntroVideoCard(preferredConfig = null) {
+        const config =
+            preferredConfig && typeof preferredConfig === 'object'
+                ? preferredConfig
+                : await Promise.resolve(readShowroomIntroVideoConfig?.());
+        ui.renderShowroomIntroVideo(config);
+        return config;
     }
 
     function focusOnCar(resetPan = false) {
@@ -480,6 +535,8 @@ function createEditModeUi({
     onUploadBillboardGroup,
     onResetBillboardGroup,
     onToggleBillboardGroupPlayback,
+    onUploadShowroomIntroVideo,
+    onResetShowroomIntroVideo,
 } = {}) {
     const root = document.createElement('section');
     root.id = 'editModePanel';
@@ -519,6 +576,13 @@ function createEditModeUi({
             <div class="editModeBillboardList" data-role="billboard-list"></div>
         </div>
         <div class="editModeBlock">
+            <div class="editModeBlockTitle">SHOWROOM DEMO</div>
+            <div class="editModeBillboardIntro">
+                Upload one video and it will be converted automatically to the showroom intro format.
+            </div>
+            <div class="editModeBillboardList" data-role="showroom-intro-video"></div>
+        </div>
+        <div class="editModeBlock">
             <div class="editModeBlockTitle">CRASH & DAMAGE</div>
             <div class="editModeTuneTools">
                 <button type="button" data-action="reset-crash-tuning">RESET DEFAULTS</button>
@@ -534,14 +598,20 @@ function createEditModeUi({
     const searchInput = root.querySelector('[data-role="search"]');
     const partList = root.querySelector('[data-role="part-list"]');
     const billboardList = root.querySelector('[data-role="billboard-list"]');
+    const showroomIntroVideoList = root.querySelector('[data-role="showroom-intro-video"]');
     const viewGrid = root.querySelector('[data-role="view-grid"]');
     const crashTuningList = root.querySelector('[data-role="crash-tuning-list"]');
     const crashTuningResetBtn = root.querySelector('[data-action="reset-crash-tuning"]');
     const presetButtons = new Map();
     const tuningControlsByKey = new Map();
     const billboardStateByGroup = new Map();
+    const showroomIntroVideoState = {
+        busy: false,
+        message: '',
+    };
     let tuningFieldSignature = '';
     let lastBillboardGroups = [];
+    let lastShowroomIntroVideoConfig = null;
 
     closeBtn?.addEventListener('click', () => onClose?.());
     showAllBtn?.addEventListener('click', () => onShowAll?.());
@@ -591,6 +661,11 @@ function createEditModeUi({
             nextState.message = String(message || '');
             billboardStateByGroup.set(normalizedGroupId, nextState);
             this.renderBillboardGroups(lastBillboardGroups);
+        },
+        setShowroomIntroVideoBusy(isBusy, message = '') {
+            showroomIntroVideoState.busy = Boolean(isBusy);
+            showroomIntroVideoState.message = String(message || '');
+            this.renderShowroomIntroVideo(lastShowroomIntroVideoConfig);
         },
         renderBillboardGroups(groups = []) {
             if (!billboardList) {
@@ -735,6 +810,98 @@ function createEditModeUi({
                 section.append(actions, mediaList);
                 billboardList.appendChild(section);
             }
+        },
+        renderShowroomIntroVideo(config = null) {
+            if (!showroomIntroVideoList) {
+                return;
+            }
+
+            lastShowroomIntroVideoConfig =
+                config && typeof config === 'object' ? { ...config } : null;
+            showroomIntroVideoList.innerHTML = '';
+
+            const videoConfig = lastShowroomIntroVideoConfig || {};
+            const section = document.createElement('section');
+            section.className = 'editModeBillboardCard';
+
+            const head = document.createElement('div');
+            head.className = 'editModeBillboardHead';
+
+            const titleWrap = document.createElement('div');
+            const title = document.createElement('div');
+            title.className = 'editModeBillboardTitle';
+            title.textContent = 'Welcome Intro Video';
+
+            const meta = document.createElement('div');
+            meta.className = 'editModeBillboardMeta';
+            meta.textContent = [
+                `${Math.max(1, Number(videoConfig.width) || 1680)}x${Math.max(1, Number(videoConfig.height) || 900)}`,
+                `${Math.max(1, Number(videoConfig.frameRate) || 30)} fps`,
+                formatEditModeBytes(Math.max(0, Number(videoConfig.sizeBytes) || 0)),
+            ].join(' • ');
+
+            titleWrap.append(title, meta);
+
+            const badge = document.createElement('span');
+            badge.className = 'editModeBillboardBadge';
+            badge.dataset.tone = videoConfig.isCustom ? 'custom' : 'default';
+            badge.textContent = videoConfig.isCustom ? 'CUSTOM' : 'DEFAULT';
+            head.append(titleWrap, badge);
+
+            const description = document.createElement('div');
+            description.className = 'editModeBillboardDescription';
+            description.textContent = videoConfig.originalFileName
+                ? `Source: ${videoConfig.originalFileName}`
+                : 'Built-in showroom intro video';
+
+            const status = document.createElement('div');
+            status.className = 'editModeBillboardStatus';
+            status.textContent = showroomIntroVideoState.message
+                ? showroomIntroVideoState.message
+                : videoConfig.statusText || 'Using built-in showroom demo.';
+
+            const actions = document.createElement('div');
+            actions.className = 'editModeBillboardActions';
+
+            const uploadButton = document.createElement('button');
+            uploadButton.type = 'button';
+            uploadButton.textContent = showroomIntroVideoState.busy ? 'WORKING...' : 'UPLOAD VIDEO';
+            uploadButton.disabled = showroomIntroVideoState.busy;
+
+            const resetButton = document.createElement('button');
+            resetButton.type = 'button';
+            resetButton.textContent = 'RESET DEFAULT';
+            resetButton.disabled = showroomIntroVideoState.busy || !videoConfig.canReset;
+
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.hidden = true;
+            fileInput.accept = videoConfig.accept || 'video/*';
+
+            uploadButton.addEventListener('click', () => {
+                if (showroomIntroVideoState.busy) {
+                    return;
+                }
+                fileInput.click();
+            });
+            fileInput.addEventListener('change', () => {
+                const nextFile = fileInput.files?.[0] || null;
+                if (!nextFile) {
+                    return;
+                }
+                void onUploadShowroomIntroVideo?.(nextFile);
+                fileInput.value = '';
+            });
+            resetButton.addEventListener('click', () => {
+                if (showroomIntroVideoState.busy) {
+                    return;
+                }
+                void onResetShowroomIntroVideo?.();
+            });
+
+            actions.append(uploadButton, resetButton, fileInput);
+            section.append(head, description, status, actions);
+            showroomIntroVideoList.appendChild(section);
         },
         renderParts(parts = []) {
             if (!partList) {
@@ -946,6 +1113,20 @@ function createEditModeUi({
             }
         },
     };
+}
+
+function formatEditModeBytes(value) {
+    const size = Math.max(0, Number(value) || 0);
+    if (size <= 0) {
+        return 'size unknown';
+    }
+    if (size >= 1024 * 1024) {
+        return `${(size / (1024 * 1024)).toFixed(size >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+    }
+    if (size >= 1024) {
+        return `${Math.round(size / 1024)} KB`;
+    }
+    return `${size} B`;
 }
 
 function normalizeKey(rawKey) {

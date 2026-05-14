@@ -96,6 +96,8 @@ import {
     persistPlayerTopSpeedKph,
     readPersistedGraphicsQualityMode,
     persistGraphicsQualityMode,
+    readPersistedHideGameplayPanels,
+    persistHideGameplayPanels,
     readPersistedChaseCameraSettings,
     persistChaseCameraSettings,
     readPersistedPlayerCarVehicleId,
@@ -169,6 +171,12 @@ import {
     uploadBillboardGroupFiles,
 } from './environment/billboard-content-manager.js';
 import {
+    getShowroomIntroVideoConfig,
+    initializeShowroomIntroVideoManager,
+    resetShowroomIntroVideo,
+    uploadShowroomIntroVideo,
+} from './showroom-intro-video-manager.js';
+import {
     applyLorienVelmoreMineDetonation,
     appendLorienVelmoreDoorCollisionObstacles,
     resolveLorienVelmoreMineBarrierImpact,
@@ -232,6 +240,8 @@ const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
 const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persistedGraphicsQualityMode)
     ? persistedGraphicsQualityMode
     : GRAPHICS_QUALITY_MODES.balanced;
+let gameplayPanelsHidden = readPersistedHideGameplayPanels(false);
+document.body?.classList.toggle('gameplay-panels-hidden', gameplayPanelsHidden);
 const runtimeState = createGameRuntimeState({
     selectedCarColorHex,
     selectedCarSkinId,
@@ -376,6 +386,12 @@ const {
         syncRuntimePlayerWrapAppearance();
     },
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
+    getHideGameplayPanels: () => gameplayPanelsHidden,
+    onHideGameplayPanelsChange(nextHidden) {
+        return setGameplayPanelsHidden(nextHidden, {
+            persist: true,
+        });
+    },
 });
 runtimeState.authController = createAuthController({
     onToast(toast) {
@@ -1507,6 +1523,9 @@ const carEditModeController = createCarEditModeController({
     onSetBillboardGroupPlaybackEnabled(groupId, enabled) {
         return setBillboardGroupPlaybackEnabled(groupId, enabled);
     },
+    getShowroomIntroVideoConfig,
+    onUploadShowroomIntroVideo: uploadShowroomIntroVideo,
+    onResetShowroomIntroVideo: resetShowroomIntroVideo,
 });
 
 function getRuntimeEditableParts() {
@@ -3824,6 +3843,23 @@ function createDiagnosticsLogFilename() {
     return `auto-performance-log-${runtimeState.gameMode === 'online' ? 'online' : 'bots'}-${formatDiagnosticsTimestamp(new Date())}.json`;
 }
 
+function setGameplayPanelsHidden(nextHidden, { persist = true } = {}) {
+    gameplayPanelsHidden = Boolean(nextHidden);
+    document.body?.classList.toggle('gameplay-panels-hidden', gameplayPanelsHidden);
+    if (persist) {
+        persistHideGameplayPanels(gameplayPanelsHidden);
+    }
+    chargingProgressHudController.setWorldHudEnabled?.(!gameplayPanelsHidden);
+    pauseMenuUi.refreshHudVisibilityStatus?.();
+    return gameplayPanelsHidden;
+}
+
+function toggleGameplayPanelsHidden({ persist = true } = {}) {
+    return setGameplayPanelsHidden(!gameplayPanelsHidden, {
+        persist,
+    });
+}
+
 function formatDiagnosticsTimestamp(date) {
     const iso = date instanceof Date ? date.toISOString() : new Date().toISOString();
     return iso
@@ -3864,6 +3900,20 @@ pauseMenuUi.configureGraphicsControls({
         return cycleGraphicsQualityMode(step, { showStatus: false, persist: true });
     },
 });
+pauseMenuUi.configureHudVisibilityControls({
+    getSnapshot() {
+        return {
+            hidden: gameplayPanelsHidden,
+        };
+    },
+    onToggle() {
+        return {
+            hidden: toggleGameplayPanelsHidden({
+                persist: true,
+            }),
+        };
+    },
+});
 pauseMenuUi.configureCameraTuneControls({
     getSnapshot() {
         return runtimeState.gameSessionController?.getCameraTuneUiSnapshot?.() || null;
@@ -3871,6 +3921,9 @@ pauseMenuUi.configureCameraTuneControls({
     onReset() {
         return runtimeState.gameSessionController?.resetChaseCameraTuneToDefault?.() || null;
     },
+});
+setGameplayPanelsHidden(gameplayPanelsHidden, {
+    persist: false,
 });
 syncRuntimeInputContext();
 
@@ -4083,6 +4136,7 @@ runtimeState.crashDebrisController.resetPlayerDamageState();
 setPlayerBatteryLevel(1);
 runtimeState.gameSessionController.setBatteryDepletedState(false, { showStatus: false });
 if (welcomeModalUi.isAvailable()) {
+    void initializeShowroomIntroVideoManager();
     runtimeState.gameSessionController.showWelcomeModal();
 }
 

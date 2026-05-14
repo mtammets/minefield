@@ -6,6 +6,7 @@ import {
     PLAYER_TOP_SPEED_STORAGE_KEY,
     GRAPHICS_QUALITY_MODE_STORAGE_KEY,
     AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
+    HIDE_GAMEPLAY_PANELS_STORAGE_KEY,
     CHASE_CAMERA_SETTINGS_STORAGE_KEY,
     CAR_COLOR_PRESETS,
     DEFAULT_PLAYER_CAR_COLOR_HEX,
@@ -105,6 +106,24 @@ export function persistAutoFullscreenOnStart(enabled) {
             AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
             enabled ? 'true' : 'false'
         );
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedHideGameplayPanels(fallback = false) {
+    const fallbackValue = fallback === true;
+    try {
+        const storedValue = window.localStorage.getItem(HIDE_GAMEPLAY_PANELS_STORAGE_KEY);
+        return resolveStoredBoolean(storedValue, fallbackValue);
+    } catch {
+        return fallbackValue;
+    }
+}
+
+export function persistHideGameplayPanels(enabled) {
+    try {
+        window.localStorage.setItem(HIDE_GAMEPLAY_PANELS_STORAGE_KEY, enabled ? 'true' : 'false');
     } catch {
         // localStorage can fail in restricted browsing modes.
     }
@@ -309,6 +328,16 @@ function resolveAutoFullscreenOnStart(value, fallback = true) {
         return false;
     }
     return fallback !== false;
+}
+
+function resolveStoredBoolean(value, fallback = false) {
+    if (value === 'true') {
+        return true;
+    }
+    if (value === 'false') {
+        return false;
+    }
+    return fallback === true;
 }
 
 export function sanitizeChaseCameraSettings(

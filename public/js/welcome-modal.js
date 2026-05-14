@@ -17,7 +17,15 @@ import {
 import {
     persistAutoFullscreenOnStart,
     readPersistedAutoFullscreenOnStart,
+    persistHideGameplayPanels,
+    readPersistedHideGameplayPanels,
 } from './player-persistence.js';
+import {
+    SHOWROOM_INTRO_VIDEO_UPDATED_EVENT,
+    getShowroomIntroVideoConfig,
+    initializeShowroomIntroVideoManager,
+    refreshShowroomIntroVideoConfig,
+} from './showroom-intro-video-manager.js';
 import {
     WELCOME_CAR_SPIN_SPEED,
     WELCOME_PREVIEW_STATE_SPEED,
@@ -102,6 +110,8 @@ export function createWelcomeModalController({
     onPurchaseVehicle,
     onBuyCredits,
     onWrapChange,
+    getHideGameplayPanels,
+    onHideGameplayPanelsChange,
     initialSkinId,
     getCurrentSkinId,
     initialVehicleId,
@@ -235,6 +245,7 @@ export function createWelcomeModalController({
     const authSignOutBtnEl = document.getElementById('welcomeAuthSignOutBtn');
     const authDeleteAccountBtnEl = document.getElementById('welcomeAuthDeleteAccountBtn');
     const autoFullscreenInputEl = document.getElementById('welcomeAutoFullscreenInput');
+    const hideGameplayPanelsInputEl = document.getElementById('welcomeHideGameplayPanelsInput');
     const authPasswordChangePanelEl = document.getElementById('welcomeAuthPasswordChangePanel');
     const authNewPasswordInputEl = document.getElementById('welcomeAuthNewPasswordInput');
     const authConfirmNewPasswordInputEl = document.getElementById(
@@ -269,6 +280,7 @@ export function createWelcomeModalController({
     const previewLoadingEl = document.getElementById('welcomePreviewLoading');
     const introVideoOverlayEl = document.getElementById('welcomeIntroVideoOverlay');
     const introVideoEl = document.getElementById('welcomeIntroVideo');
+    const introVideoSourceEl = introVideoEl?.querySelector?.('source') || null;
     renderGarageWrapPresetButtons(authGarageWrapPresetGridEl);
     const authGarageWrapPresetBtnEls = Array.from(
         authGarageWrapPresetGridEl?.querySelectorAll?.('.welcomeAuthGarageSkinPresetBtn') || []
@@ -299,6 +311,7 @@ export function createWelcomeModalController({
     const previewSettingsCloseBtnEl = document.getElementById('welcomePreviewSettingsCloseBtn');
     const settingsPanelEl = document.getElementById('welcomeSettingsPanel');
     const settingsFullscreenCardEl = document.getElementById('welcomeSettingsFullscreenCard');
+    const settingsHidePanelsCardEl = document.getElementById('welcomeSettingsHidePanelsCard');
     const previewDonateOverlayEl = document.getElementById('welcomePreviewDonateOverlay');
     const previewDonateCloseBtnEl = document.getElementById('welcomePreviewDonateCloseBtn');
     const previewOnlineOverlayEl = document.getElementById('welcomePreviewOnlineOverlay');
@@ -399,6 +412,7 @@ export function createWelcomeModalController({
     let authUiState = normalizeWelcomeAuthState(getAuthState?.());
     let authSignedInSection = 'security';
     let autoFullscreenOnStart = readPersistedAutoFullscreenOnStart(true);
+    let hideGameplayPanels = readPersistedHideGameplayPanels(false);
     let authLocalStatusText = '';
     let authLocalStatusTone = 'muted';
     let garageNoticeText = '';
@@ -444,11 +458,13 @@ export function createWelcomeModalController({
     };
     const introVideoState = {
         available: Boolean(previewShellEl && introVideoOverlayEl && introVideoEl),
+        sourceAvailable: true,
         active: false,
         dismissed: false,
         hideTimeoutHandle: null,
         listenersBound: false,
     };
+    let showroomIntroVideoConfig = getShowroomIntroVideoConfig();
     const hasOnlineStartFlow = Boolean(
         startActionsEl &&
         onlineModeFlowEl &&
@@ -576,6 +592,7 @@ export function createWelcomeModalController({
     setTaglineByIndex(0);
     applySelectedPreset(selectedVehicleIndex, false);
     resetStartSequenceUi();
+    applyShowroomIntroVideoConfig(showroomIntroVideoConfig);
     syncAuthUi();
     syncWelcomeLeaderboardUi();
     syncWelcomeOnlineUi();
@@ -583,6 +600,12 @@ export function createWelcomeModalController({
     bindVehicleButtons();
     initializePreviewLoadingUi();
     startPreviewLoadingAnimation();
+    void initializeShowroomIntroVideoManager()
+        .then((config) => {
+            applyShowroomIntroVideoConfig(config);
+        })
+        .catch(() => {});
+    window.addEventListener(SHOWROOM_INTRO_VIDEO_UPDATED_EVENT, handleShowroomIntroVideoUpdated);
     document.addEventListener(WELCOME_DONATE_OPEN_EVENT, () => {
         if (rootEl.hidden) {
             return;
@@ -606,6 +629,15 @@ export function createWelcomeModalController({
         autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
         persistAutoFullscreenOnStart(autoFullscreenOnStart);
         syncAutoFullscreenPreferenceUi();
+    });
+    hideGameplayPanelsInputEl?.addEventListener('change', () => {
+        hideGameplayPanels = Boolean(hideGameplayPanelsInputEl.checked);
+        if (typeof onHideGameplayPanelsChange === 'function') {
+            hideGameplayPanels = Boolean(onHideGameplayPanelsChange(hideGameplayPanels));
+        } else {
+            persistHideGameplayPanels(hideGameplayPanels);
+        }
+        syncGameplayPanelsPreferenceUi();
     });
     if (hasAuthPanel) {
         authSignInTabEl.addEventListener('click', () => {
@@ -957,6 +989,7 @@ export function createWelcomeModalController({
             setAuthSignedInSection('security', { skipSync: true });
             setWalletPanelOpen(false, { skipSync: true });
             syncAutoFullscreenPreferenceUi();
+            syncGameplayPanelsPreferenceUi();
             setAuthState(getAuthState?.());
             const shouldOpenProfileOnShow = Boolean(authUiState.authenticated);
             setWelcomeLeaderboardOpen(false, { skipSync: true });
@@ -982,6 +1015,7 @@ export function createWelcomeModalController({
             applyPreviewPose();
             renderPreview();
             schedulePreviewLoadingReady();
+            void refreshManagedShowroomIntroVideoSource();
             showIntroVideoOverlay();
         },
         hide() {
@@ -1116,6 +1150,27 @@ export function createWelcomeModalController({
         const fullscreenState = autoFullscreenOnStart ? 'enabled' : 'disabled';
         settingsPanelEl?.setAttribute('data-auto-fullscreen', fullscreenState);
         settingsFullscreenCardEl?.setAttribute('data-state', fullscreenState);
+    }
+
+    function syncGameplayPanelsPreferenceUi() {
+        hideGameplayPanels =
+            typeof getHideGameplayPanels === 'function'
+                ? Boolean(getHideGameplayPanels())
+                : readPersistedHideGameplayPanels(hideGameplayPanels);
+        if (hideGameplayPanelsInputEl) {
+            hideGameplayPanelsInputEl.checked = hideGameplayPanels;
+        }
+        const panelState = hideGameplayPanels ? 'enabled' : 'disabled';
+        settingsPanelEl?.setAttribute('data-hide-gameplay-panels', panelState);
+        settingsHidePanelsCardEl?.setAttribute('data-state', panelState);
+    }
+
+    async function refreshManagedShowroomIntroVideoSource() {
+        const config = await refreshShowroomIntroVideoConfig();
+        applyShowroomIntroVideoConfig(config, {
+            restartPlayback: introVideoState.active,
+        });
+        return config;
     }
 
     function initializePreviewLoadingUi() {
@@ -1272,7 +1327,11 @@ export function createWelcomeModalController({
     }
 
     function showIntroVideoOverlay() {
-        if (!introVideoState.available || introVideoState.dismissed) {
+        if (
+            !introVideoState.available ||
+            !introVideoState.sourceAvailable ||
+            introVideoState.dismissed
+        ) {
             return;
         }
         if (introVideoState.hideTimeoutHandle != null) {
@@ -1370,6 +1429,69 @@ export function createWelcomeModalController({
 
     function handleIntroVideoError() {
         hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+    }
+
+    function handleShowroomIntroVideoUpdated(event) {
+        const nextConfig =
+            event?.detail && typeof event.detail === 'object'
+                ? event.detail
+                : getShowroomIntroVideoConfig();
+        applyShowroomIntroVideoConfig(nextConfig, {
+            restartPlayback: introVideoState.active,
+        });
+    }
+
+    function applyShowroomIntroVideoConfig(config, { restartPlayback = false } = {}) {
+        showroomIntroVideoConfig =
+            config && typeof config === 'object' ? { ...config } : getShowroomIntroVideoConfig();
+        const nextUrl =
+            typeof showroomIntroVideoConfig.url === 'string'
+                ? showroomIntroVideoConfig.url.trim()
+                : '';
+        introVideoState.sourceAvailable =
+            Boolean(showroomIntroVideoConfig.available !== false) && Boolean(nextUrl);
+
+        if (!introVideoState.available) {
+            return;
+        }
+        if (!introVideoState.sourceAvailable) {
+            hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+            return;
+        }
+
+        const currentAssignedUrl =
+            introVideoEl.dataset.managedSrc ||
+            introVideoSourceEl?.getAttribute('src') ||
+            introVideoEl.getAttribute('src') ||
+            '';
+        if (currentAssignedUrl === nextUrl) {
+            return;
+        }
+
+        if (introVideoSourceEl) {
+            introVideoSourceEl.src = nextUrl;
+            introVideoEl.removeAttribute('src');
+        } else {
+            introVideoEl.src = nextUrl;
+        }
+        introVideoEl.dataset.managedSrc = nextUrl;
+        introVideoEl.load();
+
+        if (!restartPlayback || !introVideoState.active) {
+            return;
+        }
+
+        try {
+            introVideoEl.currentTime = 0;
+        } catch {
+            // Ignore browsers that block seeking until the new source is ready.
+        }
+        const playPromise = introVideoEl.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+                hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+            });
+        }
     }
 
     function setPreviewLoadingProgress(nextProgress) {

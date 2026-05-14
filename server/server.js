@@ -9,6 +9,7 @@ const Stripe = require('stripe');
 const { Server } = require('socket.io');
 const { createAudioPrefsStore } = require('./audio-prefs-store');
 const { createBillboardContentStore } = require('./billboard-content-store');
+const { createShowroomIntroVideoStore } = require('./showroom-intro-video-store');
 const {
     createLeaderboardStore,
     ensureLeaderboardSchema,
@@ -234,6 +235,11 @@ const billboardContentStore = createBillboardContentStore({
     manifestFilePath: path.join(__dirname, 'data/billboard-content.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/billboards'),
 });
+const showroomIntroVideoStore = createShowroomIntroVideoStore({
+    manifestFilePath: path.join(__dirname, 'data/showroom-intro-video.json'),
+    uploadsDirectoryPath: path.join(__dirname, '../public/uploads/showroom-intro'),
+    defaultVideoFilePath: path.join(__dirname, '../public/assets/Demo/Demo.mp4'),
+});
 const io = new Server(server, {
     cors: {
         origin: resolveSocketCorsOrigin,
@@ -353,6 +359,89 @@ app.post('/api/billboard-content/:groupId', express.json({ limit: '512mb' }), as
         res.status(statusCode).json({
             ok: false,
             error: error?.message || 'Billboard content upload failed.',
+        });
+    }
+});
+app.get('/api/showroom-intro-video', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+
+    try {
+        const video = await showroomIntroVideoStore.readConfig();
+        res.json({
+            ok: true,
+            video,
+        });
+    } catch (error) {
+        console.error('Showroom intro video config read failed:', error);
+        res.status(500).json({
+            ok: false,
+            error: 'Could not read showroom intro video config.',
+        });
+    }
+});
+app.post(
+    '/api/showroom-intro-video',
+    express.raw({ type: () => true, limit: '320mb' }),
+    async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        if (!isBillboardContentAdminAuthorized(req)) {
+            res.status(403).json({
+                ok: false,
+                error: 'Showroom intro admin access denied.',
+            });
+            return;
+        }
+
+        try {
+            const rawNameHeader = Array.isArray(req.headers?.['x-upload-filename'])
+                ? req.headers['x-upload-filename'][0]
+                : req.headers?.['x-upload-filename'] || '';
+            const video = await showroomIntroVideoStore.writeUploadedVideo({
+                buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+                mimeType: req.headers?.['content-type'] || '',
+                originalFileName: safelyDecodeUploadFileName(rawNameHeader),
+            });
+            res.json({
+                ok: true,
+                video,
+            });
+        } catch (error) {
+            const statusCode = resolveHttpStatusCode(error?.statusCode);
+            if (statusCode >= 500) {
+                console.error('Showroom intro video upload failed:', error);
+            }
+            res.status(statusCode).json({
+                ok: false,
+                error: error?.message || 'Showroom intro video upload failed.',
+            });
+        }
+    }
+);
+app.delete('/api/showroom-intro-video', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isBillboardContentAdminAuthorized(req)) {
+        res.status(403).json({
+            ok: false,
+            error: 'Showroom intro admin access denied.',
+        });
+        return;
+    }
+
+    try {
+        const result = await showroomIntroVideoStore.resetVideo();
+        res.json({
+            ok: true,
+            removed: Boolean(result.removed),
+            video: result.video,
+        });
+    } catch (error) {
+        const statusCode = resolveHttpStatusCode(error?.statusCode);
+        if (statusCode >= 500) {
+            console.error('Showroom intro video reset failed:', error);
+        }
+        res.status(statusCode).json({
+            ok: false,
+            error: error?.message || 'Showroom intro video reset failed.',
         });
     }
 });
@@ -2365,6 +2454,18 @@ function isAdminTokenAuthorized(req, expectedToken = '') {
         );
     } catch {
         return false;
+    }
+}
+
+function safelyDecodeUploadFileName(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized) {
+        return '';
+    }
+    try {
+        return decodeURIComponent(normalized);
+    } catch {
+        return normalized;
     }
 }
 

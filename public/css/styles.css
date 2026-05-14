@@ -3111,6 +3111,18 @@ body.edit-mode-active #starterControlsHud {
     transform: translate(-50%, 0) scale(1);
 }
 
+body.gameplay-panels-hidden #leftHudStack,
+body.gameplay-panels-hidden #botPanel,
+body.gameplay-panels-hidden #miniMapHud,
+body.gameplay-panels-hidden #speedometerHud,
+body.gameplay-panels-hidden #starterMineRackHud,
+body.gameplay-panels-hidden #starterControlsHud,
+body.gameplay-panels-hidden #scorePopupLayer,
+body.gameplay-panels-hidden #appToastLayer,
+body.gameplay-panels-hidden #vehicleWeaponScopeOverlay {
+    display: none !important;
+}
+
 .speedometerShell {
     position: relative;
     width: 100%;
@@ -4679,6 +4691,13 @@ body.race-intro-active #miniMapHud {
     box-shadow: inset 0 0 0 1px rgba(215, 236, 255, 0.05);
 }
 
+.pauseGraphicsPanel[data-state='hidden'] {
+    border-color: rgba(255, 211, 122, 0.36);
+    background:
+        linear-gradient(165deg, rgba(52, 42, 16, 0.6), rgba(23, 18, 8, 0.72)),
+        radial-gradient(circle at 14% 18%, rgba(255, 216, 132, 0.12), rgba(255, 216, 132, 0) 34%);
+}
+
 .pauseCameraTunePanel {
     display: grid;
     gap: 10px;
@@ -4815,6 +4834,12 @@ body.race-intro-active #miniMapHud {
 .pauseGraphicsActions {
     display: grid;
     grid-template-columns: 1fr;
+}
+
+.pauseGraphicsPanel[data-state='hidden'] .pauseBtn.quality {
+    border-color: rgba(255, 215, 132, 0.62);
+    background: rgba(92, 69, 24, 0.74);
+    color: #fff7dc;
 }
 
 .pauseActions {

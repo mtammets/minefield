@@ -1295,6 +1295,36 @@
                                                 </span>
                                             </span>
                                         </label>
+                                        <label
+                                            id="welcomeSettingsHidePanelsCard"
+                                            class="welcomeSettingsOptionCard welcomeAuthSecurityItem"
+                                            for="welcomeHideGameplayPanelsInput"
+                                        >
+                                            <span
+                                                class="welcomeSettingsOptionCopy welcomeAuthSecurityCopy"
+                                            >
+                                                <span class="welcomeSettingsOptionTitleRow">
+                                                    <span
+                                                        class="welcomeSettingsOptionTitle welcomeAuthSecurityItemTitle"
+                                                    >
+                                                        HIDE HUD PANELS
+                                                    </span>
+                                                </span>
+                                            </span>
+                                            <span class="welcomeSettingsOptionToggle">
+                                                <span class="welcomeAuthToggleControl">
+                                                    <input
+                                                        id="welcomeHideGameplayPanelsInput"
+                                                        class="welcomeAuthToggleInput"
+                                                        type="checkbox"
+                                                    />
+                                                    <span
+                                                        class="welcomeAuthToggleTrack"
+                                                        aria-hidden="true"
+                                                    ></span>
+                                                </span>
+                                            </span>
+                                        </label>
                                     </section>
                                 </div>
                             </div>
@@ -1605,6 +1635,16 @@
                     <div class="pauseGraphicsActions">
                         <button id="pauseGraphicsCycleBtn" class="pauseBtn quality" type="button">
                             MODE: MEDIUM
+                        </button>
+                    </div>
+                </div>
+                <div id="pauseHudPanel" class="pauseGraphicsPanel">
+                    <div class="pauseGraphicsHeader">
+                        <span class="pauseGraphicsLabel">GAMEPLAY HUD</span>
+                    </div>
+                    <div class="pauseGraphicsActions">
+                        <button id="pauseHudToggleBtn" class="pauseBtn quality" type="button">
+                            PANELS: VISIBLE
                         </button>
                     </div>
                 </div>

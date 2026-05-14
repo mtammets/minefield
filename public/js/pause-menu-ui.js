@@ -4,6 +4,8 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
     const resumeBtnEl = document.getElementById('pauseResumeBtn');
     const graphicsPanelEl = document.getElementById('pauseGraphicsPanel');
     const graphicsCycleBtnEl = document.getElementById('pauseGraphicsCycleBtn');
+    const hudPanelEl = document.getElementById('pauseHudPanel');
+    const hudToggleBtnEl = document.getElementById('pauseHudToggleBtn');
     const cameraTunePanelEl = document.getElementById('pauseCameraTunePanel');
     const cameraTuneScopeEl = document.getElementById('pauseCameraTuneScope');
     const cameraTuneDistanceToneEl = document.getElementById('pauseCameraTuneDistanceTone');
@@ -18,9 +20,12 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
 
     let getGraphicsQualitySnapshot = () => null;
     let onCycleGraphicsQualityMode = null;
+    let getHudVisibilitySnapshot = () => null;
+    let onToggleHudVisibility = null;
     let getCameraTuneSnapshot = () => null;
     let onResetCameraTune = null;
     let lastGraphicsSignature = '';
+    let lastHudSignature = '';
     let lastCameraTuneSignature = '';
 
     exitBtnEl.addEventListener('click', () => {
@@ -40,6 +45,17 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         }
         refreshGraphicsStatus();
     });
+    hudToggleBtnEl?.addEventListener('click', () => {
+        if (typeof onToggleHudVisibility !== 'function') {
+            return;
+        }
+        const snapshot = onToggleHudVisibility();
+        if (snapshot && typeof snapshot === 'object') {
+            applyHudVisibilitySnapshot(snapshot);
+            return;
+        }
+        refreshHudVisibilityStatus();
+    });
     cameraTuneResetBtnEl?.addEventListener('click', () => {
         if (typeof onResetCameraTune !== 'function') {
             return;
@@ -57,14 +73,17 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         hide,
         isVisible,
         configureGraphicsControls,
+        configureHudVisibilityControls,
         configureCameraTuneControls,
         refreshGraphicsStatus,
+        refreshHudVisibilityStatus,
         refreshCameraTuneStatus,
     };
 
     function show() {
         rootEl.hidden = false;
         refreshGraphicsStatus();
+        refreshHudVisibilityStatus();
         refreshCameraTuneStatus();
     }
 
@@ -85,6 +104,15 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         refreshGraphicsStatus();
     }
 
+    function configureHudVisibilityControls({ getSnapshot = null, onToggle = null } = {}) {
+        getHudVisibilitySnapshot = typeof getSnapshot === 'function' ? getSnapshot : () => null;
+        onToggleHudVisibility = typeof onToggle === 'function' ? onToggle : null;
+        if (hudToggleBtnEl) {
+            hudToggleBtnEl.disabled = typeof onToggleHudVisibility !== 'function';
+        }
+        refreshHudVisibilityStatus();
+    }
+
     function configureCameraTuneControls({ getSnapshot = null, onReset = null } = {}) {
         getCameraTuneSnapshot = typeof getSnapshot === 'function' ? getSnapshot : () => null;
         onResetCameraTune = typeof onReset === 'function' ? onReset : null;
@@ -100,6 +128,14 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         }
         const snapshot = getGraphicsQualitySnapshot?.();
         applyGraphicsSnapshot(snapshot);
+    }
+
+    function refreshHudVisibilityStatus() {
+        if (!hudPanelEl) {
+            return;
+        }
+        const snapshot = getHudVisibilitySnapshot?.();
+        applyHudVisibilitySnapshot(snapshot);
     }
 
     function refreshCameraTuneStatus() {
@@ -143,6 +179,41 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         lastGraphicsSignature = signature;
     }
 
+    function applyHudVisibilitySnapshot(snapshot = null) {
+        if (!hudPanelEl || !hudToggleBtnEl) {
+            return;
+        }
+
+        if (!snapshot || typeof snapshot !== 'object') {
+            const fallbackSignature = 'missing';
+            if (lastHudSignature === fallbackSignature) {
+                return;
+            }
+            hudPanelEl.hidden = true;
+            hudToggleBtnEl.textContent = 'PANELS';
+            hudToggleBtnEl.disabled = true;
+            lastHudSignature = fallbackSignature;
+            return;
+        }
+
+        hudPanelEl.hidden = false;
+        const hidden = Boolean(snapshot.hidden);
+        const buttonText = `PANELS: ${hidden ? 'HIDDEN' : 'VISIBLE'}`;
+        const signature = [
+            buttonText,
+            hidden ? 'hidden' : 'visible',
+            typeof onToggleHudVisibility === 'function' ? 'enabled' : 'disabled',
+        ].join('|');
+        if (signature === lastHudSignature) {
+            return;
+        }
+
+        hudPanelEl.dataset.state = hidden ? 'hidden' : 'visible';
+        hudToggleBtnEl.textContent = buttonText;
+        hudToggleBtnEl.disabled = typeof onToggleHudVisibility !== 'function';
+        lastHudSignature = signature;
+    }
+
     function applyCameraTuneSnapshot(snapshot = null) {
         if (!cameraTunePanelEl) {
             return;
@@ -158,9 +229,15 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
             return;
         }
 
-        const scopeLabel = String(snapshot.scopeLabel || 'LOCAL').trim().toUpperCase();
-        const distanceTone = String(snapshot.distanceTone || 'BALANCED').trim().toUpperCase();
-        const heightTone = String(snapshot.heightTone || 'NEUTRAL').trim().toUpperCase();
+        const scopeLabel = String(snapshot.scopeLabel || 'LOCAL')
+            .trim()
+            .toUpperCase();
+        const distanceTone = String(snapshot.distanceTone || 'BALANCED')
+            .trim()
+            .toUpperCase();
+        const heightTone = String(snapshot.heightTone || 'NEUTRAL')
+            .trim()
+            .toUpperCase();
         const distancePercent = clampPercent(snapshot.distancePercent);
         const heightPercent = clampPercent(snapshot.heightPercent);
         const active = Boolean(snapshot.active);
@@ -210,8 +287,10 @@ function createNoopController() {
             return false;
         },
         configureGraphicsControls() {},
+        configureHudVisibilityControls() {},
         configureCameraTuneControls() {},
         refreshGraphicsStatus() {},
+        refreshHudVisibilityStatus() {},
         refreshCameraTuneStatus() {},
     };
 }
