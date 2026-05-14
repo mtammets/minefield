@@ -193,6 +193,9 @@ const HTTP_PLAYER_ECONOMY_PURCHASE_WINDOW_MS = 5 * 60_000;
 const HTTP_PLAYER_ECONOMY_PURCHASE_MAX = 8;
 const HTTP_PLAYER_ECONOMY_PURCHASE_VERIFY_WINDOW_MS = 60_000;
 const HTTP_PLAYER_ECONOMY_PURCHASE_VERIFY_MAX = 20;
+const LIVE_LEADERBOARD_BROADCAST_TOP_LIMIT = 10;
+const LIVE_LEADERBOARD_BROADCAST_WINDOW_RADIUS = 2;
+const LIVE_LEADERBOARD_BROADCAST_DEBOUNCE_MS = 180;
 const ONLINE_AUTH_REQUIRED_ERROR = 'Sign in is required for online rooms.';
 const ONLINE_AUTH_SERVER_ERROR = 'Online auth is not configured on this server.';
 const USER_STORAGE_LIST_LIMIT = 100;
@@ -239,6 +242,8 @@ let supabaseStorageAvailabilityCache = null;
 let supabaseStorageAvailabilityCacheExpiresAt = 0;
 let supabaseStorageAvailabilityRefreshPromise = null;
 let lastSupabaseStorageAvailabilityWarning = '';
+let pendingGlobalLeaderboardBroadcastReason = 'update';
+let globalLeaderboardBroadcastTimer = null;
 
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -250,9 +255,13 @@ app.use((req, res, next) => {
     res.setHeader('Content-Security-Policy', HTTP_CONTENT_SECURITY_POLICY);
     next();
 });
-app.post('/api/donate/stripe-webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-    await handleStripeDonateWebhook(req, res);
-});
+app.post(
+    '/api/donate/stripe-webhook',
+    express.raw({ type: 'application/json' }),
+    async (req, res) => {
+        await handleStripeDonateWebhook(req, res);
+    }
+);
 app.get('/api/billboard-content', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
@@ -582,112 +591,116 @@ app.post('/api/player-economy/sync', express.json({ limit: '64kb' }), async (req
     }
 });
 
-app.post('/api/player-economy/credits-checkout-session', express.json({ limit: '16kb' }), async (req, res) => {
-    res.setHeader('Cache-Control', 'no-store');
-    if (!stripeClient) {
-        res.status(503).json({
-            ok: false,
-            error: 'Credits checkout is not configured on this server.',
-        });
-        return;
-    }
-    if (!playerEconomyStore.isConfigured()) {
-        res.status(503).json({
-            ok: false,
-            error: 'Player wallet sync is not configured on this server.',
-        });
-        return;
-    }
-    if (
-        !consumeHttpRequestQuota(
-            req,
-            'player-economy-purchase',
-            HTTP_PLAYER_ECONOMY_PURCHASE_WINDOW_MS,
-            HTTP_PLAYER_ECONOMY_PURCHASE_MAX
-        )
-    ) {
-        res.status(429).json({
-            ok: false,
-            error: 'Too many checkout attempts. Try again shortly.',
-        });
-        return;
-    }
-
-    try {
-        const authIdentity = await resolveAuthenticatedRequestIdentity(req);
-        if (!authIdentity?.userId) {
-            res.status(401).json({
+app.post(
+    '/api/player-economy/credits-checkout-session',
+    express.json({ limit: '16kb' }),
+    async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        if (!stripeClient) {
+            res.status(503).json({
                 ok: false,
-                error: 'Sign in before buying credits.',
+                error: 'Credits checkout is not configured on this server.',
+            });
+            return;
+        }
+        if (!playerEconomyStore.isConfigured()) {
+            res.status(503).json({
+                ok: false,
+                error: 'Player wallet sync is not configured on this server.',
+            });
+            return;
+        }
+        if (
+            !consumeHttpRequestQuota(
+                req,
+                'player-economy-purchase',
+                HTTP_PLAYER_ECONOMY_PURCHASE_WINDOW_MS,
+                HTTP_PLAYER_ECONOMY_PURCHASE_MAX
+            )
+        ) {
+            res.status(429).json({
+                ok: false,
+                error: 'Too many checkout attempts. Try again shortly.',
             });
             return;
         }
 
-        const checkoutBaseUrl = resolveDonateBaseUrl(req);
-        const successUrl = createCreditsPurchaseReturnUrl(checkoutBaseUrl, 'success', {
-            includeSessionId: true,
-        });
-        const cancelUrl = createCreditsPurchaseReturnUrl(checkoutBaseUrl, 'cancel');
-        if (!successUrl || !cancelUrl) {
-            res.status(500).json({
-                ok: false,
-                error: 'Could not determine checkout return URL.',
-            });
-            return;
-        }
+        try {
+            const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+            if (!authIdentity?.userId) {
+                res.status(401).json({
+                    ok: false,
+                    error: 'Sign in before buying credits.',
+                });
+                return;
+            }
 
-        const checkoutSession = await stripeClient.checkout.sessions.create({
-            mode: 'payment',
-            locale: 'en',
-            payment_method_types: ['card'],
-            client_reference_id: authIdentity.userId,
-            customer_email: authIdentity.email || undefined,
-            line_items: [
-                {
-                    quantity: 1,
-                    price_data: {
-                        currency: DONATE_CURRENCY,
-                        unit_amount: PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS,
-                        product_data: {
-                            name: PLAYER_CREDITS_PURCHASE_PRODUCT_NAME,
+            const checkoutBaseUrl = resolveDonateBaseUrl(req);
+            const successUrl = createCreditsPurchaseReturnUrl(checkoutBaseUrl, 'success', {
+                includeSessionId: true,
+            });
+            const cancelUrl = createCreditsPurchaseReturnUrl(checkoutBaseUrl, 'cancel');
+            if (!successUrl || !cancelUrl) {
+                res.status(500).json({
+                    ok: false,
+                    error: 'Could not determine checkout return URL.',
+                });
+                return;
+            }
+
+            const checkoutSession = await stripeClient.checkout.sessions.create({
+                mode: 'payment',
+                locale: 'en',
+                payment_method_types: ['card'],
+                client_reference_id: authIdentity.userId,
+                customer_email: authIdentity.email || undefined,
+                line_items: [
+                    {
+                        quantity: 1,
+                        price_data: {
+                            currency: DONATE_CURRENCY,
+                            unit_amount: PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS,
+                            product_data: {
+                                name: PLAYER_CREDITS_PURCHASE_PRODUCT_NAME,
+                            },
                         },
                     },
+                ],
+                success_url: successUrl,
+                cancel_url: cancelUrl,
+                metadata: {
+                    integration: 'minefield-drift',
+                    checkoutPurpose: 'credits-purchase',
+                    purchasePackId: PLAYER_CREDITS_PURCHASE_PACK_ID,
+                    userId: authIdentity.userId,
+                    creditsAmount: String(PLAYER_CREDITS_PURCHASE_GRANT),
+                    amountCents: String(PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS),
+                    currencyCode: DONATE_CURRENCY,
                 },
-            ],
-            success_url: successUrl,
-            cancel_url: cancelUrl,
-            metadata: {
-                integration: 'minefield-drift',
-                checkoutPurpose: 'credits-purchase',
-                purchasePackId: PLAYER_CREDITS_PURCHASE_PACK_ID,
-                userId: authIdentity.userId,
-                creditsAmount: String(PLAYER_CREDITS_PURCHASE_GRANT),
-                amountCents: String(PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS),
-                currencyCode: DONATE_CURRENCY,
-            },
-        });
-        if (typeof checkoutSession?.url !== 'string' || !checkoutSession.url) {
-            throw new Error('Stripe did not return a checkout URL.');
-        }
+            });
+            if (typeof checkoutSession?.url !== 'string' || !checkoutSession.url) {
+                throw new Error('Stripe did not return a checkout URL.');
+            }
 
-        res.status(201).json({
-            ok: true,
-            sessionId: checkoutSession.id,
-            checkoutUrl: checkoutSession.url,
-            pack: {
-                creditsGranted: PLAYER_CREDITS_PURCHASE_GRANT,
-                amountCents: PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS,
-                currency: DONATE_CURRENCY,
-            },
-        });
-    } catch (error) {
-        console.error('Credits checkout session creation failed:', error);
-        res.status(502).json({
-            ok: false,
-            error: 'Could not start secure credits checkout. Try again.',
-        });
+            res.status(201).json({
+                ok: true,
+                sessionId: checkoutSession.id,
+                checkoutUrl: checkoutSession.url,
+                pack: {
+                    creditsGranted: PLAYER_CREDITS_PURCHASE_GRANT,
+                    amountCents: PLAYER_CREDITS_PURCHASE_AMOUNT_CENTS,
+                    currency: DONATE_CURRENCY,
+                },
+            });
+        } catch (error) {
+            console.error('Credits checkout session creation failed:', error);
+            res.status(502).json({
+                ok: false,
+                error: 'Could not start secure credits checkout. Try again.',
+            });
+        }
     }
-});
+);
 
 app.get('/api/player-economy/credits-session-status', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
@@ -882,6 +895,7 @@ app.post('/api/leaderboard/round-result', async (req, res) => {
             ok: true,
             entry: result.entry,
         });
+        scheduleGlobalLeaderboardBroadcast('round-result');
     } catch (error) {
         console.error('Supabase leaderboard write failed:', error);
         res.status(502).json({
@@ -2124,6 +2138,59 @@ function sanitizeCurrencyCode(value, fallback = 'eur') {
     return /^[a-z]{3}$/.test(normalized) ? normalized : fallback;
 }
 
+function scheduleGlobalLeaderboardBroadcast(reason = 'update') {
+    if (!leaderboardStore.isConfigured()) {
+        return;
+    }
+    pendingGlobalLeaderboardBroadcastReason = sanitizeLeaderboardBroadcastReason(reason);
+    if (globalLeaderboardBroadcastTimer) {
+        return;
+    }
+    globalLeaderboardBroadcastTimer = setTimeout(() => {
+        globalLeaderboardBroadcastTimer = null;
+        const broadcastReason = pendingGlobalLeaderboardBroadcastReason;
+        pendingGlobalLeaderboardBroadcastReason = 'update';
+        void broadcastGlobalLeaderboardUpdate(broadcastReason);
+    }, LIVE_LEADERBOARD_BROADCAST_DEBOUNCE_MS);
+}
+
+async function broadcastGlobalLeaderboardUpdate(reason = 'update') {
+    if (!leaderboardStore.isConfigured()) {
+        return;
+    }
+    try {
+        const leaderboardView = await leaderboardStore.readLeaderboardView({
+            topLimit: LIVE_LEADERBOARD_BROADCAST_TOP_LIMIT,
+            viewerWindowRadius: LIVE_LEADERBOARD_BROADCAST_WINDOW_RADIUS,
+            viewerUserId: '',
+        });
+        io.emit('leaderboard:update', {
+            ok: true,
+            reason: sanitizeLeaderboardBroadcastReason(reason),
+            broadcastedAt: new Date().toISOString(),
+            ...leaderboardView,
+        });
+    } catch (error) {
+        console.error('Live leaderboard broadcast failed:', error);
+    }
+}
+
+function sanitizeLeaderboardBroadcastReason(value) {
+    if (typeof value !== 'string') {
+        return 'update';
+    }
+    const normalized = value.trim().toLowerCase();
+    if (
+        normalized === 'round-result' ||
+        normalized === 'update' ||
+        normalized === 'manual' ||
+        normalized === 'bootstrap'
+    ) {
+        return normalized;
+    }
+    return 'update';
+}
+
 function sanitizeCheckoutText(value, fallback = 'Support Minefield Drift') {
     if (typeof value !== 'string') {
         return fallback;
@@ -2354,11 +2421,7 @@ function normalizeCreditsPurchaseFromCheckoutSession(checkoutSession = null) {
     const creditsAmount = Math.max(
         0,
         Math.round(
-            Number(
-                metadata.creditsAmount ||
-                    metadata.credits ||
-                    PLAYER_CREDITS_PURCHASE_GRANT
-            ) || 0
+            Number(metadata.creditsAmount || metadata.credits || PLAYER_CREDITS_PURCHASE_GRANT) || 0
         )
     );
     const amountCents = Math.max(
