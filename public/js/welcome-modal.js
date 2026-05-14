@@ -67,6 +67,7 @@ const WELCOME_START_SEQUENCE_PREP_CAP = 0.9;
 const WELCOME_START_SEQUENCE_READY_CAP = 0.98;
 const WELCOME_PREVIEW_LOADING_MIN_VISIBLE_MS = 700;
 const WELCOME_PREVIEW_LOADING_FADE_MS = 420;
+const WELCOME_INTRO_VIDEO_FADE_MS = 320;
 const WELCOME_PREVIEW_LOADING_SOFT_CAP = 0.94;
 const WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT = 3;
 const WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY = 0.011;
@@ -266,6 +267,8 @@ export function createWelcomeModalController({
     const previewShellEl = document.getElementById('welcomePreviewShell');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
     const previewLoadingEl = document.getElementById('welcomePreviewLoading');
+    const introVideoOverlayEl = document.getElementById('welcomeIntroVideoOverlay');
+    const introVideoEl = document.getElementById('welcomeIntroVideo');
     renderGarageWrapPresetButtons(authGarageWrapPresetGridEl);
     const authGarageWrapPresetBtnEls = Array.from(
         authGarageWrapPresetGridEl?.querySelectorAll?.('.welcomeAuthGarageSkinPresetBtn') || []
@@ -439,6 +442,13 @@ export function createWelcomeModalController({
         progress: 0,
         targetProgress: 0,
     };
+    const introVideoState = {
+        available: Boolean(previewShellEl && introVideoOverlayEl && introVideoEl),
+        active: false,
+        dismissed: false,
+        hideTimeoutHandle: null,
+        listenersBound: false,
+    };
     const hasOnlineStartFlow = Boolean(
         startActionsEl &&
         onlineModeFlowEl &&
@@ -550,6 +560,7 @@ export function createWelcomeModalController({
         previewShellEl.dataset.settingsOpen = 'false';
         previewShellEl.dataset.donateOpen = 'false';
         previewShellEl.dataset.onlineOpen = 'false';
+        previewShellEl.dataset.introVideoActive = 'false';
     }
     if (authPanelEl && previewAccountBodyEl) {
         previewAccountBodyEl.append(authPanelEl);
@@ -936,6 +947,7 @@ export function createWelcomeModalController({
             releasePointerCapture: false,
         });
     });
+    introVideoEl?.addEventListener('error', handleIntroVideoError);
 
     return {
         show() {
@@ -970,9 +982,11 @@ export function createWelcomeModalController({
             applyPreviewPose();
             renderPreview();
             schedulePreviewLoadingReady();
+            showIntroVideoOverlay();
         },
         hide() {
             cancelStartSequence();
+            hideIntroVideoOverlay({ markDismissed: false, resetPlayback: true });
             resetTaglineTransition();
             setAuthSignedInSection('security', { skipSync: true });
             setWalletPanelOpen(false, { skipSync: true });
@@ -1257,6 +1271,107 @@ export function createWelcomeModalController({
         }, WELCOME_PREVIEW_LOADING_FADE_MS);
     }
 
+    function showIntroVideoOverlay() {
+        if (!introVideoState.available || introVideoState.dismissed) {
+            return;
+        }
+        if (introVideoState.hideTimeoutHandle != null) {
+            window.clearTimeout(introVideoState.hideTimeoutHandle);
+            introVideoState.hideTimeoutHandle = null;
+        }
+        introVideoState.active = true;
+        introVideoOverlayEl.hidden = false;
+        introVideoOverlayEl.classList.remove('is-hiding');
+        introVideoOverlayEl.setAttribute('aria-hidden', 'false');
+        if (previewShellEl) {
+            previewShellEl.dataset.introVideoActive = 'true';
+        }
+        bindIntroVideoDismissListeners();
+        try {
+            introVideoEl.currentTime = 0;
+        } catch {
+            // Ignore browsers that block seeking before metadata is ready.
+        }
+        const playPromise = introVideoEl.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+                hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+            });
+        }
+    }
+
+    function hideIntroVideoOverlay({ markDismissed = false, resetPlayback = false } = {}) {
+        if (!introVideoState.available) {
+            return;
+        }
+        if (markDismissed) {
+            introVideoState.dismissed = true;
+        }
+        if (introVideoState.hideTimeoutHandle != null) {
+            window.clearTimeout(introVideoState.hideTimeoutHandle);
+            introVideoState.hideTimeoutHandle = null;
+        }
+        introVideoState.active = false;
+        unbindIntroVideoDismissListeners();
+        if (previewShellEl) {
+            previewShellEl.dataset.introVideoActive = 'false';
+        }
+        if (introVideoOverlayEl.hidden) {
+            pauseIntroVideoPlayback({ resetPlayback });
+            return;
+        }
+        introVideoOverlayEl.classList.add('is-hiding');
+        introVideoOverlayEl.setAttribute('aria-hidden', 'true');
+        introVideoState.hideTimeoutHandle = window.setTimeout(() => {
+            introVideoState.hideTimeoutHandle = null;
+            introVideoOverlayEl.hidden = true;
+            introVideoOverlayEl.classList.remove('is-hiding');
+            pauseIntroVideoPlayback({ resetPlayback });
+        }, WELCOME_INTRO_VIDEO_FADE_MS);
+    }
+
+    function pauseIntroVideoPlayback({ resetPlayback = false } = {}) {
+        if (!introVideoState.available) {
+            return;
+        }
+        introVideoEl.pause();
+        if (!resetPlayback) {
+            return;
+        }
+        try {
+            introVideoEl.currentTime = 0;
+        } catch {
+            // Ignore browsers that disallow a seek while the element is detaching.
+        }
+    }
+
+    function bindIntroVideoDismissListeners() {
+        if (!introVideoState.available || introVideoState.listenersBound) {
+            return;
+        }
+        document.addEventListener('pointerdown', handleIntroVideoDismissInteraction, true);
+        introVideoState.listenersBound = true;
+    }
+
+    function unbindIntroVideoDismissListeners() {
+        if (!introVideoState.listenersBound) {
+            return;
+        }
+        document.removeEventListener('pointerdown', handleIntroVideoDismissInteraction, true);
+        introVideoState.listenersBound = false;
+    }
+
+    function handleIntroVideoDismissInteraction() {
+        if (!introVideoState.active || rootEl.hidden) {
+            return;
+        }
+        hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+    }
+
+    function handleIntroVideoError() {
+        hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+    }
+
     function setPreviewLoadingProgress(nextProgress) {
         if (!previewLoadingState.active) {
             return;
@@ -1297,6 +1412,7 @@ export function createWelcomeModalController({
         if (launchSequenceState.active) {
             return;
         }
+        hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
         const normalizedMode = mode === 'online' ? 'online' : 'bots';
         const hasLaunchUi = Boolean(
             launchOverlayEl &&
