@@ -434,6 +434,7 @@ export function createMineSystemController(options = {}) {
         const localPlayerId = sanitizePlayerId(context.localPlayerId || getLocalPlayerId());
         const localCarPosition = context.localCarPosition || car.position;
         const enableLocalCollision = Boolean(context.enableLocalCollision);
+        const localMineImmune = Boolean(context.localMineImmune);
         const otherVehicleTargets = Array.isArray(context.otherVehicleTargets)
             ? context.otherVehicleTargets
             : getOtherVehicleTargets();
@@ -542,7 +543,13 @@ export function createMineSystemController(options = {}) {
                         : obstacleImpact
                 );
                 let thrownImpact = resolvedImpact;
-                if (enableLocalCollision && localMovement && localPlayerId && !localOwnMine) {
+                if (
+                    enableLocalCollision &&
+                    localMovement &&
+                    localPlayerId &&
+                    !localOwnMine &&
+                    !localMineImmune
+                ) {
                     thrownImpact = resolveEarliestThrownMineImpact(
                         thrownImpact,
                         resolveThrownMineMovementImpact({
@@ -657,9 +664,10 @@ export function createMineSystemController(options = {}) {
             const ownerLocalTriggerEnabled =
                 localPlayerId && mine.ownerId && mine.ownerId === localPlayerId;
             const localTriggerActive = mine.landed && (armed || ownerLocalTriggerEnabled);
+            const localImmuneToMine = localMineImmune && !ownerLocalTriggerEnabled;
 
             let detonatedThisFrame = false;
-            if (localMovement && localTriggerActive) {
+            if (localMovement && localTriggerActive && !localImmuneToMine) {
                 const ownMineCollision = Boolean(ownerLocalTriggerEnabled);
                 let localMovementForMine = localMovement;
                 if (ownMineCollision) {
@@ -1244,7 +1252,10 @@ export function createMineSystemController(options = {}) {
         }
 
         const launchSurfaceY = (Number(snapshot.y) || 0) - MINE_THROW_UP_OFFSET;
-        const baseGroundHeight = getGroundHeightAt(Number(snapshot.x) || 0, Number(snapshot.z) || 0);
+        const baseGroundHeight = getGroundHeightAt(
+            Number(snapshot.x) || 0,
+            Number(snapshot.z) || 0
+        );
         if (!Number.isFinite(baseGroundHeight)) {
             return 0;
         }
@@ -2525,7 +2536,11 @@ function isNearLaunchLowBarrierImpact(mine, impact) {
     const launchX = Number.isFinite(mine?.launchX) ? mine.launchX : mine?.mesh?.position?.x;
     const resolvedLaunchY = Number.isFinite(mine?.launchY) ? mine.launchY : mine?.mesh?.position?.y;
     const launchZ = Number.isFinite(mine?.launchZ) ? mine.launchZ : mine?.mesh?.position?.z;
-    if (!Number.isFinite(launchX) || !Number.isFinite(resolvedLaunchY) || !Number.isFinite(launchZ)) {
+    if (
+        !Number.isFinite(launchX) ||
+        !Number.isFinite(resolvedLaunchY) ||
+        !Number.isFinite(launchZ)
+    ) {
         return false;
     }
 

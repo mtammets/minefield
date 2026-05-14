@@ -74,6 +74,7 @@ import {
 } from './carphysics.js';
 import { addStars } from './stars.js';
 import { createCollectibleSystem } from './collectibles.js';
+import { createStealthPickupSystem } from './stealth-pickup-system.js';
 import { createBotTrafficSystem } from './bots.js';
 import {
     MAX_PHYSICS_STEPS_PER_FRAME,
@@ -208,6 +209,11 @@ const RUNTIME_SCENE_REPAIR_STATUS_COOLDOWN_MS = 2400;
 const PLAYER_SPAWN_CLEARANCE = 3.4;
 const PLAYER_SPAWN_BOT_CLEARANCE = 14;
 const PLAYER_SPAWN_CARDINAL_ROTATIONS = Object.freeze([0, Math.PI * 0.5, Math.PI, -Math.PI * 0.5]);
+const STEALTH_PICKUP_ID = 'central-plaza-stealth';
+const STEALTH_PICKUP_RESPAWN_DELAY_MS = 12000;
+const STEALTH_PICKUP_DURATION_MS = 9000;
+const STEALTH_PICKUP_FALLBACK_X = 0;
+const STEALTH_PICKUP_FALLBACK_Z = 16.5;
 const crashParts = getPlayerCarCrashParts();
 const initialPlayerEconomyState = createDefaultPlayerEconomyState();
 const selectedCarVehicleId = resolveOwnedVehicleIdForEconomy(
@@ -243,6 +249,30 @@ let runtimeGraphicsContextLossCount = 0;
 runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
 const performanceDiagnosticsController = createNoopPerformanceDiagnosticsController();
+
+function createLocalStealthPickupSnapshot({ available = true, respawnAt = 0 } = {}) {
+    const centralParkingLot = cityMapLayout?.centralParkingLot || null;
+    const x = Number(centralParkingLot?.centerX);
+    const maxZ = Number(centralParkingLot?.maxZ);
+    return {
+        id: STEALTH_PICKUP_ID,
+        available: Boolean(available),
+        respawnAt: Math.max(0, Math.round(Number(respawnAt) || 0)),
+        x: Number.isFinite(x) ? x : STEALTH_PICKUP_FALLBACK_X,
+        z: Number.isFinite(maxZ) ? maxZ - 7.5 : STEALTH_PICKUP_FALLBACK_Z,
+    };
+}
+
+function resetRuntimeStealthPickupState(gameMode = 'bots', { silent = true } = {}) {
+    const botsMode = gameMode !== 'online';
+    runtimeState.stealthPickupSystem?.applyPickupStateSnapshot?.(
+        botsMode ? createLocalStealthPickupSnapshot({ available: true }) : null
+    );
+    runtimeState.stealthPickupSystem?.setLocalStealthState?.(
+        { active: false, expiresAt: 0 },
+        { silent }
+    );
+}
 
 setPlayerCarAppearance({
     vehicleId: runtimeState.selectedCarVehicleId,
@@ -1808,6 +1838,7 @@ function prepareBotsMissionEnvironment(mission = null) {
     runtimeState.crashDebrisController?.resetPlayerDamageState?.();
     runtimeState.mineController?.resetRoundInventory?.();
     runtimeState.mineController?.clearAll?.();
+    resetRuntimeStealthPickupState('bots', { silent: true });
     runtimeState.weaponSystem?.setTriggerHeld?.(false);
     runtimeState.weaponSystem?.resetRound?.();
 
@@ -2613,6 +2644,31 @@ const collectibleSystem = createCollectibleSystem(scene, worldBounds, {
     staticObstacles,
 });
 runtimeState.collectibleSystem = collectibleSystem;
+runtimeState.stealthPickupSystem = createStealthPickupSystem({
+    scene,
+    car,
+    getGroundHeightAt,
+    objectiveUi,
+    onCollected() {
+        runtimeState.audioController?.onStealthPickupCollected?.();
+    },
+    reportPickupCollected(payload = null, ack = null) {
+        if (runtimeState.gameMode === 'bots') {
+            const now = Date.now();
+            ack?.({
+                ok: true,
+                pickup: createLocalStealthPickupSnapshot({
+                    available: false,
+                    respawnAt: now + STEALTH_PICKUP_RESPAWN_DELAY_MS,
+                }),
+                stealthExpiresAt: now + STEALTH_PICKUP_DURATION_MS,
+                stealthDurationMs: STEALTH_PICKUP_DURATION_MS,
+            });
+            return true;
+        }
+        return runtimeState.multiplayerController?.reportStealthPickupCollected?.(payload, ack);
+    },
+});
 runtimeState.botTrafficSystem = createBotTrafficSystem(scene, worldBounds, staticObstacles, {
     botCount: getBotsMissionMaxBotCount(),
     sharedTargetColorHex: SHARED_PICKUP_COLOR_HEX,
@@ -3046,9 +3102,17 @@ runtimeState.multiplayerController = createMultiplayerController({
     onWeaponPickupSnapshot(pickupSnapshots) {
         runtimeState.weaponSystem?.applyPickupStateSnapshot?.(pickupSnapshots);
     },
+    onStealthPickupSnapshot(pickupSnapshot) {
+        runtimeState.stealthPickupSystem?.applyPickupStateSnapshot?.(pickupSnapshot);
+    },
     onEnvironmentStateSnapshot(environmentState) {
         runtimeState.authoritativeEnvironmentState =
             environmentState && typeof environmentState === 'object' ? environmentState : null;
+    },
+    onSelfStealthStateChanged(stealthState) {
+        runtimeState.stealthPickupSystem?.setLocalStealthState?.(stealthState, {
+            silent: true,
+        });
     },
     onAuthoritativeRoundState(authoritativeState) {
         if (!authoritativeState?.inRoom) {
@@ -3141,6 +3205,7 @@ runtimeState.multiplayerController = createMultiplayerController({
         }
     },
     onLeaveRoom() {
+        resetRuntimeStealthPickupState('online', { silent: true });
         runtimeState.inputController?.returnToWelcome?.();
     },
 });
@@ -3186,6 +3251,7 @@ runtimeState.gameSessionController = createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
+    resetStealthPickupState: resetRuntimeStealthPickupState,
     vehicleWeaponSystem: runtimeState.weaponSystem,
     getBotTrafficSystem: () => runtimeState.botTrafficSystem,
     getCollectorScore(collectorId) {
@@ -3902,6 +3968,7 @@ runtimeState.gameLoopController = createGameLoopController({
     objectiveUi,
     botStatusUi,
     collectibleSystem,
+    stealthPickupSystem: runtimeState.stealthPickupSystem,
     vehicleWeaponSystem: runtimeState.weaponSystem,
     multiplayerController: runtimeState.multiplayerController,
     mineSystemController: runtimeState.mineController,

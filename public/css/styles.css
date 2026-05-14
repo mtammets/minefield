@@ -1384,6 +1384,14 @@ canvas#gameCanvas {
     --mission-target-color: #7cf9ff;
 }
 
+#missionHud[data-stealth-active='true'] {
+    border-color: rgba(119, 235, 255, 0.38);
+    box-shadow:
+        0 24px 56px rgba(0, 0, 0, 0.34),
+        0 0 28px rgba(72, 219, 255, 0.12),
+        inset 0 0 0 1px rgba(218, 240, 255, 0.05);
+}
+
 #missionHud::before {
     content: '';
     position: absolute;
@@ -1412,6 +1420,13 @@ canvas#gameCanvas {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
+}
+
+.missionHudBadgeCluster {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
     gap: 10px;
 }
 
@@ -1472,6 +1487,99 @@ canvas#gameCanvas {
     box-shadow:
         0 0 28px color-mix(in srgb, var(--mission-target-color) 34%, transparent),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.missionHudStealth {
+    --stealth-progress-angle: 1turn;
+    position: relative;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 50% 38%, rgba(118, 245, 255, 0.16), rgba(4, 10, 18, 0.92) 66%),
+        rgba(5, 11, 19, 0.9);
+    box-shadow:
+        inset 0 0 0 1px rgba(184, 236, 255, 0.08),
+        0 0 22px rgba(86, 226, 255, 0.14);
+}
+
+.missionHudStealth[hidden] {
+    display: none;
+}
+
+.missionHudStealth[data-urgent='true'] {
+    animation: missionHudStealthUrgent 0.68s ease-in-out infinite;
+}
+
+.missionHudStealthRing,
+.missionHudStealthPulse,
+.missionHudStealthCore {
+    position: absolute;
+}
+
+.missionHudStealthRing {
+    inset: 0;
+    border-radius: 50%;
+    background: conic-gradient(
+        from -90deg,
+        rgba(122, 246, 255, 0.98) 0turn,
+        rgba(122, 246, 255, 0.98) var(--stealth-progress-angle),
+        rgba(74, 95, 122, 0.2) var(--stealth-progress-angle),
+        rgba(74, 95, 122, 0.2) 1turn
+    );
+    -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 0);
+    mask: radial-gradient(farthest-side, transparent calc(100% - 6px), #000 0);
+}
+
+.missionHudStealthPulse {
+    inset: 5px;
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(109, 242, 255, 0.34),
+        rgba(109, 242, 255, 0.08) 46%,
+        transparent 74%
+    );
+    opacity: 0.74;
+    transform: scale(0.92);
+}
+
+.missionHudStealthCore {
+    inset: 0;
+    display: grid;
+    place-items: center;
+}
+
+.missionHudStealthCoreShard,
+.missionHudStealthCoreSlash {
+    position: absolute;
+    display: block;
+}
+
+.missionHudStealthCoreShard {
+    width: 15px;
+    height: 15px;
+    border-radius: 4px;
+    transform: rotate(45deg);
+    background:
+        radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.5), transparent 42%),
+        linear-gradient(180deg, rgba(224, 255, 255, 0.96), rgba(93, 232, 255, 0.82));
+    box-shadow:
+        0 0 14px rgba(118, 242, 255, 0.32),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.missionHudStealthCoreSlash {
+    width: 3px;
+    height: 24px;
+    border-radius: 999px;
+    transform: rotate(38deg);
+    background: linear-gradient(180deg, rgba(214, 255, 255, 0.1), rgba(214, 255, 255, 0.92));
+    box-shadow: 0 0 10px rgba(126, 245, 255, 0.24);
 }
 
 .missionHudTitle {
@@ -1637,6 +1745,22 @@ canvas#gameCanvas {
 .missionHudStatus[data-tone='danger'] {
     color: rgba(255, 206, 202, 0.98);
     border-color: rgba(219, 109, 109, 0.34);
+}
+
+@keyframes missionHudStealthUrgent {
+    0%,
+    100% {
+        transform: scale(1);
+        box-shadow:
+            inset 0 0 0 1px rgba(184, 236, 255, 0.08),
+            0 0 22px rgba(86, 226, 255, 0.14);
+    }
+    50% {
+        transform: scale(1.06);
+        box-shadow:
+            inset 0 0 0 1px rgba(214, 247, 255, 0.18),
+            0 0 28px rgba(102, 238, 255, 0.26);
+    }
 }
 
 #economyHud {
@@ -7771,7 +7895,9 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageMeta {
-    top: clamp(72px, 10vh, 104px);
+    top: auto;
+    bottom: clamp(76px, 9.5vh, 110px);
+    width: min(calc(100% - 56px), 560px);
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageVehicleName {
@@ -7791,7 +7917,10 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions {
-    grid-template-columns: repeat(2, auto);
+    grid-template-columns: repeat(2, 40px);
+    width: 88px;
+    justify-content: end;
+    justify-items: stretch;
 }
 
 .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageControlRow,
@@ -9202,7 +9331,7 @@ body.race-intro-active #botPanel {
     }
 
     .welcomeAuthGarageMeta {
-        width: min(calc(100% - 72px), 420px);
+        width: min(calc(100% - 32px), 420px);
     }
 
     .welcomeAuthGarageStatsRow {
@@ -9216,6 +9345,8 @@ body.race-intro-active #botPanel {
 
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapActions {
         grid-column: auto;
+        grid-template-columns: repeat(2, 38px);
+        width: 84px;
     }
 
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthSectionStage {
@@ -9229,6 +9360,11 @@ body.race-intro-active #botPanel {
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageHero {
         inset: 0;
         width: auto;
+    }
+
+    .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageMeta {
+        top: auto;
+        bottom: 72px;
     }
 
     .welcomeAuthPanel[data-account-mode='garage'] .welcomeAuthGarageWrapCard {

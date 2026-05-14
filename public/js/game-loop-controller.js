@@ -42,6 +42,7 @@ export function createGameLoopController(options = {}) {
         objectiveUi,
         botStatusUi,
         collectibleSystem,
+        stealthPickupSystem = null,
         vehicleWeaponSystem = null,
         multiplayerController,
         mineSystemController,
@@ -144,6 +145,7 @@ export function createGameLoopController(options = {}) {
             : () => WORLD_MAP_DRIVE_LOCK_MODES.none;
     const readWorldMapOpen =
         typeof getIsWorldMapOpen === 'function' ? getIsWorldMapOpen : () => false;
+    const readPlayerStealthActive = () => Boolean(stealthPickupSystem?.isLocalStealthActive?.());
 
     let running = false;
     let animationFrameId = null;
@@ -266,6 +268,7 @@ export function createGameLoopController(options = {}) {
         localCarPosition: car.position,
         localPlayerId: '',
         enableLocalCollision: false,
+        localMineImmune: false,
     };
     let botHudUpdateTimer = BOT_STATUS_UPDATE_INTERVAL_SEC;
     let botMineDecisionStamp = 0;
@@ -438,6 +441,13 @@ export function createGameLoopController(options = {}) {
         const worldMapOpen = readWorldMapOpen();
         const renderWorldSceneThisFrame = shouldRenderWorldSceneThisFrame(worldMapOpen, frameDelta);
         const gamePaused = readGamePaused();
+        const stealthPickupGameplayBlocked =
+            isWelcomeVisible ||
+            gamePaused ||
+            isEditModeActive ||
+            raceIntroController.isActive() ||
+            readPickupRoundFinished() ||
+            worldMapOpen;
         let chargingHudEnabled = false;
         let chargingHudActive = false;
         let chargingHudLevel = 0;
@@ -454,6 +464,17 @@ export function createGameLoopController(options = {}) {
         let frameBotCollectorCount = 0;
 
         welcomeModalUi.update(frameDelta);
+        measureStage('stealthPickup', () => {
+            stealthPickupSystem?.update?.(frameDelta, {
+                enabled:
+                    (readGameMode() === 'bots' ||
+                        (readGameMode() === 'online' && multiplayerController?.isInRoom?.())) &&
+                    !stealthPickupGameplayBlocked,
+                carDestroyed: readCarDestroyed(),
+                gameplayBlocked: stealthPickupGameplayBlocked,
+            });
+        });
+        const playerStealthActive = readPlayerStealthActive();
         if (isWelcomeVisible && !isEditModeActive) {
             const welcomeStageStartMs = performance.now();
             chargingZoneController.update(car.position, frameDelta, { enabled: false });
@@ -470,6 +491,7 @@ export function createGameLoopController(options = {}) {
 
             mineFrameState.localPlayerId = readLocalPlayerId();
             mineFrameState.enableLocalCollision = false;
+            mineFrameState.localMineImmune = false;
             mineSystemController?.update?.(frameDelta, mineFrameState);
 
             mapFrameCache.pickups = EMPTY_ARRAY;
@@ -717,10 +739,13 @@ export function createGameLoopController(options = {}) {
                     visiblePickups = collectibleSystem.getVisiblePickups();
                     if (botsEnabled) {
                         const botTrafficStageStartMs = performance.now();
-                        botTrafficSystem?.update?.(car.position, EMPTY_ARRAY, frameDelta);
+                        botTrafficSystem?.update?.(car.position, EMPTY_ARRAY, frameDelta, {
+                            playerStealthActive,
+                        });
                         updateBotMineDeployment(
                             botTrafficSystem?.getCollisionSnapshots?.() || EMPTY_ARRAY,
-                            frameDelta
+                            frameDelta,
+                            playerStealthActive
                         );
                         addStageDuration('botTraffic', performance.now() - botTrafficStageStartMs);
                         botCollectorDescriptors =
@@ -783,6 +808,7 @@ export function createGameLoopController(options = {}) {
 
         mineFrameState.localPlayerId = readLocalPlayerId();
         mineFrameState.enableLocalCollision = mineCollisionEnabled;
+        mineFrameState.localMineImmune = playerStealthActive;
         measureStage('mineSystem', () => {
             mineSystemController?.update?.(frameDelta, mineFrameState);
         });
@@ -837,6 +863,7 @@ export function createGameLoopController(options = {}) {
                 editModeActive: isEditModeActive,
                 raceIntroActive: raceIntroController.isActive(),
                 carDestroyed: readCarDestroyed(),
+                playerStealthActive,
                 pickupRoundFinished: readPickupRoundFinished(),
                 worldMapOpen,
                 gameMode: readGameMode(),
@@ -1150,11 +1177,12 @@ export function createGameLoopController(options = {}) {
         return Math.max(0, Math.round(numeric));
     }
 
-    function updateBotMineDeployment(snapshots = [], frameDelta) {
+    function updateBotMineDeployment(snapshots = [], frameDelta, playerStealthActive = false) {
         if (
             readGameMode() !== 'bots' ||
             readCarDestroyed() ||
             readPickupRoundFinished() ||
+            playerStealthActive ||
             frameDelta <= 0
         ) {
             botMineDecisionById.clear();

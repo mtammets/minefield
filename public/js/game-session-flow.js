@@ -67,6 +67,7 @@ export function createGameSessionController({
     chargingProgressHudController,
     skidMarkController,
     collectibleSystem,
+    resetStealthPickupState = () => {},
     vehicleWeaponSystem = null,
     getBotTrafficSystem,
     getCollectorScore = () => 0,
@@ -386,9 +387,7 @@ export function createGameSessionController({
     function handleAuthStateChanged(authState = null) {
         clearPendingChaseCameraProfileSave();
         const authenticated = Boolean(authState?.authenticated);
-        economyHudUi?.setGameplayVisible?.(
-            authenticated && !getIsWelcomeModalVisible()
-        );
+        economyHudUi?.setGameplayVisible?.(authenticated && !getIsWelcomeModalVisible());
         const nextSettings = authenticated
             ? normalizeChaseCameraSettings(authState?.chaseCameraSettings)
             : normalizeChaseCameraSettings(readGuestChaseCameraSettings());
@@ -1108,6 +1107,8 @@ export function createGameSessionController({
         chargingProgressHudController.reset();
         skidMarkController.reset();
         vehicleWeaponSystem?.resetRound?.();
+        const normalizedGameMode = normalizeGameMode(getGameMode());
+        resetStealthPickupState(normalizedGameMode, { silent: true });
 
         refreshPlayerSpawnState();
         car.visible = true;
@@ -1115,7 +1116,7 @@ export function createGameSessionController({
         snapCarToGround();
         car.rotation.set(0, playerSpawnState.rotationY, 0);
 
-        const botsEnabled = normalizeGameMode(getGameMode()) === 'bots';
+        const botsEnabled = normalizedGameMode === 'bots';
         setMultiplayerPanelVisible(!botsEnabled);
 
         if (botsEnabled && typeof prepareBotsSession === 'function') {

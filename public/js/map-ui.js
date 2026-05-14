@@ -2643,6 +2643,9 @@ function normalizeVehiclesInPlace(target, botDescriptors, remotePlayers) {
             if (!entry || typeof entry !== 'object') {
                 continue;
             }
+            if (entry.stealthActive) {
+                continue;
+            }
             const x = Number(entry.x);
             const z = Number(entry.z);
             if (!Number.isFinite(x) || !Number.isFinite(z)) {

@@ -301,9 +301,10 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
     prewarmDetachedDebrisMeshes();
 
     return {
-        update(playerPosition, visiblePickups = [], deltaTime = 1 / 60) {
+        update(playerPosition, visiblePickups = [], deltaTime = 1 / 60, context = {}) {
             const dt = Math.min(deltaTime, 0.05);
             const nowMs = Date.now();
+            const playerStealthActive = Boolean(context?.playerStealthActive);
             processPendingMineDebrisSpawns(dt, playerPosition);
             updateDetachedDebris(dt, playerPosition);
             applyDetachedDebrisVisibilityBudget(dt, playerPosition);
@@ -331,7 +332,8 @@ export function createBotTrafficSystem(scene, worldBounds, staticObstacles = [],
                     buildingLayer,
                     getGroundHeightAt,
                     cityMapLayout,
-                    navigationPlanner
+                    navigationPlanner,
+                    playerStealthActive
                 );
             }
         },
@@ -1751,7 +1753,8 @@ function updateBotAdaptiveTick(
     buildingLayer,
     getGroundHeightAt,
     cityMapLayout,
-    navigationPlanner
+    navigationPlanner,
+    playerStealthActive = false
 ) {
     const simulationStep = resolveBotSimulationStep(bot.car.position, playerPosition);
     bot.simulationStep = simulationStep;
@@ -1778,7 +1781,8 @@ function updateBotAdaptiveTick(
             buildingLayer,
             getGroundHeightAt,
             cityMapLayout,
-            navigationPlanner
+            navigationPlanner,
+            playerStealthActive
         );
         bot.simulationAccumulator -= simulationStep;
         simulationSteps += 1;
@@ -1807,13 +1811,15 @@ function updateBot(
     buildingLayer,
     getGroundHeightAt,
     cityMapLayout,
-    navigationPlanner
+    navigationPlanner,
+    playerStealthActive = false
 ) {
     const damageDynamics = getBotDamageDynamics(bot.damageState);
     const roadFollowingEnabled = hasRoadNetwork(cityMapLayout);
-    const hunterDriveTarget = bot.vehicleWeaponHunter
-        ? resolveVehicleWeaponHunterDriveTarget(bot, playerPosition, buildingLayer)
-        : null;
+    const hunterDriveTarget =
+        bot.vehicleWeaponHunter && !playerStealthActive
+            ? resolveVehicleWeaponHunterDriveTarget(bot, playerPosition, buildingLayer)
+            : null;
     const targetPickup = hunterDriveTarget
         ? null
         : findNearestPickup(

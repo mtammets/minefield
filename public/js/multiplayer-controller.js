@@ -57,8 +57,10 @@ export function createMultiplayerController(options = {}) {
         onMineDetonated = () => {},
         onCollectedPickupSnapshot = () => {},
         onWeaponPickupSnapshot = () => {},
+        onStealthPickupSnapshot = () => {},
         onEnvironmentStateSnapshot = () => {},
         onAuthoritativeRoundState = () => {},
+        onSelfStealthStateChanged = () => {},
         onLeaveRoom = null,
     } = options;
 
@@ -108,6 +110,7 @@ export function createMultiplayerController(options = {}) {
         reportMinePlaced,
         reportMineDetonated,
         reportWeaponPickupCollected,
+        reportStealthPickupCollected,
         reportWeaponShot,
         reportPickupCollected,
         reportEnvironmentState,
@@ -211,6 +214,7 @@ export function createMultiplayerController(options = {}) {
             snapshot.speedKph = Math.abs(Number(remote.visualState?.speed) || 0);
             snapshot.velocityX = clampNumber(remote.visualState?.velocity?.x, -400, 400, 0);
             snapshot.velocityZ = clampNumber(remote.visualState?.velocity?.y, -400, 400, 0);
+            snapshot.stealthActive = Boolean(remote.isStealthed);
             snapshot.undergroundParkingIsolated = isUndergroundParkingSpaceIsolatedPosition(
                 remote.car.position,
                 0.18
@@ -304,6 +308,25 @@ export function createMultiplayerController(options = {}) {
         }
         const message = payload && typeof payload === 'object' ? payload : {};
         socket.emit('mp:weaponPickupCollected', message, (response) => {
+            if (typeof ack === 'function') {
+                ack(response);
+            }
+        });
+        return true;
+    }
+
+    function reportStealthPickupCollected(payload = null, ack = null) {
+        if (!isPanelVisible || !socket?.connected || !room) {
+            if (typeof ack === 'function') {
+                ack({
+                    ok: false,
+                    error: 'Offline',
+                });
+            }
+            return false;
+        }
+        const message = payload && typeof payload === 'object' ? payload : {};
+        socket.emit('mp:stealthPickupCollected', message, (response) => {
             if (typeof ack === 'function') {
                 ack(response);
             }
@@ -943,7 +966,7 @@ export function createMultiplayerController(options = {}) {
                 continue;
             }
 
-            remote.car.visible = !remote.isDestroyed;
+            remote.car.visible = !remote.isDestroyed && !remote.isStealthed;
             if (!remote.hasState) {
                 remote.skidMarkController?.update?.(dt, { enabled: false });
                 remote.weaponController?.update?.(dt, remote.visualState, {
@@ -967,13 +990,13 @@ export function createMultiplayerController(options = {}) {
                 Boolean(remote.visualState.batteryDepleted) || remote.isDestroyed;
             remote.updateVisuals(remote.visualState, dt);
             remote.skidMarkController?.update?.(dt, {
-                enabled: !remote.isDestroyed,
+                enabled: !remote.isDestroyed && !remote.isStealthed,
                 vehicle: remote.car,
                 vehicleState: remote.visualState,
                 inputState: remote.inputState,
             });
             remote.weaponController?.update?.(dt, remote.visualState, {
-                showMount: true,
+                showMount: !remote.isStealthed,
                 isDestroyed: remote.isDestroyed,
             });
             updateRemoteCrashDebris(remote, dt);
@@ -1005,6 +1028,7 @@ export function createMultiplayerController(options = {}) {
         if (Array.isArray(snapshot.weaponPickups)) {
             onWeaponPickupSnapshot(snapshot.weaponPickups);
         }
+        onStealthPickupSnapshot(snapshot.stealthPickup || null);
         if (snapshot.environmentState && typeof snapshot.environmentState === 'object') {
             onEnvironmentStateSnapshot(snapshot.environmentState);
         }
@@ -1014,6 +1038,15 @@ export function createMultiplayerController(options = {}) {
             localPlayerName = sanitizePlayerName(selfPlayer.name);
             writeStorage(MP_NAME_STORAGE_KEY, localPlayerName);
         }
+        const selfStealthExpiresAt = Math.max(
+            0,
+            Math.round(Number(selfPlayer?.state?.stealthExpiresAt) || 0)
+        );
+        onSelfStealthStateChanged({
+            active: Boolean(selfPlayer?.state?.stealthActive) && selfStealthExpiresAt > Date.now(),
+            expiresAt: selfStealthExpiresAt,
+            durationMs: Math.max(0, Math.round(Number(selfPlayer?.state?.stealthDurationMs) || 0)),
+        });
 
         const presentRemoteIds = new Set();
 
@@ -1062,7 +1095,12 @@ export function createMultiplayerController(options = {}) {
         onMineSnapshot([]);
         onCollectedPickupSnapshot([]);
         onWeaponPickupSnapshot([]);
+        onStealthPickupSnapshot(null);
         onEnvironmentStateSnapshot(null);
+        onSelfStealthStateChanged({
+            active: false,
+            expiresAt: 0,
+        });
 
         for (const remote of remotePlayers.values()) {
             removeRemotePlayer(remote);
@@ -1128,6 +1166,7 @@ export function createMultiplayerController(options = {}) {
             hasState: false,
             isDestroyed: false,
             wasDestroyed: false,
+            isStealthed: false,
             crashDebrisSimAccumulator: 0,
             crashVisualSuppressed: true,
             lastStateAt: 0,
@@ -1370,6 +1409,7 @@ export function createMultiplayerController(options = {}) {
             targetY: clampNumber(state.weaponTargetY, -200, 2500, 0),
             targetZ: clampNumber(state.weaponTargetZ, -5000, 5000, 0),
         });
+        remote.isStealthed = Boolean(state.stealthActive);
         const wasDestroyed = Boolean(remote.isDestroyed);
         remote.isDestroyed = Boolean(state.isDestroyed);
         if (!wasDestroyed && remote.isDestroyed) {
@@ -1885,6 +1925,15 @@ function createNoopController() {
             return false;
         },
         reportWeaponPickupCollected(payload = null, ack = null) {
+            if (typeof ack === 'function') {
+                ack({
+                    ok: false,
+                    error: 'Offline',
+                });
+            }
+            return false;
+        },
+        reportStealthPickupCollected(payload = null, ack = null) {
             if (typeof ack === 'function') {
                 ack({
                     ok: false,

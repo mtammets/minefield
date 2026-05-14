@@ -1383,8 +1383,23 @@
                         class="missionHudTimeline"
                         aria-hidden="true"
                     ></div>
-                    <div class="missionHudTarget" aria-label="Target shard">
-                        <span id="missionHudTargetSwatch" class="missionHudTargetSwatch"></span>
+                    <div class="missionHudBadgeCluster">
+                        <div class="missionHudTarget" aria-label="Target shard">
+                            <span id="missionHudTargetSwatch" class="missionHudTargetSwatch"></span>
+                        </div>
+                        <div
+                            id="missionHudStealth"
+                            class="missionHudStealth"
+                            hidden
+                            aria-hidden="true"
+                        >
+                            <div id="missionHudStealthRing" class="missionHudStealthRing"></div>
+                            <div class="missionHudStealthPulse"></div>
+                            <div class="missionHudStealthCore">
+                                <span class="missionHudStealthCoreShard"></span>
+                                <span class="missionHudStealthCoreSlash"></span>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div id="missionHudTitle" class="missionHudTitle">Contract loading...</div>

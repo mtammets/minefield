@@ -83,6 +83,12 @@ const WEAPON_SHOT_MIN_DISTANCE = 0.5;
 const WEAPON_SHOT_MAX_START_HORIZONTAL_OFFSET = 8;
 const WEAPON_SHOT_MAX_START_VERTICAL_OFFSET = 6;
 const WEAPON_PICKUP_RESPAWN_DELAY_MS = 900;
+const STEALTH_PICKUP_ID = 'central-plaza-stealth';
+const STEALTH_PICKUP_X = 0;
+const STEALTH_PICKUP_Z = 16.5;
+const STEALTH_PICKUP_COLLECT_RADIUS = 4.8;
+const STEALTH_PICKUP_RESPAWN_DELAY_MS = 12_000;
+const STEALTH_PICKUP_DURATION_MS = 9_000;
 const ROOM_ROOF_LIFT_DEFAULT_SURFACE_Y = 0.16;
 const PICKUP_STATE_MAX_DISTANCE = 4.6;
 const PLAYER_STATE_MAX_HORIZONTAL_SPEED_UNITS_PER_SEC = 82;
@@ -212,6 +218,7 @@ const EVENT_RATE_LIMITS = {
     'mp:mineDetonated': { windowMs: 1000, max: 12 },
     'mp:pickupCollected': { windowMs: 1000, max: 10 },
     'mp:weaponPickupCollected': { windowMs: 1000, max: 10 },
+    'mp:stealthPickupCollected': { windowMs: 1000, max: 8 },
     'mp:environmentState': { windowMs: 1000, max: 24 },
     'mp:crashReplication': { windowMs: 1000, max: 8 },
     'mp:vehicleStatus': { windowMs: 1000, max: 12 },
@@ -1129,6 +1136,7 @@ io.on('connection', (socket) => {
                 players: new Map(),
                 mines: new Map(),
                 weaponPickups: createRoomWeaponPickupState(),
+                stealthPickup: createRoomStealthPickupState(),
                 environmentState: createRoomEnvironmentState(),
                 collectedPickupIds: new Map(),
                 roundState: createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT),
@@ -1327,6 +1335,10 @@ io.on('connection', (socket) => {
         sanitizedState.collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
         sanitizedState.score = Math.max(0, Math.round(Number(player.score) || 0));
         sanitizedState.isDestroyed = Boolean(player.isDestroyed);
+        const stealthExpiresAt = getPlayerStealthExpiresAt(player, now);
+        sanitizedState.stealthActive = stealthExpiresAt > now;
+        sanitizedState.stealthExpiresAt = stealthExpiresAt;
+        sanitizedState.stealthDurationMs = stealthExpiresAt > now ? STEALTH_PICKUP_DURATION_MS : 0;
 
         player.previousState = player.lastState;
         player.previousStateAt = player.lastStateAt;
@@ -1795,6 +1807,117 @@ io.on('connection', (socket) => {
         safeAck(ack, {
             ok: true,
             pickup: serializeRoomWeaponPickupState(pickupState),
+        });
+    });
+
+    socket.on('mp:stealthPickupCollected', (payload, ack) => {
+        if (!consumeInboundEventQuota(socket, 'mp:stealthPickupCollected')) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Rate limited',
+            });
+            return;
+        }
+
+        const roomCode = socket.data.roomCode;
+        if (!roomCode) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Not in room',
+            });
+            return;
+        }
+
+        const room = rooms.get(roomCode);
+        if (!room) {
+            socket.data.roomCode = null;
+            safeAck(ack, {
+                ok: false,
+                error: 'Room missing',
+            });
+            return;
+        }
+
+        const player = room.players.get(socket.id);
+        if (!player) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Player missing',
+            });
+            return;
+        }
+
+        const now = Date.now();
+        const pickupId = sanitizeStealthPickupId(payload?.pickupId);
+        if (!pickupId) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Invalid pickup',
+            });
+            return;
+        }
+
+        const pickupState = syncRoomStealthPickupState(room, now);
+        const activeStealthExpiresAt = getPlayerStealthExpiresAt(player, now);
+        if (activeStealthExpiresAt > now) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Stealth active',
+                pickup: serializeRoomStealthPickupState(pickupState),
+                stealthExpiresAt: activeStealthExpiresAt,
+                stealthDurationMs: STEALTH_PICKUP_DURATION_MS,
+            });
+            return;
+        }
+
+        if (!pickupState.available) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Pickup unavailable',
+                pickup: serializeRoomStealthPickupState(pickupState),
+            });
+            return;
+        }
+
+        const playerX = Number(player.lastState?.x);
+        const playerZ = Number(player.lastState?.z);
+        if (!Number.isFinite(playerX) || !Number.isFinite(playerZ)) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Player state unavailable',
+                pickup: serializeRoomStealthPickupState(pickupState),
+            });
+            return;
+        }
+
+        const distanceToPickup = Math.hypot(playerX - pickupState.x, playerZ - pickupState.z);
+        if (distanceToPickup > STEALTH_PICKUP_COLLECT_RADIUS) {
+            safeAck(ack, {
+                ok: false,
+                error: 'Pickup too far',
+                pickup: serializeRoomStealthPickupState(pickupState),
+            });
+            return;
+        }
+
+        pickupState.available = false;
+        pickupState.collectedAt = now;
+        pickupState.collectedByPlayerId = socket.id;
+        pickupState.respawnAt = now + STEALTH_PICKUP_RESPAWN_DELAY_MS;
+        pickupState.updatedAt = now;
+        player.stealthExpiresAt = now + STEALTH_PICKUP_DURATION_MS;
+        if (player.lastState && typeof player.lastState === 'object') {
+            player.lastState.stealthActive = true;
+            player.lastState.stealthExpiresAt = player.stealthExpiresAt;
+        }
+        room.updatedAt = now;
+
+        emitRoomState(room);
+        safeAck(ack, {
+            ok: true,
+            pickup: serializeRoomStealthPickupState(pickupState),
+            stealthExpiresAt: player.stealthExpiresAt,
+            stealthDurationMs: STEALTH_PICKUP_DURATION_MS,
         });
     });
 
@@ -2825,6 +2948,7 @@ function createRoomPlayer(id, profile, authIdentity = null) {
         },
         lastCrashReplicationAt: 0,
         lastVehicleStatusAt: 0,
+        stealthExpiresAt: 0,
         destroyedAt: 0,
         allowStateSnapUntil: 0,
     };
@@ -2849,6 +2973,20 @@ function createRoomWeaponPickupState(nowMs = Date.now()) {
             collectedByPlayerId: '',
             updatedAt: now,
         },
+    };
+}
+
+function createRoomStealthPickupState(nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    return {
+        id: STEALTH_PICKUP_ID,
+        x: STEALTH_PICKUP_X,
+        z: STEALTH_PICKUP_Z,
+        available: true,
+        respawnAt: 0,
+        collectedAt: 0,
+        collectedByPlayerId: '',
+        updatedAt: now,
     };
 }
 
@@ -2893,6 +3031,25 @@ function syncRoomWeaponPickupState(room, nowMs = Date.now()) {
     }
     if (room && typeof room === 'object') {
         room.weaponPickups = nextState;
+    }
+    return nextState;
+}
+
+function syncRoomStealthPickupState(room, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const baseState =
+        room?.stealthPickup && typeof room.stealthPickup === 'object'
+            ? room.stealthPickup
+            : createRoomStealthPickupState(now);
+    const nextState = normalizeRoomStealthPickupState(baseState, now);
+    if (nextState.respawnAt > 0 && now >= nextState.respawnAt) {
+        nextState.available = true;
+        nextState.respawnAt = 0;
+        nextState.collectedByPlayerId = '';
+        nextState.updatedAt = now;
+    }
+    if (room && typeof room === 'object') {
+        room.stealthPickup = nextState;
     }
     return nextState;
 }
@@ -2963,12 +3120,43 @@ function normalizeRoomWeaponPickupState(value, fallbackId, nowMs = Date.now()) {
     };
 }
 
+function normalizeRoomStealthPickupState(value, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const respawnAt = Math.max(0, Math.round(Number(value?.respawnAt) || 0));
+    const available = Boolean(value?.available) || respawnAt <= 0;
+    return {
+        id: sanitizeStealthPickupId(value?.id) || STEALTH_PICKUP_ID,
+        x: clampFinite(value?.x, -5000, 5000, STEALTH_PICKUP_X),
+        z: clampFinite(value?.z, -5000, 5000, STEALTH_PICKUP_Z),
+        available,
+        respawnAt: available ? 0 : respawnAt,
+        collectedAt: Math.max(0, Math.round(Number(value?.collectedAt) || 0)),
+        collectedByPlayerId: sanitizeSocketLikeId(value?.collectedByPlayerId),
+        updatedAt: Math.max(0, Math.round(Number(value?.updatedAt) || now)),
+    };
+}
+
 function serializeRoomWeaponPickupState(value) {
     if (!value || typeof value !== 'object') {
         return null;
     }
     return {
         id: sanitizeWeaponPickupId(value.id),
+        available: Boolean(value.available),
+        respawnAt: Math.max(0, Math.round(Number(value.respawnAt) || 0)),
+        collectedAt: Math.max(0, Math.round(Number(value.collectedAt) || 0)),
+        collectedByPlayerId: sanitizeSocketLikeId(value.collectedByPlayerId),
+    };
+}
+
+function serializeRoomStealthPickupState(value) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    return {
+        id: sanitizeStealthPickupId(value.id),
+        x: clampFinite(value.x, -5000, 5000, STEALTH_PICKUP_X),
+        z: clampFinite(value.z, -5000, 5000, STEALTH_PICKUP_Z),
         available: Boolean(value.available),
         respawnAt: Math.max(0, Math.round(Number(value.respawnAt) || 0)),
         collectedAt: Math.max(0, Math.round(Number(value.collectedAt) || 0)),
@@ -3016,15 +3204,33 @@ function serializeRoomWeaponPickupStates(value) {
         .filter(Boolean);
 }
 
+function getPlayerStealthExpiresAt(player, nowMs = Date.now()) {
+    const now = Math.max(0, Math.round(Number(nowMs) || Date.now()));
+    const expiresAt = Math.max(0, Math.round(Number(player?.stealthExpiresAt) || 0));
+    if (expiresAt > 0 && now >= expiresAt) {
+        if (player && typeof player === 'object') {
+            player.stealthExpiresAt = 0;
+            if (player.lastState && typeof player.lastState === 'object') {
+                player.lastState.stealthActive = false;
+                player.lastState.stealthExpiresAt = 0;
+            }
+        }
+        return 0;
+    }
+    return expiresAt;
+}
+
 function serializeRoom(room) {
-    pruneExpiredMines(room, Date.now());
-    pruneCollectedPickupHistory(room, Date.now());
+    const now = Date.now();
+    pruneExpiredMines(room, now);
+    pruneCollectedPickupHistory(room, now);
     room.roundState =
         room.roundState && typeof room.roundState === 'object'
             ? room.roundState
             : createRoomRoundState(ONLINE_ROUND_TOTAL_PICKUPS_DEFAULT);
-    syncRoomWeaponPickupState(room, Date.now());
-    syncRoomEnvironmentState(room, Date.now());
+    syncRoomStealthPickupState(room, now);
+    syncRoomWeaponPickupState(room, now);
+    syncRoomEnvironmentState(room, now);
     recalculateRoomRoundStateFromPlayers(room.roundState, room.players);
     const mineMap = room?.mines instanceof Map ? room.mines : new Map();
     const players = Array.from(room.players.values())
@@ -3033,6 +3239,7 @@ function serializeRoom(room) {
             const collectedCount = Math.max(0, Math.round(Number(player.collectedCount) || 0));
             const score = Math.max(0, Math.round(Number(player.score) || 0));
             const isDestroyed = Boolean(player.isDestroyed);
+            const stealthExpiresAt = getPlayerStealthExpiresAt(player, now);
             const baseState =
                 player.lastState && typeof player.lastState === 'object'
                     ? {
@@ -3040,6 +3247,10 @@ function serializeRoom(room) {
                           collectedCount,
                           score,
                           isDestroyed,
+                          stealthActive: stealthExpiresAt > now,
+                          stealthExpiresAt,
+                          stealthDurationMs:
+                              stealthExpiresAt > now ? STEALTH_PICKUP_DURATION_MS : 0,
                       }
                     : null;
             if (baseState && player.lastCrashReplication) {
@@ -3070,6 +3281,7 @@ function serializeRoom(room) {
         roundState: serializeRoomRoundState(room.roundState),
         collectedPickupIds: serializeCollectedPickupIds(room),
         weaponPickups: serializeRoomWeaponPickupStates(room.weaponPickups),
+        stealthPickup: serializeRoomStealthPickupState(room.stealthPickup),
         environmentState: serializeRoomEnvironmentState(room.environmentState),
         players,
         mines: Array.from(mineMap.values())
@@ -3806,6 +4018,14 @@ function sanitizeWeaponPickupId(value) {
     }
     const normalized = value.trim().toLowerCase();
     return normalized === 'roof' || normalized === 'parking' ? normalized : '';
+}
+
+function sanitizeStealthPickupId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    return normalized === STEALTH_PICKUP_ID ? normalized : '';
 }
 
 function sanitizeMineId(value) {

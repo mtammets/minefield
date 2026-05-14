@@ -358,6 +358,7 @@ const EVENT_COOLDOWNS = Object.freeze({
     obstacleCrash: 0.2,
     mineDetonation: 0.1,
     pickupCollect: 0.05,
+    stealthPickup: 0.12,
     chargingStart: 0.18,
     chargingStop: 0.18,
 });
@@ -624,6 +625,7 @@ export function createAudioSystem({ camera = null } = {}) {
         onVehicleCollisionContacts,
         onObstacleCrash,
         onPickupCollected,
+        onStealthPickupCollected,
         onMineDeployed,
         onMineDetonated,
         onPlayerExplosion,
@@ -1817,6 +1819,16 @@ export function createAudioSystem({ camera = null } = {}) {
         });
     }
 
+    function onStealthPickupCollected() {
+        if (!isRealtimeAudioReady()) {
+            return;
+        }
+        if (!isEventReady('stealthPickup', EVENT_COOLDOWNS.stealthPickup)) {
+            return;
+        }
+        playStealthPickupSynth();
+    }
+
     function onMineDeployed({ thrown = false } = {}) {
         if (!isRealtimeAudioReady()) {
             return;
@@ -2032,6 +2044,87 @@ export function createAudioSystem({ camera = null } = {}) {
             return;
         }
         playVehicleWeaponPickupSynth();
+    }
+
+    function playStealthPickupSynth() {
+        const busNode = mixer?.buses?.effects;
+        if (!context || !busNode) {
+            return false;
+        }
+
+        const now = context.currentTime;
+        const outputGain = context.createGain();
+        outputGain.gain.setValueAtTime(0.0001, now);
+        outputGain.gain.linearRampToValueAtTime(0.18, now + 0.018);
+        outputGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
+        outputGain.connect(busNode);
+
+        const shimmerFilter = context.createBiquadFilter();
+        shimmerFilter.type = 'bandpass';
+        shimmerFilter.frequency.setValueAtTime(1680, now);
+        shimmerFilter.frequency.exponentialRampToValueAtTime(3120, now + 0.22);
+        shimmerFilter.Q.setValueAtTime(1.8, now);
+        shimmerFilter.connect(outputGain);
+
+        const bodyTone = context.createOscillator();
+        const bodyGain = context.createGain();
+        bodyTone.type = 'triangle';
+        bodyTone.frequency.setValueAtTime(280, now);
+        bodyTone.frequency.exponentialRampToValueAtTime(640, now + 0.19);
+        bodyTone.frequency.exponentialRampToValueAtTime(520, now + 0.34);
+        bodyGain.gain.setValueAtTime(0.0001, now);
+        bodyGain.gain.linearRampToValueAtTime(0.16, now + 0.024);
+        bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
+
+        const shimmerTone = context.createOscillator();
+        const shimmerGain = context.createGain();
+        shimmerTone.type = 'sine';
+        shimmerTone.frequency.setValueAtTime(1420, now + 0.02);
+        shimmerTone.frequency.exponentialRampToValueAtTime(2780, now + 0.24);
+        shimmerGain.gain.setValueAtTime(0.0001, now + 0.02);
+        shimmerGain.gain.linearRampToValueAtTime(0.09, now + 0.06);
+        shimmerGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+
+        const phaseTone = context.createOscillator();
+        const phaseGain = context.createGain();
+        phaseTone.type = 'sawtooth';
+        phaseTone.frequency.setValueAtTime(96, now + 0.015);
+        phaseTone.frequency.exponentialRampToValueAtTime(180, now + 0.16);
+        phaseTone.frequency.exponentialRampToValueAtTime(132, now + 0.5);
+        phaseGain.gain.setValueAtTime(0.0001, now + 0.015);
+        phaseGain.gain.linearRampToValueAtTime(0.055, now + 0.05);
+        phaseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.52);
+
+        bodyTone.connect(bodyGain);
+        bodyGain.connect(outputGain);
+
+        shimmerTone.connect(shimmerGain);
+        shimmerGain.connect(shimmerFilter);
+
+        phaseTone.connect(phaseGain);
+        phaseGain.connect(shimmerFilter);
+
+        const cleanup = once(() => {
+            safeDisconnect(bodyTone);
+            safeDisconnect(bodyGain);
+            safeDisconnect(shimmerTone);
+            safeDisconnect(shimmerGain);
+            safeDisconnect(phaseTone);
+            safeDisconnect(phaseGain);
+            safeDisconnect(shimmerFilter);
+            safeDisconnect(outputGain);
+        });
+
+        bodyTone.onended = cleanup;
+        shimmerTone.onended = cleanup;
+        phaseTone.onended = cleanup;
+        bodyTone.start(now);
+        shimmerTone.start(now + 0.02);
+        phaseTone.start(now + 0.015);
+        safeStopSource(bodyTone, now + 0.38);
+        safeStopSource(shimmerTone, now + 0.46);
+        safeStopSource(phaseTone, now + 0.56);
+        return true;
     }
 
     function onVehicleWeaponShot({
@@ -4783,6 +4876,7 @@ function createNoopAudioSystem() {
         onVehicleCollisionContacts() {},
         onObstacleCrash() {},
         onPickupCollected() {},
+        onStealthPickupCollected() {},
         onMineDeployed() {},
         onMineDetonated() {},
         onPlayerExplosion() {},

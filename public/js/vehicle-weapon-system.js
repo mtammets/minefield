@@ -1524,6 +1524,7 @@ export function createVehicleWeaponSystem({
             !frameState.editModeActive &&
             !frameState.raceIntroActive &&
             !frameState.carDestroyed &&
+            !frameState.playerStealthActive &&
             !frameState.pickupRoundFinished &&
             !hunterBot.destroyed;
 

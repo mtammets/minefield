@@ -1900,6 +1900,21 @@ export function createWelcomeModalController({
             busy,
             canManageCarWrap,
             hasCarWrap,
+            garageStatusText:
+                garagePanelVisible &&
+                (localStatus ||
+                    (remoteStatus && remoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT
+                        ? remoteStatus
+                        : ''))
+                    ? localStatus ||
+                      (remoteStatus && remoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT
+                          ? remoteStatus
+                          : '')
+                    : '',
+            garageStatusTone:
+                garagePanelVisible && (localStatus || remoteStatus)
+                    ? statusTone || 'muted'
+                    : 'muted',
         });
         if (authAvatarFrameEl) {
             authAvatarFrameEl.disabled = !canManageProfileImage || busy;
@@ -1954,7 +1969,7 @@ export function createWelcomeModalController({
         if (authStatusEl) {
             authStatusEl.textContent = statusText;
             authStatusEl.dataset.tone = statusTone || 'muted';
-            authStatusEl.hidden = !shouldShowStatus;
+            authStatusEl.hidden = garagePanelVisible || !shouldShowStatus;
         }
         if (authSubmitBtnEl) {
             authSubmitBtnEl.disabled = authenticated || busy || !enabled;
@@ -2211,6 +2226,8 @@ export function createWelcomeModalController({
         busy = false,
         canManageCarWrap = false,
         hasCarWrap = false,
+        garageStatusText = '',
+        garageStatusTone = 'muted',
     } = {}) {
         const selectedPreset =
             PLAYER_VEHICLE_PRESETS[selectedVehicleIndex] || PLAYER_VEHICLE_PRESETS[0] || null;
@@ -2257,12 +2274,16 @@ export function createWelcomeModalController({
             : authenticated
               ? 'Unlocked and ready. Custom wraps stay tied to this signed-in profile.'
               : 'Starter chassis only. Sign in to unlock more vehicles and save progression.';
-        const garageHint = garageNoticeText || defaultGarageHint;
+        const transientGarageStatus =
+            typeof garageStatusText === 'string' ? garageStatusText.trim() : '';
+        const garageHint = garageNoticeText || transientGarageStatus || defaultGarageHint;
         const garageHintTone = garageNoticeText
             ? garageNoticeTone
-            : !vehicleUnlocked
-              ? 'info'
-              : 'muted';
+            : transientGarageStatus
+              ? garageStatusTone || 'muted'
+              : !vehicleUnlocked
+                ? 'info'
+                : 'muted';
 
         if (authGarageVehicleNameEl) {
             authGarageVehicleNameEl.textContent = vehicleName;

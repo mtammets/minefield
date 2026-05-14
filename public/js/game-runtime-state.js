@@ -38,6 +38,7 @@ export function createGameRuntimeState({
         crashDebrisController: null,
         mineController: null,
         weaponSystem: null,
+        stealthPickupSystem: null,
         audioController: null,
         scorePopupController: null,
         scoringSystem: null,

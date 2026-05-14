@@ -21,13 +21,13 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
     const progressFillEl = document.getElementById('missionHudProgressFill');
     const statusEl = document.getElementById('missionHudStatus');
     const targetSwatchEl = document.getElementById('missionHudTargetSwatch');
+    const stealthEl = document.getElementById('missionHudStealth');
 
     if (!rootEl) {
         return createNoopObjectiveHudController();
     }
 
-    const defaultStatus =
-        typeof statusDefaultText === 'string' ? statusDefaultText.trim() : '';
+    const defaultStatus = typeof statusDefaultText === 'string' ? statusDefaultText.trim() : '';
     let gameplayVisible = false;
     let statusResetTimeout = null;
     let persistentStatusText = defaultStatus;
@@ -46,6 +46,7 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
         progressValue: 0,
     });
     setStatus(defaultStatus, 'muted', 0, { persist: true });
+    setStealthState({ active: false, progress: 0 });
     syncVisibility();
 
     return {
@@ -79,6 +80,9 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
         showResult(messageText, timeoutMs = 1600) {
             setStatus(messageText, 'success', timeoutMs);
         },
+        setStealthState(nextState = null) {
+            setStealthState(nextState);
+        },
         resetStatus() {
             setStatus(persistentStatusText, persistentStatusTone, 0);
         },
@@ -111,21 +115,14 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
     };
 
     function applyMissionState(nextMissionState = {}) {
-        const missionNumber = Math.max(
-            1,
-            Math.round(Number(nextMissionState.missionNumber) || 1)
-        );
+        const missionNumber = Math.max(1, Math.round(Number(nextMissionState.missionNumber) || 1));
         const totalMissions = Math.max(
             missionNumber,
             Math.round(Number(nextMissionState.totalMissions) || missionNumber)
         );
-        const pickupCurrent = Math.max(
-            0,
-            Math.round(Number(nextMissionState.pickupCurrent) || 0)
-        );
+        const pickupCurrent = Math.max(0, Math.round(Number(nextMissionState.pickupCurrent) || 0));
         const pickupTarget = Math.max(0, Math.round(Number(nextMissionState.pickupTarget) || 0));
-        const pickupRequired =
-            nextMissionState.pickupRequired !== false && pickupTarget > 0;
+        const pickupRequired = nextMissionState.pickupRequired !== false && pickupTarget > 0;
         const botCount = Math.max(0, Math.round(Number(nextMissionState.botCount) || 0));
         const eliminationCurrent = Math.max(
             0,
@@ -197,15 +194,38 @@ export function createObjectiveHudController({ statusDefaultText = '' } = {}) {
         statusEl.dataset.tone = resolvedTone;
         statusEl.hidden = !resolvedText;
         if (Number.isFinite(timeoutMs) && timeoutMs > 0 && resolvedText) {
-            statusResetTimeout = window.setTimeout(() => {
-                statusResetTimeout = null;
-                setStatus(persistentStatusText, persistentStatusTone, 0);
-            }, Math.max(0, Math.round(timeoutMs)));
+            statusResetTimeout = window.setTimeout(
+                () => {
+                    statusResetTimeout = null;
+                    setStatus(persistentStatusText, persistentStatusTone, 0);
+                },
+                Math.max(0, Math.round(timeoutMs))
+            );
         }
     }
 
     function syncVisibility() {
         rootEl.hidden = !gameplayVisible;
+    }
+
+    function setStealthState(nextState = null) {
+        if (!stealthEl) {
+            return;
+        }
+        const active = Boolean(nextState?.active);
+        rootEl.dataset.stealthActive = active ? 'true' : 'false';
+        if (!active) {
+            stealthEl.hidden = true;
+            stealthEl.dataset.urgent = 'false';
+            stealthEl.style.setProperty('--stealth-progress-angle', '0turn');
+            return;
+        }
+        const progress = clamp01(
+            Number.isFinite(nextState?.progress) ? nextState.progress : nextState?.remainingRatio
+        );
+        stealthEl.hidden = false;
+        stealthEl.dataset.urgent = progress <= 0.24 ? 'true' : 'false';
+        stealthEl.style.setProperty('--stealth-progress-angle', `${progress.toFixed(4)}turn`);
     }
 }
 
@@ -223,7 +243,11 @@ function buildTimelineDotsHtml(missionNumber, totalMissions) {
     return parts.join('');
 }
 
-function buildThreatIconsHtml({ botCount = 0, eliminationCurrent = 0, eliminationTarget = 0 } = {}) {
+function buildThreatIconsHtml({
+    botCount = 0,
+    eliminationCurrent = 0,
+    eliminationTarget = 0,
+} = {}) {
     const totalIcons = Math.max(1, botCount);
     const clearedCount =
         eliminationTarget > 0 ? Math.min(totalIcons, Math.max(0, eliminationCurrent)) : 0;
@@ -243,6 +267,7 @@ function createNoopObjectiveHudController() {
         showCrash() {},
         showInfo() {},
         showResult() {},
+        setStealthState() {},
         resetStatus() {},
         setGameplayVisible() {},
         registerControlAction() {},
