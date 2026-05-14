@@ -10009,6 +10009,8 @@ body.race-intro-active #botPanel {
     transform: scale(1.06);
     filter: none;
     border-color: transparent;
+    outline: none;
+    box-shadow: none;
 }
 
 .welcomePreviewLeaderboardActionBtn.is-gear:hover span,
@@ -10030,6 +10032,7 @@ body.race-intro-active #botPanel {
     transform: translateY(-1px);
     filter: brightness(1.05);
     border-color: rgba(210, 232, 246, 0.88);
+    outline: none;
 }
 
 .welcomePreviewLeaderboardActionBtn:disabled {
