@@ -458,11 +458,12 @@ export function createWelcomeModalController({
     };
     const introVideoState = {
         available: Boolean(previewShellEl && introVideoOverlayEl && introVideoEl),
-        sourceAvailable: true,
+        sourceAvailable: false,
         active: false,
         dismissed: false,
         hideTimeoutHandle: null,
         listenersBound: false,
+        requestToken: 0,
     };
     let showroomIntroVideoConfig = getShowroomIntroVideoConfig();
     const hasOnlineStartFlow = Boolean(
@@ -592,7 +593,6 @@ export function createWelcomeModalController({
     setTaglineByIndex(0);
     applySelectedPreset(selectedVehicleIndex, false);
     resetStartSequenceUi();
-    applyShowroomIntroVideoConfig(showroomIntroVideoConfig);
     syncAuthUi();
     syncWelcomeLeaderboardUi();
     syncWelcomeOnlineUi();
@@ -1015,8 +1015,7 @@ export function createWelcomeModalController({
             applyPreviewPose();
             renderPreview();
             schedulePreviewLoadingReady();
-            void refreshManagedShowroomIntroVideoSource();
-            showIntroVideoOverlay();
+            requestShowIntroVideoOverlay();
         },
         hide() {
             cancelStartSequence();
@@ -1171,6 +1170,27 @@ export function createWelcomeModalController({
             restartPlayback: introVideoState.active,
         });
         return config;
+    }
+
+    function requestShowIntroVideoOverlay() {
+        if (!introVideoState.available || introVideoState.dismissed) {
+            return;
+        }
+
+        const requestToken = introVideoState.requestToken + 1;
+        introVideoState.requestToken = requestToken;
+
+        void (async () => {
+            await refreshManagedShowroomIntroVideoSource();
+            if (
+                requestToken !== introVideoState.requestToken ||
+                rootEl.hidden ||
+                introVideoState.dismissed
+            ) {
+                return;
+            }
+            showIntroVideoOverlay();
+        })();
     }
 
     function initializePreviewLoadingUi() {

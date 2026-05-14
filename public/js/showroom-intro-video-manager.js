@@ -10,7 +10,7 @@ const SHOWROOM_INTRO_VIDEO_MAX_UPLOAD_BYTES = 300 * 1024 * 1024;
 export const SHOWROOM_INTRO_VIDEO_UPDATED_EVENT = 'silentdrift:showroom-intro-video-updated';
 
 const showroomIntroVideoState = {
-    config: createDefaultShowroomIntroVideoConfig(),
+    config: createPendingShowroomIntroVideoConfig(),
     initializationPromise: null,
 };
 
@@ -50,7 +50,11 @@ export async function refreshShowroomIntroVideoConfig() {
         return setShowroomIntroVideoConfig(payload.video);
     } catch (error) {
         console.warn('Showroom intro video config could not be loaded. Using fallback.', error);
-        return getShowroomIntroVideoConfig();
+        const currentConfig = showroomIntroVideoState.config;
+        if (currentConfig.available && currentConfig.url) {
+            return getShowroomIntroVideoConfig();
+        }
+        return setShowroomIntroVideoConfig(createDefaultShowroomIntroVideoConfig());
     }
 }
 
@@ -129,6 +133,27 @@ function createDefaultShowroomIntroVideoConfig() {
         sizeBytes: 0,
         updatedAt: null,
         url: SHOWROOM_INTRO_VIDEO_DEFAULT_URL,
+        accept: SHOWROOM_INTRO_VIDEO_UPLOAD_ACCEPT,
+    };
+}
+
+function createPendingShowroomIntroVideoConfig() {
+    return {
+        available: false,
+        isCustom: false,
+        canReset: false,
+        sourceLabel: 'Loading',
+        statusText: 'Loading showroom demo...',
+        fileName: '',
+        originalFileName: '',
+        mimeType: 'video/mp4',
+        uploadedMimeType: '',
+        width: SHOWROOM_INTRO_VIDEO_DEFAULT_WIDTH,
+        height: SHOWROOM_INTRO_VIDEO_DEFAULT_HEIGHT,
+        frameRate: SHOWROOM_INTRO_VIDEO_DEFAULT_FRAME_RATE,
+        sizeBytes: 0,
+        updatedAt: null,
+        url: '',
         accept: SHOWROOM_INTRO_VIDEO_UPLOAD_ACCEPT,
     };
 }
