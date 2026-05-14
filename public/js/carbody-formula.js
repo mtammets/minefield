@@ -685,7 +685,12 @@ function sanitizeUserWrapTextureUrl(value) {
             normalized,
             typeof window?.location?.origin === 'string' ? window.location.origin : undefined
         );
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        if (
+            parsed.protocol !== 'http:' &&
+            parsed.protocol !== 'https:' &&
+            parsed.protocol !== 'blob:' &&
+            parsed.protocol !== 'data:'
+        ) {
             return '';
         }
         return parsed.toString();

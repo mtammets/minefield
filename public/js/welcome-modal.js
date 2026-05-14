@@ -50,6 +50,12 @@ const PRESET_AVATAR_PATHS = [
     '/assets/Avatars/avatar3.png',
     '/assets/Avatars/avata4.png',
 ];
+const PRESET_GARAGE_WRAP_PATHS = [
+    '/assets/skins/skin1.png',
+    '/assets/skins/skin2.png',
+    '/assets/skins/skin3.png',
+    '/assets/skins/skin4.png',
+];
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
 const AUTH_SIGNED_IN_STATUS_TEXT = 'Signed in. Online rooms and score sync are unlocked.';
 const AUTH_SIGNED_OUT_STATUS_TEXT =
@@ -94,6 +100,7 @@ export function createWelcomeModalController({
     onVehicleChange,
     onPurchaseVehicle,
     onBuyCredits,
+    onWrapChange,
     initialSkinId,
     getCurrentSkinId,
     initialVehicleId,
@@ -218,6 +225,7 @@ export function createWelcomeModalController({
     const authGarageWrapUploadIconEl = document.getElementById('welcomeAuthGarageWrapUploadIcon');
     const authGarageWrapRemoveBtnEl = document.getElementById('welcomeAuthGarageWrapRemoveBtn');
     const authGarageWrapRemoveIconEl = document.getElementById('welcomeAuthGarageWrapRemoveIcon');
+    const authGarageWrapPresetGridEl = document.getElementById('welcomeAuthGarageSkinPresetGrid');
     const authGarageDockTitleEl = document.getElementById('welcomeAuthGarageDockTitle');
     const authGarageDockSubtitleEl = document.getElementById('welcomeAuthGarageDockSubtitle');
     const authChangePasswordToggleBtnEl = document.getElementById(
@@ -258,6 +266,10 @@ export function createWelcomeModalController({
     const previewShellEl = document.getElementById('welcomePreviewShell');
     const previewCanvasEl = document.getElementById('welcomeCarCanvas');
     const previewLoadingEl = document.getElementById('welcomePreviewLoading');
+    renderGarageWrapPresetButtons(authGarageWrapPresetGridEl);
+    const authGarageWrapPresetBtnEls = Array.from(
+        authGarageWrapPresetGridEl?.querySelectorAll?.('.welcomeAuthGarageSkinPresetBtn') || []
+    );
     const previewLoadingStatusEl = document.getElementById('welcomePreviewLoadingStatus');
     const previewLoadingProgressEl = document.getElementById('welcomePreviewLoadingProgress');
     const previewLoadingFillEl = document.getElementById('welcomePreviewLoadingFill');
@@ -391,6 +403,7 @@ export function createWelcomeModalController({
     let garagePurchasePending = false;
     let authPasswordChangeOpen = false;
     const avatarEditorState = createInitialAvatarEditorState();
+    const garageWrapState = createInitialGarageWrapState();
     let accountToolsOpen = false;
     let garagePanelOpen = false;
     let walletPanelOpen = false;
@@ -540,6 +553,10 @@ export function createWelcomeModalController({
     }
     if (authPanelEl && previewAccountBodyEl) {
         previewAccountBodyEl.append(authPanelEl);
+    }
+    if (authGarageWrapCardEl && previewAccountBodyEl) {
+        previewAccountBodyEl.append(authGarageWrapCardEl);
+        authGarageWrapCardEl.hidden = true;
     }
     if (onlineModeFlowEl && previewOnlineBodyEl) {
         previewOnlineBodyEl.append(onlineModeFlowEl);
@@ -699,11 +716,30 @@ export function createWelcomeModalController({
         authGarageWrapUploadBtnEl?.addEventListener('click', () => {
             openCarWrapFilePicker();
         });
+        authGarageWrapPresetBtnEls.forEach((buttonEl) => {
+            buttonEl.addEventListener('click', () => {
+                const presetPath = sanitizeGarageWrapPresetPath(
+                    buttonEl.getAttribute('data-garage-wrap-preset') || ''
+                );
+                handleGarageWrapPresetSelection(presetPath);
+            });
+        });
         authCarWrapInputEl?.addEventListener('change', () => {
             void handleCarWrapSelection();
         });
         authGarageWrapRemoveBtnEl?.addEventListener('click', () => {
             void handleCarWrapRemoval();
+        });
+        authCarWrapPreviewEl?.addEventListener('error', () => {
+            authCarWrapPreviewEl.hidden = true;
+            authCarWrapPreviewEl.removeAttribute('src');
+            if (authCarWrapCardEl) {
+                authCarWrapCardEl.dataset.hasImage = 'false';
+            }
+        });
+        authGarageWrapPreviewEl?.addEventListener('error', () => {
+            authGarageWrapPreviewEl.hidden = true;
+            authGarageWrapPreviewEl.removeAttribute('src');
         });
         authAvatarImageEl?.addEventListener('error', () => {
             if (authAvatarFrameEl) {
@@ -1044,14 +1080,8 @@ export function createWelcomeModalController({
             syncGaragePresentationUi({
                 authenticated: authUiState.authenticated,
                 busy: Boolean(authUiState.loading),
-                canManageCarWrap: Boolean(
-                    authUiState.authenticated &&
-                    authUiState.enabled &&
-                    authUiState.carWrapEnabled &&
-                    authCarWrapInputEl &&
-                    authGarageWrapUploadBtnEl
-                ),
-                hasCarWrap: Boolean(authUiState.carWrapUrl),
+                canManageCarWrap: Boolean(authCarWrapInputEl && authGarageWrapUploadBtnEl),
+                hasCarWrap: Boolean(getEffectiveGarageWrapUrl()),
             });
         },
         setGlobalLeaderboard(nextState = {}) {
@@ -1626,6 +1656,71 @@ export function createWelcomeModalController({
         });
     }
 
+    function getRemoteGarageWrapUrl() {
+        return sanitizeGarageWrapUrl(authUiState?.carWrapUrl || '');
+    }
+
+    function getEffectiveGarageWrapUrl() {
+        return garageWrapState.url || getRemoteGarageWrapUrl();
+    }
+
+    function resolveGarageWrapSelectionMode() {
+        if (garageWrapState.mode === 'preset') {
+            return 'preset';
+        }
+        if (garageWrapState.mode === 'upload') {
+            return 'upload';
+        }
+        return getRemoteGarageWrapUrl() ? 'remote' : 'stock';
+    }
+
+    function revokeGarageWrapObjectUrlIfNeeded() {
+        if (!garageWrapState.ownsObjectUrl || !garageWrapState.url) {
+            return;
+        }
+        try {
+            URL.revokeObjectURL(garageWrapState.url);
+        } catch {
+            // Ignore failed object URL cleanup.
+        }
+    }
+
+    function applyGarageWrapSelection(
+        nextUrl,
+        { mode = 'upload', presetPath = '', ownsObjectUrl = false } = {}
+    ) {
+        const safeUrl = sanitizeGarageWrapUrl(nextUrl);
+        if (!safeUrl) {
+            return;
+        }
+        revokeGarageWrapObjectUrlIfNeeded();
+        garageWrapState.mode = mode === 'preset' ? 'preset' : 'upload';
+        garageWrapState.url = safeUrl;
+        garageWrapState.presetPath =
+            garageWrapState.mode === 'preset' ? sanitizeGarageWrapPresetPath(presetPath) : '';
+        garageWrapState.ownsObjectUrl = Boolean(ownsObjectUrl && safeUrl.startsWith('blob:'));
+        onWrapChange?.(safeUrl, {
+            mode: garageWrapState.mode,
+            presetPath: garageWrapState.presetPath,
+        });
+        syncPreviewVehicleWrap();
+        syncAuthUi();
+    }
+
+    function clearGarageWrapSelection() {
+        revokeGarageWrapObjectUrlIfNeeded();
+        garageWrapState.mode = 'none';
+        garageWrapState.url = '';
+        garageWrapState.presetPath = '';
+        garageWrapState.ownsObjectUrl = false;
+        onWrapChange?.('', {
+            mode: 'none',
+            presetPath: '',
+        });
+        syncPreviewVehicleWrap();
+        syncAuthUi();
+    }
+
     function setAuthState(nextState = null) {
         const previousAuthUiState = authUiState;
         const nextAuthUiState = normalizeWelcomeAuthState(nextState);
@@ -1711,11 +1806,9 @@ export function createWelcomeModalController({
             enabled &&
             Boolean(authUiState.profileImageEnabled && authAvatarInputEl && authAvatarFrameEl);
         const hasProfileImage = Boolean(authUiState.avatarUrl);
-        const canManageCarWrap =
-            authenticated &&
-            enabled &&
-            Boolean(authUiState.carWrapEnabled && authCarWrapInputEl && authGarageWrapUploadBtnEl);
-        const hasCarWrap = Boolean(authUiState.carWrapUrl);
+        const canManageCarWrap = Boolean(authCarWrapInputEl && authGarageWrapUploadBtnEl);
+        const activeGarageWrapUrl = getEffectiveGarageWrapUrl();
+        const hasCarWrap = Boolean(activeGarageWrapUrl);
         const localStatus = authLocalStatusText.trim();
         const remoteStatus =
             typeof authUiState.statusText === 'string' ? authUiState.statusText.trim() : '';
@@ -1804,14 +1897,15 @@ export function createWelcomeModalController({
         if (authCarWrapCardEl) {
             authCarWrapCardEl.hidden = !showGarageDock;
             authCarWrapCardEl.dataset.hasImage = hasCarWrap ? 'true' : 'false';
+            authCarWrapCardEl.dataset.selection = resolveGarageWrapSelectionMode();
         }
         if (authCarWrapFallbackEl) {
             authCarWrapFallbackEl.hidden = hasCarWrap;
         }
         if (authCarWrapPreviewEl) {
             if (hasCarWrap) {
-                if (authCarWrapPreviewEl.getAttribute('src') !== authUiState.carWrapUrl) {
-                    authCarWrapPreviewEl.src = authUiState.carWrapUrl;
+                if (authCarWrapPreviewEl.getAttribute('src') !== activeGarageWrapUrl) {
+                    authCarWrapPreviewEl.src = activeGarageWrapUrl;
                 }
                 authCarWrapPreviewEl.hidden = false;
             } else {
@@ -1824,8 +1918,8 @@ export function createWelcomeModalController({
         }
         if (authGarageWrapPreviewEl) {
             if (hasCarWrap) {
-                if (authGarageWrapPreviewEl.getAttribute('src') !== authUiState.carWrapUrl) {
-                    authGarageWrapPreviewEl.src = authUiState.carWrapUrl;
+                if (authGarageWrapPreviewEl.getAttribute('src') !== activeGarageWrapUrl) {
+                    authGarageWrapPreviewEl.src = activeGarageWrapUrl;
                 }
                 authGarageWrapPreviewEl.hidden = false;
             } else {
@@ -1892,6 +1986,9 @@ export function createWelcomeModalController({
         if (authSectionGaragePanelEl) {
             authSectionGaragePanelEl.hidden = !garagePanelVisible;
         }
+        if (authGarageWrapCardEl) {
+            authGarageWrapCardEl.hidden = !garagePanelVisible;
+        }
         if (authSectionSecurityPanelEl) {
             authSectionSecurityPanelEl.hidden = !securityPanelVisible;
         }
@@ -1951,11 +2048,12 @@ export function createWelcomeModalController({
             hasProfileImage,
         });
         if (authCarWrapInputEl) {
-            authCarWrapInputEl.disabled = !canManageCarWrap || busy;
+            authCarWrapInputEl.disabled = busy || !canManageCarWrap;
         }
         if (authCarWrapUploadBtnEl) {
             authCarWrapUploadBtnEl.disabled = busy;
             authCarWrapUploadBtnEl.dataset.hasImage = hasCarWrap ? 'true' : 'false';
+            authCarWrapUploadBtnEl.dataset.selection = resolveGarageWrapSelectionMode();
             authCarWrapUploadBtnEl.dataset.busy = 'false';
             authCarWrapUploadBtnEl.setAttribute('aria-label', 'Open garage');
             authCarWrapUploadBtnEl.setAttribute('title', 'Open garage');
@@ -2245,35 +2343,46 @@ export function createWelcomeModalController({
         const walletCredits = authenticated
             ? Math.max(0, Math.round(Number(playerEconomyState?.credits) || 0))
             : 0;
-        const wrapFeatureEnabled = Boolean(authUiState.carWrapEnabled && authCarWrapInputEl);
-        const uploadBusy = Boolean(busy && authUiState.pendingAction === 'update-car-wrap');
+        const wrapFeatureEnabled = Boolean(authCarWrapInputEl && authGarageWrapUploadBtnEl);
+        const uploadBusy = false;
         const removeBusy = Boolean(busy && authUiState.pendingAction === 'remove-car-wrap');
-        const wrapState = !vehicleUnlocked
+        const remoteWrapUrl = getRemoteGarageWrapUrl();
+        const activeGarageWrapUrl = getEffectiveGarageWrapUrl();
+        const hasRemoteCarWrap = Boolean(remoteWrapUrl);
+        const hasLocalGarageWrap = Boolean(garageWrapState.url);
+        const effectiveHasCarWrap = Boolean(activeGarageWrapUrl || hasCarWrap);
+        const wrapState = !vehicleUnlocked ? 'locked' : effectiveHasCarWrap ? 'custom' : 'stock';
+        const activeSelection = !vehicleUnlocked
             ? 'locked'
-            : !wrapFeatureEnabled
-              ? 'disabled'
-              : hasCarWrap
-                ? 'custom'
-                : 'stock';
-        const wrapActionLabel = hasCarWrap ? 'Replace wrap' : 'Upload wrap';
+            : garageWrapState.mode === 'preset'
+              ? 'preset'
+              : garageWrapState.mode === 'upload'
+                ? 'upload'
+                : hasRemoteCarWrap
+                  ? 'remote'
+                  : 'stock';
+        const wrapActionLabel =
+            garageWrapState.mode === 'upload' ? 'Replace uploaded wrap' : 'Upload custom wrap';
         const wrapSummary = !vehicleUnlocked
             ? authenticated
                 ? `${vehicleName}. Locked chassis. Unlock cost: ${formatCredits(purchaseAvailability.unlockPriceCredits)}.`
                 : `${vehicleName}. Locked chassis. Sign in to unlock it.`
             : !wrapFeatureEnabled
-              ? `${vehicleName}. Wrap uploads unavailable on this server.`
-              : hasCarWrap
-                ? `${vehicleName}. Custom wrap equipped.`
-                : `${vehicleName}. Stock finish equipped.`;
+              ? `${vehicleName}. Wrap uploads are unavailable right now.`
+              : activeSelection === 'preset'
+                ? `${vehicleName}. Preset skin equipped.`
+                : activeSelection === 'upload'
+                  ? `${vehicleName}. Uploaded skin equipped.`
+                  : activeSelection === 'remote'
+                    ? `${vehicleName}. Saved account wrap equipped.`
+                    : `${vehicleName}. Stock finish equipped.`;
         const defaultGarageHint = !vehicleUnlocked
             ? !authenticated
                 ? 'Sign in to unlock additional chassis and earn credits.'
                 : purchaseAvailability.canAfford
                   ? `Spend ${formatCredits(purchaseAvailability.unlockPriceCredits)} to bring this chassis into the next run.`
                   : `Earn ${formatCredits(purchaseAvailability.creditsShort)} more in races to unlock this chassis.`
-            : authenticated
-              ? 'Unlocked and ready. Custom wraps stay tied to this signed-in profile.'
-              : 'Starter chassis only. Sign in to unlock more vehicles and save progression.';
+            : 'Upload a skin or pick one of the presets.';
         const transientGarageStatus =
             typeof garageStatusText === 'string' ? garageStatusText.trim() : '';
         const garageHint = garageNoticeText || transientGarageStatus || defaultGarageHint;
@@ -2305,7 +2414,7 @@ export function createWelcomeModalController({
                 ? authenticated
                     ? `${vehicleName} • locked • ${formatCredits(purchaseAvailability.unlockPriceCredits)}`
                     : `${vehicleName} • sign in to unlock`
-                : hasCarWrap
+                : effectiveHasCarWrap
                   ? `${vehicleName} • custom wrap equipped`
                   : authenticated
                     ? `${vehicleName} • wallet ${formatCredits(walletCredits)}`
@@ -2355,32 +2464,58 @@ export function createWelcomeModalController({
             authGarageNextBtnEl.disabled = busy || garagePurchasePending;
         }
         if (authGarageWrapUploadBtnEl) {
-            authGarageWrapUploadBtnEl.hidden =
-                !vehicleUnlocked || !authenticated || !wrapFeatureEnabled;
             authGarageWrapUploadBtnEl.disabled =
-                !vehicleUnlocked || !canManageCarWrap || busy || garagePurchasePending;
-            authGarageWrapUploadBtnEl.setAttribute('aria-label', wrapActionLabel);
-            authGarageWrapUploadBtnEl.setAttribute('title', wrapActionLabel);
-            authGarageWrapUploadBtnEl.dataset.action = hasCarWrap ? 'replace' : 'upload';
-        }
-        if (authGarageWrapUploadIconEl) {
-            authGarageWrapUploadIconEl.textContent = uploadBusy ? '…' : hasCarWrap ? '↻' : '+';
-        }
-        if (authGarageWrapRemoveBtnEl) {
-            authGarageWrapRemoveBtnEl.hidden =
-                !vehicleUnlocked || !authenticated || !wrapFeatureEnabled || !hasCarWrap;
-            authGarageWrapRemoveBtnEl.disabled =
                 !vehicleUnlocked ||
+                !wrapFeatureEnabled ||
                 !canManageCarWrap ||
                 busy ||
+                garagePurchasePending;
+            authGarageWrapUploadBtnEl.setAttribute('aria-label', wrapActionLabel);
+            authGarageWrapUploadBtnEl.setAttribute('title', wrapActionLabel);
+            authGarageWrapUploadBtnEl.dataset.action =
+                garageWrapState.mode === 'upload' ? 'replace' : 'upload';
+            authGarageWrapUploadBtnEl.dataset.hasImage = effectiveHasCarWrap ? 'true' : 'false';
+        }
+        if (authGarageWrapUploadIconEl) {
+            authGarageWrapUploadIconEl.textContent = uploadBusy ? '…' : '+';
+        }
+        if (authGarageWrapRemoveBtnEl) {
+            authGarageWrapRemoveBtnEl.disabled =
+                !vehicleUnlocked ||
+                busy ||
                 garagePurchasePending ||
-                !hasCarWrap ||
-                typeof onAuthRemoveCarWrap !== 'function';
-            authGarageWrapRemoveBtnEl.setAttribute('aria-label', 'Remove wrap');
-            authGarageWrapRemoveBtnEl.setAttribute('title', 'Remove wrap');
+                (!hasLocalGarageWrap &&
+                    (!hasRemoteCarWrap ||
+                        !authenticated ||
+                        typeof onAuthRemoveCarWrap !== 'function'));
+            authGarageWrapRemoveBtnEl.setAttribute(
+                'aria-label',
+                hasLocalGarageWrap ? 'Reset wrap' : 'Remove saved wrap'
+            );
+            authGarageWrapRemoveBtnEl.setAttribute(
+                'title',
+                hasLocalGarageWrap ? 'Reset wrap' : 'Remove saved wrap'
+            );
+            authGarageWrapRemoveBtnEl.hidden =
+                !vehicleUnlocked || (!hasLocalGarageWrap && !hasRemoteCarWrap);
         }
         if (authGarageWrapRemoveIconEl) {
-            authGarageWrapRemoveIconEl.textContent = removeBusy ? '…' : '×';
+            authGarageWrapRemoveIconEl.textContent = removeBusy ? '…' : '↺';
+        }
+        for (let i = 0; i < authGarageWrapPresetBtnEls.length; i += 1) {
+            const buttonEl = authGarageWrapPresetBtnEls[i];
+            const presetPath = sanitizeGarageWrapPresetPath(
+                buttonEl.getAttribute('data-garage-wrap-preset') || ''
+            );
+            buttonEl.disabled =
+                !vehicleUnlocked || !wrapFeatureEnabled || busy || garagePurchasePending;
+            buttonEl.dataset.selected =
+                garageWrapState.mode === 'preset' && garageWrapState.presetPath === presetPath
+                    ? 'true'
+                    : 'false';
+        }
+        if (authGarageWrapFallbackEl) {
+            authGarageWrapFallbackEl.hidden = effectiveHasCarWrap;
         }
     }
 
@@ -3119,12 +3254,7 @@ export function createWelcomeModalController({
     }
 
     function openCarWrapFilePicker() {
-        if (
-            !authCarWrapInputEl ||
-            authUiState.loading ||
-            !authUiState.authenticated ||
-            authGarageWrapUploadBtnEl?.disabled
-        ) {
+        if (!authCarWrapInputEl || authUiState.loading || authGarageWrapUploadBtnEl?.disabled) {
             return;
         }
         authCarWrapInputEl.value = '';
@@ -3617,12 +3747,7 @@ export function createWelcomeModalController({
     }
 
     async function handleCarWrapSelection() {
-        if (
-            authUiState.loading ||
-            !authUiState.authenticated ||
-            !authUiState.carWrapEnabled ||
-            typeof onAuthUpdateCarWrap !== 'function'
-        ) {
+        if (authUiState.loading || !authCarWrapInputEl) {
             if (authCarWrapInputEl) {
                 authCarWrapInputEl.value = '';
             }
@@ -3634,30 +3759,42 @@ export function createWelcomeModalController({
             return;
         }
 
-        clearLocalAuthStatus();
-        syncAuthUi();
-
-        const response = await Promise.resolve(onAuthUpdateCarWrap(file)).catch((error) => ({
-            ok: false,
-            error: error?.message || 'Could not update the car wrap.',
-        }));
-
-        if (authCarWrapInputEl) {
-            authCarWrapInputEl.value = '';
-        }
-        if (!response?.ok && response?.error) {
-            setLocalAuthStatus(String(response.error), 'error');
+        let objectUrl = '';
+        try {
+            clearGarageNotice();
+            validateGarageWrapFile(file);
+            objectUrl = URL.createObjectURL(file);
+            await loadImageFromObjectUrl(objectUrl);
+            applyGarageWrapSelection(objectUrl, {
+                mode: 'upload',
+                ownsObjectUrl: true,
+            });
+        } catch (error) {
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+            setGarageNotice(error?.message || 'Could not load the selected skin.', 'error');
             syncAuthUi();
-            return;
+        } finally {
+            if (authCarWrapInputEl) {
+                authCarWrapInputEl.value = '';
+            }
         }
-        syncAuthUi();
     }
 
     async function handleCarWrapRemoval() {
+        if (authUiState.loading) {
+            return;
+        }
+
+        if (garageWrapState.mode !== 'none') {
+            clearGarageWrapSelection();
+            return;
+        }
+
         if (
-            authUiState.loading ||
             !authUiState.authenticated ||
-            !authUiState.carWrapUrl ||
+            !getRemoteGarageWrapUrl() ||
             typeof onAuthRemoveCarWrap !== 'function'
         ) {
             return;
@@ -3677,6 +3814,21 @@ export function createWelcomeModalController({
             return;
         }
         syncAuthUi();
+    }
+
+    function handleGarageWrapPresetSelection(presetPath = '') {
+        if (authUiState.loading || !presetPath) {
+            return;
+        }
+        const safePresetPath = sanitizeGarageWrapPresetPath(presetPath);
+        if (!safePresetPath) {
+            return;
+        }
+        clearGarageNotice();
+        applyGarageWrapSelection(safePresetPath, {
+            mode: 'preset',
+            presetPath: safePresetPath,
+        });
     }
 
     function handlePasswordChangeToggle() {
@@ -4528,14 +4680,8 @@ export function createWelcomeModalController({
         syncGaragePresentationUi({
             authenticated: authUiState.authenticated,
             busy: Boolean(authUiState.loading),
-            canManageCarWrap: Boolean(
-                authUiState.authenticated &&
-                authUiState.enabled &&
-                authUiState.carWrapEnabled &&
-                authCarWrapInputEl &&
-                authGarageWrapUploadBtnEl
-            ),
-            hasCarWrap: Boolean(authUiState.carWrapUrl),
+            canManageCarWrap: Boolean(authCarWrapInputEl && authGarageWrapUploadBtnEl),
+            hasCarWrap: Boolean(getEffectiveGarageWrapUrl()),
         });
         if (emitChange && isVehicleUnlockedForEconomy(playerEconomyState, selectedVehicleId)) {
             onVehicleChange?.(resolveVehicleId(selectedPreset.id), selectedPreset);
@@ -5199,8 +5345,7 @@ export function createWelcomeModalController({
     }
 
     function syncPreviewVehicleWrap() {
-        const wrapUrl =
-            authUiState?.authenticated && authUiState?.carWrapUrl ? authUiState.carWrapUrl : '';
+        const wrapUrl = getEffectiveGarageWrapUrl();
         for (let i = 0; i < previewVehicles.length; i += 1) {
             previewVehicles[i]?.rig?.setAppearance?.({
                 wrapUrl,
@@ -5281,12 +5426,70 @@ export function createWelcomeModalController({
         };
     }
 
+    function createInitialGarageWrapState() {
+        return {
+            mode: 'none',
+            url: '',
+            presetPath: '',
+            ownsObjectUrl: false,
+        };
+    }
+
     function sanitizePresetAvatarPath(value) {
         if (typeof value !== 'string') {
             return '';
         }
         const normalized = value.trim();
         return PRESET_AVATAR_PATHS.includes(normalized) ? normalized : '';
+    }
+
+    function sanitizeGarageWrapPresetPath(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const normalized = value.trim();
+        return PRESET_GARAGE_WRAP_PATHS.includes(normalized) ? normalized : '';
+    }
+
+    function renderGarageWrapPresetButtons(containerEl) {
+        if (!containerEl) {
+            return;
+        }
+        containerEl.textContent = '';
+        for (let i = 0; i < PRESET_GARAGE_WRAP_PATHS.length; i += 1) {
+            const presetPath = PRESET_GARAGE_WRAP_PATHS[i];
+            const buttonEl = document.createElement('button');
+            buttonEl.type = 'button';
+            buttonEl.className = 'welcomeAuthGarageSkinPresetBtn';
+            buttonEl.setAttribute('data-garage-wrap-preset', presetPath);
+            buttonEl.setAttribute('aria-label', `Select preset skin ${i + 1}`);
+            buttonEl.setAttribute('title', `Select preset skin ${i + 1}`);
+
+            const imageEl = document.createElement('img');
+            imageEl.className = 'welcomeAuthGarageSkinPresetImage';
+            imageEl.src = presetPath;
+            imageEl.alt = '';
+            imageEl.loading = 'lazy';
+            imageEl.decoding = 'async';
+
+            buttonEl.appendChild(imageEl);
+            containerEl.appendChild(buttonEl);
+        }
+    }
+
+    function validateGarageWrapFile(file) {
+        if (!(file instanceof File)) {
+            throw new Error('Choose an image file first.');
+        }
+        if (!USER_MEDIA_ALLOWED_TYPES.has(file.type)) {
+            throw new Error('Only JPG, PNG, or WebP images are supported.');
+        }
+        if (!Number.isFinite(file.size) || file.size <= 0) {
+            throw new Error('The selected image is empty.');
+        }
+        if (file.size > USER_MEDIA_MAX_INPUT_BYTES) {
+            throw new Error('Choose an image smaller than 10 MB.');
+        }
     }
 
     function validateAvatarEditorFile(file) {
@@ -5398,6 +5601,33 @@ export function createWelcomeModalController({
             normalized === 'muted'
             ? normalized
             : 'muted';
+    }
+
+    function sanitizeGarageWrapUrl(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const normalized = value.trim();
+        if (!normalized) {
+            return '';
+        }
+        try {
+            const parsed = new URL(
+                normalized,
+                typeof window?.location?.origin === 'string' ? window.location.origin : undefined
+            );
+            if (
+                parsed.protocol === 'https:' ||
+                parsed.protocol === 'http:' ||
+                parsed.protocol === 'blob:' ||
+                parsed.protocol === 'data:'
+            ) {
+                return parsed.toString();
+            }
+            return '';
+        } catch {
+            return '';
+        }
     }
 
     function sanitizeProfileImageUrl(value) {

@@ -240,6 +240,8 @@ const runtimeState = createGameRuntimeState({
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
 runtimeState.playerEconomy = normalizePlayerEconomyState(initialPlayerEconomyState);
+runtimeState.authCarWrapUrl = '';
+runtimeState.localGarageWrapUrl = '';
 let runtimeGraphicsWarmupReady = false;
 let runtimeGraphicsRecoveryPromise = null;
 let runtimeGraphicsLastRecoveryRequestAtMs = -Number.POSITIVE_INFINITY;
@@ -249,6 +251,20 @@ let runtimeGraphicsContextLossCount = 0;
 runtimeState.scoringSystem = createPickupScoringSystem();
 runtimeState.scorePopupController = createScorePopupController();
 const performanceDiagnosticsController = createNoopPerformanceDiagnosticsController();
+
+function getActivePlayerWrapUrl() {
+    return typeof runtimeState.localGarageWrapUrl === 'string' && runtimeState.localGarageWrapUrl
+        ? runtimeState.localGarageWrapUrl
+        : typeof runtimeState.authCarWrapUrl === 'string'
+          ? runtimeState.authCarWrapUrl
+          : '';
+}
+
+function syncRuntimePlayerWrapAppearance() {
+    setPlayerCarAppearance({
+        wrapUrl: getActivePlayerWrapUrl(),
+    });
+}
 
 function createLocalStealthPickupSnapshot({ available = true, respawnAt = 0 } = {}) {
     const centralParkingLot = cityMapLayout?.centralParkingLot || null;
@@ -355,6 +371,10 @@ const {
     onBuyCredits() {
         return runtimeState.authController?.purchaseCreditsPack?.();
     },
+    onWrapChange(wrapUrl = '') {
+        runtimeState.localGarageWrapUrl = typeof wrapUrl === 'string' ? wrapUrl.trim() : '';
+        syncRuntimePlayerWrapAppearance();
+    },
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
 });
 runtimeState.authController = createAuthController({
@@ -369,16 +389,25 @@ runtimeState.authController = createAuthController({
     },
     onStateChanged(state) {
         welcomeModalUi.setAuthState?.(state);
-        setPlayerCarAppearance({
-            wrapUrl: state?.authenticated ? state?.carWrapUrl || '' : '',
-        });
+        runtimeState.authCarWrapUrl =
+            state?.authenticated && typeof state?.carWrapUrl === 'string'
+                ? state.carWrapUrl.trim()
+                : '';
+        syncRuntimePlayerWrapAppearance();
         handleRuntimeAuthEconomyStateChanged(state);
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
         runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
         void runtimeState.globalLeaderboardController?.refresh?.();
     },
 });
-welcomeModalUi.setAuthState?.(runtimeState.authController.getState?.());
+const initialRuntimeAuthState = runtimeState.authController.getState?.() || null;
+runtimeState.authCarWrapUrl =
+    initialRuntimeAuthState?.authenticated &&
+    typeof initialRuntimeAuthState?.carWrapUrl === 'string'
+        ? initialRuntimeAuthState.carWrapUrl.trim()
+        : '';
+syncRuntimePlayerWrapAppearance();
+welcomeModalUi.setAuthState?.(initialRuntimeAuthState);
 welcomeModalUi.setPlayerEconomy?.(runtimeState.playerEconomy);
 syncRuntimeEconomyHud();
 runtimeState.globalLeaderboardController = createGlobalLeaderboardController({
