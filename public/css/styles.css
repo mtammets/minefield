@@ -11868,7 +11868,12 @@ body.edit-mode-active .audioControlPanel {
     }
 }
 
-.welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard {
+.welcomePreviewAccountBody > .welcomeAuthGarageWrapCard {
+    display: none;
+}
+
+.welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard:not([hidden]) {
+    display: grid;
     gap: 10px;
 }
 
@@ -11932,7 +11937,7 @@ body.edit-mode-active .audioControlPanel {
     pointer-events: none;
 }
 
-.welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard {
+.welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard:not([hidden]) {
     position: absolute;
     top: clamp(108px, 11vh, 148px);
     left: clamp(96px, 6vw, 128px);
@@ -11977,7 +11982,7 @@ body.edit-mode-active .audioControlPanel {
 }
 
 @media (max-width: 900px) {
-    .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard {
+    .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard:not([hidden]) {
         top: auto;
         left: auto;
         right: clamp(20px, 2.4vw, 34px);

@@ -2382,7 +2382,7 @@ export function createWelcomeModalController({
                 : purchaseAvailability.canAfford
                   ? `Spend ${formatCredits(purchaseAvailability.unlockPriceCredits)} to bring this chassis into the next run.`
                   : `Earn ${formatCredits(purchaseAvailability.creditsShort)} more in races to unlock this chassis.`
-            : 'Upload a skin or pick one of the presets.';
+            : '';
         const transientGarageStatus =
             typeof garageStatusText === 'string' ? garageStatusText.trim() : '';
         const garageHint = garageNoticeText || transientGarageStatus || defaultGarageHint;
@@ -3420,7 +3420,7 @@ export function createWelcomeModalController({
         accountBtnEl.dataset.open = welcomeAccountOpen ? 'true' : 'false';
         accountBtnEl.setAttribute('aria-expanded', welcomeAccountOpen ? 'true' : 'false');
         previewAccountOverlayEl.hidden = !welcomeAccountOpen;
-        syncAccountToolsUi();
+        syncAuthUi();
     }
 
     function setAccountToolsOpen(nextOpen, options = {}) {

@@ -245,10 +245,9 @@ export function createVehicleWeaponSystem({
         scene.add(entry.pickup.root);
     });
 
-    const mountParent = car.getObjectByName('body_shell_group') || car;
     const mount = createWeaponMount();
     mount.root.visible = false;
-    mountParent.add(mount.root);
+    let mountParent = ensureWeaponMountAttachment(car, mount);
 
     const hud = ensureWeaponHud();
     const reticleColor = new THREE.Color().copy(RETICLE_DEFAULT_COLOR);
@@ -631,6 +630,7 @@ export function createVehicleWeaponSystem({
         updatePickups(dt);
         maybeCollectPickup(frameState, multiplayerPickupSyncActive);
 
+        mountParent = ensureWeaponMountAttachment(car, mount, mountParent);
         const weaponMotionState = resolveWeaponMotionState(vehicleState);
         applyWeaponBasePoseToMount(mount, weaponMotionState);
         const aimState = resolveAimState(gameMode);
@@ -2998,6 +2998,24 @@ function createWeaponMount() {
     };
 }
 
+function ensureWeaponMountAttachment(car, mount, currentMountParent = null) {
+    if (!car || !mount?.root) {
+        return currentMountParent || null;
+    }
+
+    const nextMountParent = car.getObjectByName('body_shell_group') || car;
+    if (!nextMountParent) {
+        return currentMountParent || null;
+    }
+
+    if (mount.root.parent !== nextMountParent) {
+        mount.root.parent?.remove?.(mount.root);
+        nextMountParent.add(mount.root);
+    }
+
+    return nextMountParent;
+}
+
 function setMaterialArrayOpacity(materials = [], opacity = 1) {
     const clampedOpacity = THREE.MathUtils.clamp(opacity, 0, 1);
     for (let index = 0; index < materials.length; index += 1) {
@@ -3456,10 +3474,9 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
     effectRoot.name = 'replicatedVehicleWeaponEffects';
     scene.add(effectRoot);
 
-    const mountParent = car.getObjectByName('body_shell_group') || car;
     const mount = createWeaponMount();
     mount.root.visible = false;
-    mountParent.add(mount.root);
+    let mountParent = ensureWeaponMountAttachment(car, mount);
 
     const reticleColor = new THREE.Color().copy(RETICLE_DEFAULT_COLOR);
     const targetReticleColor = new THREE.Color().copy(RETICLE_DEFAULT_COLOR);
@@ -3637,6 +3654,7 @@ export function createReplicatedVehicleWeaponVisualController({ scene, car } = {
     };
 
     function updateReplicatedMount(dt, vehicleState = {}) {
+        mountParent = ensureWeaponMountAttachment(car, mount, mountParent);
         const speedRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.speed || 0) / 42, 0, 1.25);
         const throttleRatio = THREE.MathUtils.clamp(Math.abs(vehicleState?.throttle || 0), 0, 1);
         const idleSway = Math.sin(projectileState.hoverPhase * WEAPON_IDLE_SWAY_SPEED) * 0.01;
