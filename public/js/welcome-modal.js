@@ -2780,7 +2780,7 @@ export function createWelcomeModalController({
                 : 'PLAYER ACCOUNT';
         }
         if (previewAccountTitleEl) {
-            previewAccountTitleEl.textContent = garagePanelVisible ? 'GARAGE' : 'DRIVER PROFILE';
+            previewAccountTitleEl.textContent = garagePanelVisible ? 'GARAGE' : 'DRIVER';
         }
         const showPreviewAccountHeading = authenticated || garagePanelVisible;
         if (previewAccountHeadingEl) {
@@ -7040,6 +7040,11 @@ export function createWelcomeModalController({
             const preset = getPlayerWheelPresetById(wheelPresetId);
             const isPhotonTurbine = preset.layout === 'photon-turbine';
             const isObsidianHalo = preset.layout === 'obsidian-halo';
+            const isLeviathanRift = preset.layout === 'leviathan-rift';
+            const previewScale =
+                Number.isFinite(preset.previewScale) && preset.previewScale > 0
+                    ? preset.previewScale
+                    : 0.8;
 
             try {
                 const renderer = new THREE.WebGLRenderer({
@@ -7051,54 +7056,76 @@ export function createWelcomeModalController({
                 renderer.setClearColor(0x000000, 0);
                 renderer.outputColorSpace = THREE.SRGBColorSpace;
                 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-                renderer.toneMappingExposure = isPhotonTurbine
-                    ? 1.34
-                    : isObsidianHalo
-                      ? 1.24
-                      : 1.38;
+                renderer.toneMappingExposure = isLeviathanRift
+                    ? 1.18
+                    : isPhotonTurbine
+                      ? 1.34
+                      : isObsidianHalo
+                        ? 1.24
+                        : 1.38;
 
                 const scene = new THREE.Scene();
                 const camera = new THREE.PerspectiveCamera(24, 1, 0.1, 10);
                 camera.position.set(
-                    isObsidianHalo ? 1.86 : 1.92,
-                    0.18,
-                    isObsidianHalo ? 1.04 : 0.98
+                    isLeviathanRift ? 2.2 : isObsidianHalo ? 1.86 : 1.92,
+                    isLeviathanRift ? 0.24 : 0.18,
+                    isLeviathanRift ? 1.22 : isObsidianHalo ? 1.04 : 0.98
                 );
                 camera.lookAt(0, 0.01, 0);
 
                 const ambientLight = new THREE.HemisphereLight(
                     0xdff2ff,
-                    isPhotonTurbine ? 0x040912 : isObsidianHalo ? 0x050608 : 0x09111b,
-                    isPhotonTurbine ? 1.16 : isObsidianHalo ? 1.08 : 1.32
+                    isLeviathanRift
+                        ? 0x070b12
+                        : isPhotonTurbine
+                          ? 0x040912
+                          : isObsidianHalo
+                            ? 0x050608
+                            : 0x09111b,
+                    isLeviathanRift ? 1.12 : isPhotonTurbine ? 1.16 : isObsidianHalo ? 1.08 : 1.32
                 );
                 scene.add(ambientLight);
 
                 const keyLight = new THREE.DirectionalLight(
-                    isPhotonTurbine ? 0xffffff : isObsidianHalo ? 0xfff0d9 : 0xf7fbff,
-                    isPhotonTurbine ? 1.46 : isObsidianHalo ? 1.42 : 1.78
+                    isLeviathanRift
+                        ? 0xfff2da
+                        : isPhotonTurbine
+                          ? 0xffffff
+                          : isObsidianHalo
+                            ? 0xfff0d9
+                            : 0xf7fbff,
+                    isLeviathanRift ? 1.6 : isPhotonTurbine ? 1.46 : isObsidianHalo ? 1.42 : 1.78
                 );
                 keyLight.position.set(2.24, 2.96, 3.18);
                 scene.add(keyLight);
 
                 const rimLight = new THREE.DirectionalLight(
-                    isPhotonTurbine ? 0x93d8ff : isObsidianHalo ? 0xffbe6b : 0xbfdfff,
-                    isPhotonTurbine ? 1.18 : isObsidianHalo ? 1.08 : 1.32
+                    isLeviathanRift
+                        ? 0xff8d36
+                        : isPhotonTurbine
+                          ? 0x93d8ff
+                          : isObsidianHalo
+                            ? 0xffbe6b
+                            : 0xbfdfff,
+                    isLeviathanRift ? 1.26 : isPhotonTurbine ? 1.18 : isObsidianHalo ? 1.08 : 1.32
                 );
                 rimLight.position.set(-2.42, 1.38, -1.94);
                 scene.add(rimLight);
 
                 const faceFillLight = new THREE.DirectionalLight(
                     0xe8f5ff,
-                    isPhotonTurbine ? 0.72 : isObsidianHalo ? 0.86 : 1.24
+                    isLeviathanRift ? 0.94 : isPhotonTurbine ? 0.72 : isObsidianHalo ? 0.86 : 1.24
                 );
                 faceFillLight.position.set(-0.48, 0.94, 3.48);
                 scene.add(faceFillLight);
 
-                const accentLightBaseIntensity = isPhotonTurbine
-                    ? 1.04
-                    : isObsidianHalo
-                      ? 1.14
-                      : 1.02;
+                const accentLightBaseIntensity = isLeviathanRift
+                    ? 1.24
+                    : isPhotonTurbine
+                      ? 1.04
+                      : isObsidianHalo
+                        ? 1.14
+                        : 1.02;
                 const accentLight = new THREE.PointLight(
                     preset.accentColor,
                     accentLightBaseIntensity,
@@ -7106,15 +7133,21 @@ export function createWelcomeModalController({
                     2
                 );
                 accentLight.position.set(
-                    isPhotonTurbine ? 0.4 : isObsidianHalo ? 0.14 : -0.08,
-                    0.18,
-                    1.18
+                    isLeviathanRift ? 0.08 : isPhotonTurbine ? 0.4 : isObsidianHalo ? 0.14 : -0.08,
+                    isLeviathanRift ? 0.26 : 0.18,
+                    isLeviathanRift ? 1.3 : 1.18
                 );
                 scene.add(accentLight);
 
                 const kickerLight = new THREE.PointLight(
-                    isPhotonTurbine ? 0x93ffcf : isObsidianHalo ? 0xff8a24 : 0xff7575,
-                    isPhotonTurbine ? 0.42 : isObsidianHalo ? 0.6 : 0.82,
+                    isLeviathanRift
+                        ? 0xff6a17
+                        : isPhotonTurbine
+                          ? 0x93ffcf
+                          : isObsidianHalo
+                            ? 0xff8a24
+                            : 0xff7575,
+                    isLeviathanRift ? 0.78 : isPhotonTurbine ? 0.42 : isObsidianHalo ? 0.6 : 0.82,
                     3.8,
                     2
                 );
@@ -7122,40 +7155,58 @@ export function createWelcomeModalController({
                 scene.add(kickerLight);
 
                 const shadowPlate = new THREE.Mesh(
-                    new THREE.CircleGeometry(0.66, 36),
+                    new THREE.CircleGeometry(isLeviathanRift ? 0.82 : 0.66, 36),
                     new THREE.MeshBasicMaterial({
                         color: 0x02060b,
                         transparent: true,
-                        opacity: isPhotonTurbine ? 0.5 : isObsidianHalo ? 0.56 : 0.42,
+                        opacity: isLeviathanRift
+                            ? 0.62
+                            : isPhotonTurbine
+                              ? 0.5
+                              : isObsidianHalo
+                                ? 0.56
+                                : 0.42,
                         depthWrite: false,
                     })
                 );
                 shadowPlate.rotation.x = -Math.PI * 0.5;
-                shadowPlate.position.y = -0.56;
+                shadowPlate.position.y = isLeviathanRift ? -0.68 : -0.56;
                 scene.add(shadowPlate);
 
                 const haloPlate = new THREE.Mesh(
-                    new THREE.CircleGeometry(0.58, 32),
+                    new THREE.CircleGeometry(isLeviathanRift ? 0.72 : 0.58, 32),
                     new THREE.MeshBasicMaterial({
                         color: preset.accentColor,
                         transparent: true,
-                        opacity: isPhotonTurbine ? 0.12 : isObsidianHalo ? 0.18 : 0.14,
+                        opacity: isLeviathanRift
+                            ? 0.22
+                            : isPhotonTurbine
+                              ? 0.12
+                              : isObsidianHalo
+                                ? 0.18
+                                : 0.14,
                         blending: THREE.AdditiveBlending,
                         depthWrite: false,
                     })
                 );
                 haloPlate.rotation.x = -Math.PI * 0.5;
-                haloPlate.position.y = -0.54;
+                haloPlate.position.y = isLeviathanRift ? -0.66 : -0.54;
                 scene.add(haloPlate);
 
                 const wheelStage = new THREE.Group();
-                wheelStage.rotation.y = isPhotonTurbine ? 0.42 : isObsidianHalo ? 0.3 : 0.18;
-                wheelStage.scale.setScalar(0.8);
+                wheelStage.rotation.y = isLeviathanRift
+                    ? 0.24
+                    : isPhotonTurbine
+                      ? 0.42
+                      : isObsidianHalo
+                        ? 0.3
+                        : 0.18;
+                wheelStage.scale.setScalar(previewScale);
                 scene.add(wheelStage);
 
                 const wheel = createWheelPreviewMesh(preset.id);
                 const restSpinAngle = THREE.MathUtils.degToRad(
-                    isPhotonTurbine ? 12 : isObsidianHalo ? 8 : 4
+                    isLeviathanRift ? 3 : isPhotonTurbine ? 12 : isObsidianHalo ? 8 : 4
                 );
                 wheel.rotation.x = restSpinAngle;
                 wheelStage.add(wheel);
@@ -7179,7 +7230,13 @@ export function createWelcomeModalController({
                     baseYaw: wheelStage.rotation.y,
                     restSpinAngle,
                     spinAngle: restSpinAngle,
-                    spinVelocity: isPhotonTurbine ? 1.16 : isObsidianHalo ? 0.94 : 0.88,
+                    spinVelocity: isLeviathanRift
+                        ? 0.76
+                        : isPhotonTurbine
+                          ? 1.16
+                          : isObsidianHalo
+                            ? 0.94
+                            : 0.88,
                     floatOffset: i * 0.82,
                 };
 

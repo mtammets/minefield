@@ -17,7 +17,11 @@ import {
     getPlayerVehiclePresetById,
     resolvePlayerVehicleId,
 } from './car-vehicles.js';
-import { DEFAULT_PLAYER_WHEEL_PRESET_ID, resolvePlayerWheelPresetId } from './wheel-presets.js';
+import {
+    DEFAULT_PLAYER_WHEEL_PRESET_ID,
+    getPlayerWheelPresetById,
+    resolvePlayerWheelPresetId,
+} from './wheel-presets.js';
 
 const DEFAULT_CAR_BASE_RIDE_HEIGHT = PLAYER_RIDE_HEIGHT;
 const PLAYER_REAR_LIGHT_Z = 2.045;
@@ -455,7 +459,9 @@ export function createCarRig(options = {}) {
         bodyRig.rotation.z = suspensionState.roll;
         bodyRig.position.x = suspensionState.lateralOffset;
         bodyRig.position.y =
-            suspensionState.heave + getSuspensionHeightOffset() * (1 - collapseBlend);
+            suspensionState.heave +
+            getSuspensionHeightOffset() * (1 - collapseBlend) +
+            getActiveWheelPresetBodyLift();
     }
 
     function rebuildVehicleBody() {
@@ -509,6 +515,12 @@ export function createCarRig(options = {}) {
             return addFormulaBody(bodyRig, commonConfig);
         }
         return addLuxuryBody(bodyRig, commonConfig);
+    }
+
+    function getActiveWheelPresetBodyLift() {
+        const activeWheelPreset = getPlayerWheelPresetById(appearanceState.wheelPresetId);
+        const bodyLift = Number(activeWheelPreset?.bodyLift);
+        return Number.isFinite(bodyLift) ? bodyLift : 0;
     }
 
     function rebuildEditablePartDescriptors() {

@@ -24,6 +24,35 @@ const REAR_DRIVE_VISUAL_SLIP = 5.8;
 const REAR_DRIVE_VISUAL_SLIP_FADE_SPEED = 22;
 const REAR_DRIVE_LAUNCH_SPIN = 10.5;
 
+function getWheelScale(wheelPreset) {
+    const scale = Number(wheelPreset?.scale);
+    return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function getWheelWidthScale(wheelPreset) {
+    const scale = Number(wheelPreset?.widthScale);
+    return Number.isFinite(scale) && scale > 0 ? scale : getWheelScale(wheelPreset);
+}
+
+function getWheelRadius(wheelPreset) {
+    return WHEEL_RADIUS * getWheelScale(wheelPreset);
+}
+
+function getWheelBodyLift(wheelPreset) {
+    const bodyLift = Number(wheelPreset?.bodyLift);
+    return Number.isFinite(bodyLift) ? bodyLift : 0;
+}
+
+function getWheelMassScale(wheelPreset) {
+    const massScale = Number(wheelPreset?.massScale);
+    return Number.isFinite(massScale) && massScale > 0 ? massScale : 1;
+}
+
+function getWheelDurabilityScale(wheelPreset) {
+    const durabilityScale = Number(wheelPreset?.durabilityScale);
+    return Number.isFinite(durabilityScale) && durabilityScale > 0 ? durabilityScale : 1;
+}
+
 function createWheelMaterials(wheelPreset) {
     return {
         tire: new THREE.MeshPhysicalMaterial({
@@ -136,6 +165,10 @@ function isObsidianHaloPreset(wheelPreset) {
     return wheelPreset?.layout === 'obsidian-halo';
 }
 
+function isLeviathanRiftPreset(wheelPreset) {
+    return wheelPreset?.layout === 'leviathan-rift';
+}
+
 function addSegmentedHaloRing(
     parent,
     {
@@ -157,6 +190,32 @@ function addSegmentedHaloRing(
         haloSegment.rotation.x = (Math.PI * 2 * i) / segments + spinOffset;
         haloSegment.position.x = positionX;
         parent.add(haloSegment);
+    }
+}
+
+function addTireLugBand(
+    parent,
+    {
+        radius = 0.46,
+        thickness = 0.05,
+        tangentialLength = 0.12,
+        width = 0.08,
+        count = 12,
+        xOffset = 0,
+        spinOffset = 0,
+        cant = 0,
+        material,
+    } = {}
+) {
+    const lugGeometry = new THREE.BoxGeometry(width, thickness, tangentialLength);
+    lugGeometry.translate(0, radius, 0);
+
+    for (let i = 0; i < count; i += 1) {
+        const lug = new THREE.Mesh(lugGeometry, material);
+        lug.rotation.x = (Math.PI * 2 * i) / count + spinOffset;
+        lug.rotation.z = cant;
+        lug.position.x = xOffset;
+        parent.add(lug);
     }
 }
 
@@ -225,6 +284,72 @@ function createTire(materials, wheelPreset) {
             positionX: TIRE_WIDTH * 0.5 - 0.056,
             material: materials.glow,
         });
+    } else if (isLeviathanRiftPreset(wheelPreset)) {
+        addTireLugBand(tireGroup, {
+            radius: 0.484,
+            thickness: 0.05,
+            tangentialLength: 0.13,
+            width: 0.11,
+            count: 13,
+            xOffset: -(TIRE_WIDTH * 0.24),
+            spinOffset: THREE.MathUtils.degToRad(8),
+            cant: THREE.MathUtils.degToRad(26),
+            material: materials.rimBase,
+        });
+        addTireLugBand(tireGroup, {
+            radius: 0.484,
+            thickness: 0.05,
+            tangentialLength: 0.13,
+            width: 0.11,
+            count: 13,
+            xOffset: TIRE_WIDTH * 0.24,
+            spinOffset: THREE.MathUtils.degToRad(22),
+            cant: -THREE.MathUtils.degToRad(26),
+            material: materials.rimBase,
+        });
+
+        const treadBridgeGeometry = new THREE.BoxGeometry(0.2, 0.032, 0.11);
+        treadBridgeGeometry.translate(0, 0.492, 0);
+        for (let i = 0; i < 7; i += 1) {
+            const treadBridge = new THREE.Mesh(
+                treadBridgeGeometry,
+                i % 2 === 0 ? materials.tireDetail : materials.rimBase
+            );
+            treadBridge.rotation.x = (Math.PI * 2 * i) / 7 + THREE.MathUtils.degToRad(10);
+            treadBridge.rotation.z = i % 2 === 0 ? 0.18 : -0.18;
+            tireGroup.add(treadBridge);
+        }
+
+        addSegmentedHaloRing(tireGroup, {
+            radius: 0.41,
+            tube: 0.012,
+            segments: 6,
+            arc: Math.PI * 0.18,
+            spinOffset: THREE.MathUtils.degToRad(12),
+            positionX: -(TIRE_WIDTH * 0.5 - 0.058),
+            material: materials.glow,
+        });
+        addSegmentedHaloRing(tireGroup, {
+            radius: 0.41,
+            tube: 0.012,
+            segments: 6,
+            arc: Math.PI * 0.18,
+            spinOffset: THREE.MathUtils.degToRad(12),
+            positionX: TIRE_WIDTH * 0.5 - 0.058,
+            material: materials.glow,
+        });
+
+        const sidewallCrown = new THREE.Mesh(
+            new THREE.TorusGeometry(0.438, 0.014, 12, 58),
+            materials.rimSecondary
+        );
+        sidewallCrown.rotation.y = Math.PI / 2;
+        sidewallCrown.position.x = -(TIRE_WIDTH * 0.5 - 0.03);
+        tireGroup.add(sidewallCrown);
+
+        const mirroredSidewallCrown = sidewallCrown.clone();
+        mirroredSidewallCrown.position.x *= -1;
+        tireGroup.add(mirroredSidewallCrown);
     }
 
     applyShadowFlags(tireGroup);
@@ -497,12 +622,143 @@ function createObsidianHaloFace(side, mirror, materials) {
     return rim;
 }
 
+function createLeviathanRiftFace(side, mirror, materials) {
+    const rim = new THREE.Group();
+
+    const outerArmor = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.372, 0.372, 0.046, 64),
+        materials.rimBase
+    );
+    outerArmor.rotation.z = Math.PI / 2;
+    rim.add(outerArmor);
+
+    const outerBezel = new THREE.Mesh(
+        new THREE.TorusGeometry(0.34, 0.018, 12, 64),
+        materials.rimSecondary
+    );
+    outerBezel.rotation.y = Math.PI / 2;
+    rim.add(outerBezel);
+
+    const haloCrown = new THREE.Mesh(
+        new THREE.TorusGeometry(0.314, 0.012, 10, 58),
+        materials.glow
+    );
+    haloCrown.rotation.y = Math.PI / 2;
+    rim.add(haloCrown);
+
+    const deepBarrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.318, 0.318, 0.118, 56),
+        materials.rimBase
+    );
+    deepBarrel.rotation.z = Math.PI / 2;
+    deepBarrel.position.x = -side * 0.03;
+    rim.add(deepBarrel);
+
+    const armorShield = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.264, 0.264, 0.05, 44),
+        materials.rimPrimary
+    );
+    armorShield.rotation.z = Math.PI / 2;
+    armorShield.position.x = -side * 0.044;
+    rim.add(armorShield);
+
+    addSegmentedHaloRing(rim, {
+        radius: 0.286,
+        tube: 0.013,
+        segments: 6,
+        arc: Math.PI * 0.17,
+        spinOffset: THREE.MathUtils.degToRad(14),
+        material: materials.glow,
+    });
+
+    const bladeCount = 6;
+    const bladeLength = 0.238;
+    const bladeGeometry = new THREE.BoxGeometry(0.102, bladeLength, 0.09);
+    bladeGeometry.translate(0, bladeLength * 0.5 - 0.026, 0);
+    const bladeInsetGeometry = new THREE.BoxGeometry(0.03, bladeLength * 0.74, 0.104);
+    bladeInsetGeometry.translate(0, bladeLength * 0.44 - 0.018, 0);
+
+    for (let i = 0; i < bladeCount; i += 1) {
+        const blade = new THREE.Mesh(
+            bladeGeometry,
+            i % 2 === 0 ? materials.rimPrimary : materials.rimSecondary
+        );
+        blade.rotation.x = (Math.PI * 2 * i) / bladeCount;
+        blade.rotation.z = i % 2 === 0 ? 0.58 : -0.42;
+        blade.position.x = -side * 0.015;
+        rim.add(blade);
+
+        const bladeInset = new THREE.Mesh(bladeInsetGeometry, materials.accent);
+        bladeInset.rotation.x = blade.rotation.x + THREE.MathUtils.degToRad(4);
+        bladeInset.rotation.z = blade.rotation.z * 0.58;
+        bladeInset.position.x = -side * 0.004;
+        bladeInset.position.z = 0.022;
+        rim.add(bladeInset);
+    }
+
+    const finGeometry = new THREE.BoxGeometry(0.024, 0.088, 0.032);
+    finGeometry.translate(0, 0.154, 0);
+    for (let i = 0; i < 12; i += 1) {
+        const fin = new THREE.Mesh(
+            finGeometry,
+            i % 3 === 0 ? materials.glow : i % 2 === 0 ? materials.accent : materials.rimSecondary
+        );
+        fin.rotation.x = (Math.PI * 2 * i) / 12 + THREE.MathUtils.degToRad(6);
+        fin.rotation.z = i % 2 === 0 ? 0.24 : -0.24;
+        fin.position.x = -side * 0.018;
+        rim.add(fin);
+    }
+
+    const coreHub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.096, 0.096, 0.076, 28),
+        materials.brakeHub
+    );
+    coreHub.rotation.z = Math.PI / 2;
+    coreHub.position.x = -side * 0.02;
+    rim.add(coreHub);
+
+    const orbitRingOuter = new THREE.Mesh(
+        new THREE.TorusGeometry(0.11, 0.01, 10, 32),
+        materials.glow
+    );
+    orbitRingOuter.rotation.set(Math.PI / 2, 0, THREE.MathUtils.degToRad(24));
+    orbitRingOuter.position.x = -side * 0.012;
+    rim.add(orbitRingOuter);
+
+    const orbitRingInner = new THREE.Mesh(
+        new THREE.TorusGeometry(0.08, 0.008, 10, 28),
+        materials.rimSecondary
+    );
+    orbitRingInner.rotation.set(
+        THREE.MathUtils.degToRad(26),
+        Math.PI / 2,
+        THREE.MathUtils.degToRad(12)
+    );
+    orbitRingInner.position.x = 0.006 - side * 0.012;
+    rim.add(orbitRingInner);
+
+    const singularityCore = new THREE.Mesh(new THREE.IcosahedronGeometry(0.04, 1), materials.glow);
+    singularityCore.position.x = 0.016 - side * 0.014;
+    rim.add(singularityCore);
+
+    rim.position.x = side * (TIRE_WIDTH * 0.5 + 0.012);
+    if (mirror) {
+        rim.scale.x *= -1;
+    }
+
+    applyShadowFlags(rim);
+    return rim;
+}
+
 function createRimFace(wheelPreset, materials, side, mirror) {
     if (isPhotonTurbinePreset(wheelPreset)) {
         return createPhotonTurbineFace(side, mirror, materials);
     }
     if (isObsidianHaloPreset(wheelPreset)) {
         return createObsidianHaloFace(side, mirror, materials);
+    }
+    if (isLeviathanRiftPreset(wheelPreset)) {
+        return createLeviathanRiftFace(side, mirror, materials);
     }
     return createRazorTenFace(side, mirror, materials);
 }
@@ -560,6 +816,42 @@ function createBrakeDisk(materials, wheelPreset) {
             bolt.position.x = 0.018;
             brakeGroup.add(bolt);
         }
+    } else if (isLeviathanRiftPreset(wheelPreset)) {
+        const reactorChamber = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.128, 0.128, 0.026, 22),
+            materials.rimSecondary
+        );
+        reactorChamber.rotation.z = Math.PI / 2;
+        reactorChamber.position.x = 0.024;
+        brakeGroup.add(reactorChamber);
+
+        const reactorRing = new THREE.Mesh(
+            new THREE.TorusGeometry(0.176, 0.012, 10, 30),
+            materials.glow
+        );
+        reactorRing.rotation.y = Math.PI / 2;
+        reactorRing.position.x = 0.028;
+        brakeGroup.add(reactorRing);
+
+        const shardGeometry = new THREE.BoxGeometry(0.022, 0.084, 0.028);
+        shardGeometry.translate(0, 0.164, 0);
+        for (let i = 0; i < 8; i += 1) {
+            const shard = new THREE.Mesh(
+                shardGeometry,
+                i % 2 === 0 ? materials.accent : materials.rimPrimary
+            );
+            shard.rotation.x = (Math.PI * 2 * i) / 8 + THREE.MathUtils.degToRad(4);
+            shard.rotation.z = i % 2 === 0 ? 0.22 : -0.18;
+            shard.position.x = 0.024;
+            brakeGroup.add(shard);
+        }
+
+        const singularity = new THREE.Mesh(
+            new THREE.IcosahedronGeometry(0.034, 1),
+            materials.accent
+        );
+        singularity.position.x = 0.04;
+        brakeGroup.add(singularity);
     }
 
     brakeGroup.position.set(0, 0, 0.1);
@@ -575,6 +867,13 @@ function createWheelAssembly(wheelPreset, mirror = false) {
     wheel.add(createRimFace(wheelPreset, materials, 1, mirror));
     wheel.add(createRimFace(wheelPreset, materials, -1, mirror));
     wheel.add(createBrakeDisk(materials, wheelPreset));
+    wheel.scale.set(
+        getWheelWidthScale(wheelPreset),
+        getWheelScale(wheelPreset),
+        getWheelScale(wheelPreset)
+    );
+    wheel.userData.radius = getWheelRadius(wheelPreset);
+    wheel.userData.bodyLift = getWheelBodyLift(wheelPreset);
 
     applyShadowFlags(wheel);
     return wheel;
@@ -590,7 +889,7 @@ function createWheelPreviewMesh(wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID, 
 
 function createWheel(x, z, parent, wheelPreset, mirror = false) {
     const wheel = createWheelAssembly(wheelPreset, mirror);
-    wheel.position.set(x, 0.5, z);
+    wheel.position.set(x, getWheelRadius(wheelPreset), z);
     parent.add(wheel);
     return wheel;
 }
@@ -679,6 +978,7 @@ function initializeWheels(car, options = {}) {
     ];
 
     let currentWheelPresetId = resolvePlayerWheelPresetId(wheelPresetId);
+    let currentWheelRollRadius = getWheelRadius(getPlayerWheelPresetById(currentWheelPresetId));
 
     rebuildWheelMeshes();
 
@@ -698,7 +998,7 @@ function initializeWheels(car, options = {}) {
                     ? vehicleState.velocity.length()
                     : Math.abs(vehicleState.speed || 0);
             const longitudinalSpeed = velocityLength < 0.01 ? 0 : vehicleState.speed || 0;
-            const baseRollAmount = (longitudinalSpeed / WHEEL_RADIUS) * dt;
+            const baseRollAmount = (longitudinalSpeed / currentWheelRollRadius) * dt;
             const speedAbs = Math.abs(vehicleState.speed || 0);
             const throttle = vehicleState.throttle || 0;
             const throttleAbs = Math.abs(throttle);
@@ -755,6 +1055,10 @@ function initializeWheels(car, options = {}) {
 
     function rebuildWheelMeshes() {
         const activePreset = getPlayerWheelPresetById(currentWheelPresetId);
+        const activeWheelRadius = getWheelRadius(activePreset);
+        const wheelMassScale = getWheelMassScale(activePreset);
+        const wheelDurabilityScale = getWheelDurabilityScale(activePreset);
+        currentWheelRollRadius = activeWheelRadius;
         clearGroupChildren(frontAxleGroup);
         clearGroupChildren(rearAxleGroup);
         frontWheelMeshes.length = 0;
@@ -804,6 +1108,13 @@ function initializeWheels(car, options = {}) {
         detachableWheels[1].source = frontRight.wheel;
         detachableWheels[2].source = backLeft;
         detachableWheels[3].source = backRight;
+        for (let i = 0; i < detachableWheels.length; i += 1) {
+            detachableWheels[i].groundOffset = activeWheelRadius;
+            detachableWheels[i].baseLife =
+                (i < 2 ? 5.8 : 6) * wheelDurabilityScale;
+            detachableWheels[i].mass =
+                (i < 2 ? 1.05 : 1.1) * wheelMassScale;
+        }
     }
 }
 
