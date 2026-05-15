@@ -2590,17 +2590,21 @@ export function createWelcomeModalController({
         const localStatus = authLocalStatusText.trim();
         const remoteStatus =
             typeof authUiState.statusText === 'string' ? authUiState.statusText.trim() : '';
+        const defaultSignedOutStatusActive =
+            !authenticated &&
+            !localStatus &&
+            remoteStatus === AUTH_SIGNED_OUT_STATUS_TEXT &&
+            (authUiState.statusTone || 'muted') === 'muted';
+        const effectiveRemoteStatus = defaultSignedOutStatusActive ? '' : remoteStatus;
+        const visibleRemoteStatus =
+            effectiveRemoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT ? effectiveRemoteStatus : '';
         const statusText =
             localStatus ||
-            remoteStatus ||
-            (authenticated ? AUTH_SIGNED_IN_STATUS_TEXT : AUTH_SIGNED_OUT_STATUS_TEXT);
+            effectiveRemoteStatus ||
+            (authenticated ? AUTH_SIGNED_IN_STATUS_TEXT : '');
         const statusTone =
             localStatus && authLocalStatusTone ? authLocalStatusTone : authUiState.statusTone;
-        const shouldShowStatus =
-            !authenticated ||
-            busy ||
-            Boolean(localStatus) ||
-            (Boolean(remoteStatus) && remoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT);
+        const shouldShowStatus = busy || Boolean(localStatus) || Boolean(visibleRemoteStatus);
         const availableSignedInSections = resolveAvailableAuthSignedInSections({
             authenticated,
         });
@@ -2779,19 +2783,9 @@ export function createWelcomeModalController({
             busy,
             canManageCarWrap,
             hasCarWrap,
-            garageStatusText:
-                garagePanelVisible &&
-                (localStatus ||
-                    (remoteStatus && remoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT
-                        ? remoteStatus
-                        : ''))
-                    ? localStatus ||
-                      (remoteStatus && remoteStatus !== AUTH_SIGNED_IN_STATUS_TEXT
-                          ? remoteStatus
-                          : '')
-                    : '',
+            garageStatusText: garagePanelVisible ? localStatus || visibleRemoteStatus : '',
             garageStatusTone:
-                garagePanelVisible && (localStatus || remoteStatus)
+                garagePanelVisible && (localStatus || effectiveRemoteStatus)
                     ? statusTone || 'muted'
                     : 'muted',
         });

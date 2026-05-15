@@ -30,7 +30,7 @@ test('sanitizeAudioPrefs clamps values and falls back safely', () => {
         ambienceVolume: 0,
         menuMusicVolume: 0.2,
         gameMusicVolume: 0.2,
-        uiVolume: 0.9,
+        uiVolume: 0.27,
         muted: true,
     });
 });

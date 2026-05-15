@@ -3,14 +3,14 @@ const path = require('path');
 
 const AUDIO_PREFS_VERSION = 2;
 const DEFAULT_AUDIO_PREFS = Object.freeze({
-    masterVolume: 0.84,
-    vehiclesVolume: 1,
-    botVehiclesVolume: 1,
-    effectsVolume: 1,
-    ambienceVolume: 1,
-    menuMusicVolume: 0.08,
-    gameMusicVolume: 0.08,
-    uiVolume: 0.9,
+    masterVolume: 1,
+    vehiclesVolume: 0.18,
+    botVehiclesVolume: 0.44,
+    effectsVolume: 0.07,
+    ambienceVolume: 0.22,
+    menuMusicVolume: 0.44,
+    gameMusicVolume: 0.02,
+    uiVolume: 0.27,
     muted: false,
 });
 const AUDIO_PREF_KEYS = Object.freeze([
