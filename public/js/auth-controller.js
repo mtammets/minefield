@@ -30,6 +30,19 @@ const CAR_WRAP_OUTPUT_QUALITY = 0.9;
 const USER_MEDIA_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const CHASE_CAMERA_SETTING_MIN = -1;
 const CHASE_CAMERA_SETTING_MAX = 1;
+const DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START = true;
+const DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS = false;
+const DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED = true;
+const DEFAULT_ACCOUNT_AUDIO_PREFS = Object.freeze({
+    masterVolume: 0.84,
+    vehiclesVolume: 1,
+    botVehiclesVolume: 1,
+    effectsVolume: 1,
+    ambienceVolume: 1,
+    musicVolume: 0.08,
+    uiVolume: 0.9,
+    muted: false,
+});
 
 export function createAuthController({ onStateChanged = null, onToast = null } = {}) {
     const listeners = new Set();
@@ -40,6 +53,8 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
     let currentSession = null;
     let browserConfig = createInitialBrowserConfig();
     let creditsPurchaseReturnPromise = null;
+    let userMetadataUpdateQueue = Promise.resolve();
+    const pendingUserMetadataRequests = new Set();
 
     function resolveAuthUnavailableMessage() {
         const statusText =
@@ -222,6 +237,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 };
             }
 
+            await flushUserMetadataUpdateQueue();
             updateState({
                 loading: true,
                 pendingAction: 'sign-out',
@@ -422,6 +438,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 return updateValidationFailure('Sign in before deleting the account.');
             }
 
+            await flushUserMetadataUpdateQueue();
             updateState({
                 loading: true,
                 pendingAction: 'delete-account',
@@ -491,10 +508,11 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 requiresEmailConfirmation: false,
             });
 
+            let nextAvatarPath = '';
             try {
                 const preparedImage = await prepareProfileImageUpload(file);
                 const oldAvatarPath = resolveProfileImagePath(currentSession?.user);
-                const nextAvatarPath = buildProfileImageStoragePath(
+                nextAvatarPath = buildProfileImageStoragePath(
                     state.userId,
                     preparedImage.extension
                 );
@@ -514,23 +532,15 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     statusTone: 'info',
                 });
 
-                const metadata = buildUpdatedUserMetadata(
-                    currentSession?.user,
+                await queueUserMetadataUpdate(
                     {
                         avatar_path: nextAvatarPath,
                     },
-                    state.displayName
+                    {
+                        statusText: 'Profile photo updated.',
+                        statusTone: 'success',
+                    }
                 );
-                const { data, error } = await supabaseClient.auth.updateUser({
-                    data: metadata,
-                });
-                if (error) {
-                    await removeStoredStorageObjects(
-                        [nextAvatarPath],
-                        browserConfig.profileImagesBucket
-                    ).catch(() => {});
-                    throw error;
-                }
 
                 if (oldAvatarPath && oldAvatarPath !== nextAvatarPath) {
                     await removeStoredStorageObjects(
@@ -539,14 +549,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     ).catch(() => {});
                 }
 
-                applySession(mergeCurrentSessionUser(data?.user), {
-                    statusText: 'Profile photo updated.',
-                    statusTone: 'success',
-                });
                 return {
                     ok: true,
                 };
             } catch (error) {
+                await removeStoredStorageObjects(
+                    nextAvatarPath ? [nextAvatarPath] : [],
+                    browserConfig.profileImagesBucket
+                ).catch(() => {});
                 return updateRequestFailure(error);
             }
         },
@@ -584,28 +594,20 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             });
 
             try {
-                const metadata = buildUpdatedUserMetadata(
-                    currentSession?.user,
+                await queueUserMetadataUpdate(
                     {
                         avatar_path: '',
                     },
-                    state.displayName
+                    {
+                        statusText: 'Profile photo removed.',
+                        statusTone: 'success',
+                    }
                 );
-                const { data, error } = await supabaseClient.auth.updateUser({
-                    data: metadata,
-                });
-                if (error) {
-                    throw error;
-                }
 
                 await removeStoredStorageObjects(
                     [currentAvatarPath],
                     browserConfig.profileImagesBucket
                 ).catch(() => {});
-                applySession(mergeCurrentSessionUser(data?.user), {
-                    statusText: 'Profile photo removed.',
-                    statusTone: 'success',
-                });
                 return {
                     ok: true,
                 };
@@ -647,13 +649,11 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 requiresEmailConfirmation: false,
             });
 
+            let nextCarWrapPath = '';
             try {
                 const preparedImage = await prepareCarWrapUpload(file);
                 const oldCarWrapPath = resolveCarWrapPath(currentSession?.user);
-                const nextCarWrapPath = buildCarWrapStoragePath(
-                    state.userId,
-                    preparedImage.extension
-                );
+                nextCarWrapPath = buildCarWrapStoragePath(state.userId, preparedImage.extension);
                 const uploadResult = await supabaseClient.storage
                     .from(browserConfig.carWrapsBucket)
                     .upload(nextCarWrapPath, preparedImage.blob, {
@@ -670,24 +670,16 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     statusTone: 'info',
                 });
 
-                const metadata = buildUpdatedUserMetadata(
-                    currentSession?.user,
+                await queueUserMetadataUpdate(
                     {
                         car_wrap_path: nextCarWrapPath,
                         garage_wrap_preset_id: '',
                     },
-                    state.displayName
+                    {
+                        statusText: 'Car wrap updated.',
+                        statusTone: 'success',
+                    }
                 );
-                const { data, error } = await supabaseClient.auth.updateUser({
-                    data: metadata,
-                });
-                if (error) {
-                    await removeStoredStorageObjects(
-                        [nextCarWrapPath],
-                        browserConfig.carWrapsBucket
-                    ).catch(() => {});
-                    throw error;
-                }
 
                 if (oldCarWrapPath && oldCarWrapPath !== nextCarWrapPath) {
                     await removeStoredStorageObjects(
@@ -696,14 +688,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     ).catch(() => {});
                 }
 
-                applySession(mergeCurrentSessionUser(data?.user), {
-                    statusText: 'Car wrap updated.',
-                    statusTone: 'success',
-                });
                 return {
                     ok: true,
                 };
             } catch (error) {
+                await removeStoredStorageObjects(
+                    nextCarWrapPath ? [nextCarWrapPath] : [],
+                    browserConfig.carWrapsBucket
+                ).catch(() => {});
                 return updateRequestFailure(error);
             }
         },
@@ -741,28 +733,20 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             });
 
             try {
-                const metadata = buildUpdatedUserMetadata(
-                    currentSession?.user,
+                await queueUserMetadataUpdate(
                     {
                         car_wrap_path: '',
                     },
-                    state.displayName
+                    {
+                        statusText: 'Car wrap removed.',
+                        statusTone: 'success',
+                    }
                 );
-                const { data, error } = await supabaseClient.auth.updateUser({
-                    data: metadata,
-                });
-                if (error) {
-                    throw error;
-                }
 
                 await removeStoredStorageObjects(
                     [currentCarWrapPath],
                     browserConfig.carWrapsBucket
                 ).catch(() => {});
-                applySession(mergeCurrentSessionUser(data?.user), {
-                    statusText: 'Car wrap removed.',
-                    statusTone: 'success',
-                });
                 return {
                     ok: true,
                 };
@@ -788,23 +772,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
 
             const normalizedSettings = sanitizeChaseCameraSettings(settings);
             try {
-                const metadata = buildUpdatedUserMetadata(
-                    currentSession?.user,
+                await queueUserMetadataUpdate(
                     {
                         chase_camera_settings: normalizedSettings,
                     },
-                    state.displayName
+                    {
+                        preserveStatus: true,
+                    }
                 );
-                const { data, error } = await supabaseClient.auth.updateUser({
-                    data: metadata,
-                });
-                if (error) {
-                    throw error;
-                }
-
-                applySession(mergeCurrentSessionUser(data?.user), {
-                    preserveStatus: true,
-                });
                 return {
                     ok: true,
                     settings: normalizedSettings,
@@ -861,19 +836,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             }
 
             try {
-                const metadata = buildUpdatedUserMetadata(
-                    currentSession?.user,
-                    metadataUpdates,
-                    state.displayName
-                );
-                const { data, error } = await supabaseClient.auth.updateUser({
-                    data: metadata,
-                });
-                if (error) {
-                    throw error;
-                }
-
-                applySession(mergeCurrentSessionUser(data?.user), {
+                await queueUserMetadataUpdate(metadataUpdates, {
                     preserveStatus: true,
                 });
                 return {
@@ -891,6 +854,109 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     error: normalizeSupabaseAuthError(error),
                 };
             }
+        },
+        async updateAccountSettings(settings = null) {
+            return runTrackedUserMetadataRequest(async () => {
+                await initializeInternalSafe();
+                if (!supabaseClient || !state.enabled) {
+                    return {
+                        ok: false,
+                        error: resolveAuthUnavailableMessage(),
+                    };
+                }
+
+                if (!state.authenticated || !state.userId) {
+                    return {
+                        ok: false,
+                        error: 'Sign in before saving account settings.',
+                    };
+                }
+
+                const source = settings && typeof settings === 'object' ? settings : {};
+                const hasAutoFullscreenUpdate = Object.prototype.hasOwnProperty.call(
+                    source,
+                    'autoFullscreenOnStart'
+                );
+                const hasHideGameplayPanelsUpdate = Object.prototype.hasOwnProperty.call(
+                    source,
+                    'hideGameplayPanels'
+                );
+                const hasProfileScreensaverUpdate = Object.prototype.hasOwnProperty.call(
+                    source,
+                    'profileScreensaverEnabled'
+                );
+                const hasAudioPrefsUpdate = Object.prototype.hasOwnProperty.call(
+                    source,
+                    'audioPrefs'
+                );
+                if (
+                    !hasAutoFullscreenUpdate &&
+                    !hasHideGameplayPanelsUpdate &&
+                    !hasProfileScreensaverUpdate &&
+                    !hasAudioPrefsUpdate
+                ) {
+                    return {
+                        ok: true,
+                        ignored: true,
+                    };
+                }
+
+                const metadataUpdates = {};
+                if (hasAutoFullscreenUpdate) {
+                    metadataUpdates.auto_fullscreen_on_start = sanitizeAccountSettingBoolean(
+                        source.autoFullscreenOnStart,
+                        DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START
+                    );
+                }
+                if (hasHideGameplayPanelsUpdate) {
+                    metadataUpdates.hide_gameplay_panels = sanitizeAccountSettingBoolean(
+                        source.hideGameplayPanels,
+                        DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS
+                    );
+                }
+                if (hasProfileScreensaverUpdate) {
+                    metadataUpdates.profile_screensaver_enabled = sanitizeAccountSettingBoolean(
+                        source.profileScreensaverEnabled,
+                        DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED
+                    );
+                }
+                if (hasAudioPrefsUpdate) {
+                    metadataUpdates.audio_prefs = sanitizeAccountAudioPrefs(
+                        source.audioPrefs,
+                        DEFAULT_ACCOUNT_AUDIO_PREFS
+                    );
+                }
+
+                try {
+                    await queueUserMetadataUpdate(metadataUpdates, {
+                        preserveStatus: true,
+                    });
+                    return {
+                        ok: true,
+                        autoFullscreenOnStart: hasAutoFullscreenUpdate
+                            ? metadataUpdates.auto_fullscreen_on_start
+                            : state.accountAutoFullscreenOnStart,
+                        hideGameplayPanels: hasHideGameplayPanelsUpdate
+                            ? metadataUpdates.hide_gameplay_panels
+                            : state.accountHideGameplayPanels,
+                        profileScreensaverEnabled: hasProfileScreensaverUpdate
+                            ? metadataUpdates.profile_screensaver_enabled
+                            : state.accountProfileScreensaverEnabled,
+                        audioPrefs: hasAudioPrefsUpdate
+                            ? { ...metadataUpdates.audio_prefs }
+                            : state.accountAudioPrefs
+                              ? {
+                                    ...state.accountAudioPrefs,
+                                }
+                              : null,
+                    };
+                } catch (error) {
+                    return {
+                        ok: false,
+                        error: normalizeSupabaseAuthError(error),
+                    };
+                }
+            });
         },
         dispose() {
             if (authSubscription && typeof authSubscription.unsubscribe === 'function') {
@@ -937,6 +1003,54 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         } catch {
             initializePromise = null;
             // The state is already updated with the failure details.
+        }
+    }
+
+    function runTrackedUserMetadataRequest(operation) {
+        let requestPromise;
+        try {
+            requestPromise = Promise.resolve(operation());
+        } catch (error) {
+            requestPromise = Promise.reject(error);
+        }
+        pendingUserMetadataRequests.add(requestPromise);
+        requestPromise.finally(() => {
+            pendingUserMetadataRequests.delete(requestPromise);
+        });
+        return requestPromise;
+    }
+
+    function queueUserMetadataUpdate(metadataUpdates = {}, applySessionOptions = {}) {
+        const runUpdate = async () => {
+            const metadata = buildUpdatedUserMetadata(
+                currentSession?.user,
+                metadataUpdates,
+                state.displayName
+            );
+            const { data, error } = await supabaseClient.auth.updateUser({
+                data: metadata,
+            });
+            if (error) {
+                throw error;
+            }
+            applySession(mergeCurrentSessionUser(data?.user), applySessionOptions);
+            return data?.user || null;
+        };
+
+        const queuedUpdate = userMetadataUpdateQueue.then(runUpdate, runUpdate);
+        userMetadataUpdateQueue = queuedUpdate.catch(() => {});
+        return queuedUpdate;
+    }
+
+    async function flushUserMetadataUpdateQueue() {
+        while (pendingUserMetadataRequests.size > 0) {
+            const pendingRequests = Array.from(pendingUserMetadataRequests);
+            await Promise.allSettled(pendingRequests);
+        }
+        try {
+            await userMetadataUpdateQueue;
+        } catch {
+            // Metadata flush failures are handled by the originating request.
         }
     }
 
@@ -1222,6 +1336,28 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             ? hasUserMetadataField(user?.user_metadata, 'wheel_preset_id')
             : false;
         const accountWheelPresetId = authenticated ? resolveWheelPresetId(user) : '';
+        const accountAutoFullscreenConfigured = authenticated
+            ? hasUserMetadataField(user?.user_metadata, 'auto_fullscreen_on_start')
+            : false;
+        const accountAutoFullscreenOnStart = authenticated
+            ? resolveAccountAutoFullscreenOnStart(user)
+            : DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START;
+        const accountHideGameplayPanelsConfigured = authenticated
+            ? hasUserMetadataField(user?.user_metadata, 'hide_gameplay_panels')
+            : false;
+        const accountHideGameplayPanels = authenticated
+            ? resolveAccountHideGameplayPanels(user)
+            : DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS;
+        const accountProfileScreensaverConfigured = authenticated
+            ? hasUserMetadataField(user?.user_metadata, 'profile_screensaver_enabled')
+            : false;
+        const accountProfileScreensaverEnabled = authenticated
+            ? resolveAccountProfileScreensaverEnabled(user)
+            : DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED;
+        const accountAudioPrefsConfigured = authenticated
+            ? hasUserMetadataField(user?.user_metadata, 'audio_prefs')
+            : false;
+        const accountAudioPrefs = authenticated ? resolveAccountAudioPrefs(user) : null;
         const playerEconomyState = authenticated
             ? mergePlayerEconomyStates(
                   state.userId && state.userId === resolvedUserId
@@ -1278,6 +1414,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             accountGarageWrapPresetId,
             accountWheelPresetConfigured,
             accountWheelPresetId,
+            accountAutoFullscreenConfigured,
+            accountAutoFullscreenOnStart,
+            accountHideGameplayPanelsConfigured,
+            accountHideGameplayPanels,
+            accountProfileScreensaverConfigured,
+            accountProfileScreensaverEnabled,
+            accountAudioPrefsConfigured,
+            accountAudioPrefs: accountAudioPrefs ? { ...accountAudioPrefs } : null,
             credits: playerEconomyState.credits,
             unlockedVehicleIds: [...playerEconomyState.unlockedVehicleIds],
             economySyncSource: preserveServerEconomyProfile
@@ -1342,6 +1486,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             accountGarageWrapPresetId: '',
             accountWheelPresetConfigured: false,
             accountWheelPresetId: '',
+            accountAutoFullscreenConfigured: false,
+            accountAutoFullscreenOnStart: DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START,
+            accountHideGameplayPanelsConfigured: false,
+            accountHideGameplayPanels: DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS,
+            accountProfileScreensaverConfigured: false,
+            accountProfileScreensaverEnabled: DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED,
+            accountAudioPrefsConfigured: false,
+            accountAudioPrefs: null,
             credits: 0,
             unlockedVehicleIds: createDefaultPlayerEconomyState().unlockedVehicleIds,
             economySyncSource: 'local',
@@ -1630,6 +1782,14 @@ function createInitialAuthState() {
         accountGarageWrapPresetId: '',
         accountWheelPresetConfigured: false,
         accountWheelPresetId: '',
+        accountAutoFullscreenConfigured: false,
+        accountAutoFullscreenOnStart: DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START,
+        accountHideGameplayPanelsConfigured: false,
+        accountHideGameplayPanels: DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS,
+        accountProfileScreensaverConfigured: false,
+        accountProfileScreensaverEnabled: DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED,
+        accountAudioPrefsConfigured: false,
+        accountAudioPrefs: null,
         credits: 0,
         unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
         economySyncSource: 'local',
@@ -1759,6 +1919,31 @@ function resolveChaseCameraSettings(user) {
     return sanitizeChaseCameraSettings(user?.user_metadata?.chase_camera_settings);
 }
 
+function resolveAccountAutoFullscreenOnStart(user) {
+    return sanitizeAccountSettingBoolean(
+        user?.user_metadata?.auto_fullscreen_on_start,
+        DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START
+    );
+}
+
+function resolveAccountHideGameplayPanels(user) {
+    return sanitizeAccountSettingBoolean(
+        user?.user_metadata?.hide_gameplay_panels,
+        DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS
+    );
+}
+
+function resolveAccountProfileScreensaverEnabled(user) {
+    return sanitizeAccountSettingBoolean(
+        user?.user_metadata?.profile_screensaver_enabled,
+        DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED
+    );
+}
+
+function resolveAccountAudioPrefs(user) {
+    return sanitizeAccountAudioPrefs(user?.user_metadata?.audio_prefs, DEFAULT_ACCOUNT_AUDIO_PREFS);
+}
+
 function resolveStorageObjectPublicUrl(baseUrl, bucketName, objectPath) {
     const safeBaseUrl =
         typeof baseUrl === 'string' && /^(https?:)?\/\//iu.test(baseUrl.trim())
@@ -1806,6 +1991,40 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
     )
         ? sanitizeChaseCameraSettings(updates.chase_camera_settings)
         : resolveChaseCameraSettings(user);
+    const hasAutoFullscreenUpdate = Object.prototype.hasOwnProperty.call(
+        updates,
+        'auto_fullscreen_on_start'
+    );
+    const nextAutoFullscreenOnStart = hasAutoFullscreenUpdate
+        ? sanitizeAccountSettingBoolean(
+              updates.auto_fullscreen_on_start,
+              DEFAULT_ACCOUNT_AUTO_FULLSCREEN_ON_START
+          )
+        : resolveAccountAutoFullscreenOnStart(user);
+    const hasHideGameplayPanelsUpdate = Object.prototype.hasOwnProperty.call(
+        updates,
+        'hide_gameplay_panels'
+    );
+    const nextHideGameplayPanels = hasHideGameplayPanelsUpdate
+        ? sanitizeAccountSettingBoolean(
+              updates.hide_gameplay_panels,
+              DEFAULT_ACCOUNT_HIDE_GAMEPLAY_PANELS
+          )
+        : resolveAccountHideGameplayPanels(user);
+    const hasProfileScreensaverUpdate = Object.prototype.hasOwnProperty.call(
+        updates,
+        'profile_screensaver_enabled'
+    );
+    const nextProfileScreensaverEnabled = hasProfileScreensaverUpdate
+        ? sanitizeAccountSettingBoolean(
+              updates.profile_screensaver_enabled,
+              DEFAULT_ACCOUNT_PROFILE_SCREENSAVER_ENABLED
+          )
+        : resolveAccountProfileScreensaverEnabled(user);
+    const hasAudioPrefsUpdate = Object.prototype.hasOwnProperty.call(updates, 'audio_prefs');
+    const nextAudioPrefs = hasAudioPrefsUpdate
+        ? sanitizeAccountAudioPrefs(updates.audio_prefs, DEFAULT_ACCOUNT_AUDIO_PREFS)
+        : resolveAccountAudioPrefs(user);
     const nextMetadata = {
         ...currentMetadata,
         display_name: displayName,
@@ -1829,6 +2048,35 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
         nextMetadata.chase_camera_settings = nextChaseCameraSettings;
     } else {
         delete nextMetadata.chase_camera_settings;
+    }
+    if (
+        hasAutoFullscreenUpdate ||
+        hasUserMetadataField(currentMetadata, 'auto_fullscreen_on_start')
+    ) {
+        nextMetadata.auto_fullscreen_on_start = nextAutoFullscreenOnStart;
+    } else {
+        delete nextMetadata.auto_fullscreen_on_start;
+    }
+    if (
+        hasHideGameplayPanelsUpdate ||
+        hasUserMetadataField(currentMetadata, 'hide_gameplay_panels')
+    ) {
+        nextMetadata.hide_gameplay_panels = nextHideGameplayPanels;
+    } else {
+        delete nextMetadata.hide_gameplay_panels;
+    }
+    if (
+        hasProfileScreensaverUpdate ||
+        hasUserMetadataField(currentMetadata, 'profile_screensaver_enabled')
+    ) {
+        nextMetadata.profile_screensaver_enabled = nextProfileScreensaverEnabled;
+    } else {
+        delete nextMetadata.profile_screensaver_enabled;
+    }
+    if (hasAudioPrefsUpdate || hasUserMetadataField(currentMetadata, 'audio_prefs')) {
+        nextMetadata.audio_prefs = nextAudioPrefs;
+    } else {
+        delete nextMetadata.audio_prefs;
     }
     return nextMetadata;
 }
@@ -1889,6 +2137,39 @@ function sanitizeChaseCameraSettings(value) {
 function clampChaseCameraSettingValue(value, fallback = 0) {
     const numeric = Number.isFinite(value) ? Number(value) : Number(fallback) || 0;
     return Math.min(CHASE_CAMERA_SETTING_MAX, Math.max(CHASE_CAMERA_SETTING_MIN, numeric));
+}
+
+function sanitizeAccountSettingBoolean(value, fallback = false) {
+    if (typeof value === 'boolean') {
+        return value;
+    }
+    return fallback === true;
+}
+
+function sanitizeAccountAudioPrefs(value, fallbackPrefs = DEFAULT_ACCOUNT_AUDIO_PREFS) {
+    const fallback =
+        fallbackPrefs && typeof fallbackPrefs === 'object'
+            ? fallbackPrefs
+            : DEFAULT_ACCOUNT_AUDIO_PREFS;
+    const source = value && typeof value === 'object' ? value : {};
+    return {
+        masterVolume: clampAccountAudioPref(source.masterVolume, fallback.masterVolume),
+        vehiclesVolume: clampAccountAudioPref(source.vehiclesVolume, fallback.vehiclesVolume),
+        botVehiclesVolume: clampAccountAudioPref(
+            source.botVehiclesVolume,
+            fallback.botVehiclesVolume
+        ),
+        effectsVolume: clampAccountAudioPref(source.effectsVolume, fallback.effectsVolume),
+        ambienceVolume: clampAccountAudioPref(source.ambienceVolume, fallback.ambienceVolume),
+        musicVolume: clampAccountAudioPref(source.musicVolume, fallback.musicVolume),
+        uiVolume: clampAccountAudioPref(source.uiVolume, fallback.uiVolume),
+        muted: Boolean('muted' in source ? source.muted : fallback.muted),
+    };
+}
+
+function clampAccountAudioPref(value, fallback = 1) {
+    const numeric = Number.isFinite(value) ? Number(value) : Number(fallback) || 0;
+    return Math.min(1, Math.max(0, numeric));
 }
 
 function readStoredPlayerName() {

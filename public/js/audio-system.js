@@ -18,7 +18,7 @@ const WELCOME_MENU_MUSIC_SOUND_ID = 'welcomeMenuSnr2Loop01';
 const MONUMENT_MUSIC_SOUND_ID = 'monumentHookusPookusInstrumentalLoop01';
 const UFO_DISKO_STORE_MUSIC_SOUND_ID = 'ufoDiskoNebulaStore01';
 
-const DEFAULT_AUDIO_PREFS = Object.freeze({
+export const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
     vehiclesVolume: 1,
     botVehiclesVolume: 1,
@@ -548,7 +548,7 @@ const BOT_TRAFFIC_UNDERGROUND_MISMATCH_GAIN = 0.12;
 const BOT_TRAFFIC_UNDERGROUND_MISMATCH_WET_GAIN = 0.42;
 const BOT_TRAFFIC_APPROACH_RATE_RANGE = 0.035;
 
-export function createAudioSystem({ camera = null } = {}) {
+export function createAudioSystem({ camera = null, onPrefsChanged = null } = {}) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioContextCtor) {
         return createNoopAudioSystem();
@@ -623,7 +623,9 @@ export function createAudioSystem({ camera = null } = {}) {
         update,
         unlock: unlockAudio,
         getMixerSnapshot,
+        getMixerPrefsSnapshot,
         setMixerVolume,
+        applyMixerPrefs,
         toggleMute,
         resetMixerToDefaults,
         prepareForGameplay,
@@ -1257,6 +1259,10 @@ export function createAudioSystem({ camera = null } = {}) {
         };
     }
 
+    function getMixerPrefsSnapshot() {
+        return sanitizeAudioPrefs(prefs, runtimeDefaultPrefs);
+    }
+
     function setMixerVolume(key, normalizedValue) {
         if (!isMixerSliderKey(key)) {
             return getMixerSnapshot();
@@ -1266,6 +1272,23 @@ export function createAudioSystem({ camera = null } = {}) {
         markRuntimeDefaultsDirty();
         applyBusVolumes();
         refreshUi();
+        emitPrefsChanged('volume');
+        return getMixerSnapshot();
+    }
+
+    function applyMixerPrefs(nextPrefs = null, options = {}) {
+        applyResolvedAudioPrefs(nextPrefs);
+        if (options.persistLocal !== false) {
+            persistAudioPrefs(prefs, runtimeDefaultPrefs);
+        }
+        if (options.markRuntimeDefaultsDirty === true) {
+            markRuntimeDefaultsDirty();
+        }
+        applyBusVolumes();
+        refreshUi();
+        if (options.notify !== false) {
+            emitPrefsChanged(options.reason || 'apply');
+        }
         return getMixerSnapshot();
     }
 
@@ -1275,6 +1298,7 @@ export function createAudioSystem({ camera = null } = {}) {
         persistAudioPrefs(prefs, runtimeDefaultPrefs);
         applyBusVolumes();
         refreshUi();
+        emitPrefsChanged('mute');
         if (options?.playFeedback) {
             playVariant('uiClickSoft', { gain: 0.55 });
         }
@@ -1282,11 +1306,12 @@ export function createAudioSystem({ camera = null } = {}) {
     }
 
     function resetMixerToDefaults(options = {}) {
-        applyResolvedAudioPrefs(runtimeDefaultPrefs);
-        persistAudioPrefs(prefs, runtimeDefaultPrefs);
-        markRuntimeDefaultsDirty();
-        applyBusVolumes();
-        refreshUi();
+        applyMixerPrefs(runtimeDefaultPrefs, {
+            persistLocal: true,
+            markRuntimeDefaultsDirty: true,
+            notify: true,
+            reason: 'reset',
+        });
         if (options?.playFeedback) {
             void unlockAudio().then((unlockedNow) => {
                 if (!unlockedNow) {
@@ -1298,6 +1323,21 @@ export function createAudioSystem({ camera = null } = {}) {
             });
         }
         return getMixerSnapshot();
+    }
+
+    function emitPrefsChanged(reason = 'update') {
+        if (typeof onPrefsChanged !== 'function') {
+            return;
+        }
+        try {
+            onPrefsChanged(getMixerPrefsSnapshot(), {
+                reason,
+                unlocked,
+                gameplayReady,
+            });
+        } catch {
+            // Settings listeners must not interrupt audio updates.
+        }
     }
 
     function refreshUi() {
@@ -4950,7 +4990,13 @@ function createNoopAudioSystem() {
             return Promise.resolve(false);
         },
         getMixerSnapshot: getOfflineMixerSnapshot,
+        getMixerPrefsSnapshot() {
+            return sanitizeAudioPrefs(DEFAULT_AUDIO_PREFS, DEFAULT_AUDIO_PREFS);
+        },
         setMixerVolume() {
+            return getOfflineMixerSnapshot();
+        },
+        applyMixerPrefs() {
             return getOfflineMixerSnapshot();
         },
         toggleMute() {

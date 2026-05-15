@@ -93,12 +93,16 @@ import {
 } from './constants.js';
 import { toCssHex, colorNameFromHex } from './color-utils.js';
 import {
+    persistAutoFullscreenOnStart,
+    readPersistedAutoFullscreenOnStart,
     readPersistedPlayerTopSpeedKph,
     persistPlayerTopSpeedKph,
     readPersistedGraphicsQualityMode,
     persistGraphicsQualityMode,
     readPersistedHideGameplayPanels,
     persistHideGameplayPanels,
+    persistProfileScreensaverEnabled,
+    readPersistedProfileScreensaverEnabled,
     readPersistedChaseCameraSettings,
     persistChaseCameraSettings,
     readPersistedPlayerCarVehicleId,
@@ -151,7 +155,7 @@ import { createRuntimeUiControllers } from './game-runtime-ui.js';
 import { createMultiplayerController } from './multiplayer-controller.js';
 import { createMineSystemController } from './mine-system.js';
 import { createMapUiController } from './map-ui.js';
-import { createAudioSystem } from './audio-system.js';
+import { createAudioSystem, DEFAULT_AUDIO_PREFS } from './audio-system.js';
 import { createAuthController } from './auth-controller.js';
 import { createGlobalLeaderboardController } from './global-leaderboard.js';
 import { createPickupScoringSystem } from './scoring-system.js';
@@ -233,6 +237,7 @@ const STEALTH_PICKUP_RESPAWN_DELAY_MS = 12000;
 const STEALTH_PICKUP_DURATION_MS = 9000;
 const STEALTH_PICKUP_FALLBACK_X = 0;
 const STEALTH_PICKUP_FALLBACK_Z = 16.5;
+const ACCOUNT_AUDIO_SETTINGS_SAVE_DEBOUNCE_MS = 320;
 const crashParts = getPlayerCarCrashParts();
 const initialPlayerEconomyState = createDefaultPlayerEconomyState();
 const selectedCarVehicleId = resolveOwnedVehicleIdForEconomy(
@@ -265,6 +270,9 @@ const runtimeState = createGameRuntimeState({
 runtimeState.playerEconomy = normalizePlayerEconomyState(initialPlayerEconomyState);
 runtimeState.authCarWrapUrl = '';
 runtimeState.localGarageWrapUrl = '';
+let pendingAccountAudioSettingsSaveTimeout = null;
+let pendingAccountAudioPrefs = null;
+let guestAccountSettingsFallback = createDefaultGuestAccountSettingsFallback();
 let runtimeGraphicsWarmupReady = false;
 let runtimeGraphicsRecoveryPromise = null;
 let runtimeGraphicsLastRecoveryRequestAtMs = -Number.POSITIVE_INFINITY;
@@ -304,6 +312,133 @@ function syncRuntimePlayerWrapAppearance() {
     setPlayerCarAppearance({
         wrapUrl: getActivePlayerWrapUrl(),
     });
+}
+
+function cloneRuntimeAudioPrefsSnapshot(prefs = null) {
+    return prefs && typeof prefs === 'object'
+        ? {
+              masterVolume: Number(prefs.masterVolume),
+              vehiclesVolume: Number(prefs.vehiclesVolume),
+              botVehiclesVolume: Number(prefs.botVehiclesVolume),
+              effectsVolume: Number(prefs.effectsVolume),
+              ambienceVolume: Number(prefs.ambienceVolume),
+              musicVolume: Number(prefs.musicVolume),
+              uiVolume: Number(prefs.uiVolume),
+              muted: Boolean(prefs.muted),
+          }
+        : null;
+}
+
+function createDefaultGuestAccountSettingsFallback() {
+    return {
+        autoFullscreenOnStart: true,
+        hideGameplayPanels: false,
+        profileScreensaverEnabled: true,
+        audioPrefs: cloneRuntimeAudioPrefsSnapshot(DEFAULT_AUDIO_PREFS),
+    };
+}
+
+function captureCurrentGuestAccountSettingsFallback() {
+    return {
+        autoFullscreenOnStart: readPersistedAutoFullscreenOnStart(true),
+        hideGameplayPanels: readPersistedHideGameplayPanels(false),
+        profileScreensaverEnabled: readPersistedProfileScreensaverEnabled(true),
+        audioPrefs: cloneRuntimeAudioPrefsSnapshot(
+            runtimeState.audioController?.getMixerPrefsSnapshot?.() || DEFAULT_AUDIO_PREFS
+        ),
+    };
+}
+
+function restoreGuestAccountSettingsFallback() {
+    const fallback = guestAccountSettingsFallback || createDefaultGuestAccountSettingsFallback();
+    persistAutoFullscreenOnStart(Boolean(fallback.autoFullscreenOnStart));
+    setGameplayPanelsHidden(Boolean(fallback.hideGameplayPanels), {
+        persist: true,
+    });
+    persistProfileScreensaverEnabled(Boolean(fallback.profileScreensaverEnabled));
+    if (fallback.audioPrefs) {
+        runtimeState.audioController?.applyMixerPrefs?.(fallback.audioPrefs, {
+            persistLocal: true,
+            markRuntimeDefaultsDirty: false,
+            notify: false,
+            reason: 'guest-restore',
+        });
+    }
+}
+
+function clearPendingAccountAudioSettingsSave() {
+    pendingAccountAudioPrefs = null;
+    if (pendingAccountAudioSettingsSaveTimeout == null) {
+        return;
+    }
+    window.clearTimeout(pendingAccountAudioSettingsSaveTimeout);
+    pendingAccountAudioSettingsSaveTimeout = null;
+}
+
+function scheduleRuntimeAccountAudioSettingsSave(nextPrefs = null) {
+    const authState = runtimeState.authController?.getState?.() || null;
+    if (!authState?.authenticated) {
+        clearPendingAccountAudioSettingsSave();
+        return;
+    }
+    const safePrefs = cloneRuntimeAudioPrefsSnapshot(
+        nextPrefs || runtimeState.audioController?.getMixerPrefsSnapshot?.() || null
+    );
+    if (!safePrefs) {
+        return;
+    }
+    pendingAccountAudioPrefs = safePrefs;
+    if (pendingAccountAudioSettingsSaveTimeout != null) {
+        window.clearTimeout(pendingAccountAudioSettingsSaveTimeout);
+    }
+    pendingAccountAudioSettingsSaveTimeout = window.setTimeout(() => {
+        pendingAccountAudioSettingsSaveTimeout = null;
+        const prefsToSave = cloneRuntimeAudioPrefsSnapshot(pendingAccountAudioPrefs);
+        pendingAccountAudioPrefs = null;
+        if (!prefsToSave) {
+            return;
+        }
+        void runtimeState.authController?.updateAccountSettings?.({
+            audioPrefs: prefsToSave,
+        });
+    }, ACCOUNT_AUDIO_SETTINGS_SAVE_DEBOUNCE_MS);
+}
+
+function applyRuntimeAccountSettings(authState = null, previousAuthState = null) {
+    const authenticated = Boolean(authState?.authenticated);
+    const wasAuthenticated = Boolean(previousAuthState?.authenticated);
+    if (!authenticated) {
+        clearPendingAccountAudioSettingsSave();
+        if (wasAuthenticated) {
+            restoreGuestAccountSettingsFallback();
+        }
+        return;
+    }
+    if (!wasAuthenticated) {
+        const restoredSession = Boolean(previousAuthState && previousAuthState.ready !== true);
+        guestAccountSettingsFallback = restoredSession
+            ? createDefaultGuestAccountSettingsFallback()
+            : captureCurrentGuestAccountSettingsFallback();
+    }
+    if (authState.accountAutoFullscreenConfigured) {
+        persistAutoFullscreenOnStart(Boolean(authState.accountAutoFullscreenOnStart));
+    }
+    if (authState.accountHideGameplayPanelsConfigured) {
+        setGameplayPanelsHidden(Boolean(authState.accountHideGameplayPanels), {
+            persist: true,
+        });
+    }
+    if (authState.accountProfileScreensaverConfigured) {
+        persistProfileScreensaverEnabled(Boolean(authState.accountProfileScreensaverEnabled));
+    }
+    if (authState.accountAudioPrefsConfigured && authState.accountAudioPrefs) {
+        runtimeState.audioController?.applyMixerPrefs?.(authState.accountAudioPrefs, {
+            persistLocal: true,
+            markRuntimeDefaultsDirty: false,
+            notify: false,
+            reason: 'account-sync',
+        });
+    }
 }
 
 function createLocalStealthPickupSnapshot({ available = true, respawnAt = 0 } = {}) {
@@ -399,6 +534,9 @@ const {
     onAuthUpdateGaragePreferences(preferences = null) {
         return runtimeState.authController?.updateGaragePreferences?.(preferences);
     },
+    onAuthUpdateAccountSettings(settings = null) {
+        return runtimeState.authController?.updateAccountSettings?.(settings);
+    },
     onAuthChangePassword(credentials) {
         return runtimeState.authController?.changePassword?.(credentials);
     },
@@ -439,6 +577,7 @@ runtimeState.authController = createAuthController({
         });
     },
     onStateChanged(state) {
+        applyRuntimeAccountSettings(state, lastRuntimeAuthState);
         welcomeModalUi.setAuthState?.(state);
         runtimeState.authCarWrapUrl = resolveRuntimeAuthCarWrapUrl(state);
         syncRuntimePlayerWrapAppearance();
@@ -446,9 +585,11 @@ runtimeState.authController = createAuthController({
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
         runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
         void runtimeState.globalLeaderboardController?.refresh?.();
+        lastRuntimeAuthState = state;
     },
 });
 const initialRuntimeAuthState = runtimeState.authController.getState?.() || null;
+let lastRuntimeAuthState = initialRuntimeAuthState;
 runtimeState.authCarWrapUrl = resolveRuntimeAuthCarWrapUrl(initialRuntimeAuthState);
 syncRuntimePlayerWrapAppearance();
 welcomeModalUi.setAuthState?.(initialRuntimeAuthState);
@@ -1458,7 +1599,12 @@ const scene = initializeScene({
     worldBoundary,
 });
 const renderer = initializeRenderer({ renderSettings });
-runtimeState.audioController = createAudioSystem({ camera });
+runtimeState.audioController = createAudioSystem({
+    camera,
+    onPrefsChanged(prefs) {
+        scheduleRuntimeAccountAudioSettingsSave(prefs);
+    },
+});
 runtimeState.audioController.initialize({
     preloadOnInitialize: false,
 });
@@ -1483,6 +1629,7 @@ const chargingProgressHudController = createChargingProgressHudController(scene,
         return runtimeState.playerBattery / BATTERY_MAX;
     },
 });
+applyRuntimeAccountSettings(runtimeState.authController?.getState?.() || null);
 const skidMarkController = createSkidMarkController(scene, {
     sampleGroundHeight: getGroundHeightAt,
     keys,

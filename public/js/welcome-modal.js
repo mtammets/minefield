@@ -120,6 +120,7 @@ export function createWelcomeModalController({
     onAuthUpdateCarWrap,
     onAuthRemoveCarWrap,
     onAuthUpdateGaragePreferences,
+    onAuthUpdateAccountSettings,
     onAuthChangePassword,
     onAuthDeleteAccount,
     onRefreshGlobalLeaderboard,
@@ -694,6 +695,13 @@ export function createWelcomeModalController({
     autoFullscreenInputEl?.addEventListener('change', () => {
         autoFullscreenOnStart = Boolean(autoFullscreenInputEl.checked);
         persistAutoFullscreenOnStart(autoFullscreenOnStart);
+        if (authUiState.authenticated && typeof onAuthUpdateAccountSettings === 'function') {
+            void Promise.resolve(
+                onAuthUpdateAccountSettings({
+                    autoFullscreenOnStart,
+                })
+            ).catch(() => {});
+        }
         syncAutoFullscreenPreferenceUi();
     });
     hideGameplayPanelsInputEl?.addEventListener('change', () => {
@@ -703,11 +711,25 @@ export function createWelcomeModalController({
         } else {
             persistHideGameplayPanels(hideGameplayPanels);
         }
+        if (authUiState.authenticated && typeof onAuthUpdateAccountSettings === 'function') {
+            void Promise.resolve(
+                onAuthUpdateAccountSettings({
+                    hideGameplayPanels,
+                })
+            ).catch(() => {});
+        }
         syncGameplayPanelsPreferenceUi();
     });
     profileScreensaverInputEl?.addEventListener('change', () => {
         profileScreensaverEnabled = Boolean(profileScreensaverInputEl.checked);
         persistProfileScreensaverEnabled(profileScreensaverEnabled);
+        if (authUiState.authenticated && typeof onAuthUpdateAccountSettings === 'function') {
+            void Promise.resolve(
+                onAuthUpdateAccountSettings({
+                    profileScreensaverEnabled,
+                })
+            ).catch(() => {});
+        }
         syncProfileScreensaverPreferenceUi();
         syncWelcomeProfileScreensaverForCurrentView();
     });
