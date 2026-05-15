@@ -2,6 +2,7 @@ export function createGameRuntimeState({
     selectedCarColorHex,
     selectedCarSkinId,
     selectedCarVehicleId,
+    selectedCarWheelPresetId,
     batteryMax,
     playerCarPoolSize,
 }) {
@@ -10,6 +11,8 @@ export function createGameRuntimeState({
         selectedCarColorHex: selectedCarColorHex >>> 0,
         selectedCarSkinId: typeof selectedCarSkinId === 'string' ? selectedCarSkinId : '',
         selectedCarVehicleId: typeof selectedCarVehicleId === 'string' ? selectedCarVehicleId : '',
+        selectedCarWheelPresetId:
+            typeof selectedCarWheelPresetId === 'string' ? selectedCarWheelPresetId : '',
         isCarDestroyed: false,
         botTrafficSystem: null,
         botsMissionDirector: null,

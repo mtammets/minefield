@@ -17,6 +17,7 @@ import {
     getPlayerVehiclePresetById,
     resolvePlayerVehicleId,
 } from './car-vehicles.js';
+import { DEFAULT_PLAYER_WHEEL_PRESET_ID, resolvePlayerWheelPresetId } from './wheel-presets.js';
 
 const DEFAULT_CAR_BASE_RIDE_HEIGHT = PLAYER_RIDE_HEIGHT;
 const PLAYER_REAR_LIGHT_Z = 2.045;
@@ -91,6 +92,7 @@ export function createCarRig(options = {}) {
         bodyColor = 0x2d67a6,
         skinId = DEFAULT_PLAYER_CAR_SKIN_ID,
         vehicleId = DEFAULT_PLAYER_VEHICLE_ID,
+        wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID,
         wrapUrl = '',
         displayName = 'MAREK',
         addLights = true,
@@ -112,7 +114,10 @@ export function createCarRig(options = {}) {
     // Keep tire contact visually aligned with the raised road surface planes.
     car.position.y = carBaseRideHeight;
 
-    const wheelController = initializeWheels(wheelRig, { addWheelWellLights });
+    const wheelController = initializeWheels(wheelRig, {
+        addWheelWellLights,
+        wheelPresetId,
+    });
     const lightController = addLights ? addLightsToCar(lightRig, lightConfig) : null;
     const lightEditableParts = lightController?.editableParts || [];
     const detachableWheels = wheelController?.getDetachableWheels?.() || [];
@@ -124,6 +129,7 @@ export function createCarRig(options = {}) {
     const appearanceState = {
         vehicleId: resolvePlayerVehicleId(vehicleId),
         skinId: resolvePlayerCarSkinId(skinId),
+        wheelPresetId: resolvePlayerWheelPresetId(wheelPresetId),
         colorHex: normalizeAppearanceColorHex(bodyColor, DEFAULT_PLAYER_CAR_SKIN_ID),
         wrapUrl: typeof wrapUrl === 'string' ? wrapUrl : '',
         displayName: typeof displayName === 'string' && displayName.trim() ? displayName : 'MAREK',
@@ -546,6 +552,10 @@ export function createCarRig(options = {}) {
         const nextAppearance = appearance && typeof appearance === 'object' ? appearance : {};
         const hasVehicleId = Object.prototype.hasOwnProperty.call(nextAppearance, 'vehicleId');
         const hasSkinId = Object.prototype.hasOwnProperty.call(nextAppearance, 'skinId');
+        const hasWheelPresetId = Object.prototype.hasOwnProperty.call(
+            nextAppearance,
+            'wheelPresetId'
+        );
         const hasColorHex = Object.prototype.hasOwnProperty.call(nextAppearance, 'colorHex');
         const hasWrapUrl = Object.prototype.hasOwnProperty.call(nextAppearance, 'wrapUrl');
         const nextVehicleId = hasVehicleId
@@ -554,6 +564,9 @@ export function createCarRig(options = {}) {
         const nextSkinId = hasSkinId
             ? resolvePlayerCarSkinId(nextAppearance.skinId)
             : appearanceState.skinId;
+        const nextWheelPresetId = hasWheelPresetId
+            ? resolvePlayerWheelPresetId(nextAppearance.wheelPresetId)
+            : appearanceState.wheelPresetId;
         const nextColorHex = hasColorHex
             ? normalizeAppearanceColorHex(nextAppearance.colorHex, nextSkinId)
             : hasSkinId
@@ -564,14 +577,26 @@ export function createCarRig(options = {}) {
             : appearanceState.wrapUrl;
 
         const vehicleChanged = nextVehicleId !== appearanceState.vehicleId;
+        const wheelPresetChanged = nextWheelPresetId !== appearanceState.wheelPresetId;
         appearanceState.vehicleId = nextVehicleId;
         appearanceState.skinId = nextSkinId;
+        appearanceState.wheelPresetId = nextWheelPresetId;
         appearanceState.colorHex = nextColorHex;
         appearanceState.wrapUrl = nextWrapUrl;
+
+        if (wheelPresetChanged) {
+            wheelController.setWheelPreset(nextWheelPresetId);
+        }
 
         if (vehicleChanged) {
             rebuildVehicleBody();
             return currentVehiclePreset?.id || appearanceState.vehicleId;
+        }
+
+        if (wheelPresetChanged) {
+            const previousVisibility = captureEditablePartVisibilitySnapshot();
+            rebuildEditablePartDescriptors();
+            restoreEditablePartVisibilitySnapshot(previousVisibility);
         }
 
         if (bodyMeta?.setAppearance) {
@@ -651,11 +676,17 @@ export function createCarRig(options = {}) {
         getVehicleId() {
             return appearanceState.vehicleId;
         },
+        getWheelPresetId() {
+            return appearanceState.wheelPresetId;
+        },
         setBodyColor(colorHex) {
             applyAppearance({ colorHex });
         },
         setSkin(nextSkinId) {
             applyAppearance({ skinId: nextSkinId });
+        },
+        setWheelPreset(nextWheelPresetId) {
+            return applyAppearance({ wheelPresetId: nextWheelPresetId });
         },
         setVehicle(nextVehicleId) {
             return applyAppearance({ vehicleId: nextVehicleId });

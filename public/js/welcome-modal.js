@@ -7,6 +7,13 @@ import {
     getPlayerVehiclePresetById,
 } from './car-vehicles.js';
 import {
+    DEFAULT_PLAYER_WHEEL_PRESET_ID,
+    PLAYER_WHEEL_PRESETS,
+    getPlayerWheelPresetById,
+    resolvePlayerWheelPresetId,
+} from './wheel-presets.js';
+import { createWheelPreviewMesh } from './wheels.js';
+import {
     formatPlayerCredits,
     getOwnedVehicleCountForEconomy,
     getVehiclePurchaseAvailability,
@@ -22,6 +29,13 @@ import {
     persistProfileScreensaverEnabled,
     readPersistedProfileScreensaverEnabled,
 } from './player-persistence.js';
+import {
+    GARAGE_WRAP_PRESETS_UPDATED_EVENT,
+    getGarageWrapPresetById,
+    getGarageWrapPresetByUrl,
+    getGarageWrapPresetEntries,
+    initializeGarageWrapPresetManager,
+} from './garage-wrap-presets-manager.js';
 import {
     SHOWROOM_INTRO_VIDEO_UPDATED_EVENT,
     getShowroomIntroVideoConfig,
@@ -60,17 +74,12 @@ const PRESET_AVATAR_PATHS = [
     '/assets/Avatars/avatar3.png',
     '/assets/Avatars/avata4.png',
 ];
-const PRESET_GARAGE_WRAP_PATHS = [
-    '/assets/skins/skin1.png',
-    '/assets/skins/skin2.png',
-    '/assets/skins/skin3.png',
-    '/assets/skins/skin4.png',
-];
 const DEFAULT_ONLINE_PLAYER_NAME = 'Driver';
 const AUTH_SIGNED_IN_STATUS_TEXT = 'Signed in. Online rooms and score sync are unlocked.';
 const AUTH_SIGNED_OUT_STATUS_TEXT =
     'Create an account or sign in to unlock online rooms and score sync.';
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
+const GARAGE_WRAP_PRESET_STORAGE_KEY = 'silentdrift-garage-wrap-preset-id';
 const WELCOME_START_SEQUENCE_MIN_MS = 2600;
 const WELCOME_START_SEQUENCE_COMPLETION_DELAY_MS = 260;
 const WELCOME_START_SEQUENCE_PREP_CAP = 0.9;
@@ -113,6 +122,7 @@ export function createWelcomeModalController({
     onAuthDeleteAccount,
     onRefreshGlobalLeaderboard,
     onVehicleChange,
+    onWheelPresetChange,
     onPurchaseVehicle,
     onBuyCredits,
     onWrapChange,
@@ -122,6 +132,8 @@ export function createWelcomeModalController({
     getCurrentSkinId,
     initialVehicleId,
     getCurrentVehicleId,
+    initialWheelPresetId,
+    getCurrentWheelPresetId,
     getAuthState,
     getPlayerEconomyState,
     resolvePlayerCarSkinId,
@@ -143,6 +155,10 @@ export function createWelcomeModalController({
         typeof getCurrentSkinId === 'function' ? getCurrentSkinId : () => initialSkinId;
     const currentVehicleGetter =
         typeof getCurrentVehicleId === 'function' ? getCurrentVehicleId : () => initialVehicleId;
+    const currentWheelPresetGetter =
+        typeof getCurrentWheelPresetId === 'function'
+            ? getCurrentWheelPresetId
+            : () => initialWheelPresetId;
 
     const rootEl = document.getElementById('welcomeModal');
     const startActionsEl = rootEl?.querySelector?.('.welcomeStartActions') || null;
@@ -243,6 +259,9 @@ export function createWelcomeModalController({
     const authGarageWrapRemoveBtnEl = document.getElementById('welcomeAuthGarageWrapRemoveBtn');
     const authGarageWrapRemoveIconEl = document.getElementById('welcomeAuthGarageWrapRemoveIcon');
     const authGarageWrapPresetGridEl = document.getElementById('welcomeAuthGarageSkinPresetGrid');
+    const authGarageWheelCardEl = document.getElementById('welcomeAuthGarageWheelCard');
+    const authGarageWheelStatusEl = document.getElementById('welcomeAuthGarageWheelStatus');
+    const authGarageWheelPresetGridEl = document.getElementById('welcomeAuthGarageWheelPresetGrid');
     const authGarageDockTitleEl = document.getElementById('welcomeAuthGarageDockTitle');
     const authGarageDockSubtitleEl = document.getElementById('welcomeAuthGarageDockSubtitle');
     const authChangePasswordToggleBtnEl = document.getElementById(
@@ -288,9 +307,14 @@ export function createWelcomeModalController({
     const introVideoOverlayEl = document.getElementById('welcomeIntroVideoOverlay');
     const introVideoEl = document.getElementById('welcomeIntroVideo');
     const introVideoSourceEl = introVideoEl?.querySelector?.('source') || null;
-    renderGarageWrapPresetButtons(authGarageWrapPresetGridEl);
-    const authGarageWrapPresetBtnEls = Array.from(
+    let garageWrapPresetEntries = getGarageWrapPresetEntries();
+    renderGarageWrapPresetButtons(authGarageWrapPresetGridEl, garageWrapPresetEntries);
+    let authGarageWrapPresetBtnEls = Array.from(
         authGarageWrapPresetGridEl?.querySelectorAll?.('.welcomeAuthGarageSkinPresetBtn') || []
+    );
+    renderWheelPresetButtons(authGarageWheelPresetGridEl);
+    const authGarageWheelPresetBtnEls = Array.from(
+        authGarageWheelPresetGridEl?.querySelectorAll?.('.welcomeAuthGarageWheelPresetBtn') || []
     );
     const previewLoadingStatusEl = document.getElementById('welcomePreviewLoadingStatus');
     const previewLoadingProgressEl = document.getElementById('welcomePreviewLoadingProgress');
@@ -350,6 +374,12 @@ export function createWelcomeModalController({
                 return fallbackVehicleId;
             },
             setSelectedVehicleId() {},
+            getSelectedWheelPresetId() {
+                return resolvePlayerWheelPresetId(
+                    initialWheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+                );
+            },
+            setSelectedWheelPresetId() {},
             selectNeighborVehicle() {},
             getPreferredStartMode() {
                 return 'bots';
@@ -410,6 +440,10 @@ export function createWelcomeModalController({
     underGlow.position.y = 0.02;
     previewScene.add(underGlow);
 
+    let selectedWheelPresetId = resolvePlayerWheelPresetId(
+        currentWheelPresetGetter() || initialWheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+    );
+    let wheelPresetPreviewStages = createWheelPresetPreviewStages(authGarageWheelPresetBtnEls);
     const previewVehicles = [createPreviewVehicle(), createPreviewVehicle()];
     let activeVehicleIndex = 0;
     let previewSpinYaw = Math.PI * 0.32;
@@ -430,6 +464,7 @@ export function createWelcomeModalController({
     let garageNoticeText = '';
     let garageNoticeTone = 'muted';
     let garagePurchasePending = false;
+    let garageWheelPickerExpanded = false;
     let authPasswordChangeOpen = false;
     const avatarEditorState = createInitialAvatarEditorState();
     const garageWrapState = createInitialGarageWrapState();
@@ -604,6 +639,10 @@ export function createWelcomeModalController({
     if (authGarageWrapCardEl && previewAccountBodyEl) {
         previewAccountBodyEl.append(authGarageWrapCardEl);
         authGarageWrapCardEl.hidden = true;
+    }
+    if (authGarageWheelCardEl && previewAccountBodyEl) {
+        previewAccountBodyEl.append(authGarageWheelCardEl);
+        authGarageWheelCardEl.hidden = true;
     }
     if (onlineModeFlowEl && previewOnlineBodyEl) {
         previewOnlineBodyEl.append(onlineModeFlowEl);
@@ -790,12 +829,30 @@ export function createWelcomeModalController({
         authGarageWrapUploadBtnEl?.addEventListener('click', () => {
             openCarWrapFilePicker();
         });
-        authGarageWrapPresetBtnEls.forEach((buttonEl) => {
+        authGarageWrapPresetGridEl?.addEventListener('click', (event) => {
+            const buttonEl = event.target?.closest?.('.welcomeAuthGarageSkinPresetBtn');
+            if (!(buttonEl instanceof HTMLElement)) {
+                return;
+            }
+            const presetId = sanitizeGarageWrapPresetId(
+                buttonEl.getAttribute('data-garage-wrap-preset-id') || ''
+            );
+            handleGarageWrapPresetSelection(presetId);
+        });
+        authGarageWheelPresetBtnEls.forEach((buttonEl) => {
             buttonEl.addEventListener('click', () => {
-                const presetPath = sanitizeGarageWrapPresetPath(
-                    buttonEl.getAttribute('data-garage-wrap-preset') || ''
+                const wheelPresetId = resolvePlayerWheelPresetId(
+                    buttonEl.getAttribute('data-wheel-preset-id') || ''
                 );
-                handleGarageWrapPresetSelection(presetPath);
+                if (wheelPresetId === selectedWheelPresetId) {
+                    setGarageWheelPickerExpanded(!garageWheelPickerExpanded);
+                    return;
+                }
+                applySelectedWheelPreset(wheelPresetId, {
+                    emitChange: true,
+                    announce: true,
+                });
+                setGarageWheelPickerExpanded(false);
             });
         });
         authCarWrapInputEl?.addEventListener('change', () => {
@@ -950,6 +1007,17 @@ export function createWelcomeModalController({
             setWelcomeAccountOpen(false);
         }
     });
+    previewAccountOverlayEl?.addEventListener('pointerdown', (event) => {
+        if (
+            !garageWheelPickerExpanded ||
+            !authGarageWheelCardEl ||
+            !(event.target instanceof Node) ||
+            authGarageWheelCardEl.contains(event.target)
+        ) {
+            return;
+        }
+        setGarageWheelPickerExpanded(false);
+    });
     previewAccountOverlayEl?.addEventListener('pointerdown', handlePreviewPointerDown);
     previewAccountOverlayEl?.addEventListener('pointermove', handlePreviewPointerMove);
     previewAccountOverlayEl?.addEventListener('pointerup', handlePreviewPointerUp);
@@ -1017,6 +1085,19 @@ export function createWelcomeModalController({
         });
     });
     introVideoEl?.addEventListener('error', handleIntroVideoError);
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener(
+            GARAGE_WRAP_PRESETS_UPDATED_EVENT,
+            handleGarageWrapPresetCatalogUpdate
+        );
+    }
+    void initializeGarageWrapPresetManager()
+        .then((entries) => {
+            refreshGarageWrapPresetButtons(entries);
+        })
+        .catch((error) => {
+            console.warn('Garage wrap preset manager could not be initialized.', error);
+        });
 
     return {
         show() {
@@ -1046,7 +1127,15 @@ export function createWelcomeModalController({
             taglineRotation.elapsedSec = 0;
             resetTaglineTransition();
             setTaglineByIndex(taglineRotation.activeIndex);
+            selectedWheelPresetId = resolvePlayerWheelPresetId(
+                currentWheelPresetGetter() ||
+                    selectedWheelPresetId ||
+                    DEFAULT_PLAYER_WHEEL_PRESET_ID
+            );
             forceSelectPreset(resolveVehiclePresetIndex(currentVehicleGetter()), false);
+            applySelectedWheelPreset(selectedWheelPresetId, {
+                emitChange: false,
+            });
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
             updateShowroomAtmosphere(0);
@@ -1075,8 +1164,12 @@ export function createWelcomeModalController({
         },
         resize() {
             syncPreviewSize();
+            syncWheelPresetPreviewStageSizing();
             if (!rootEl.hidden) {
                 renderPreview();
+                renderWheelPresetPreviewStages({
+                    force: true,
+                });
                 schedulePreviewLoadingReady();
             }
         },
@@ -1092,6 +1185,7 @@ export function createWelcomeModalController({
             updatePreviewVisualState(frameDt);
             updateShowroomAtmosphere(frameDt);
             updateTaglineRotation(frameDt);
+            updateWheelPresetPreviewStages(frameDt);
             applyPreviewPose();
             renderPreview();
             schedulePreviewLoadingReady();
@@ -1108,6 +1202,12 @@ export function createWelcomeModalController({
         setSelectedVehicleId(vehicleId, options = {}) {
             const { emitChange = true } = options;
             forceSelectPreset(resolveVehiclePresetIndex(vehicleId), emitChange);
+        },
+        getSelectedWheelPresetId() {
+            return selectedWheelPresetId;
+        },
+        setSelectedWheelPresetId(wheelPresetId, options = {}) {
+            applySelectedWheelPreset(wheelPresetId, options);
         },
         selectNeighborVehicle(step = 1) {
             const direction = Math.sign(step || 1) || 1;
@@ -1176,6 +1276,9 @@ export function createWelcomeModalController({
             syncWelcomeLeaderboardUi();
             syncSignedInProfileSummary();
         },
+        refreshGarageWrapPresets() {
+            refreshGarageWrapPresetButtons(getGarageWrapPresetEntries());
+        },
         focusAuthPanel(mode = 'sign-in', options = {}) {
             focusAuthPanel(mode, options);
         },
@@ -1205,7 +1308,8 @@ export function createWelcomeModalController({
     }
 
     function syncProfileScreensaverPreferenceUi() {
-        profileScreensaverEnabled = readPersistedProfileScreensaverEnabled(profileScreensaverEnabled);
+        profileScreensaverEnabled =
+            readPersistedProfileScreensaverEnabled(profileScreensaverEnabled);
         if (profileScreensaverInputEl) {
             profileScreensaverInputEl.checked = profileScreensaverEnabled;
         }
@@ -1298,16 +1402,16 @@ export function createWelcomeModalController({
     function canRunWelcomeProfileScreensaver() {
         return Boolean(
             !rootEl.hidden &&
-                profileScreensaverEnabled &&
-                authUiState.authenticated &&
-                !launchSequenceState.active &&
-                !welcomeSettingsOpen &&
-                !welcomeDonateOpen &&
-                !avatarEditorState.open &&
-                !isWelcomeOnlineOverlayOpen() &&
-                !accountToolsOpen &&
-                !garagePanelOpen &&
-                !walletPanelOpen
+            profileScreensaverEnabled &&
+            authUiState.authenticated &&
+            !launchSequenceState.active &&
+            !welcomeSettingsOpen &&
+            !welcomeDonateOpen &&
+            !avatarEditorState.open &&
+            !isWelcomeOnlineOverlayOpen() &&
+            !accountToolsOpen &&
+            !garagePanelOpen &&
+            !walletPanelOpen
         );
     }
 
@@ -1320,13 +1424,16 @@ export function createWelcomeModalController({
     function scheduleWelcomeProfileScreensaverStep(delayMs, callback) {
         clearWelcomeProfileScreensaverTimeout();
         const token = profileScreensaverState.cycleToken;
-        profileScreensaverState.timeoutHandle = window.setTimeout(() => {
-            profileScreensaverState.timeoutHandle = null;
-            if (token !== profileScreensaverState.cycleToken) {
-                return;
-            }
-            callback();
-        }, Math.max(0, Math.round(Number(delayMs) || 0)));
+        profileScreensaverState.timeoutHandle = window.setTimeout(
+            () => {
+                profileScreensaverState.timeoutHandle = null;
+                if (token !== profileScreensaverState.cycleToken) {
+                    return;
+                }
+                callback();
+            },
+            Math.max(0, Math.round(Number(delayMs) || 0))
+        );
     }
 
     function stopWelcomeProfileScreensaver({ restoreProfile = false } = {}) {
@@ -2213,7 +2320,7 @@ export function createWelcomeModalController({
 
     function applyGarageWrapSelection(
         nextUrl,
-        { mode = 'upload', presetPath = '', ownsObjectUrl = false } = {}
+        { mode = 'upload', presetId = '', presetPath = '', ownsObjectUrl = false } = {}
     ) {
         const safeUrl = sanitizeGarageWrapUrl(nextUrl);
         if (!safeUrl) {
@@ -2222,11 +2329,19 @@ export function createWelcomeModalController({
         revokeGarageWrapObjectUrlIfNeeded();
         garageWrapState.mode = mode === 'preset' ? 'preset' : 'upload';
         garageWrapState.url = safeUrl;
+        garageWrapState.presetId =
+            garageWrapState.mode === 'preset' ? sanitizeGarageWrapPresetId(presetId) : '';
         garageWrapState.presetPath =
             garageWrapState.mode === 'preset' ? sanitizeGarageWrapPresetPath(presetPath) : '';
         garageWrapState.ownsObjectUrl = Boolean(ownsObjectUrl && safeUrl.startsWith('blob:'));
+        if (garageWrapState.mode === 'preset' && garageWrapState.presetId) {
+            writeStoredGarageWrapPresetId(garageWrapState.presetId);
+        } else {
+            clearStoredGarageWrapPresetId();
+        }
         onWrapChange?.(safeUrl, {
             mode: garageWrapState.mode,
+            presetId: garageWrapState.presetId,
             presetPath: garageWrapState.presetPath,
         });
         syncPreviewVehicleWrap();
@@ -2237,16 +2352,41 @@ export function createWelcomeModalController({
         revokeGarageWrapObjectUrlIfNeeded();
         garageWrapState.mode = 'none';
         garageWrapState.url = '';
+        garageWrapState.presetId = '';
         garageWrapState.presetPath = '';
         garageWrapState.ownsObjectUrl = false;
+        clearStoredGarageWrapPresetId();
         if (emitWrapChange) {
             onWrapChange?.('', {
                 mode: 'none',
+                presetId: '',
                 presetPath: '',
             });
         }
         syncPreviewVehicleWrap();
         syncAuthUi();
+    }
+
+    function restorePersistedGarageWrapSelection({ force = false } = {}) {
+        if (!force && garageWrapState.mode !== 'none') {
+            return false;
+        }
+        const storedPresetId = readStoredGarageWrapPresetId();
+        if (!storedPresetId) {
+            return false;
+        }
+        const presetEntry = getGarageWrapPresetById(storedPresetId);
+        const presetPath = sanitizeGarageWrapPresetPath(presetEntry?.url || '');
+        if (!presetPath) {
+            clearStoredGarageWrapPresetId();
+            return false;
+        }
+        applyGarageWrapSelection(presetPath, {
+            mode: 'preset',
+            presetId: storedPresetId,
+            presetPath,
+        });
+        return true;
     }
 
     function setAuthState(nextState = null) {
@@ -2297,6 +2437,9 @@ export function createWelcomeModalController({
             authMode = 'sign-in';
         }
         clearLocalAuthStatus();
+        if (garageWrapState.mode === 'none') {
+            restorePersistedGarageWrapSelection();
+        }
         syncPreviewVehicleWrap();
         syncAuthUi();
         syncWelcomeSettingsUi();
@@ -2863,6 +3006,7 @@ export function createWelcomeModalController({
     } = {}) {
         const selectedPreset =
             PLAYER_VEHICLE_PRESETS[selectedVehicleIndex] || PLAYER_VEHICLE_PRESETS[0] || null;
+        const selectedWheelPreset = getPlayerWheelPresetById(selectedWheelPresetId);
         const selectedVehicleId = resolveVehicleId(selectedPreset?.id || DEFAULT_PLAYER_VEHICLE_ID);
         const vehicleName = selectedPreset?.name || 'Garage';
         const vehicleCategory = selectedPreset?.category || 'Driver Build';
@@ -2910,6 +3054,7 @@ export function createWelcomeModalController({
                   : activeSelection === 'remote'
                     ? `${vehicleName}. Saved account wrap equipped.`
                     : `${vehicleName}. Stock finish equipped.`;
+        const wheelSummary = `${selectedWheelPreset.name}. ${selectedWheelPreset.family}. ${selectedWheelPreset.description}`;
         const defaultGarageHint = !vehicleUnlocked
             ? !authenticated
                 ? 'Sign in to unlock additional chassis and earn credits.'
@@ -3038,18 +3183,56 @@ export function createWelcomeModalController({
         }
         for (let i = 0; i < authGarageWrapPresetBtnEls.length; i += 1) {
             const buttonEl = authGarageWrapPresetBtnEls[i];
+            const presetId = sanitizeGarageWrapPresetId(
+                buttonEl.getAttribute('data-garage-wrap-preset-id') || ''
+            );
             const presetPath = sanitizeGarageWrapPresetPath(
                 buttonEl.getAttribute('data-garage-wrap-preset') || ''
             );
             buttonEl.disabled =
                 !vehicleUnlocked || !wrapFeatureEnabled || busy || garagePurchasePending;
             buttonEl.dataset.selected =
-                garageWrapState.mode === 'preset' && garageWrapState.presetPath === presetPath
+                garageWrapState.mode === 'preset' &&
+                garageWrapState.presetId === presetId &&
+                garageWrapState.presetPath === presetPath
                     ? 'true'
                     : 'false';
         }
         if (authGarageWrapFallbackEl) {
             authGarageWrapFallbackEl.hidden = effectiveHasCarWrap;
+        }
+        if (authGarageWheelCardEl) {
+            authGarageWheelCardEl.hidden = false;
+            authGarageWheelCardEl.dataset.activePreset = selectedWheelPreset.id;
+            authGarageWheelCardEl.dataset.expanded = garageWheelPickerExpanded ? 'true' : 'false';
+            authGarageWheelCardEl.setAttribute('title', wheelSummary);
+        }
+        if (authGarageWheelStatusEl) {
+            authGarageWheelStatusEl.textContent = '';
+        }
+        const garageWheelPickerOpen =
+            garageWheelPickerExpanded && authGarageWheelPresetBtnEls.length > 1;
+        for (let i = 0; i < authGarageWheelPresetBtnEls.length; i += 1) {
+            const buttonEl = authGarageWheelPresetBtnEls[i];
+            const wheelPresetId = resolvePlayerWheelPresetId(
+                buttonEl.getAttribute('data-wheel-preset-id') || ''
+            );
+            const isSelectedWheelPreset = wheelPresetId === selectedWheelPreset.id;
+            buttonEl.disabled = busy || garagePurchasePending;
+            buttonEl.dataset.selected = isSelectedWheelPreset ? 'true' : 'false';
+            buttonEl.dataset.expanded = garageWheelPickerOpen ? 'true' : 'false';
+            buttonEl.dataset.launcher = isSelectedWheelPreset ? 'true' : 'false';
+            buttonEl.dataset.collapsed =
+                !garageWheelPickerOpen && !isSelectedWheelPreset ? 'true' : 'false';
+            buttonEl.hidden = false;
+            buttonEl.style.order = String(
+                isSelectedWheelPreset ? PLAYER_WHEEL_PRESETS.length + 1 : i + 1
+            );
+            buttonEl.setAttribute(
+                'aria-expanded',
+                isSelectedWheelPreset && garageWheelPickerOpen ? 'true' : 'false'
+            );
+            buttonEl.setAttribute('aria-pressed', isSelectedWheelPreset ? 'true' : 'false');
         }
     }
 
@@ -3694,6 +3877,7 @@ export function createWelcomeModalController({
         setAuthSignedInSection('garage', {
             skipSync: true,
         });
+        garageWheelPickerExpanded = false;
         setGaragePanelOpen(true);
     }
 
@@ -3795,10 +3979,38 @@ export function createWelcomeModalController({
         authCarWrapInputEl.click();
     }
 
+    function setGarageWheelPickerExpanded(nextExpanded, options = {}) {
+        const shouldExpand = Boolean(
+            nextExpanded &&
+            welcomeAccountOpen &&
+            garagePanelOpen &&
+            authGarageWheelPresetBtnEls.length > 1 &&
+            !authUiState.loading &&
+            !garagePurchasePending
+        );
+        if (garageWheelPickerExpanded === shouldExpand && !options.force) {
+            return;
+        }
+        garageWheelPickerExpanded = shouldExpand;
+        if (!options.skipSync) {
+            syncAuthUi();
+        }
+        markWheelPresetPreviewStagesDirty();
+        if (isGarageShowcaseOpen()) {
+            syncWheelPresetPreviewStageSizing();
+            renderWheelPresetPreviewStages({
+                force: true,
+            });
+        }
+    }
+
     function setGaragePanelOpen(nextOpen, options = {}) {
         garagePanelOpen = Boolean(nextOpen && authToolsSectionEl);
         if (garagePanelOpen) {
             walletPanelOpen = false;
+        }
+        if (!garagePanelOpen) {
+            garageWheelPickerExpanded = false;
         }
         if (!options.skipSync) {
             syncAuthUi();
@@ -3929,6 +4141,7 @@ export function createWelcomeModalController({
             });
         }
         if (!welcomeAccountOpen) {
+            garageWheelPickerExpanded = false;
             setAccountToolsOpen(false, {
                 skipSync: true,
             });
@@ -4321,10 +4534,12 @@ export function createWelcomeModalController({
             });
 
             if (authUiState.authenticated && typeof onAuthUpdateCarWrap === 'function') {
-                const response = await Promise.resolve(onAuthUpdateCarWrap(file)).catch((error) => ({
-                    ok: false,
-                    error: error?.message || 'Could not save the car wrap to your account.',
-                }));
+                const response = await Promise.resolve(onAuthUpdateCarWrap(file)).catch(
+                    (error) => ({
+                        ok: false,
+                        error: error?.message || 'Could not save the car wrap to your account.',
+                    })
+                );
                 if (!response?.ok) {
                     setGarageNotice(
                         response?.error ||
@@ -4386,17 +4601,20 @@ export function createWelcomeModalController({
         syncAuthUi();
     }
 
-    function handleGarageWrapPresetSelection(presetPath = '') {
-        if (authUiState.loading || !presetPath) {
+    function handleGarageWrapPresetSelection(presetId = '') {
+        if (authUiState.loading || !presetId) {
             return;
         }
-        const safePresetPath = sanitizeGarageWrapPresetPath(presetPath);
-        if (!safePresetPath) {
+        const presetEntry = getGarageWrapPresetById(presetId);
+        const safePresetPath = sanitizeGarageWrapPresetPath(presetEntry?.url || '');
+        const safePresetId = sanitizeGarageWrapPresetId(presetEntry?.id || presetId);
+        if (!safePresetPath || !safePresetId) {
             return;
         }
         clearGarageNotice();
         applyGarageWrapSelection(safePresetPath, {
             mode: 'preset',
+            presetId: safePresetId,
             presetPath: safePresetPath,
         });
     }
@@ -5105,6 +5323,7 @@ export function createWelcomeModalController({
         incomingVehicle.rig.setAppearance({
             vehicleId: targetPreset.id,
             skinId: previewSkinId,
+            wheelPresetId: selectedWheelPresetId,
         });
         incomingVehicle.car.visible = false;
 
@@ -5244,6 +5463,7 @@ export function createWelcomeModalController({
         previewVehicles[activeVehicleIndex].rig.setAppearance({
             vehicleId: selectedPreset.id,
             skinId: previewSkinId,
+            wheelPresetId: selectedWheelPresetId,
         });
         clearGarageNotice();
         updateVehicleButtonLabels();
@@ -5257,6 +5477,41 @@ export function createWelcomeModalController({
         if (emitChange && isVehicleUnlockedForEconomy(playerEconomyState, selectedVehicleId)) {
             onVehicleChange?.(resolveVehicleId(selectedPreset.id), selectedPreset);
         }
+    }
+
+    function applySelectedWheelPreset(nextWheelPresetId, options = {}) {
+        const { emitChange = true, announce = false } = options;
+        const resolvedWheelPresetId = resolvePlayerWheelPresetId(
+            nextWheelPresetId || currentWheelPresetGetter() || DEFAULT_PLAYER_WHEEL_PRESET_ID
+        );
+        selectedWheelPresetId = resolvedWheelPresetId;
+
+        for (let i = 0; i < previewVehicles.length; i += 1) {
+            previewVehicles[i].rig.setAppearance({
+                wheelPresetId: resolvedWheelPresetId,
+            });
+        }
+
+        const selectedWheelPreset = getPlayerWheelPresetById(resolvedWheelPresetId);
+        if (announce) {
+            clearGarageNotice();
+        }
+        markWheelPresetPreviewStagesDirty();
+        syncGaragePresentationUi({
+            authenticated: authUiState.authenticated,
+            busy: Boolean(authUiState.loading),
+            canManageCarWrap: Boolean(authCarWrapInputEl && authGarageWrapUploadBtnEl),
+            hasCarWrap: Boolean(getEffectiveGarageWrapUrl()),
+        });
+        if (isGarageShowcaseOpen()) {
+            renderWheelPresetPreviewStages({
+                force: true,
+            });
+        }
+        if (emitChange) {
+            onWheelPresetChange?.(resolvedWheelPresetId, selectedWheelPreset);
+        }
+        return resolvedWheelPresetId;
     }
 
     function applyPreviewPose() {
@@ -5930,6 +6185,7 @@ export function createWelcomeModalController({
         const rig = createCarRig({
             vehicleId: defaultVehiclePreset.id,
             skinId: defaultSkinId,
+            wheelPresetId: selectedWheelPresetId,
             bodyColor: getCarSkinPresetById(defaultSkinId).bodyColor,
             wrapUrl: '',
             displayName: 'MAREK',
@@ -6001,6 +6257,7 @@ export function createWelcomeModalController({
         return {
             mode: 'none',
             url: '',
+            presetId: '',
             presetPath: '',
             ownsObjectUrl: false,
         };
@@ -6014,27 +6271,94 @@ export function createWelcomeModalController({
         return PRESET_AVATAR_PATHS.includes(normalized) ? normalized : '';
     }
 
+    function sanitizeGarageWrapPresetId(value) {
+        if (typeof value !== 'string') {
+            return '';
+        }
+        const normalized = value
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, '')
+            .slice(0, 48);
+        return getGarageWrapPresetById(normalized) ? normalized : '';
+    }
+
     function sanitizeGarageWrapPresetPath(value) {
         if (typeof value !== 'string') {
             return '';
         }
-        const normalized = value.trim();
-        return PRESET_GARAGE_WRAP_PATHS.includes(normalized) ? normalized : '';
+        const normalized = sanitizeGarageWrapUrl(value);
+        return getGarageWrapPresetByUrl(normalized)?.url || '';
     }
 
-    function renderGarageWrapPresetButtons(containerEl) {
+    function handleGarageWrapPresetCatalogUpdate(event) {
+        refreshGarageWrapPresetButtons(event?.detail?.presets);
+    }
+
+    function refreshGarageWrapPresetButtons(nextEntries = null) {
+        garageWrapPresetEntries =
+            Array.isArray(nextEntries) && nextEntries.length
+                ? nextEntries.slice()
+                : getGarageWrapPresetEntries();
+        renderGarageWrapPresetButtons(authGarageWrapPresetGridEl, garageWrapPresetEntries);
+        authGarageWrapPresetBtnEls = Array.from(
+            authGarageWrapPresetGridEl?.querySelectorAll?.('.welcomeAuthGarageSkinPresetBtn') || []
+        );
+
+        if (garageWrapState.mode === 'preset') {
+            const previousUrl = garageWrapState.url;
+            const activePreset =
+                getGarageWrapPresetById(garageWrapState.presetId) ||
+                getGarageWrapPresetByUrl(garageWrapState.presetPath) ||
+                null;
+            if (activePreset?.url) {
+                garageWrapState.presetId = activePreset.id;
+                garageWrapState.presetPath = sanitizeGarageWrapPresetPath(activePreset.url);
+                garageWrapState.url = sanitizeGarageWrapUrl(activePreset.url);
+                if (garageWrapState.url && garageWrapState.url !== previousUrl) {
+                    onWrapChange?.(garageWrapState.url, {
+                        mode: 'preset',
+                        presetId: garageWrapState.presetId,
+                        presetPath: garageWrapState.presetPath,
+                    });
+                    syncPreviewVehicleWrap();
+                }
+            } else {
+                clearGarageWrapSelection();
+                return;
+            }
+        }
+
+        if (garageWrapState.mode === 'none') {
+            restorePersistedGarageWrapSelection();
+        }
+
+        syncAuthUi();
+    }
+
+    function renderGarageWrapPresetButtons(containerEl, entries = []) {
         if (!containerEl) {
             return;
         }
         containerEl.textContent = '';
-        for (let i = 0; i < PRESET_GARAGE_WRAP_PATHS.length; i += 1) {
-            const presetPath = PRESET_GARAGE_WRAP_PATHS[i];
+        const presetEntries = Array.isArray(entries) ? entries : [];
+        for (let i = 0; i < presetEntries.length; i += 1) {
+            const presetEntry = presetEntries[i];
+            const presetPath = sanitizeGarageWrapPresetPath(presetEntry?.url || '');
+            const presetId = sanitizeGarageWrapPresetId(presetEntry?.id || '');
+            if (!presetPath || !presetId) {
+                continue;
+            }
             const buttonEl = document.createElement('button');
             buttonEl.type = 'button';
             buttonEl.className = 'welcomeAuthGarageSkinPresetBtn';
+            buttonEl.setAttribute('data-garage-wrap-preset-id', presetId);
             buttonEl.setAttribute('data-garage-wrap-preset', presetPath);
-            buttonEl.setAttribute('aria-label', `Select preset skin ${i + 1}`);
-            buttonEl.setAttribute('title', `Select preset skin ${i + 1}`);
+            buttonEl.setAttribute(
+                'aria-label',
+                `Select ${presetEntry.label || `preset skin ${i + 1}`}`
+            );
+            buttonEl.setAttribute('title', presetEntry.label || `Preset skin ${i + 1}`);
 
             const imageEl = document.createElement('img');
             imageEl.className = 'welcomeAuthGarageSkinPresetImage';
@@ -6044,6 +6368,332 @@ export function createWelcomeModalController({
             imageEl.decoding = 'async';
 
             buttonEl.appendChild(imageEl);
+            containerEl.appendChild(buttonEl);
+        }
+    }
+
+    function createWheelPresetPreviewStages(buttonEls = []) {
+        const stages = [];
+
+        for (let i = 0; i < buttonEls.length; i += 1) {
+            const buttonEl = buttonEls[i];
+            const canvasEl = buttonEl.querySelector('.welcomeAuthGarageWheelPresetCanvas');
+            if (!(canvasEl instanceof HTMLCanvasElement)) {
+                continue;
+            }
+
+            const wheelPresetId = resolvePlayerWheelPresetId(
+                buttonEl.getAttribute('data-wheel-preset-id') || ''
+            );
+            const preset = getPlayerWheelPresetById(wheelPresetId);
+            const isPhotonTurbine = preset.layout === 'photon-turbine';
+
+            try {
+                const renderer = new THREE.WebGLRenderer({
+                    canvas: canvasEl,
+                    alpha: true,
+                    antialias: true,
+                    powerPreference: 'high-performance',
+                });
+                renderer.setClearColor(0x000000, 0);
+                renderer.outputColorSpace = THREE.SRGBColorSpace;
+                renderer.toneMapping = THREE.ACESFilmicToneMapping;
+                renderer.toneMappingExposure = isPhotonTurbine ? 1.34 : 1.38;
+
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(24, 1, 0.1, 10);
+                camera.position.set(1.92, 0.18, 0.98);
+                camera.lookAt(0, 0.01, 0);
+
+                const ambientLight = new THREE.HemisphereLight(
+                    0xdff2ff,
+                    isPhotonTurbine ? 0x040912 : 0x09111b,
+                    isPhotonTurbine ? 1.16 : 1.32
+                );
+                scene.add(ambientLight);
+
+                const keyLight = new THREE.DirectionalLight(
+                    isPhotonTurbine ? 0xffffff : 0xf7fbff,
+                    isPhotonTurbine ? 1.46 : 1.78
+                );
+                keyLight.position.set(2.24, 2.96, 3.18);
+                scene.add(keyLight);
+
+                const rimLight = new THREE.DirectionalLight(
+                    isPhotonTurbine ? 0x93d8ff : 0xbfdfff,
+                    isPhotonTurbine ? 1.18 : 1.32
+                );
+                rimLight.position.set(-2.42, 1.38, -1.94);
+                scene.add(rimLight);
+
+                const faceFillLight = new THREE.DirectionalLight(
+                    0xe8f5ff,
+                    isPhotonTurbine ? 0.72 : 1.24
+                );
+                faceFillLight.position.set(-0.48, 0.94, 3.48);
+                scene.add(faceFillLight);
+
+                const accentLightBaseIntensity = isPhotonTurbine ? 1.04 : 1.02;
+                const accentLight = new THREE.PointLight(
+                    preset.accentColor,
+                    accentLightBaseIntensity,
+                    4.6,
+                    2
+                );
+                accentLight.position.set(isPhotonTurbine ? 0.4 : -0.08, 0.18, 1.18);
+                scene.add(accentLight);
+
+                const kickerLight = new THREE.PointLight(
+                    isPhotonTurbine ? 0x93ffcf : 0xff7575,
+                    isPhotonTurbine ? 0.42 : 0.82,
+                    3.8,
+                    2
+                );
+                kickerLight.position.set(-0.52, -0.04, 1.06);
+                scene.add(kickerLight);
+
+                const shadowPlate = new THREE.Mesh(
+                    new THREE.CircleGeometry(0.66, 36),
+                    new THREE.MeshBasicMaterial({
+                        color: 0x02060b,
+                        transparent: true,
+                        opacity: isPhotonTurbine ? 0.5 : 0.42,
+                        depthWrite: false,
+                    })
+                );
+                shadowPlate.rotation.x = -Math.PI * 0.5;
+                shadowPlate.position.y = -0.56;
+                scene.add(shadowPlate);
+
+                const haloPlate = new THREE.Mesh(
+                    new THREE.CircleGeometry(0.58, 32),
+                    new THREE.MeshBasicMaterial({
+                        color: preset.accentColor,
+                        transparent: true,
+                        opacity: isPhotonTurbine ? 0.12 : 0.14,
+                        blending: THREE.AdditiveBlending,
+                        depthWrite: false,
+                    })
+                );
+                haloPlate.rotation.x = -Math.PI * 0.5;
+                haloPlate.position.y = -0.54;
+                scene.add(haloPlate);
+
+                const wheelStage = new THREE.Group();
+                wheelStage.rotation.y = isPhotonTurbine ? 0.42 : 0.18;
+                wheelStage.scale.setScalar(isPhotonTurbine ? 0.8 : 0.8);
+                scene.add(wheelStage);
+
+                const wheel = createWheelPreviewMesh(preset.id);
+                const restSpinAngle = THREE.MathUtils.degToRad(isPhotonTurbine ? 12 : 4);
+                wheel.rotation.x = restSpinAngle;
+                wheelStage.add(wheel);
+
+                const previewEntry = {
+                    buttonEl,
+                    canvasEl,
+                    wheelPresetId: preset.id,
+                    renderer,
+                    scene,
+                    camera,
+                    wheelStage,
+                    wheel,
+                    haloPlate,
+                    accentLight,
+                    accentLightBaseIntensity,
+                    width: 0,
+                    height: 0,
+                    dirty: true,
+                    hover: false,
+                    baseYaw: wheelStage.rotation.y,
+                    restSpinAngle,
+                    spinAngle: restSpinAngle,
+                    spinVelocity: isPhotonTurbine ? 1.16 : 0.88,
+                    floatOffset: i * 0.82,
+                };
+
+                buttonEl.dataset.previewReady = 'true';
+                buttonEl.addEventListener('pointerenter', () => {
+                    previewEntry.hover = true;
+                    previewEntry.dirty = true;
+                });
+                buttonEl.addEventListener('pointerleave', () => {
+                    previewEntry.hover = false;
+                    previewEntry.dirty = true;
+                });
+                buttonEl.addEventListener('focus', () => {
+                    previewEntry.hover = true;
+                    previewEntry.dirty = true;
+                });
+                buttonEl.addEventListener('blur', () => {
+                    previewEntry.hover = false;
+                    previewEntry.dirty = true;
+                });
+
+                stages.push(previewEntry);
+            } catch {
+                buttonEl.dataset.previewReady = 'false';
+            }
+        }
+
+        return stages;
+    }
+
+    function markWheelPresetPreviewStagesDirty() {
+        for (let i = 0; i < wheelPresetPreviewStages.length; i += 1) {
+            wheelPresetPreviewStages[i].dirty = true;
+        }
+    }
+
+    function syncWheelPresetPreviewStageSizing() {
+        for (let i = 0; i < wheelPresetPreviewStages.length; i += 1) {
+            const previewStage = wheelPresetPreviewStages[i];
+            const width = Math.round(previewStage.canvasEl.clientWidth || 0);
+            const height = Math.round(previewStage.canvasEl.clientHeight || 0);
+
+            if (width <= 0 || height <= 0) {
+                continue;
+            }
+            if (width === previewStage.width && height === previewStage.height) {
+                continue;
+            }
+
+            previewStage.width = width;
+            previewStage.height = height;
+            previewStage.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            previewStage.renderer.setSize(width, height, false);
+            previewStage.camera.aspect = width / height;
+            previewStage.camera.updateProjectionMatrix();
+            previewStage.dirty = true;
+        }
+    }
+
+    function renderWheelPresetPreviewStages({ force = false } = {}) {
+        for (let i = 0; i < wheelPresetPreviewStages.length; i += 1) {
+            const previewStage = wheelPresetPreviewStages[i];
+            if (
+                (!force && !previewStage.dirty) ||
+                previewStage.width <= 0 ||
+                previewStage.height <= 0
+            ) {
+                continue;
+            }
+            previewStage.renderer.render(previewStage.scene, previewStage.camera);
+            previewStage.dirty = false;
+        }
+    }
+
+    function updateWheelPresetPreviewStages(dt = 1 / 60) {
+        if (!wheelPresetPreviewStages.length) {
+            return;
+        }
+
+        syncWheelPresetPreviewStageSizing();
+
+        const garageShowcaseOpen = isGarageShowcaseOpen();
+        const prefersReducedMotion =
+            window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
+        const animatePreviews = garageShowcaseOpen && !prefersReducedMotion;
+        const response = 1 - Math.exp(-Math.max(dt, 0) * 8);
+
+        for (let i = 0; i < wheelPresetPreviewStages.length; i += 1) {
+            const previewStage = wheelPresetPreviewStages[i];
+            const selected = previewStage.wheelPresetId === selectedWheelPresetId;
+            const targetYaw =
+                previewStage.baseYaw + (selected ? 0.16 : 0) + (previewStage.hover ? 0.06 : 0);
+            const targetBank = selected ? -0.08 : previewStage.hover ? -0.04 : 0;
+            const targetHaloOpacity = selected ? 0.24 : previewStage.hover ? 0.17 : 0.13;
+            const targetAccentIntensity =
+                previewStage.accentLightBaseIntensity *
+                (selected ? 1.35 : previewStage.hover ? 1.12 : 0.98);
+            const targetFloat =
+                animatePreviews && (selected || previewStage.hover || garageShowcaseOpen)
+                    ? Math.sin(previewPulseTime * 1.48 + previewStage.floatOffset) *
+                      (selected ? 0.026 : previewStage.hover ? 0.019 : 0.012)
+                    : 0;
+
+            previewStage.wheelStage.rotation.y = THREE.MathUtils.lerp(
+                previewStage.wheelStage.rotation.y,
+                targetYaw,
+                response
+            );
+            previewStage.wheelStage.rotation.z = THREE.MathUtils.lerp(
+                previewStage.wheelStage.rotation.z,
+                targetBank,
+                response
+            );
+            previewStage.wheelStage.position.y = THREE.MathUtils.lerp(
+                previewStage.wheelStage.position.y,
+                targetFloat,
+                response
+            );
+            previewStage.haloPlate.material.opacity = THREE.MathUtils.lerp(
+                previewStage.haloPlate.material.opacity,
+                targetHaloOpacity,
+                response
+            );
+            previewStage.accentLight.intensity = THREE.MathUtils.lerp(
+                previewStage.accentLight.intensity,
+                targetAccentIntensity,
+                response
+            );
+
+            if (animatePreviews) {
+                previewStage.spinAngle -=
+                    Math.max(dt, 0) *
+                    previewStage.spinVelocity *
+                    (selected ? 1.38 : previewStage.hover ? 1.1 : 0.88);
+            } else {
+                previewStage.spinAngle = THREE.MathUtils.lerp(
+                    previewStage.spinAngle,
+                    previewStage.restSpinAngle,
+                    response
+                );
+            }
+            previewStage.wheel.rotation.x = previewStage.spinAngle;
+
+            if (garageShowcaseOpen || previewStage.hover || previewStage.dirty) {
+                previewStage.dirty = true;
+            }
+        }
+
+        renderWheelPresetPreviewStages({
+            force: garageShowcaseOpen,
+        });
+    }
+
+    function renderWheelPresetButtons(containerEl) {
+        if (!containerEl) {
+            return;
+        }
+        containerEl.textContent = '';
+        for (let i = 0; i < PLAYER_WHEEL_PRESETS.length; i += 1) {
+            const preset = PLAYER_WHEEL_PRESETS[i];
+            const buttonEl = document.createElement('button');
+            buttonEl.type = 'button';
+            buttonEl.className = 'welcomeAuthGarageWheelPresetBtn';
+            buttonEl.setAttribute('data-wheel-preset-id', preset.id);
+            buttonEl.setAttribute(
+                'aria-label',
+                `${preset.name}. ${preset.family}. ${preset.description}`
+            );
+            buttonEl.setAttribute('title', preset.name);
+            buttonEl.style.setProperty('--wheel-preset-accent', preset.uiAccentColor);
+            buttonEl.style.setProperty('--wheel-preset-glow', preset.uiGlowColor);
+            buttonEl.dataset.layout = preset.layout;
+
+            const stageEl = document.createElement('span');
+            stageEl.className = 'welcomeAuthGarageWheelPresetStage';
+            stageEl.setAttribute('aria-hidden', 'true');
+
+            const canvasEl = document.createElement('canvas');
+            canvasEl.className = 'welcomeAuthGarageWheelPresetCanvas';
+            canvasEl.width = 92;
+            canvasEl.height = 92;
+            canvasEl.setAttribute('aria-hidden', 'true');
+
+            stageEl.appendChild(canvasEl);
+            buttonEl.appendChild(stageEl);
             containerEl.appendChild(buttonEl);
         }
     }
@@ -6279,9 +6929,40 @@ export function createWelcomeModalController({
         }
     }
 
+    function readStoredGarageWrapPresetId() {
+        try {
+            return sanitizeGarageWrapPresetId(
+                window.localStorage.getItem(GARAGE_WRAP_PRESET_STORAGE_KEY) || ''
+            );
+        } catch {
+            return '';
+        }
+    }
+
     function writeStoredOnlinePlayerName(value) {
         try {
             window.localStorage.setItem(MP_NAME_STORAGE_KEY, sanitizeOnlinePlayerNameInput(value));
+        } catch {
+            // localStorage is optional.
+        }
+    }
+
+    function writeStoredGarageWrapPresetId(presetId) {
+        const safePresetId = sanitizeGarageWrapPresetId(presetId);
+        if (!safePresetId) {
+            clearStoredGarageWrapPresetId();
+            return;
+        }
+        try {
+            window.localStorage.setItem(GARAGE_WRAP_PRESET_STORAGE_KEY, safePresetId);
+        } catch {
+            // localStorage is optional.
+        }
+    }
+
+    function clearStoredGarageWrapPresetId() {
+        try {
+            window.localStorage.removeItem(GARAGE_WRAP_PRESET_STORAGE_KEY);
         } catch {
             // localStorage is optional.
         }

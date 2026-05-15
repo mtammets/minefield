@@ -1,0 +1,82 @@
+export const PLAYER_WHEEL_PRESETS = Object.freeze([
+    Object.freeze({
+        id: 'scarlet-switchblade',
+        name: 'Scarlet Switchblade',
+        family: 'Street Cut',
+        description:
+            'Angular ten-spoke alloy with red-hot detail cuts and a sharp midnight sidewall.',
+        tag: 'Precision',
+        layout: 'razor-ten',
+        tireColor: 0x1f232a,
+        tireRoughness: 0.54,
+        tireMetalness: 0.28,
+        rimPrimaryColor: 0xf3f6fb,
+        rimSecondaryColor: 0xa0afc3,
+        rimBaseColor: 0x0d141d,
+        accentColor: 0xff5b5b,
+        accentEmissiveColor: 0x8a181c,
+        accentEmissiveIntensity: 0.42,
+        rotorColor: 0x858f9f,
+        hubColor: 0xf3f6fb,
+        uiAccentColor: '#ff6d6d',
+        uiGlowColor: 'rgba(255, 93, 93, 0.34)',
+    }),
+    Object.freeze({
+        id: 'photon-turbine',
+        name: 'Photon Turbine',
+        family: 'Showroom Elite',
+        description:
+            'Layered turbine wheel with luminous aero ring, titanium blades and a hypercar-grade glow.',
+        tag: 'Signature',
+        layout: 'photon-turbine',
+        tireColor: 0x0b1016,
+        tireRoughness: 0.46,
+        tireMetalness: 0.34,
+        rimPrimaryColor: 0xeaf6ff,
+        rimSecondaryColor: 0x79cfff,
+        rimBaseColor: 0x06111d,
+        accentColor: 0x93ffcf,
+        accentEmissiveColor: 0x4ef5ff,
+        accentEmissiveIntensity: 0.72,
+        rotorColor: 0x8fa6c0,
+        hubColor: 0xf7fcff,
+        uiAccentColor: '#82f4ff',
+        uiGlowColor: 'rgba(91, 233, 255, 0.38)',
+    }),
+]);
+
+export const DEFAULT_PLAYER_WHEEL_PRESET_ID = PLAYER_WHEEL_PRESETS[0].id;
+
+export function sanitizePlayerWheelPresetId(value) {
+    return typeof value === 'string'
+        ? value
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, '')
+              .slice(0, 32)
+        : '';
+}
+
+export function getPlayerWheelPresetById(wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID) {
+    const normalizedId = sanitizePlayerWheelPresetId(wheelPresetId);
+    for (let i = 0; i < PLAYER_WHEEL_PRESETS.length; i += 1) {
+        if (PLAYER_WHEEL_PRESETS[i].id === normalizedId) {
+            return PLAYER_WHEEL_PRESETS[i];
+        }
+    }
+    return PLAYER_WHEEL_PRESETS[0];
+}
+
+export function resolvePlayerWheelPresetId(wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID) {
+    return getPlayerWheelPresetById(wheelPresetId).id;
+}
+
+export function getPlayerWheelPresetIndex(wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID) {
+    const normalizedId = resolvePlayerWheelPresetId(wheelPresetId);
+    for (let i = 0; i < PLAYER_WHEEL_PRESETS.length; i += 1) {
+        if (PLAYER_WHEEL_PRESETS[i].id === normalizedId) {
+            return i;
+        }
+    }
+    return 0;
+}

@@ -49,6 +49,10 @@ export function createCarEditModeController({
     getShowroomIntroVideoConfig,
     onUploadShowroomIntroVideo,
     onResetShowroomIntroVideo,
+    getGarageWrapPresets,
+    onUploadGarageWrapPreset,
+    onCreateGarageWrapPreset,
+    onDeleteGarageWrapPreset,
 } = {}) {
     if (!camera || !car || !canvas) {
         return createNoopController();
@@ -91,6 +95,14 @@ export function createCarEditModeController({
         typeof onUploadShowroomIntroVideo === 'function' ? onUploadShowroomIntroVideo : null;
     const resetShowroomIntroVideo =
         typeof onResetShowroomIntroVideo === 'function' ? onResetShowroomIntroVideo : null;
+    const readGarageWrapPresets =
+        typeof getGarageWrapPresets === 'function' ? getGarageWrapPresets : () => [];
+    const uploadGarageWrapPreset =
+        typeof onUploadGarageWrapPreset === 'function' ? onUploadGarageWrapPreset : null;
+    const createGarageWrapPreset =
+        typeof onCreateGarageWrapPreset === 'function' ? onCreateGarageWrapPreset : null;
+    const deleteGarageWrapPreset =
+        typeof onDeleteGarageWrapPreset === 'function' ? onDeleteGarageWrapPreset : null;
     const pointerState = {
         active: false,
         id: null,
@@ -225,6 +237,57 @@ export function createCarEditModeController({
             }
             ui.setShowroomIntroVideoBusy(false);
         },
+        onUploadGarageWrapPreset: async (presetId, file) => {
+            if (!uploadGarageWrapPreset || !file) {
+                return;
+            }
+            ui.setGarageWrapPresetBusy(presetId, true, 'Uploading wrap preset...');
+            try {
+                const presets = await uploadGarageWrapPreset(presetId, file);
+                renderGarageWrapPresetList(presets);
+                onStatus?.('Garage wrap preset updated.');
+            } catch (error) {
+                const message = error?.message || 'Garage wrap preset upload failed.';
+                ui.setGarageWrapPresetBusy(presetId, false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setGarageWrapPresetBusy(presetId, false);
+        },
+        onCreateGarageWrapPreset: async (file) => {
+            if (!createGarageWrapPreset || !file) {
+                return;
+            }
+            ui.setGarageWrapPresetBusy('__new__', true, 'Adding wrap preset...');
+            try {
+                const presets = await createGarageWrapPreset(file);
+                renderGarageWrapPresetList(presets);
+                onStatus?.('Garage wrap preset added.');
+            } catch (error) {
+                const message = error?.message || 'Garage wrap preset could not be added.';
+                ui.setGarageWrapPresetBusy('__new__', false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setGarageWrapPresetBusy('__new__', false);
+        },
+        onDeleteGarageWrapPreset: async (presetId) => {
+            if (!deleteGarageWrapPreset) {
+                return;
+            }
+            ui.setGarageWrapPresetBusy(presetId, true, 'Removing wrap preset...');
+            try {
+                const presets = await deleteGarageWrapPreset(presetId);
+                renderGarageWrapPresetList(presets);
+                onStatus?.('Garage wrap preset removed.');
+            } catch (error) {
+                const message = error?.message || 'Garage wrap preset could not be removed.';
+                ui.setGarageWrapPresetBusy(presetId, false, message);
+                onStatus?.(message);
+                return;
+            }
+            ui.setGarageWrapPresetBusy(presetId, false);
+        },
     });
 
     let active = false;
@@ -318,6 +381,7 @@ export function createCarEditModeController({
             applyViewPreset('iso', false);
             targetFov = DEFAULT_CAMERA_FOV;
             renderPartList();
+            renderGarageWrapPresetList();
             refreshCrashDamageTuning();
             renderBillboardGroupList();
             void refreshShowroomIntroVideoCard();
@@ -361,6 +425,15 @@ export function createCarEditModeController({
             ? readBillboardContentGroups()
             : [];
         ui.renderBillboardGroups(groups);
+    }
+
+    function renderGarageWrapPresetList(preferredPresets = null) {
+        const presets = Array.isArray(preferredPresets)
+            ? preferredPresets
+            : Array.isArray(readGarageWrapPresets?.())
+              ? readGarageWrapPresets()
+              : [];
+        ui.renderGarageWrapPresets(presets);
     }
 
     async function refreshShowroomIntroVideoCard(preferredConfig = null) {
@@ -530,6 +603,9 @@ function createEditModeUi({
     onSelectPreset,
     onSearch,
     onTogglePart,
+    onUploadGarageWrapPreset,
+    onCreateGarageWrapPreset,
+    onDeleteGarageWrapPreset,
     onSetCrashDamageTuningValue,
     onResetCrashDamageTuning,
     onUploadBillboardGroup,
@@ -552,6 +628,22 @@ function createEditModeUi({
         <div class="editModeBlock">
             <div class="editModeBlockTitle">VAADE</div>
             <div class="editModeViewGrid" data-role="view-grid"></div>
+        </div>
+        <div class="editModeBlock">
+            <div class="editModeBlockTitle">GARAGE WRAPS</div>
+            <div class="editModeBillboardIntro">
+                Manage the image-based wrap presets shown in the garage picker. Replace built-ins or add new preset slots.
+            </div>
+            <div class="editModeGarageWrapPresetToolbar">
+                <button type="button" data-action="garage-wrap-preset-add">ADD PRESET</button>
+                <input
+                    type="file"
+                    data-role="garage-wrap-preset-add-input"
+                    accept="image/jpeg,image/png,image/webp"
+                    hidden
+                />
+            </div>
+            <div class="editModeBillboardList" data-role="garage-wrap-preset-list"></div>
         </div>
         <div class="editModeBlock">
             <div class="editModeBlockTitle">OSAD</div>
@@ -597,6 +689,11 @@ function createEditModeUi({
     const hideAllBtn = root.querySelector('[data-action="hide-all"]');
     const searchInput = root.querySelector('[data-role="search"]');
     const partList = root.querySelector('[data-role="part-list"]');
+    const garageWrapPresetList = root.querySelector('[data-role="garage-wrap-preset-list"]');
+    const garageWrapPresetAddBtn = root.querySelector('[data-action="garage-wrap-preset-add"]');
+    const garageWrapPresetAddInput = root.querySelector(
+        '[data-role="garage-wrap-preset-add-input"]'
+    );
     const billboardList = root.querySelector('[data-role="billboard-list"]');
     const showroomIntroVideoList = root.querySelector('[data-role="showroom-intro-video"]');
     const viewGrid = root.querySelector('[data-role="view-grid"]');
@@ -605,11 +702,13 @@ function createEditModeUi({
     const presetButtons = new Map();
     const tuningControlsByKey = new Map();
     const billboardStateByGroup = new Map();
+    const garageWrapPresetStateById = new Map();
     const showroomIntroVideoState = {
         busy: false,
         message: '',
     };
     let tuningFieldSignature = '';
+    let lastRenderedGarageWrapPresets = [];
     let lastBillboardGroups = [];
     let lastShowroomIntroVideoConfig = null;
 
@@ -629,6 +728,20 @@ function createEditModeUi({
         viewGrid?.appendChild(button);
         presetButtons.set(preset.id, button);
     }
+    garageWrapPresetAddBtn?.addEventListener('click', () => {
+        if (garageWrapPresetAddInput) {
+            garageWrapPresetAddInput.value = '';
+            garageWrapPresetAddInput.click();
+        }
+    });
+    garageWrapPresetAddInput?.addEventListener('change', () => {
+        const nextFile = garageWrapPresetAddInput.files?.[0] || null;
+        if (!nextFile) {
+            return;
+        }
+        void onCreateGarageWrapPreset?.(nextFile);
+        garageWrapPresetAddInput.value = '';
+    });
 
     return {
         setVisible(isVisible) {
@@ -645,6 +758,132 @@ function createEditModeUi({
         setSearchValue(nextValue) {
             if (searchInput) {
                 searchInput.value = String(nextValue ?? '');
+            }
+        },
+        setGarageWrapPresetBusy(presetId, isBusy, message = '') {
+            const normalizedPresetId = String(presetId || '__new__').trim() || '__new__';
+            garageWrapPresetStateById.set(normalizedPresetId, {
+                busy: Boolean(isBusy),
+                message: String(message || ''),
+            });
+            this.renderGarageWrapPresets(lastRenderedGarageWrapPresets);
+        },
+        renderGarageWrapPresets(presets = []) {
+            if (!garageWrapPresetList) {
+                return;
+            }
+
+            lastRenderedGarageWrapPresets = Array.isArray(presets) ? presets.slice() : [];
+            garageWrapPresetList.innerHTML = '';
+
+            if (garageWrapPresetAddBtn) {
+                const addState = garageWrapPresetStateById.get('__new__') || { busy: false };
+                garageWrapPresetAddBtn.disabled = addState.busy;
+                garageWrapPresetAddBtn.textContent = addState.busy ? 'ADDING...' : 'ADD PRESET';
+            }
+
+            if (!lastRenderedGarageWrapPresets.length) {
+                const empty = document.createElement('div');
+                empty.className = 'editModeEmpty';
+                empty.textContent = 'No garage wrap presets available.';
+                garageWrapPresetList.appendChild(empty);
+                return;
+            }
+
+            for (let i = 0; i < lastRenderedGarageWrapPresets.length; i += 1) {
+                const preset = lastRenderedGarageWrapPresets[i];
+                const presetId = String(preset?.id || '');
+                const uiState = garageWrapPresetStateById.get(presetId) || {
+                    busy: false,
+                    message: '',
+                };
+                const section = document.createElement('section');
+                section.className = 'editModeBillboardCard';
+
+                const head = document.createElement('div');
+                head.className = 'editModeBillboardHead';
+
+                const titleWrap = document.createElement('div');
+                const title = document.createElement('div');
+                title.className = 'editModeBillboardTitle';
+                title.textContent = preset.label || presetId;
+
+                const meta = document.createElement('div');
+                meta.className = 'editModeBillboardMeta';
+                meta.textContent =
+                    preset.source === 'custom' ? 'Custom preset slot' : 'Built-in preset slot';
+                titleWrap.append(title, meta);
+
+                const badge = document.createElement('span');
+                badge.className = 'editModeBillboardBadge';
+                badge.dataset.tone = preset.source === 'custom' ? 'custom' : 'default';
+                badge.textContent = preset.source === 'custom' ? 'CUSTOM' : 'DEFAULT';
+                head.append(titleWrap, badge);
+
+                const preview = document.createElement('div');
+                preview.className = 'editModeGarageWrapPresetPreview';
+
+                const previewImage = document.createElement('img');
+                previewImage.className = 'editModeGarageWrapPresetPreviewImage';
+                previewImage.src = String(preset?.url || '');
+                previewImage.alt = '';
+                previewImage.loading = 'lazy';
+                previewImage.decoding = 'async';
+                preview.appendChild(previewImage);
+
+                const status = document.createElement('div');
+                status.className = 'editModeBillboardStatus';
+                status.textContent = uiState.message
+                    ? uiState.message
+                    : preset.source === 'custom'
+                      ? 'Custom garage wrap preset. Visible immediately in the garage picker.'
+                      : preset.hasCustomImage
+                        ? 'Built-in slot overridden with your uploaded image.'
+                        : 'Using the built-in garage wrap image.';
+
+                const actions = document.createElement('div');
+                actions.className = 'editModeBillboardActions';
+
+                const uploadButton = document.createElement('button');
+                uploadButton.type = 'button';
+                uploadButton.textContent = uiState.busy ? 'WORKING...' : 'REPLACE';
+                uploadButton.disabled = uiState.busy;
+
+                const removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.textContent = preset.canDelete ? 'DELETE' : 'RESET';
+                removeButton.disabled = uiState.busy || (!preset.canDelete && !preset.canReset);
+
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.hidden = true;
+                fileInput.accept = 'image/jpeg,image/png,image/webp';
+
+                uploadButton.addEventListener('click', () => {
+                    if (uiState.busy) {
+                        return;
+                    }
+                    fileInput.value = '';
+                    fileInput.click();
+                });
+                fileInput.addEventListener('change', () => {
+                    const nextFile = fileInput.files?.[0] || null;
+                    if (!nextFile) {
+                        return;
+                    }
+                    void onUploadGarageWrapPreset?.(presetId, nextFile);
+                    fileInput.value = '';
+                });
+                removeButton.addEventListener('click', () => {
+                    if (uiState.busy || (!preset.canDelete && !preset.canReset)) {
+                        return;
+                    }
+                    void onDeleteGarageWrapPreset?.(presetId);
+                });
+
+                actions.append(uploadButton, removeButton, fileInput);
+                section.append(head, preview, status, actions);
+                garageWrapPresetList.appendChild(section);
             }
         },
         setBillboardGroupBusy(groupId, isBusy, message = '') {

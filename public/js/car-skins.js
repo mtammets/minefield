@@ -1,4 +1,4 @@
-export const CAR_SKIN_PRESETS = Object.freeze([
+const BUILT_IN_CAR_SKIN_PRESETS = Object.freeze([
     Object.freeze({
         id: 'midnight-comet',
         name: 'Midnight Comet',
@@ -136,6 +136,7 @@ export const CAR_SKIN_PRESETS = Object.freeze([
     }),
 ]);
 
+export const CAR_SKIN_PRESETS = Object.freeze(BUILT_IN_CAR_SKIN_PRESETS.slice());
 export const DEFAULT_PLAYER_CAR_SKIN_ID = CAR_SKIN_PRESETS[0].id;
 export const DEFAULT_PLAYER_CAR_COLOR_HEX = CAR_SKIN_PRESETS[0].bodyColor >>> 0;
 
@@ -145,7 +146,7 @@ export function sanitizeCarSkinId(value) {
               .trim()
               .toLowerCase()
               .replace(/[^a-z0-9-]/g, '')
-              .slice(0, 32)
+              .slice(0, 48)
         : '';
 }
 

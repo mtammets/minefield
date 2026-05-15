@@ -50,10 +50,12 @@ export function createGameSessionController({
     resolvePlayerCarColorHex,
     resolvePlayerCarSkinId,
     resolvePlayerCarVehicleId = (vehicleId) => vehicleId || '',
+    resolvePlayerCarWheelPresetId = (wheelPresetId) => wheelPresetId || '',
     getCarSkinPresetById = () => null,
     persistPlayerCarColorHex,
     persistPlayerCarSkinId,
     persistPlayerCarVehicleId = () => {},
+    persistPlayerCarWheelPresetId = () => {},
     objectiveUi,
     economyHudUi = null,
     controlsHelpUi = null,
@@ -112,6 +114,8 @@ export function createGameSessionController({
     setSelectedCarSkinId = () => {},
     getSelectedCarVehicleId = () => '',
     setSelectedCarVehicleId = () => {},
+    getSelectedCarWheelPresetId = () => '',
+    setSelectedCarWheelPresetId = () => {},
     getGameMode = () => 'bots',
     setGameMode = () => {},
     setMultiplayerPanelVisible = () => {},
@@ -204,6 +208,7 @@ export function createGameSessionController({
         triggerObstacleCrash,
         startNewGame,
         setSelectedPlayerCarVehicle,
+        setSelectedPlayerCarWheelPreset,
         setSelectedPlayerCarColor,
         setSelectedPlayerCarSkin,
     };
@@ -1156,12 +1161,14 @@ export function createGameSessionController({
 
         setSelectedCarVehicleId(normalizedVehicleId);
         const currentSkinId = resolvePlayerCarSkinId(getSelectedCarSkinId());
+        const currentWheelPresetId = resolvePlayerCarWheelPresetId(getSelectedCarWheelPresetId());
         const currentColorHex = resolvePlayerCarColorHex(getSelectedCarColorHex());
 
         if (typeof setPlayerCarAppearance === 'function') {
             setPlayerCarAppearance({
                 vehicleId: normalizedVehicleId,
                 skinId: currentSkinId,
+                wheelPresetId: currentWheelPresetId,
                 colorHex: currentColorHex,
             });
         }
@@ -1174,18 +1181,51 @@ export function createGameSessionController({
         }
     }
 
+    function setSelectedPlayerCarWheelPreset(wheelPresetId, options = {}) {
+        const { persist = true } = options;
+        const normalizedWheelPresetId = resolvePlayerCarWheelPresetId(wheelPresetId);
+        if (!normalizedWheelPresetId) {
+            return;
+        }
+
+        const normalizedVehicleId = resolvePlayerCarVehicleId(getSelectedCarVehicleId());
+        const normalizedSkinId = resolvePlayerCarSkinId(getSelectedCarSkinId());
+        const normalizedColorHex = resolvePlayerCarColorHex(getSelectedCarColorHex());
+        setSelectedCarWheelPresetId(normalizedWheelPresetId);
+
+        if (typeof setPlayerCarAppearance === 'function') {
+            setPlayerCarAppearance({
+                vehicleId: normalizedVehicleId,
+                skinId: normalizedSkinId,
+                wheelPresetId: normalizedWheelPresetId,
+                colorHex: normalizedColorHex,
+            });
+        }
+
+        crashDebrisController?.initializeBodyPartBaselines?.();
+        crashDebrisController?.resetPlayerDamageState?.();
+
+        if (persist) {
+            persistPlayerCarWheelPresetId?.(normalizedWheelPresetId);
+        }
+    }
+
     function setSelectedPlayerCarColor(colorHex, options = {}) {
         const { persist = true } = options;
         const normalized = resolvePlayerCarColorHex(colorHex);
         const preset = getCarSkinPresetByColorHex(normalized);
         const normalizedSkinId = resolvePlayerCarSkinId(preset?.id);
         const normalizedVehicleId = resolvePlayerCarVehicleId(getSelectedCarVehicleId());
+        const normalizedWheelPresetId = resolvePlayerCarWheelPresetId(
+            getSelectedCarWheelPresetId()
+        );
         setSelectedCarSkinId(normalizedSkinId);
         setSelectedCarColorHex(normalized);
         if (typeof setPlayerCarAppearance === 'function') {
             setPlayerCarAppearance({
                 vehicleId: normalizedVehicleId,
                 skinId: normalizedSkinId,
+                wheelPresetId: normalizedWheelPresetId,
                 colorHex: normalized,
             });
         } else {
@@ -1206,12 +1246,16 @@ export function createGameSessionController({
         }
         const normalizedColorHex = resolvePlayerCarColorHex(preset.bodyColor);
         const normalizedVehicleId = resolvePlayerCarVehicleId(getSelectedCarVehicleId());
+        const normalizedWheelPresetId = resolvePlayerCarWheelPresetId(
+            getSelectedCarWheelPresetId()
+        );
         setSelectedCarSkinId(normalizedSkinId);
         setSelectedCarColorHex(normalizedColorHex);
         if (typeof setPlayerCarAppearance === 'function') {
             setPlayerCarAppearance({
                 vehicleId: normalizedVehicleId,
                 skinId: normalizedSkinId,
+                wheelPresetId: normalizedWheelPresetId,
                 colorHex: normalizedColorHex,
             });
         } else {

@@ -9,6 +9,7 @@ const Stripe = require('stripe');
 const { Server } = require('socket.io');
 const { createAudioPrefsStore } = require('./audio-prefs-store');
 const { createBillboardContentStore } = require('./billboard-content-store');
+const { createGarageWrapPresetStore } = require('./garage-wrap-presets-store');
 const { createShowroomIntroVideoStore } = require('./showroom-intro-video-store');
 const {
     createLeaderboardStore,
@@ -63,8 +64,10 @@ const MAX_ACTIVE_ROOMS = 500;
 const PLAYER_NAME_MAX_LENGTH = 18;
 const PLAYER_SKIN_ID_MAX_LENGTH = 32;
 const PLAYER_VEHICLE_ID_MAX_LENGTH = 32;
+const PLAYER_WHEEL_PRESET_ID_MAX_LENGTH = 32;
 const DEFAULT_PLAYER_SKIN_ID = 'midnight-comet';
 const DEFAULT_PLAYER_VEHICLE_ID = 'voltline-sled';
+const DEFAULT_PLAYER_WHEEL_PRESET_ID = 'scarlet-switchblade';
 const STATE_UPDATE_MIN_INTERVAL_MS = 35;
 const COLLISION_RELAY_MIN_INTERVAL_MS = 60;
 const MAX_DETACHED_PART_IDS = 32;
@@ -231,6 +234,10 @@ const server = http.createServer(app);
 const audioPrefsStore = createAudioPrefsStore({
     prefsFilePath: path.join(__dirname, 'data/audio-prefs.json'),
 });
+const garageWrapPresetStore = createGarageWrapPresetStore({
+    manifestFilePath: path.join(__dirname, 'data/garage-wrap-presets.json'),
+    uploadsDirectoryPath: path.join(__dirname, '../public/uploads/garage-wrap-presets'),
+});
 const billboardContentStore = createBillboardContentStore({
     manifestFilePath: path.join(__dirname, 'data/billboard-content.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/billboards'),
@@ -362,6 +369,99 @@ app.post('/api/billboard-content/:groupId', express.json({ limit: '512mb' }), as
         });
     }
 });
+app.get('/api/garage-wrap-presets', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+
+    try {
+        const config = await garageWrapPresetStore.readConfig();
+        res.json({
+            ok: true,
+            ...config,
+        });
+    } catch (error) {
+        console.error('Garage wrap preset config read failed:', error);
+        res.status(500).json({
+            ok: false,
+            error: 'Could not read garage wrap presets.',
+        });
+    }
+});
+app.post(
+    '/api/garage-wrap-presets',
+    express.raw({ type: () => true, limit: '32mb' }),
+    async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        if (!isBillboardContentAdminAuthorized(req)) {
+            res.status(403).json({
+                ok: false,
+                error: 'Garage wrap preset admin access denied.',
+            });
+            return;
+        }
+
+        try {
+            const rawNameHeader = Array.isArray(req.headers?.['x-upload-filename'])
+                ? req.headers['x-upload-filename'][0]
+                : req.headers?.['x-upload-filename'] || '';
+            const config = await garageWrapPresetStore.createPresetImage({
+                buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+                mimeType: req.headers?.['content-type'] || '',
+                originalFileName: safelyDecodeUploadFileName(rawNameHeader),
+            });
+            res.json({
+                ok: true,
+                ...config,
+            });
+        } catch (error) {
+            const statusCode = resolveHttpStatusCode(error?.statusCode);
+            if (statusCode >= 500) {
+                console.error('Garage wrap preset creation failed:', error);
+            }
+            res.status(statusCode).json({
+                ok: false,
+                error: error?.message || 'Garage wrap preset creation failed.',
+            });
+        }
+    }
+);
+app.post(
+    '/api/garage-wrap-presets/:presetId',
+    express.raw({ type: () => true, limit: '32mb' }),
+    async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        if (!isBillboardContentAdminAuthorized(req)) {
+            res.status(403).json({
+                ok: false,
+                error: 'Garage wrap preset admin access denied.',
+            });
+            return;
+        }
+
+        try {
+            const rawNameHeader = Array.isArray(req.headers?.['x-upload-filename'])
+                ? req.headers['x-upload-filename'][0]
+                : req.headers?.['x-upload-filename'] || '';
+            const config = await garageWrapPresetStore.writePresetImage(req.params?.presetId, {
+                buffer: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
+                mimeType: req.headers?.['content-type'] || '',
+                originalFileName: safelyDecodeUploadFileName(rawNameHeader),
+            });
+            res.json({
+                ok: true,
+                ...config,
+            });
+        } catch (error) {
+            const statusCode = resolveHttpStatusCode(error?.statusCode);
+            if (statusCode >= 500) {
+                console.error('Garage wrap preset upload failed:', error);
+            }
+            res.status(statusCode).json({
+                ok: false,
+                error: error?.message || 'Garage wrap preset upload failed.',
+            });
+        }
+    }
+);
 app.get('/api/showroom-intro-video', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
 
@@ -470,6 +570,34 @@ app.delete('/api/billboard-content/:groupId', async (req, res) => {
         res.status(statusCode).json({
             ok: false,
             error: error?.message || 'Billboard content reset failed.',
+        });
+    }
+});
+app.delete('/api/garage-wrap-presets/:presetId', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!isBillboardContentAdminAuthorized(req)) {
+        res.status(403).json({
+            ok: false,
+            error: 'Garage wrap preset admin access denied.',
+        });
+        return;
+    }
+
+    try {
+        const result = await garageWrapPresetStore.removePreset(req.params?.presetId);
+        res.json({
+            ok: true,
+            removed: Boolean(result.removed),
+            presets: Array.isArray(result.presets) ? result.presets : [],
+        });
+    } catch (error) {
+        const statusCode = resolveHttpStatusCode(error?.statusCode);
+        if (statusCode >= 500) {
+            console.error('Garage wrap preset removal failed:', error);
+        }
+        res.status(statusCode).json({
+            ok: false,
+            error: error?.message || 'Garage wrap preset removal failed.',
         });
     }
 });
@@ -1372,6 +1500,7 @@ io.on('connection', (socket) => {
         player.colorHex = profile.colorHex;
         player.vehicleId = profile.vehicleId;
         player.skinId = profile.skinId;
+        player.wheelPresetId = profile.wheelPresetId;
         player.carWrapPath = profile.carWrapPath;
         player.carWrapUrl = profile.carWrapUrl;
         room.updatedAt = Date.now();
@@ -3025,6 +3154,7 @@ function createRoomPlayer(id, profile, authIdentity = null) {
         colorHex: profile.colorHex,
         vehicleId: profile.vehicleId,
         skinId: profile.skinId,
+        wheelPresetId: profile.wheelPresetId,
         carWrapPath,
         carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
         collectedCount: 0,
@@ -3364,6 +3494,7 @@ function serializeRoom(room) {
                 colorHex: player.colorHex,
                 vehicleId: player.vehicleId,
                 skinId: player.skinId,
+                wheelPresetId: player.wheelPresetId,
                 carWrapUrl: resolvePlayerCarWrapPublicUrl(player.carWrapPath || ''),
                 collectedCount,
                 score,
@@ -3482,6 +3613,7 @@ function createDefaultProfile(socketId) {
         colorHex: 0x2d67a6,
         vehicleId: DEFAULT_PLAYER_VEHICLE_ID,
         skinId: DEFAULT_PLAYER_SKIN_ID,
+        wheelPresetId: DEFAULT_PLAYER_WHEEL_PRESET_ID,
         carWrapPath: '',
         carWrapUrl: '',
     };
@@ -3767,6 +3899,7 @@ function resolveProfile(input, fallback, socketId, authIdentity = null) {
         colorHex: sanitizeColorHex(input?.colorHex, defaultProfile.colorHex),
         vehicleId: sanitizePlayerVehicleId(input?.vehicleId, defaultProfile.vehicleId),
         skinId: sanitizePlayerSkinId(input?.skinId, defaultProfile.skinId),
+        wheelPresetId: sanitizeWheelPresetId(input?.wheelPresetId, defaultProfile.wheelPresetId),
         carWrapPath,
         carWrapUrl: resolvePlayerCarWrapPublicUrl(carWrapPath),
     };
@@ -3819,6 +3952,19 @@ function sanitizePlayerVehicleId(value, fallbackVehicleId) {
         .replace(/[^a-z0-9-]/g, '')
         .slice(0, PLAYER_VEHICLE_ID_MAX_LENGTH);
     return normalized || fallbackVehicleId;
+}
+
+function sanitizeWheelPresetId(value, fallbackWheelPresetId) {
+    if (typeof value !== 'string') {
+        return fallbackWheelPresetId;
+    }
+
+    const normalized = value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, PLAYER_WHEEL_PRESET_ID_MAX_LENGTH);
+    return normalized || fallbackWheelPresetId;
 }
 
 function sanitizeRoomCode(value) {

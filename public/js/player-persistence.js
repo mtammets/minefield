@@ -3,6 +3,7 @@ import {
     CAR_COLOR_STORAGE_KEY,
     PLAYER_CAR_SKIN_STORAGE_KEY,
     PLAYER_CAR_VEHICLE_STORAGE_KEY,
+    PLAYER_CAR_WHEEL_PRESET_STORAGE_KEY,
     PLAYER_TOP_SPEED_STORAGE_KEY,
     GRAPHICS_QUALITY_MODE_STORAGE_KEY,
     AUTO_FULLSCREEN_ON_START_STORAGE_KEY,
@@ -21,6 +22,7 @@ import {
     resolvePlayerCarSkinId,
 } from './car-skins.js';
 import { DEFAULT_PLAYER_VEHICLE_ID, resolvePlayerVehicleId } from './car-vehicles.js';
+import { DEFAULT_PLAYER_WHEEL_PRESET_ID, resolvePlayerWheelPresetId } from './wheel-presets.js';
 
 export {
     CAR_SKIN_PRESETS,
@@ -31,6 +33,7 @@ export {
     resolvePlayerCarSkinId,
 } from './car-skins.js';
 export { DEFAULT_PLAYER_VEHICLE_ID, resolvePlayerVehicleId } from './car-vehicles.js';
+export { DEFAULT_PLAYER_WHEEL_PRESET_ID, resolvePlayerWheelPresetId } from './wheel-presets.js';
 
 const GRAPHICS_QUALITY_MODES = new Set(['auto', 'quality', 'balanced', 'performance']);
 const CHASE_CAMERA_SETTING_MIN = -1;
@@ -226,6 +229,34 @@ export function persistPlayerCarVehicleId(vehicleId) {
     const resolvedVehicleId = resolvePlayerVehicleId(vehicleId || DEFAULT_PLAYER_VEHICLE_ID);
     try {
         window.localStorage.setItem(PLAYER_CAR_VEHICLE_STORAGE_KEY, resolvedVehicleId);
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+}
+
+export function readPersistedPlayerCarWheelPresetId(
+    fallbackWheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID
+) {
+    const fallback = resolvePlayerWheelPresetId(
+        fallbackWheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+    );
+    try {
+        const storedValue = window.localStorage.getItem(PLAYER_CAR_WHEEL_PRESET_STORAGE_KEY);
+        if (storedValue) {
+            return resolvePlayerWheelPresetId(storedValue);
+        }
+    } catch {
+        // localStorage can fail in restricted browsing modes.
+    }
+    return fallback;
+}
+
+export function persistPlayerCarWheelPresetId(wheelPresetId) {
+    const resolvedWheelPresetId = resolvePlayerWheelPresetId(
+        wheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+    );
+    try {
+        window.localStorage.setItem(PLAYER_CAR_WHEEL_PRESET_STORAGE_KEY, resolvedWheelPresetId);
     } catch {
         // localStorage can fail in restricted browsing modes.
     }

@@ -54,6 +54,7 @@ import {
     getChaseCameraTuneSnapshot,
 } from './camera.js';
 import { createCarEditModeController } from './editmode.js';
+import { getCarSkinPresetById } from './car-skins.js';
 import {
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
@@ -102,10 +103,12 @@ import {
     persistChaseCameraSettings,
     readPersistedPlayerCarVehicleId,
     persistPlayerCarVehicleId,
+    readPersistedPlayerCarWheelPresetId,
+    persistPlayerCarWheelPresetId,
     resolvePlayerCarColorHex,
     resolvePlayerCarSkinId,
+    resolvePlayerWheelPresetId,
     getCarSkinPresetIndex,
-    getCarSkinPresetById,
     readPersistedPlayerCarSkinId,
     persistPlayerCarSkinId,
     persistPlayerCarColorHex,
@@ -177,6 +180,13 @@ import {
     uploadShowroomIntroVideo,
 } from './showroom-intro-video-manager.js';
 import {
+    createGarageWrapPresetImage,
+    getGarageWrapPresetEntries,
+    initializeGarageWrapPresetManager,
+    removeGarageWrapPreset,
+    uploadGarageWrapPresetImage,
+} from './garage-wrap-presets-manager.js';
+import {
     applyLorienVelmoreMineDetonation,
     appendLorienVelmoreDoorCollisionObstacles,
     resolveLorienVelmoreMineBarrierImpact,
@@ -232,6 +242,7 @@ const selectedCarVehiclePreset = getPlayerVehiclePresetById(selectedCarVehicleId
 const selectedCarSkinId = resolvePlayerCarSkinId(
     readPersistedPlayerCarSkinId(selectedCarVehiclePreset.defaultSkinId)
 );
+const selectedCarWheelPresetId = resolvePlayerWheelPresetId(readPersistedPlayerCarWheelPresetId());
 const selectedCarSkinPreset = getCarSkinPresetById(selectedCarSkinId);
 const selectedCarColorHex = resolvePlayerCarColorHex(selectedCarSkinPreset.bodyColor);
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
@@ -246,6 +257,7 @@ const runtimeState = createGameRuntimeState({
     selectedCarColorHex,
     selectedCarSkinId,
     selectedCarVehicleId,
+    selectedCarWheelPresetId,
     batteryMax: BATTERY_MAX,
     playerCarPoolSize: PLAYER_CAR_POOL_SIZE,
 });
@@ -303,6 +315,7 @@ function resetRuntimeStealthPickupState(gameMode = 'bots', { silent = true } = {
 setPlayerCarAppearance({
     vehicleId: runtimeState.selectedCarVehicleId,
     skinId: runtimeState.selectedCarSkinId,
+    wheelPresetId: runtimeState.selectedCarWheelPresetId,
     colorHex: runtimeState.selectedCarColorHex,
 });
 setPlayerTopSpeedLimitKph(
@@ -335,6 +348,7 @@ const {
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
     getSelectedCarVehicleId: () => runtimeState.selectedCarVehicleId,
+    getSelectedCarWheelPresetId: () => runtimeState.selectedCarWheelPresetId,
     getGameSessionController: () => runtimeState.gameSessionController,
     getInputController: () => runtimeState.inputController,
     getGameMode: () => runtimeState.gameMode,
@@ -562,6 +576,7 @@ function reconcileRuntimeSelectedVehicleWithEconomy(economyState = null) {
         setPlayerCarAppearance({
             vehicleId: resolvedVehicleId,
             skinId: runtimeState.selectedCarSkinId,
+            wheelPresetId: runtimeState.selectedCarWheelPresetId,
             colorHex: runtimeState.selectedCarColorHex,
         });
         persistPlayerCarVehicleId(resolvedVehicleId);
@@ -691,6 +706,7 @@ async function purchaseVehicleUnlock(vehicleId = '') {
         setPlayerCarAppearance({
             vehicleId: purchaseResult.vehicleId,
             skinId: runtimeState.selectedCarSkinId,
+            wheelPresetId: runtimeState.selectedCarWheelPresetId,
             colorHex: runtimeState.selectedCarColorHex,
         });
         persistPlayerCarVehicleId(purchaseResult.vehicleId);
@@ -1464,11 +1480,15 @@ const graphicsQualityController = createGraphicsQualityController({
     skidMarkController,
 });
 const sceneEditModePartDescriptors = collectSceneEditModePartDescriptors(builtWorld.cityScenery);
+
 const carEditModeController = createCarEditModeController({
     camera,
     car,
     canvas: renderer.domElement,
     getEditableParts: getRuntimeEditableParts,
+    getGarageWrapPresets() {
+        return getGarageWrapPresetEntries();
+    },
     prepareEditablePartsForEditMode() {
         setAllPlayerCarPartsVisibility?.(true);
     },
@@ -1526,6 +1546,15 @@ const carEditModeController = createCarEditModeController({
     getShowroomIntroVideoConfig,
     onUploadShowroomIntroVideo: uploadShowroomIntroVideo,
     onResetShowroomIntroVideo: resetShowroomIntroVideo,
+    async onUploadGarageWrapPreset(presetId, file) {
+        return uploadGarageWrapPresetImage(presetId, file);
+    },
+    async onCreateGarageWrapPreset(file) {
+        return createGarageWrapPresetImage(file);
+    },
+    async onDeleteGarageWrapPreset(presetId) {
+        return removeGarageWrapPreset(presetId);
+    },
 });
 
 function getRuntimeEditableParts() {
@@ -3112,6 +3141,7 @@ runtimeState.multiplayerController = createMultiplayerController({
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     getSelectedCarSkinId: () => runtimeState.selectedCarSkinId,
     getSelectedCarVehicleId: () => runtimeState.selectedCarVehicleId,
+    getSelectedCarWheelPresetId: () => runtimeState.selectedCarWheelPresetId,
     getPlayerCollectedCount: () => runtimeState.playerCollectedCount,
     getIsCarDestroyed: () => runtimeState.isCarDestroyed,
     getAuthAccessToken: () => runtimeState.authController?.getAccessToken?.() || '',
@@ -3282,10 +3312,12 @@ runtimeState.gameSessionController = createGameSessionController({
     resolvePlayerCarColorHex,
     resolvePlayerCarSkinId,
     resolvePlayerCarVehicleId: resolvePlayerVehicleId,
+    resolvePlayerCarWheelPresetId: resolvePlayerWheelPresetId,
     getCarSkinPresetById,
     persistPlayerCarColorHex,
     persistPlayerCarSkinId,
     persistPlayerCarVehicleId,
+    persistPlayerCarWheelPresetId,
     objectiveUi,
     economyHudUi,
     controlsHelpUi,
@@ -3479,6 +3511,10 @@ runtimeState.gameSessionController = createGameSessionController({
     getSelectedCarVehicleId: () => runtimeState.selectedCarVehicleId,
     setSelectedCarVehicleId(value) {
         runtimeState.selectedCarVehicleId = resolvePlayerVehicleId(value);
+    },
+    getSelectedCarWheelPresetId: () => runtimeState.selectedCarWheelPresetId,
+    setSelectedCarWheelPresetId(value) {
+        runtimeState.selectedCarWheelPresetId = resolvePlayerWheelPresetId(value);
     },
     getGameMode: () => runtimeState.gameMode,
     setGameMode(mode) {
@@ -4136,6 +4172,7 @@ runtimeState.crashDebrisController.resetPlayerDamageState();
 setPlayerBatteryLevel(1);
 runtimeState.gameSessionController.setBatteryDepletedState(false, { showStatus: false });
 if (welcomeModalUi.isAvailable()) {
+    void initializeGarageWrapPresetManager();
     void initializeShowroomIntroVideoManager();
     runtimeState.gameSessionController.showWelcomeModal();
 }

@@ -21,6 +21,7 @@ export function createRuntimeUiControllers({
     getSelectedCarColorHex,
     getSelectedCarSkinId,
     getSelectedCarVehicleId,
+    getSelectedCarWheelPresetId,
     getGameSessionController,
     getInputController,
     getGameMode = () => 'bots',
@@ -91,6 +92,8 @@ export function createRuntimeUiControllers({
         getCurrentSkinId: getSelectedCarSkinId,
         initialVehicleId: getSelectedCarVehicleId(),
         getCurrentVehicleId: getSelectedCarVehicleId,
+        initialWheelPresetId: getSelectedCarWheelPresetId(),
+        getCurrentWheelPresetId: getSelectedCarWheelPresetId,
         resolvePlayerCarSkinId,
         getCarSkinPresetIndex,
         resolvePlayerVehicleId,
@@ -118,6 +121,9 @@ export function createRuntimeUiControllers({
         },
         onVehicleChange(vehicleId) {
             getGameSessionController()?.setSelectedPlayerCarVehicle?.(vehicleId);
+        },
+        onWheelPresetChange(wheelPresetId) {
+            getGameSessionController()?.setSelectedPlayerCarWheelPreset?.(wheelPresetId);
         },
         onStart(mode, startContext = null) {
             getGameSessionController()?.dismissWelcomeModal(mode, startContext);

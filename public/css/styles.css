@@ -5919,7 +5919,8 @@ body.race-intro-active #botPanel {
 .editModeViewGrid button,
 .editModeTools button,
 .editModeTuneTools button,
-.editModeBillboardActions button {
+.editModeBillboardActions button,
+.editModeGarageWrapPresetToolbar button {
     border: 1px solid rgba(160, 210, 255, 0.4);
     border-radius: 8px;
     padding: 7px 8px;
@@ -5940,6 +5941,7 @@ body.race-intro-active #botPanel {
 .editModeTools button:hover,
 .editModeTuneTools button:hover,
 .editModeBillboardActions button:hover,
+.editModeGarageWrapPresetToolbar button:hover,
 .editModeCloseBtn:hover {
     transform: translateY(-1px);
     filter: brightness(1.07);
@@ -5975,6 +5977,30 @@ body.race-intro-active #botPanel {
 .editModeBillboardList {
     display: grid;
     gap: 8px;
+}
+
+.editModeGarageWrapPresetToolbar {
+    margin-bottom: 8px;
+}
+
+.editModeGarageWrapPresetToolbar button {
+    width: 100%;
+}
+
+.editModeGarageWrapPresetPreview {
+    margin-top: 7px;
+    border: 1px solid rgba(145, 198, 255, 0.18);
+    border-radius: 10px;
+    overflow: hidden;
+    background: rgba(6, 14, 26, 0.82);
+    aspect-ratio: 1 / 1;
+}
+
+.editModeGarageWrapPresetPreviewImage {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
 }
 
 .editModeBillboardCard {
@@ -8774,6 +8800,115 @@ body.race-intro-active #botPanel {
 
 .welcomeAuthGarageActionBtn[hidden] {
     display: none !important;
+}
+
+.welcomeAuthGarageWheelCard {
+    position: relative;
+    display: block;
+    pointer-events: none;
+}
+
+.welcomeAuthGarageWheelStatus {
+    display: none;
+}
+
+.welcomeAuthGarageWheelPresetGrid {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: clamp(8px, 1vw, 14px);
+    min-height: 86px;
+    pointer-events: auto;
+}
+
+.welcomeAuthGarageWheelPresetBtn {
+    position: relative;
+    width: 62px;
+    height: 62px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    box-shadow: none;
+    cursor: pointer;
+    transition:
+        transform 220ms ease,
+        filter 220ms ease,
+        opacity 220ms ease;
+}
+
+.welcomeAuthGarageWheelPresetBtn:hover:not(:disabled),
+.welcomeAuthGarageWheelPresetBtn:focus-visible {
+    transform: translateY(-2px) scale(1.04);
+    filter: brightness(1.05);
+}
+
+.welcomeAuthGarageWheelPresetBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    filter: none;
+    box-shadow: none;
+}
+
+.welcomeAuthGarageWheelPresetBtn[data-selected='true'] {
+    width: 74px;
+    height: 74px;
+    filter: drop-shadow(
+            0 0 18px
+                color-mix(
+                    in srgb,
+                    var(--wheel-preset-glow, rgba(124, 212, 255, 0.18)) 48%,
+                    transparent
+                )
+        )
+        brightness(1.04);
+}
+
+.welcomeAuthGarageWheelPresetBtn[data-collapsed='true'] {
+    opacity: 0;
+    transform: translateX(18px) scale(0.78);
+    pointer-events: none;
+    filter: none;
+}
+
+.welcomeAuthGarageWheelPresetStage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.welcomeAuthGarageWheelPresetCanvas {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 100%;
+    filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.34));
+}
+
+.welcomeAuthGarageWheelPresetBtn[data-selected='true'] .welcomeAuthGarageWheelPresetCanvas {
+    filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.42))
+        drop-shadow(
+            0 0 18px
+                color-mix(
+                    in srgb,
+                    var(--wheel-preset-glow, rgba(124, 212, 255, 0.18)) 34%,
+                    transparent
+                )
+        );
+}
+
+.welcomeAuthGarageWheelPresetBtn[data-expanded='true'][data-launcher='false'] {
+    opacity: 0.88;
+}
+
+.welcomeAuthGarageWheelPresetBtn[data-expanded='true'][data-launcher='false']:hover:not(:disabled),
+.welcomeAuthGarageWheelPresetBtn[data-expanded='true'][data-launcher='false']:focus-visible {
+    opacity: 1;
 }
 
 .welcomeAuthSecurityPanel {
@@ -12410,6 +12545,10 @@ body.edit-mode-active .audioControlPanel {
     display: none;
 }
 
+.welcomePreviewAccountBody > .welcomeAuthGarageWheelCard {
+    display: none;
+}
+
 .welcomePreviewAccountBody > .welcomePreviewGarageBackBtn {
     display: none;
 }
@@ -12445,6 +12584,11 @@ body.edit-mode-active .audioControlPanel {
 }
 
 .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard:not([hidden]) {
+    display: grid;
+    gap: 10px;
+}
+
+.welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWheelCard:not([hidden]) {
     display: grid;
     gap: 10px;
 }
@@ -12541,6 +12685,14 @@ body.edit-mode-active .audioControlPanel {
     justify-content: start;
 }
 
+.welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWheelCard:not([hidden]) {
+    position: absolute;
+    top: clamp(76px, 8vh, 98px);
+    right: clamp(18px, 2.2vw, 30px);
+    width: auto;
+    z-index: 5;
+}
+
 @media (max-width: 720px) {
     .welcomeAuthGarageSkinPresetGrid {
         grid-template-columns: repeat(2, 36px);
@@ -12550,6 +12702,21 @@ body.edit-mode-active .audioControlPanel {
     .welcomeAuthGarageSkinPresetBtn {
         width: 36px;
         height: 36px;
+    }
+
+    .welcomeAuthGarageWheelPresetBtn {
+        width: 52px;
+        height: 52px;
+    }
+
+    .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWheelCard:not([hidden]) {
+        top: 64px;
+        right: 14px;
+    }
+
+    .welcomeAuthGarageWheelPresetBtn[data-selected='true'] {
+        width: 62px;
+        height: 62px;
     }
 }
 
@@ -12582,5 +12749,10 @@ body.edit-mode-active .audioControlPanel {
         .welcomeAuthGarageSkinPresetGrid {
         width: auto;
         justify-content: end;
+    }
+
+    .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWheelCard:not([hidden]) {
+        top: 70px;
+        right: 18px;
     }
 }

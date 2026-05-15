@@ -21,6 +21,7 @@ export const COLOR_NAMES = {
 export const CAR_COLOR_STORAGE_KEY = 'silentdrift-player-car-color-hex';
 export const PLAYER_CAR_SKIN_STORAGE_KEY = 'silentdrift-player-car-skin-id';
 export const PLAYER_CAR_VEHICLE_STORAGE_KEY = 'silentdrift-player-car-vehicle-id';
+export const PLAYER_CAR_WHEEL_PRESET_STORAGE_KEY = 'silentdrift-player-car-wheel-preset-id';
 export const PLAYER_TOP_SPEED_STORAGE_KEY = 'silentdrift-player-top-speed-kph';
 export const GRAPHICS_QUALITY_MODE_STORAGE_KEY = 'silentdrift-graphics-quality-mode';
 export const AUTO_FULLSCREEN_ON_START_STORAGE_KEY = 'silentdrift-auto-fullscreen-on-start';

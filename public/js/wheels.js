@@ -1,43 +1,10 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
 
-const tireMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x222222,
-    metalness: 0.7,
-    roughness: 0.4,
-});
-
-const rimMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xf1f5fb,
-    metalness: 1.0,
-    roughness: 0.1,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.06,
-    envMapIntensity: 1.8,
-});
-
-const rimAccentMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0xff5252,
-    emissive: 0x6b0f12,
-    emissiveIntensity: 0.35,
-    metalness: 0.9,
-    roughness: 0.16,
-    clearcoat: 1.0,
-    clearcoatRoughness: 0.08,
-});
-
-const rimBaseMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x0f1418,
-    metalness: 0.65,
-    roughness: 0.3,
-    clearcoat: 0.7,
-    clearcoatRoughness: 0.18,
-});
-
-const brakeDiskMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x888888,
-    metalness: 0.8,
-    roughness: 0.3,
-});
+import {
+    DEFAULT_PLAYER_WHEEL_PRESET_ID,
+    getPlayerWheelPresetById,
+    resolvePlayerWheelPresetId,
+} from './wheel-presets.js';
 
 const wheelMirrorConfig = {
     frontLeft: false,
@@ -57,49 +24,398 @@ const REAR_DRIVE_VISUAL_SLIP = 5.8;
 const REAR_DRIVE_VISUAL_SLIP_FADE_SPEED = 22;
 const REAR_DRIVE_LAUNCH_SPIN = 10.5;
 
-function createTire() {
-    return new THREE.Mesh(
-        new THREE.CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, TIRE_WIDTH, 32),
-        tireMaterial
-    );
+function createWheelMaterials(wheelPreset) {
+    return {
+        tire: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.tireColor,
+            metalness: wheelPreset.tireMetalness,
+            roughness: wheelPreset.tireRoughness,
+            clearcoat: 0.1,
+            clearcoatRoughness: 0.5,
+        }),
+        tireDetail: new THREE.MeshStandardMaterial({
+            color: new THREE.Color(wheelPreset.tireColor).multiplyScalar(1.14),
+            metalness: Math.max(0, wheelPreset.tireMetalness - 0.12),
+            roughness: Math.min(1, wheelPreset.tireRoughness + 0.08),
+        }),
+        rimPrimary: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.rimPrimaryColor,
+            metalness: 1,
+            roughness: 0.1,
+            clearcoat: 1,
+            clearcoatRoughness: 0.05,
+            envMapIntensity: 2.1,
+        }),
+        rimSecondary: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.rimSecondaryColor,
+            metalness: 1,
+            roughness: 0.14,
+            clearcoat: 1,
+            clearcoatRoughness: 0.07,
+            envMapIntensity: 2.2,
+        }),
+        rimBase: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.rimBaseColor,
+            metalness: 0.72,
+            roughness: 0.28,
+            clearcoat: 0.78,
+            clearcoatRoughness: 0.18,
+        }),
+        accent: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.accentColor,
+            emissive: wheelPreset.accentEmissiveColor,
+            emissiveIntensity: wheelPreset.accentEmissiveIntensity,
+            metalness: 0.95,
+            roughness: 0.12,
+            clearcoat: 1,
+            clearcoatRoughness: 0.05,
+        }),
+        glow: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.accentColor,
+            emissive: wheelPreset.accentEmissiveColor,
+            emissiveIntensity: wheelPreset.accentEmissiveIntensity * 1.28,
+            metalness: 0.82,
+            roughness: 0.18,
+            transparent: true,
+            opacity: 0.92,
+        }),
+        brakeDisk: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.rotorColor,
+            metalness: 0.84,
+            roughness: 0.3,
+        }),
+        brakeHub: new THREE.MeshPhysicalMaterial({
+            color: wheelPreset.hubColor,
+            metalness: 0.94,
+            roughness: 0.14,
+            clearcoat: 1,
+            clearcoatRoughness: 0.06,
+        }),
+    };
 }
 
-function createRim(side = 1, mirror = false) {
+function applyShadowFlags(object) {
+    object.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+        }
+    });
+}
+
+function disposeObject3D(object) {
+    object.traverse((child) => {
+        if (!child.isMesh) {
+            return;
+        }
+        child.geometry?.dispose?.();
+        if (Array.isArray(child.material)) {
+            for (let i = 0; i < child.material.length; i += 1) {
+                child.material[i]?.dispose?.();
+            }
+            return;
+        }
+        child.material?.dispose?.();
+    });
+}
+
+function clearGroupChildren(group) {
+    const children = group.children.slice();
+    for (let i = 0; i < children.length; i += 1) {
+        const child = children[i];
+        group.remove(child);
+        disposeObject3D(child);
+    }
+}
+
+function createTire(materials, wheelPreset) {
+    const tireGroup = new THREE.Group();
+
+    const tire = new THREE.Mesh(
+        new THREE.CylinderGeometry(WHEEL_RADIUS, WHEEL_RADIUS, TIRE_WIDTH, 44, 1, true),
+        materials.tire
+    );
+    tire.rotation.z = Math.PI / 2;
+    tireGroup.add(tire);
+
+    const outerCapGeometry = new THREE.CylinderGeometry(
+        WHEEL_RADIUS * 0.985,
+        WHEEL_RADIUS * 0.985,
+        0.02,
+        44
+    );
+
+    const leftSidewall = new THREE.Mesh(outerCapGeometry, materials.tire);
+    leftSidewall.rotation.z = Math.PI / 2;
+    leftSidewall.position.x = -(TIRE_WIDTH * 0.5 - 0.01);
+    tireGroup.add(leftSidewall);
+
+    const rightSidewall = leftSidewall.clone();
+    rightSidewall.position.x *= -1;
+    tireGroup.add(rightSidewall);
+
+    const shoulderGeometry = new THREE.TorusGeometry(0.45, 0.028, 14, 54);
+    const leftShoulder = new THREE.Mesh(shoulderGeometry, materials.tireDetail);
+    leftShoulder.rotation.y = Math.PI / 2;
+    leftShoulder.position.x = -(TIRE_WIDTH * 0.5 - 0.03);
+    tireGroup.add(leftShoulder);
+
+    const rightShoulder = leftShoulder.clone();
+    rightShoulder.position.x *= -1;
+    tireGroup.add(rightShoulder);
+
+    if (wheelPreset.layout === 'photon-turbine') {
+        const haloGeometry = new THREE.TorusGeometry(0.355, 0.01, 12, 52);
+        const leftHalo = new THREE.Mesh(haloGeometry, materials.glow);
+        leftHalo.rotation.y = Math.PI / 2;
+        leftHalo.position.x = -(TIRE_WIDTH * 0.5 - 0.055);
+        tireGroup.add(leftHalo);
+
+        const rightHalo = leftHalo.clone();
+        rightHalo.position.x *= -1;
+        tireGroup.add(rightHalo);
+    }
+
+    applyShadowFlags(tireGroup);
+    return tireGroup;
+}
+
+function createRazorTenFace(side, mirror, materials) {
     const rim = new THREE.Group();
 
+    const outerLip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.348, 0.348, 0.022, 54),
+        materials.rimPrimary
+    );
+    outerLip.rotation.z = Math.PI / 2;
+    rim.add(outerLip);
+
+    const innerBarrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.315, 0.315, 0.028, 48),
+        materials.rimBase
+    );
+    innerBarrel.rotation.z = Math.PI / 2;
+    rim.add(innerBarrel);
+
     const spokeBackplate = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.305, 0.305, 0.014, 40),
-        rimBaseMaterial
+        new THREE.CylinderGeometry(0.282, 0.282, 0.015, 40),
+        materials.rimBase
     );
     spokeBackplate.rotation.z = Math.PI / 2;
     rim.add(spokeBackplate);
 
+    const accentRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.275, 0.015, 10, 44),
+        materials.accent
+    );
+    accentRing.rotation.y = Math.PI / 2;
+    rim.add(accentRing);
+
     const spokeCount = 10;
     const spokeLength = 0.255;
-    const spokeGeometry = new THREE.BoxGeometry(0.028, spokeLength, 0.032);
+    const spokeGeometry = new THREE.BoxGeometry(0.028, spokeLength, 0.034);
     spokeGeometry.translate(0, spokeLength * 0.5 - 0.02, 0);
+    const spokeInsetGeometry = new THREE.BoxGeometry(0.014, spokeLength * 0.78, 0.04);
+    spokeInsetGeometry.translate(0, spokeLength * 0.45 - 0.02, 0);
+
     for (let i = 0; i < spokeCount; i += 1) {
-        const spokeMaterial = i % 2 === 0 ? rimMaterial : rimAccentMaterial;
-        const spoke = new THREE.Mesh(spokeGeometry, spokeMaterial);
+        const spoke = new THREE.Mesh(
+            spokeGeometry,
+            i % 2 === 0 ? materials.rimPrimary : materials.rimSecondary
+        );
         spoke.rotation.x = (Math.PI * 2 * i) / spokeCount;
+        spoke.rotation.z = i % 2 === 0 ? 0.12 : -0.12;
         rim.add(spoke);
+
+        const spokeInset = new THREE.Mesh(spokeInsetGeometry, materials.accent);
+        spokeInset.rotation.x = spoke.rotation.x;
+        spokeInset.rotation.z = spoke.rotation.z;
+        spokeInset.position.z = 0.008;
+        rim.add(spokeInset);
     }
 
-    const centerHub = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 24), rimMaterial);
+    const centerHub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.094, 0.094, 0.09, 28),
+        materials.brakeHub
+    );
     centerHub.rotation.z = Math.PI / 2;
     rim.add(centerHub);
 
-    rim.position.x = side * (TIRE_WIDTH * 0.5 + 0.01);
+    const centerCap = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.03, 24),
+        materials.accent
+    );
+    centerCap.rotation.z = Math.PI / 2;
+    centerCap.position.x = 0.005;
+    rim.add(centerCap);
 
+    rim.position.x = side * (TIRE_WIDTH * 0.5 + 0.01);
     if (mirror) {
         rim.scale.x *= -1;
     }
 
+    applyShadowFlags(rim);
     return rim;
 }
 
-function createBrakeDisk() {
-    return new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.05, 32), brakeDiskMaterial);
+function createPhotonTurbineFace(side, mirror, materials) {
+    const rim = new THREE.Group();
+
+    const outerHalo = new THREE.Mesh(new THREE.TorusGeometry(0.292, 0.018, 12, 64), materials.glow);
+    outerHalo.rotation.y = Math.PI / 2;
+    rim.add(outerHalo);
+
+    const outerLip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.338, 0.338, 0.022, 56),
+        materials.rimSecondary
+    );
+    outerLip.rotation.z = Math.PI / 2;
+    rim.add(outerLip);
+
+    const innerBarrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.308, 0.308, 0.03, 52),
+        materials.rimBase
+    );
+    innerBarrel.rotation.z = Math.PI / 2;
+    rim.add(innerBarrel);
+
+    const bladeCount = 8;
+    const bladeLength = 0.226;
+    const bladeGeometry = new THREE.BoxGeometry(0.048, bladeLength, 0.056);
+    bladeGeometry.translate(0, bladeLength * 0.5 - 0.018, 0);
+    const accentBladeGeometry = new THREE.BoxGeometry(0.02, bladeLength * 0.82, 0.07);
+    accentBladeGeometry.translate(0, bladeLength * 0.46 - 0.016, 0);
+
+    for (let i = 0; i < bladeCount; i += 1) {
+        const blade = new THREE.Mesh(
+            bladeGeometry,
+            i % 2 === 0 ? materials.rimPrimary : materials.rimSecondary
+        );
+        blade.rotation.x = (Math.PI * 2 * i) / bladeCount;
+        blade.rotation.z = 0.3;
+        blade.position.z = -0.006;
+        rim.add(blade);
+
+        const accentBlade = new THREE.Mesh(accentBladeGeometry, materials.accent);
+        accentBlade.rotation.x = blade.rotation.x + THREE.MathUtils.degToRad(4);
+        accentBlade.rotation.z = 0.18;
+        accentBlade.position.z = 0.018;
+        rim.add(accentBlade);
+    }
+
+    const innerShield = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.176, 0.176, 0.018, 36),
+        materials.rimBase
+    );
+    innerShield.rotation.z = Math.PI / 2;
+    rim.add(innerShield);
+
+    const centerHub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.102, 0.102, 0.09, 28),
+        materials.brakeHub
+    );
+    centerHub.rotation.z = Math.PI / 2;
+    rim.add(centerHub);
+
+    const centerGlow = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.058, 0.058, 0.028, 24),
+        materials.glow
+    );
+    centerGlow.rotation.z = Math.PI / 2;
+    centerGlow.position.x = 0.004;
+    rim.add(centerGlow);
+
+    rim.position.x = side * (TIRE_WIDTH * 0.5 + 0.01);
+    if (mirror) {
+        rim.scale.x *= -1;
+    }
+
+    applyShadowFlags(rim);
+    return rim;
+}
+
+function createRimFace(wheelPreset, materials, side, mirror) {
+    if (wheelPreset.layout === 'photon-turbine') {
+        return createPhotonTurbineFace(side, mirror, materials);
+    }
+    return createRazorTenFace(side, mirror, materials);
+}
+
+function createBrakeDisk(materials, wheelPreset) {
+    const brakeGroup = new THREE.Group();
+
+    const rotor = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.398, 0.398, 0.042, 36),
+        materials.brakeDisk
+    );
+    rotor.rotation.z = Math.PI / 2;
+    brakeGroup.add(rotor);
+
+    const carrier = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 0.05, 28),
+        materials.rimBase
+    );
+    carrier.rotation.z = Math.PI / 2;
+    brakeGroup.add(carrier);
+
+    const hub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.075, 0.075, 0.08, 20),
+        materials.brakeHub
+    );
+    hub.rotation.z = Math.PI / 2;
+    hub.position.x = 0.008;
+    brakeGroup.add(hub);
+
+    if (wheelPreset.layout === 'photon-turbine') {
+        const glowDisc = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.12, 0.12, 0.01, 20),
+            materials.glow
+        );
+        glowDisc.rotation.z = Math.PI / 2;
+        glowDisc.position.x = 0.03;
+        brakeGroup.add(glowDisc);
+    }
+
+    brakeGroup.position.set(0, 0, 0.1);
+    applyShadowFlags(brakeGroup);
+    return brakeGroup;
+}
+
+function createWheelAssembly(wheelPreset, mirror = false) {
+    const materials = createWheelMaterials(wheelPreset);
+    const wheel = new THREE.Group();
+
+    wheel.add(createTire(materials, wheelPreset));
+    wheel.add(createRimFace(wheelPreset, materials, 1, mirror));
+    wheel.add(createRimFace(wheelPreset, materials, -1, mirror));
+    wheel.add(createBrakeDisk(materials, wheelPreset));
+
+    applyShadowFlags(wheel);
+    return wheel;
+}
+
+function createWheelPreviewMesh(wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID, options = {}) {
+    const { mirror = false } = options;
+    const resolvedPreset = getPlayerWheelPresetById(resolvePlayerWheelPresetId(wheelPresetId));
+    const wheel = createWheelAssembly(resolvedPreset, mirror);
+    wheel.name = `wheel_preview_${resolvedPreset.id}`;
+    return wheel;
+}
+
+function createWheel(x, z, parent, wheelPreset, mirror = false) {
+    const wheel = createWheelAssembly(wheelPreset, mirror);
+    wheel.position.set(x, 0.5, z);
+    parent.add(wheel);
+    return wheel;
+}
+
+function createSteerableWheel(x, z, parent, wheelPreset, mirror = false) {
+    const steeringPivot = new THREE.Group();
+    steeringPivot.position.set(x, 0, z);
+    parent.add(steeringPivot);
+
+    const wheel = createWheel(0, 0, steeringPivot, wheelPreset, mirror);
+    return { steeringPivot, wheel };
 }
 
 function createWheelWellLight(x, z, parent) {
@@ -109,56 +425,8 @@ function createWheelWellLight(x, z, parent) {
     return light;
 }
 
-function createWheel(x, z, parent, mirror = false) {
-    const wheel = new THREE.Group();
-
-    const tire = createTire();
-    tire.rotation.z = Math.PI / 2;
-    tire.castShadow = true;
-    tire.receiveShadow = true;
-    wheel.add(tire);
-
-    const outerRim = createRim(1, mirror);
-    outerRim.traverse((child) => {
-        if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-        }
-    });
-    wheel.add(outerRim);
-
-    const innerRim = createRim(-1, mirror);
-    innerRim.traverse((child) => {
-        if (child.isMesh) {
-            child.castShadow = true;
-            child.receiveShadow = true;
-        }
-    });
-    wheel.add(innerRim);
-
-    const brakeDisk = createBrakeDisk();
-    brakeDisk.rotation.z = Math.PI / 2;
-    brakeDisk.position.set(0, 0, 0.1);
-    brakeDisk.castShadow = true;
-    brakeDisk.receiveShadow = true;
-    wheel.add(brakeDisk);
-
-    wheel.position.set(x, 0.5, z);
-    parent.add(wheel);
-    return wheel;
-}
-
-function createSteerableWheel(x, z, parent, mirror = false) {
-    const steeringPivot = new THREE.Group();
-    steeringPivot.position.set(x, 0, z);
-    parent.add(steeringPivot);
-
-    const wheel = createWheel(0, 0, steeringPivot, mirror);
-    return { steeringPivot, wheel };
-}
-
 function initializeWheels(car, options = {}) {
-    const { addWheelWellLights = true } = options;
+    const { addWheelWellLights = true, wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID } = options;
     const frontAxleGroup = new THREE.Group();
     frontAxleGroup.name = 'front_axle_group';
     car.add(frontAxleGroup);
@@ -171,37 +439,6 @@ function initializeWheels(car, options = {}) {
     wheelLightGroup.name = 'wheel_well_light_group';
     car.add(wheelLightGroup);
 
-    const frontLeft = createSteerableWheel(
-        -WHEEL_CENTER_X,
-        FRONT_WHEEL_Z,
-        frontAxleGroup,
-        wheelMirrorConfig.frontLeft
-    );
-    const frontRight = createSteerableWheel(
-        WHEEL_CENTER_X,
-        FRONT_WHEEL_Z,
-        frontAxleGroup,
-        wheelMirrorConfig.frontRight
-    );
-    const backLeft = createWheel(
-        -WHEEL_CENTER_X,
-        REAR_WHEEL_Z,
-        rearAxleGroup,
-        wheelMirrorConfig.backLeft
-    );
-    const backRight = createWheel(
-        WHEEL_CENTER_X,
-        REAR_WHEEL_Z,
-        rearAxleGroup,
-        wheelMirrorConfig.backRight
-    );
-    frontLeft.steeringPivot.name = 'steering_pivot_front_left';
-    frontRight.steeringPivot.name = 'steering_pivot_front_right';
-    frontLeft.wheel.name = 'wheel_front_left';
-    frontRight.wheel.name = 'wheel_front_right';
-    backLeft.name = 'wheel_rear_left';
-    backRight.name = 'wheel_rear_right';
-
     if (addWheelWellLights) {
         createWheelWellLight(-WHEEL_CENTER_X, FRONT_WHEEL_Z, wheelLightGroup);
         createWheelWellLight(WHEEL_CENTER_X, FRONT_WHEEL_Z, wheelLightGroup);
@@ -209,16 +446,16 @@ function initializeWheels(car, options = {}) {
         createWheelWellLight(WHEEL_CENTER_X, REAR_WHEEL_Z, wheelLightGroup);
     }
 
-    const frontWheelMeshes = [frontLeft.wheel, frontRight.wheel];
-    const rearWheelMeshes = [backLeft, backRight];
-    const steerPivots = [frontLeft.steeringPivot, frontRight.steeringPivot];
+    const frontWheelMeshes = [];
+    const rearWheelMeshes = [];
+    const steerPivots = [];
     const detachableWheels = [
         {
             id: 'wheel_front_left',
             type: 'wheel',
             side: 'left',
             zone: 'front',
-            source: frontLeft.wheel,
+            source: null,
             groundOffset: WHEEL_RADIUS,
             baseLife: 5.8,
             mass: 1.05,
@@ -228,7 +465,7 @@ function initializeWheels(car, options = {}) {
             type: 'wheel',
             side: 'right',
             zone: 'front',
-            source: frontRight.wheel,
+            source: null,
             groundOffset: WHEEL_RADIUS,
             baseLife: 5.8,
             mass: 1.05,
@@ -238,7 +475,7 @@ function initializeWheels(car, options = {}) {
             type: 'wheel',
             side: 'left',
             zone: 'rear',
-            source: backLeft,
+            source: null,
             groundOffset: WHEEL_RADIUS,
             baseLife: 5.8,
             mass: 1.1,
@@ -248,12 +485,16 @@ function initializeWheels(car, options = {}) {
             type: 'wheel',
             side: 'right',
             zone: 'rear',
-            source: backRight,
+            source: null,
             groundOffset: WHEEL_RADIUS,
             baseLife: 5.8,
             mass: 1.1,
         },
     ];
+
+    let currentWheelPresetId = resolvePlayerWheelPresetId(wheelPresetId);
+
+    rebuildWheelMeshes();
 
     return {
         update(vehicleState = {}, deltaTime = 1 / 60) {
@@ -261,9 +502,10 @@ function initializeWheels(car, options = {}) {
             const targetSteer = getVisualSteerAngle(vehicleState);
             const steerLerp = 1 - Math.exp(-STEER_RESPONSE * dt);
 
-            steerPivots.forEach((pivot) => {
+            for (let i = 0; i < steerPivots.length; i += 1) {
+                const pivot = steerPivots[i];
                 pivot.rotation.y = THREE.MathUtils.lerp(pivot.rotation.y, targetSteer, steerLerp);
-            });
+            }
 
             const velocityLength =
                 typeof vehicleState.velocity?.length === 'function'
@@ -282,12 +524,13 @@ function initializeWheels(car, options = {}) {
                 throttleAbs * slipFade * REAR_DRIVE_VISUAL_SLIP * dt * wheelSpinDirection;
             const launchSlipRoll = launchSlip * REAR_DRIVE_LAUNCH_SPIN * dt * wheelSpinDirection;
 
-            frontWheelMeshes.forEach((wheel) => {
-                wheel.rotation.x -= baseRollAmount;
-            });
-            rearWheelMeshes.forEach((wheel) => {
-                wheel.rotation.x -= baseRollAmount + rearDriveSlipRoll + launchSlipRoll;
-            });
+            for (let i = 0; i < frontWheelMeshes.length; i += 1) {
+                frontWheelMeshes[i].rotation.x -= baseRollAmount;
+            }
+            for (let i = 0; i < rearWheelMeshes.length; i += 1) {
+                rearWheelMeshes[i].rotation.x -=
+                    baseRollAmount + rearDriveSlipRoll + launchSlipRoll;
+            }
         },
         getDetachableWheels() {
             return detachableWheels;
@@ -300,7 +543,82 @@ function initializeWheels(car, options = {}) {
                 frontSteeringPivots: steerPivots,
             };
         },
+        getWheelPresetId() {
+            return currentWheelPresetId;
+        },
+        setWheelPreset(nextWheelPresetId) {
+            const resolvedWheelPresetId = resolvePlayerWheelPresetId(nextWheelPresetId);
+            if (resolvedWheelPresetId === currentWheelPresetId) {
+                return currentWheelPresetId;
+            }
+
+            const visibilitySnapshot = detachableWheels.map((wheelPart) =>
+                wheelPart.source ? wheelPart.source.visible !== false : true
+            );
+            currentWheelPresetId = resolvedWheelPresetId;
+            rebuildWheelMeshes();
+            for (let i = 0; i < detachableWheels.length; i += 1) {
+                if (!detachableWheels[i].source) {
+                    continue;
+                }
+                detachableWheels[i].source.visible = visibilitySnapshot[i] !== false;
+            }
+            return currentWheelPresetId;
+        },
     };
+
+    function rebuildWheelMeshes() {
+        const activePreset = getPlayerWheelPresetById(currentWheelPresetId);
+        clearGroupChildren(frontAxleGroup);
+        clearGroupChildren(rearAxleGroup);
+        frontWheelMeshes.length = 0;
+        rearWheelMeshes.length = 0;
+        steerPivots.length = 0;
+
+        const frontLeft = createSteerableWheel(
+            -WHEEL_CENTER_X,
+            FRONT_WHEEL_Z,
+            frontAxleGroup,
+            activePreset,
+            wheelMirrorConfig.frontLeft
+        );
+        const frontRight = createSteerableWheel(
+            WHEEL_CENTER_X,
+            FRONT_WHEEL_Z,
+            frontAxleGroup,
+            activePreset,
+            wheelMirrorConfig.frontRight
+        );
+        const backLeft = createWheel(
+            -WHEEL_CENTER_X,
+            REAR_WHEEL_Z,
+            rearAxleGroup,
+            activePreset,
+            wheelMirrorConfig.backLeft
+        );
+        const backRight = createWheel(
+            WHEEL_CENTER_X,
+            REAR_WHEEL_Z,
+            rearAxleGroup,
+            activePreset,
+            wheelMirrorConfig.backRight
+        );
+
+        frontLeft.steeringPivot.name = 'steering_pivot_front_left';
+        frontRight.steeringPivot.name = 'steering_pivot_front_right';
+        frontLeft.wheel.name = 'wheel_front_left';
+        frontRight.wheel.name = 'wheel_front_right';
+        backLeft.name = 'wheel_rear_left';
+        backRight.name = 'wheel_rear_right';
+
+        frontWheelMeshes.push(frontLeft.wheel, frontRight.wheel);
+        rearWheelMeshes.push(backLeft, backRight);
+        steerPivots.push(frontLeft.steeringPivot, frontRight.steeringPivot);
+        detachableWheels[0].source = frontLeft.wheel;
+        detachableWheels[1].source = frontRight.wheel;
+        detachableWheels[2].source = backLeft;
+        detachableWheels[3].source = backRight;
+    }
 }
 
 function getVisualSteerAngle(vehicleState = {}) {
@@ -308,4 +626,4 @@ function getVisualSteerAngle(vehicleState = {}) {
     return THREE.MathUtils.clamp(physicalSteer, -VISUAL_MAX_STEER, VISUAL_MAX_STEER);
 }
 
-export { initializeWheels };
+export { createWheelPreviewMesh, initializeWheels };
