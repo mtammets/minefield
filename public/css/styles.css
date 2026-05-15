@@ -12410,6 +12410,40 @@ body.edit-mode-active .audioControlPanel {
     display: none;
 }
 
+.welcomePreviewAccountBody > .welcomePreviewGarageBackBtn {
+    display: none;
+}
+
+.welcomePreviewGarageBackBtn {
+    align-items: center;
+    gap: 10px;
+    border-radius: 999px;
+    pointer-events: auto;
+}
+
+.welcomePreviewGarageBackIcon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    font-size: 16px;
+    line-height: 1;
+    color: rgba(255, 226, 173, 0.96);
+}
+
+.welcomePreviewGarageBackLabel {
+    display: inline-flex;
+    align-items: center;
+}
+
+.welcomePreviewAccountBody[data-mode='garage'] > .welcomePreviewGarageBackBtn:not([hidden]) {
+    position: absolute;
+    left: clamp(20px, 2.4vw, 34px);
+    bottom: clamp(20px, 2.8vw, 34px);
+    z-index: 6;
+    display: inline-flex;
+}
+
 .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard:not([hidden]) {
     display: grid;
     gap: 10px;
@@ -12520,6 +12554,11 @@ body.edit-mode-active .audioControlPanel {
 }
 
 @media (max-width: 900px) {
+    .welcomePreviewAccountBody[data-mode='garage'] > .welcomePreviewGarageBackBtn:not([hidden]) {
+        left: 12px;
+        bottom: 12px;
+    }
+
     .welcomePreviewAccountBody[data-mode='garage'] > .welcomeAuthGarageWrapCard:not([hidden]) {
         top: auto;
         left: auto;

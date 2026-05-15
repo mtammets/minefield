@@ -311,6 +311,7 @@ export function createWelcomeModalController({
     const previewAccountHeadingEl =
         previewAccountOverlayEl?.querySelector?.('.welcomePreviewLeaderboardHeading') || null;
     const previewAccountBodyEl = document.getElementById('welcomePreviewAccountBody');
+    const previewGarageBackBtnEl = document.getElementById('welcomePreviewGarageBackBtn');
     const previewAccountToolsToggleBtnEl = document.getElementById(
         'welcomePreviewAccountToolsToggleBtn'
     );
@@ -964,6 +965,12 @@ export function createWelcomeModalController({
             return;
         }
         openSecurityPanel();
+    });
+    previewGarageBackBtnEl?.addEventListener('click', () => {
+        if (previewGarageBackBtnEl.disabled) {
+            return;
+        }
+        setGaragePanelOpen(false);
     });
     authWalletToggleBtnEl?.addEventListener('click', () => {
         setWalletPanelOpen(!walletPanelOpen);
@@ -2468,6 +2475,10 @@ export function createWelcomeModalController({
         }
         if (previewAccountBodyEl) {
             previewAccountBodyEl.dataset.mode = accountMode;
+        }
+        if (previewGarageBackBtnEl) {
+            previewGarageBackBtnEl.hidden = !garagePanelVisible;
+            previewGarageBackBtnEl.disabled = !garagePanelVisible || busy || garagePurchasePending;
         }
         if (previewAccountOverlayEl) {
             if (showPreviewAccountHeading) {
