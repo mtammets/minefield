@@ -6797,6 +6797,7 @@ export function createWelcomeModalController({
             );
             const preset = getPlayerWheelPresetById(wheelPresetId);
             const isPhotonTurbine = preset.layout === 'photon-turbine';
+            const isObsidianHalo = preset.layout === 'obsidian-halo';
 
             try {
                 const renderer = new THREE.WebGLRenderer({
@@ -6808,54 +6809,70 @@ export function createWelcomeModalController({
                 renderer.setClearColor(0x000000, 0);
                 renderer.outputColorSpace = THREE.SRGBColorSpace;
                 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-                renderer.toneMappingExposure = isPhotonTurbine ? 1.34 : 1.38;
+                renderer.toneMappingExposure = isPhotonTurbine
+                    ? 1.34
+                    : isObsidianHalo
+                      ? 1.24
+                      : 1.38;
 
                 const scene = new THREE.Scene();
                 const camera = new THREE.PerspectiveCamera(24, 1, 0.1, 10);
-                camera.position.set(1.92, 0.18, 0.98);
+                camera.position.set(
+                    isObsidianHalo ? 1.86 : 1.92,
+                    0.18,
+                    isObsidianHalo ? 1.04 : 0.98
+                );
                 camera.lookAt(0, 0.01, 0);
 
                 const ambientLight = new THREE.HemisphereLight(
                     0xdff2ff,
-                    isPhotonTurbine ? 0x040912 : 0x09111b,
-                    isPhotonTurbine ? 1.16 : 1.32
+                    isPhotonTurbine ? 0x040912 : isObsidianHalo ? 0x050608 : 0x09111b,
+                    isPhotonTurbine ? 1.16 : isObsidianHalo ? 1.08 : 1.32
                 );
                 scene.add(ambientLight);
 
                 const keyLight = new THREE.DirectionalLight(
-                    isPhotonTurbine ? 0xffffff : 0xf7fbff,
-                    isPhotonTurbine ? 1.46 : 1.78
+                    isPhotonTurbine ? 0xffffff : isObsidianHalo ? 0xfff0d9 : 0xf7fbff,
+                    isPhotonTurbine ? 1.46 : isObsidianHalo ? 1.42 : 1.78
                 );
                 keyLight.position.set(2.24, 2.96, 3.18);
                 scene.add(keyLight);
 
                 const rimLight = new THREE.DirectionalLight(
-                    isPhotonTurbine ? 0x93d8ff : 0xbfdfff,
-                    isPhotonTurbine ? 1.18 : 1.32
+                    isPhotonTurbine ? 0x93d8ff : isObsidianHalo ? 0xffbe6b : 0xbfdfff,
+                    isPhotonTurbine ? 1.18 : isObsidianHalo ? 1.08 : 1.32
                 );
                 rimLight.position.set(-2.42, 1.38, -1.94);
                 scene.add(rimLight);
 
                 const faceFillLight = new THREE.DirectionalLight(
                     0xe8f5ff,
-                    isPhotonTurbine ? 0.72 : 1.24
+                    isPhotonTurbine ? 0.72 : isObsidianHalo ? 0.86 : 1.24
                 );
                 faceFillLight.position.set(-0.48, 0.94, 3.48);
                 scene.add(faceFillLight);
 
-                const accentLightBaseIntensity = isPhotonTurbine ? 1.04 : 1.02;
+                const accentLightBaseIntensity = isPhotonTurbine
+                    ? 1.04
+                    : isObsidianHalo
+                      ? 1.14
+                      : 1.02;
                 const accentLight = new THREE.PointLight(
                     preset.accentColor,
                     accentLightBaseIntensity,
                     4.6,
                     2
                 );
-                accentLight.position.set(isPhotonTurbine ? 0.4 : -0.08, 0.18, 1.18);
+                accentLight.position.set(
+                    isPhotonTurbine ? 0.4 : isObsidianHalo ? 0.14 : -0.08,
+                    0.18,
+                    1.18
+                );
                 scene.add(accentLight);
 
                 const kickerLight = new THREE.PointLight(
-                    isPhotonTurbine ? 0x93ffcf : 0xff7575,
-                    isPhotonTurbine ? 0.42 : 0.82,
+                    isPhotonTurbine ? 0x93ffcf : isObsidianHalo ? 0xff8a24 : 0xff7575,
+                    isPhotonTurbine ? 0.42 : isObsidianHalo ? 0.6 : 0.82,
                     3.8,
                     2
                 );
@@ -6867,7 +6884,7 @@ export function createWelcomeModalController({
                     new THREE.MeshBasicMaterial({
                         color: 0x02060b,
                         transparent: true,
-                        opacity: isPhotonTurbine ? 0.5 : 0.42,
+                        opacity: isPhotonTurbine ? 0.5 : isObsidianHalo ? 0.56 : 0.42,
                         depthWrite: false,
                     })
                 );
@@ -6880,7 +6897,7 @@ export function createWelcomeModalController({
                     new THREE.MeshBasicMaterial({
                         color: preset.accentColor,
                         transparent: true,
-                        opacity: isPhotonTurbine ? 0.12 : 0.14,
+                        opacity: isPhotonTurbine ? 0.12 : isObsidianHalo ? 0.18 : 0.14,
                         blending: THREE.AdditiveBlending,
                         depthWrite: false,
                     })
@@ -6890,12 +6907,14 @@ export function createWelcomeModalController({
                 scene.add(haloPlate);
 
                 const wheelStage = new THREE.Group();
-                wheelStage.rotation.y = isPhotonTurbine ? 0.42 : 0.18;
-                wheelStage.scale.setScalar(isPhotonTurbine ? 0.8 : 0.8);
+                wheelStage.rotation.y = isPhotonTurbine ? 0.42 : isObsidianHalo ? 0.3 : 0.18;
+                wheelStage.scale.setScalar(0.8);
                 scene.add(wheelStage);
 
                 const wheel = createWheelPreviewMesh(preset.id);
-                const restSpinAngle = THREE.MathUtils.degToRad(isPhotonTurbine ? 12 : 4);
+                const restSpinAngle = THREE.MathUtils.degToRad(
+                    isPhotonTurbine ? 12 : isObsidianHalo ? 8 : 4
+                );
                 wheel.rotation.x = restSpinAngle;
                 wheelStage.add(wheel);
 
@@ -6918,7 +6937,7 @@ export function createWelcomeModalController({
                     baseYaw: wheelStage.rotation.y,
                     restSpinAngle,
                     spinAngle: restSpinAngle,
-                    spinVelocity: isPhotonTurbine ? 1.16 : 0.88,
+                    spinVelocity: isPhotonTurbine ? 1.16 : isObsidianHalo ? 0.94 : 0.88,
                     floatOffset: i * 0.82,
                 };
 

@@ -43,6 +43,28 @@ export const PLAYER_WHEEL_PRESETS = Object.freeze([
         uiAccentColor: '#82f4ff',
         uiGlowColor: 'rgba(91, 233, 255, 0.38)',
     }),
+    Object.freeze({
+        id: 'obsidian-halo',
+        name: 'Obsidian Halo',
+        family: 'Mine Core',
+        description:
+            'Deep-dish blackout wheel with interrupted amber halo arcs, armored spokes and a volatile mine-heart hub.',
+        tag: 'Mythic',
+        layout: 'obsidian-halo',
+        tireColor: 0x05070a,
+        tireRoughness: 0.5,
+        tireMetalness: 0.24,
+        rimPrimaryColor: 0x848b98,
+        rimSecondaryColor: 0x2f3742,
+        rimBaseColor: 0x090d12,
+        accentColor: 0xffb347,
+        accentEmissiveColor: 0xff6a00,
+        accentEmissiveIntensity: 0.64,
+        rotorColor: 0x636c79,
+        hubColor: 0xd7dce4,
+        uiAccentColor: '#ffb547',
+        uiGlowColor: 'rgba(255, 154, 46, 0.38)',
+    }),
 ]);
 
 export const DEFAULT_PLAYER_WHEEL_PRESET_ID = PLAYER_WHEEL_PRESETS[0].id;

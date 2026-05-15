@@ -128,6 +128,38 @@ function clearGroupChildren(group) {
     }
 }
 
+function isPhotonTurbinePreset(wheelPreset) {
+    return wheelPreset?.layout === 'photon-turbine';
+}
+
+function isObsidianHaloPreset(wheelPreset) {
+    return wheelPreset?.layout === 'obsidian-halo';
+}
+
+function addSegmentedHaloRing(
+    parent,
+    {
+        radius = 0.28,
+        tube = 0.012,
+        segments = 5,
+        arc = Math.PI * 0.22,
+        spinOffset = 0,
+        positionX = 0,
+        material,
+    } = {}
+) {
+    for (let i = 0; i < segments; i += 1) {
+        const haloSegment = new THREE.Mesh(
+            new THREE.TorusGeometry(radius, tube, 10, 22, arc),
+            material
+        );
+        haloSegment.rotation.y = Math.PI / 2;
+        haloSegment.rotation.x = (Math.PI * 2 * i) / segments + spinOffset;
+        haloSegment.position.x = positionX;
+        parent.add(haloSegment);
+    }
+}
+
 function createTire(materials, wheelPreset) {
     const tireGroup = new THREE.Group();
 
@@ -164,7 +196,7 @@ function createTire(materials, wheelPreset) {
     rightShoulder.position.x *= -1;
     tireGroup.add(rightShoulder);
 
-    if (wheelPreset.layout === 'photon-turbine') {
+    if (isPhotonTurbinePreset(wheelPreset)) {
         const haloGeometry = new THREE.TorusGeometry(0.355, 0.01, 12, 52);
         const leftHalo = new THREE.Mesh(haloGeometry, materials.glow);
         leftHalo.rotation.y = Math.PI / 2;
@@ -174,6 +206,25 @@ function createTire(materials, wheelPreset) {
         const rightHalo = leftHalo.clone();
         rightHalo.position.x *= -1;
         tireGroup.add(rightHalo);
+    } else if (isObsidianHaloPreset(wheelPreset)) {
+        addSegmentedHaloRing(tireGroup, {
+            radius: 0.378,
+            tube: 0.009,
+            segments: 5,
+            arc: Math.PI * 0.24,
+            spinOffset: THREE.MathUtils.degToRad(10),
+            positionX: -(TIRE_WIDTH * 0.5 - 0.056),
+            material: materials.glow,
+        });
+        addSegmentedHaloRing(tireGroup, {
+            radius: 0.378,
+            tube: 0.009,
+            segments: 5,
+            arc: Math.PI * 0.24,
+            spinOffset: THREE.MathUtils.degToRad(10),
+            positionX: TIRE_WIDTH * 0.5 - 0.056,
+            material: materials.glow,
+        });
     }
 
     applyShadowFlags(tireGroup);
@@ -334,9 +385,124 @@ function createPhotonTurbineFace(side, mirror, materials) {
     return rim;
 }
 
+function createObsidianHaloFace(side, mirror, materials) {
+    const rim = new THREE.Group();
+
+    const outerLip = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.35, 0.35, 0.026, 56),
+        materials.rimBase
+    );
+    outerLip.rotation.z = Math.PI / 2;
+    rim.add(outerLip);
+
+    const lipTrim = new THREE.Mesh(
+        new THREE.TorusGeometry(0.322, 0.014, 10, 52),
+        materials.rimSecondary
+    );
+    lipTrim.rotation.y = Math.PI / 2;
+    rim.add(lipTrim);
+
+    const innerBarrel = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.304, 0.304, 0.054, 48),
+        materials.rimBase
+    );
+    innerBarrel.rotation.z = Math.PI / 2;
+    innerBarrel.position.x = -side * 0.016;
+    rim.add(innerBarrel);
+
+    const armorPlate = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.238, 0.238, 0.032, 34),
+        materials.rimPrimary
+    );
+    armorPlate.rotation.z = Math.PI / 2;
+    armorPlate.position.x = -side * 0.028;
+    rim.add(armorPlate);
+
+    addSegmentedHaloRing(rim, {
+        radius: 0.278,
+        tube: 0.012,
+        segments: 5,
+        arc: Math.PI * 0.2,
+        spinOffset: THREE.MathUtils.degToRad(14),
+        material: materials.glow,
+    });
+
+    const spokeCount = 5;
+    const spokeLength = 0.21;
+    const spokeGeometry = new THREE.BoxGeometry(0.074, spokeLength, 0.064);
+    spokeGeometry.translate(0, spokeLength * 0.5 - 0.022, 0);
+    const spokeInsetGeometry = new THREE.BoxGeometry(0.018, spokeLength * 0.74, 0.078);
+    spokeInsetGeometry.translate(0, spokeLength * 0.44 - 0.02, 0);
+
+    for (let i = 0; i < spokeCount; i += 1) {
+        const spoke = new THREE.Mesh(
+            spokeGeometry,
+            i % 2 === 0 ? materials.rimSecondary : materials.rimBase
+        );
+        spoke.rotation.x = (Math.PI * 2 * i) / spokeCount;
+        spoke.rotation.z = i % 2 === 0 ? 0.22 : 0.08;
+        spoke.position.x = -side * 0.014;
+        rim.add(spoke);
+
+        const spokeInset = new THREE.Mesh(spokeInsetGeometry, materials.accent);
+        spokeInset.rotation.x = spoke.rotation.x + THREE.MathUtils.degToRad(3);
+        spokeInset.rotation.z = spoke.rotation.z - 0.08;
+        spokeInset.position.x = -side * 0.003;
+        spokeInset.position.z = 0.016;
+        rim.add(spokeInset);
+    }
+
+    const coreRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.126, 0.016, 10, 32),
+        materials.rimSecondary
+    );
+    coreRing.rotation.y = Math.PI / 2;
+    coreRing.position.x = -side * 0.018;
+    rim.add(coreRing);
+
+    const coreFinGeometry = new THREE.BoxGeometry(0.024, 0.064, 0.03);
+    coreFinGeometry.translate(0, 0.085, 0);
+    for (let i = 0; i < 6; i += 1) {
+        const coreFin = new THREE.Mesh(
+            coreFinGeometry,
+            i % 2 === 0 ? materials.accent : materials.rimSecondary
+        );
+        coreFin.rotation.x = (Math.PI * 2 * i) / 6;
+        coreFin.position.x = -side * 0.01;
+        rim.add(coreFin);
+    }
+
+    const centerHub = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.098, 0.098, 0.094, 28),
+        materials.brakeHub
+    );
+    centerHub.rotation.z = Math.PI / 2;
+    centerHub.position.x = -side * 0.008;
+    rim.add(centerHub);
+
+    const centerCore = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.05, 0.05, 0.034, 24),
+        materials.glow
+    );
+    centerCore.rotation.z = Math.PI / 2;
+    centerCore.position.x = 0.008 - side * 0.01;
+    rim.add(centerCore);
+
+    rim.position.x = side * (TIRE_WIDTH * 0.5 + 0.01);
+    if (mirror) {
+        rim.scale.x *= -1;
+    }
+
+    applyShadowFlags(rim);
+    return rim;
+}
+
 function createRimFace(wheelPreset, materials, side, mirror) {
-    if (wheelPreset.layout === 'photon-turbine') {
+    if (isPhotonTurbinePreset(wheelPreset)) {
         return createPhotonTurbineFace(side, mirror, materials);
+    }
+    if (isObsidianHaloPreset(wheelPreset)) {
+        return createObsidianHaloFace(side, mirror, materials);
     }
     return createRazorTenFace(side, mirror, materials);
 }
@@ -366,7 +532,7 @@ function createBrakeDisk(materials, wheelPreset) {
     hub.position.x = 0.008;
     brakeGroup.add(hub);
 
-    if (wheelPreset.layout === 'photon-turbine') {
+    if (isPhotonTurbinePreset(wheelPreset)) {
         const glowDisc = new THREE.Mesh(
             new THREE.CylinderGeometry(0.12, 0.12, 0.01, 20),
             materials.glow
@@ -374,6 +540,26 @@ function createBrakeDisk(materials, wheelPreset) {
         glowDisc.rotation.z = Math.PI / 2;
         glowDisc.position.x = 0.03;
         brakeGroup.add(glowDisc);
+    } else if (isObsidianHaloPreset(wheelPreset)) {
+        const coreRing = new THREE.Mesh(
+            new THREE.TorusGeometry(0.148, 0.009, 10, 28),
+            materials.glow
+        );
+        coreRing.rotation.y = Math.PI / 2;
+        coreRing.position.x = 0.022;
+        brakeGroup.add(coreRing);
+
+        const boltGeometry = new THREE.BoxGeometry(0.018, 0.046, 0.016);
+        boltGeometry.translate(0, 0.126, 0);
+        for (let i = 0; i < 6; i += 1) {
+            const bolt = new THREE.Mesh(
+                boltGeometry,
+                i % 2 === 0 ? materials.accent : materials.rimSecondary
+            );
+            bolt.rotation.x = (Math.PI * 2 * i) / 6;
+            bolt.position.x = 0.018;
+            brakeGroup.add(bolt);
+        }
     }
 
     brakeGroup.position.set(0, 0, 0.1);
