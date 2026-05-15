@@ -1,18 +1,18 @@
 {
   "version": 1,
-  "updatedAt": "2026-05-15T12:06:45.948Z",
+  "updatedAt": "2026-05-15T21:39:06.921Z",
   "overrides": {
     "skin-1": {
-      "fileName": "skin-1-mp6vgjwc-k6fkaie0.png",
-      "originalFileName": "Screenshot 2026-05-15 at 15.05.13.png",
-      "mimeType": "image/png",
-      "updatedAt": "2026-05-15T12:06:45.948Z"
+      "fileName": "skin-1-mp7fwlk9-qsiv3ntz.webp",
+      "originalFileName": "Screenshot 2026-05-16 at 00.38.58.webp",
+      "mimeType": "image/webp",
+      "updatedAt": "2026-05-15T21:39:06.921Z"
     },
     "skin-2": {
-      "fileName": "skin-2-mp6v6jnx-5i9nqj22.png",
-      "originalFileName": "Screenshot 2026-05-14 at 22.43.30.png",
-      "mimeType": "image/png",
-      "updatedAt": "2026-05-15T11:58:59.085Z"
+      "fileName": "skin-2-mp7eyg8z-5hmbhg9o.jpg",
+      "originalFileName": "5825593.jpg",
+      "mimeType": "image/jpeg",
+      "updatedAt": "2026-05-15T21:12:33.731Z"
     },
     "skin-3": {
       "fileName": "skin-3-mp6vgcfk-29m29pp8.png",
@@ -21,10 +21,10 @@
       "updatedAt": "2026-05-15T12:06:36.272Z"
     },
     "skin-4": {
-      "fileName": "skin-4-mp6v70s4-ng51aa7q.png",
-      "originalFileName": "Screenshot 2026-05-15 at 13.36.23.png",
+      "fileName": "skin-4-mp7819rs-h06b55tx.png",
+      "originalFileName": "0616c762-9f79-4d0e-b129-bd32198bef81.png",
       "mimeType": "image/png",
-      "updatedAt": "2026-05-15T11:59:21.268Z"
+      "updatedAt": "2026-05-15T17:58:47.992Z"
     }
   },
   "customPresets": []

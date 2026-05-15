@@ -18,7 +18,7 @@ const DEFAULT_WHEEL_POSITIONS = [
     { x: 1.28, z: 1.8 },
 ];
 const ROOF_BRAND_NAME = 'Voltline';
-const REAR_MODEL_NAME = 'Minefield Drift';
+const REAR_MODEL_NAME = 'Minefielt Drift';
 const SUSPENSION_LINK_Y = 0.5;
 const ROOF_MODULE_LIFT = 0.03;
 const TAILLIGHT_RUNNING_LIGHT_FACTOR = 0.28;
@@ -1130,47 +1130,137 @@ function addVoltlineRoofBranding(
 
 function addPlayerNameDisplay(parent, playerName, bodyDimensions) {
     const plateTexture = createNameplateTexture(playerName);
-    const rearZ = bodyDimensions.depth * 0.5 + 0.05;
-    const plateY = 0.666;
+    const rearZ = bodyDimensions.depth * 0.5 + 0.072;
+    const plateY = 0.674;
 
     const badgeGroup = new THREE.Group();
     badgeGroup.position.set(0, 0, rearZ);
+    badgeGroup.rotation.x = -0.035;
     parent.add(badgeGroup);
 
-    const wordmarkWidth = bodyDimensions.width * 0.7;
-    const wordmarkHeight = 0.148;
+    const wordmarkWidth = bodyDimensions.width * 0.76;
+    const wordmarkHeight = 0.164;
+    const plaque = new THREE.Mesh(
+        createRoundedBoxGeometry(wordmarkWidth * 1.16, wordmarkHeight * 1.58, 0.03, 0.03, 5),
+        new THREE.MeshPhysicalMaterial({
+            color: 0x120d08,
+            emissive: new THREE.Color(0x23170a),
+            emissiveIntensity: 0.18,
+            metalness: 0.92,
+            roughness: 0.34,
+            clearcoat: 1,
+            clearcoatRoughness: 0.18,
+        })
+    );
+    plaque.position.set(0, plateY - 0.014, -0.006);
+    badgeGroup.add(plaque);
+
     const logoShadow = new THREE.Mesh(
-        new THREE.PlaneGeometry(wordmarkWidth * 1.01, wordmarkHeight * 1.01),
+        new THREE.PlaneGeometry(wordmarkWidth * 1.05, wordmarkHeight * 1.05),
         new THREE.MeshBasicMaterial({
             map: plateTexture,
             color: 0x000000,
             transparent: true,
-            opacity: 0.18,
+            opacity: 0.28,
             depthWrite: false,
             toneMapped: false,
         })
     );
-    logoShadow.position.set(0, plateY - 0.0025, 0.0055);
+    logoShadow.position.set(0, plateY - 0.01, 0.006);
+    logoShadow.renderOrder = 7;
     badgeGroup.add(logoShadow);
 
-    const wordmark = new THREE.Mesh(
+    const extrusionLayers = [
+        {
+            z: 0.008,
+            y: plateY - 0.006,
+            scale: 1.026,
+            color: 0x4b3013,
+            emissive: 0x1a0d04,
+            emissiveIntensity: 0.1,
+            metalness: 0.74,
+            roughness: 0.56,
+        },
+        {
+            z: 0.0115,
+            y: plateY - 0.0045,
+            scale: 1.02,
+            color: 0x6d461b,
+            emissive: 0x2a1405,
+            emissiveIntensity: 0.12,
+            metalness: 0.8,
+            roughness: 0.48,
+        },
+        {
+            z: 0.015,
+            y: plateY - 0.003,
+            scale: 1.014,
+            color: 0x926227,
+            emissive: 0x392009,
+            emissiveIntensity: 0.14,
+            metalness: 0.86,
+            roughness: 0.38,
+        },
+    ];
+
+    for (let i = 0; i < extrusionLayers.length; i += 1) {
+        const layer = extrusionLayers[i];
+        const layerMesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(wordmarkWidth * layer.scale, wordmarkHeight * layer.scale),
+            new THREE.MeshPhysicalMaterial({
+                map: plateTexture,
+                transparent: true,
+                alphaTest: 0.08,
+                color: layer.color,
+                emissive: new THREE.Color(layer.emissive),
+                emissiveIntensity: layer.emissiveIntensity,
+                metalness: layer.metalness,
+                roughness: layer.roughness,
+                clearcoat: 0.86,
+                clearcoatRoughness: 0.22,
+                depthWrite: false,
+            })
+        );
+        layerMesh.position.set(0, layer.y, layer.z);
+        layerMesh.renderOrder = 8 + i;
+        badgeGroup.add(layerMesh);
+    }
+
+    const wordmarkFace = new THREE.Mesh(
         new THREE.PlaneGeometry(wordmarkWidth, wordmarkHeight),
         new THREE.MeshPhysicalMaterial({
             map: plateTexture,
             transparent: true,
             alphaTest: 0.08,
-            color: 0xfff7e8,
-            emissive: new THREE.Color(0x7f6346),
-            emissiveIntensity: 0.34,
-            metalness: 0.3,
-            roughness: 0.48,
-            clearcoat: 0.95,
-            clearcoatRoughness: 0.22,
+            color: 0xffe9be,
+            emissive: new THREE.Color(0xa16a1d),
+            emissiveIntensity: 0.28,
+            metalness: 0.92,
+            roughness: 0.2,
+            clearcoat: 1,
+            clearcoatRoughness: 0.08,
             depthWrite: false,
         })
     );
-    wordmark.position.set(0, plateY, 0.009);
-    badgeGroup.add(wordmark);
+    wordmarkFace.position.set(0, plateY, 0.02);
+    wordmarkFace.renderOrder = 12;
+    badgeGroup.add(wordmarkFace);
+
+    const wordmarkSheen = new THREE.Mesh(
+        new THREE.PlaneGeometry(wordmarkWidth * 1.02, wordmarkHeight * 1.02),
+        new THREE.MeshBasicMaterial({
+            map: plateTexture,
+            color: 0xfff8de,
+            transparent: true,
+            opacity: 0.22,
+            depthWrite: false,
+            toneMapped: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    wordmarkSheen.position.set(0, plateY + 0.002, 0.024);
+    wordmarkSheen.renderOrder = 13;
+    badgeGroup.add(wordmarkSheen);
 
     return badgeGroup;
 }

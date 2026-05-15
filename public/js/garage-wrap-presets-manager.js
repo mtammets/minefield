@@ -1,6 +1,9 @@
 const GARAGE_WRAP_PRESETS_API_PATH = '/api/garage-wrap-presets';
 const GARAGE_WRAP_PRESET_UPLOAD_ACCEPT = 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp';
 const GARAGE_WRAP_PRESET_MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+const GARAGE_WRAP_PRESET_OUTPUT_WIDTH_PX = 2048;
+const GARAGE_WRAP_PRESET_OUTPUT_HEIGHT_PX = 1024;
+const GARAGE_WRAP_PRESET_OUTPUT_QUALITY = 0.9;
 
 export const GARAGE_WRAP_PRESETS_UPDATED_EVENT = 'silentdrift:garage-wrap-presets-updated';
 
@@ -116,6 +119,7 @@ export async function uploadGarageWrapPresetImage(presetId, file) {
     if (!normalizedPresetId) {
         throw new Error('Choose a valid preset slot first.');
     }
+    const preparedUpload = await prepareGarageWrapPresetUpload(file);
 
     const response = await window.fetch(
         `${GARAGE_WRAP_PRESETS_API_PATH}/${encodeURIComponent(normalizedPresetId)}`,
@@ -124,10 +128,12 @@ export async function uploadGarageWrapPresetImage(presetId, file) {
             cache: 'no-store',
             headers: {
                 Accept: 'application/json',
-                'Content-Type': file.type || 'application/octet-stream',
-                'X-Upload-Filename': encodeURIComponent(file.name || normalizedPresetId),
+                'Content-Type': preparedUpload.contentType,
+                'X-Upload-Filename': encodeURIComponent(
+                    preparedUpload.fileName || file.name || normalizedPresetId
+                ),
             },
-            body: file,
+            body: preparedUpload.blob,
         }
     );
     const payload = await safeReadJson(response);
@@ -141,16 +147,19 @@ export async function uploadGarageWrapPresetImage(presetId, file) {
 
 export async function createGarageWrapPresetImage(file) {
     validateGarageWrapPresetFile(file);
+    const preparedUpload = await prepareGarageWrapPresetUpload(file);
 
     const response = await window.fetch(GARAGE_WRAP_PRESETS_API_PATH, {
         method: 'POST',
         cache: 'no-store',
         headers: {
             Accept: 'application/json',
-            'Content-Type': file.type || 'application/octet-stream',
-            'X-Upload-Filename': encodeURIComponent(file.name || 'garage-wrap-preset'),
+            'Content-Type': preparedUpload.contentType,
+            'X-Upload-Filename': encodeURIComponent(
+                preparedUpload.fileName || file.name || 'garage-wrap-preset'
+            ),
         },
-        body: file,
+        body: preparedUpload.blob,
     });
     const payload = await safeReadJson(response);
     if (!response.ok || !payload?.ok) {
@@ -272,6 +281,89 @@ function validateGarageWrapPresetFile(file) {
             )}MB or smaller.`
         );
     }
+}
+
+async function prepareGarageWrapPresetUpload(file) {
+    const image = await loadImageFromFile(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = GARAGE_WRAP_PRESET_OUTPUT_WIDTH_PX;
+    canvas.height = GARAGE_WRAP_PRESET_OUTPUT_HEIGHT_PX;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        throw new Error('Could not prepare the selected wrap preset.');
+    }
+
+    const sourceWidth = Math.max(1, image.naturalWidth || image.width || 1);
+    const sourceHeight = Math.max(1, image.naturalHeight || image.height || 1);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const scale = Math.min(
+        1,
+        GARAGE_WRAP_PRESET_OUTPUT_WIDTH_PX / Math.max(1, sourceWidth),
+        GARAGE_WRAP_PRESET_OUTPUT_HEIGHT_PX / Math.max(1, sourceHeight)
+    );
+    const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+    const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+    if (canvas.width !== drawWidth || canvas.height !== drawHeight) {
+        canvas.width = drawWidth;
+        canvas.height = drawHeight;
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+    }
+    ctx.drawImage(image, 0, 0, drawWidth, drawHeight);
+
+    const webpBlob = await canvasToBlob(canvas, 'image/webp', GARAGE_WRAP_PRESET_OUTPUT_QUALITY);
+    const jpegBlob =
+        webpBlob || (await canvasToBlob(canvas, 'image/jpeg', GARAGE_WRAP_PRESET_OUTPUT_QUALITY));
+    if (!jpegBlob) {
+        throw new Error('Could not encode the selected wrap preset.');
+    }
+    if (jpegBlob.size > GARAGE_WRAP_PRESET_MAX_UPLOAD_BYTES) {
+        throw new Error(
+            `Garage wrap preset uploads must be ${Math.round(
+                GARAGE_WRAP_PRESET_MAX_UPLOAD_BYTES / (1024 * 1024)
+            )}MB or smaller.`
+        );
+    }
+
+    return {
+        blob: jpegBlob,
+        contentType: jpegBlob.type || 'image/jpeg',
+        fileName: replaceGarageWrapPresetFileExtension(
+            file?.name || 'garage-wrap-preset',
+            jpegBlob.type === 'image/webp' ? '.webp' : '.jpg'
+        ),
+    };
+}
+
+function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+        const objectUrl = URL.createObjectURL(file);
+        const image = new Image();
+        image.onload = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(image);
+        };
+        image.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            reject(new Error('The selected file is not a valid image.'));
+        };
+        image.src = objectUrl;
+    });
+}
+
+function canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve) => {
+        canvas.toBlob((blob) => resolve(blob || null), type, quality);
+    });
+}
+
+function replaceGarageWrapPresetFileExtension(fileName, nextExtension) {
+    const baseName =
+        typeof fileName === 'string' && fileName.trim() ? fileName.trim() : 'garage-wrap-preset';
+    return `${baseName.replace(/\.[^.]+$/u, '')}${nextExtension}`;
 }
 
 function sanitizeGarageWrapPresetId(value) {

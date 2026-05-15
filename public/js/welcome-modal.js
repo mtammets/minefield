@@ -105,6 +105,48 @@ const WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY = 0.011;
 const WELCOME_GARAGE_PREVIEW_PITCH_DRAG_SENSITIVITY = 0.006;
 const WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MIN = -0.18;
 const WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MAX = 0.42;
+const WELCOME_SHOWROOM_CINEMATIC_IDLE_MS = 7000;
+const WELCOME_SHOWROOM_CINEMATIC_COOLDOWN_MS = 14000;
+const WELCOME_SHOWROOM_CINEMATIC_BLEND_IN_RATE = 2.8;
+const WELCOME_SHOWROOM_CINEMATIC_BLEND_OUT_RATE = 4.1;
+const WELCOME_SHOWROOM_CINEMATIC_SHOTS = [
+    {
+        durationSec: 3.6,
+        positionStart: [0.86, 0.34, 1.78],
+        positionEnd: [0.72, 0.38, 1.56],
+        lookAtStart: [0.14, 0.24, 0.52],
+        lookAtEnd: [0.1, 0.25, 0.36],
+        fovStart: 30,
+        fovEnd: 28,
+    },
+    {
+        durationSec: 3.3,
+        positionStart: [1.28, 0.48, 0.74],
+        positionEnd: [1.1, 0.44, 0.9],
+        lookAtStart: [0.52, 0.28, 0.18],
+        lookAtEnd: [0.42, 0.27, 0.24],
+        fovStart: 31,
+        fovEnd: 29,
+    },
+    {
+        durationSec: 3.8,
+        positionStart: [-0.08, 1.08, -1.18],
+        positionEnd: [0.08, 1.02, -0.84],
+        lookAtStart: [-0.02, 0.34, -0.12],
+        lookAtEnd: [0.04, 0.31, 0.08],
+        fovStart: 30,
+        fovEnd: 28,
+    },
+    {
+        durationSec: 3.4,
+        positionStart: [-1.02, 0.38, -1.58],
+        positionEnd: [-0.88, 0.42, -1.36],
+        lookAtStart: [-0.16, 0.25, -0.34],
+        lookAtEnd: [-0.1, 0.26, -0.2],
+        fovStart: 31,
+        fovEnd: 29,
+    },
+];
 const WELCOME_DONATE_OPEN_EVENT = 'silentdrift:welcome-donate-open';
 const WELCOME_DONATE_CLOSE_EVENT = 'silentdrift:welcome-donate-close';
 const WELCOME_ONLINE_OPEN_EVENT = 'silentdrift:welcome-online-open';
@@ -615,6 +657,13 @@ export function createWelcomeModalController({
         previewCameraBasePosition.y,
         Math.hypot(previewCameraBasePosition.x, previewCameraBasePosition.z)
     );
+    const previewCameraBaseFov = previewCamera.fov;
+    const previewCameraBaseTargetPosition = new THREE.Vector3();
+    const previewCameraBaseLookTarget = new THREE.Vector3();
+    const previewCameraCinematicTargetPosition = new THREE.Vector3();
+    const previewCameraCinematicLookTarget = new THREE.Vector3();
+    const previewCameraResolvedPosition = new THREE.Vector3();
+    const previewCameraResolvedLookTarget = new THREE.Vector3();
     const swapOutgoingDistance = previewRadius * 3.6;
     const swapIncomingDistance = previewRadius * 3.8;
     const swapCurveOffset = 0;
@@ -642,6 +691,16 @@ export function createWelcomeModalController({
         settleDistance: swapSettleDistance,
         settleYawOffset: swapSettleYawOffset,
         queue: null,
+    };
+    const showroomCinematicState = {
+        active: false,
+        shotIndex: 0,
+        shotTime: 0,
+        sequenceCount: 0,
+        blend: 0,
+        baseYaw: previewSpinYaw,
+        lastActivityAtMs: performance.now(),
+        nextEligibleAtMs: performance.now() + WELCOME_SHOWROOM_CINEMATIC_IDLE_MS,
     };
 
     previewCamera.position.copy(previewCameraBasePosition);
@@ -707,6 +766,7 @@ export function createWelcomeModalController({
         setWelcomeDonateOpen(false);
     });
     document.addEventListener('keydown', handleWelcomeGlobalKeydown);
+    rootEl.addEventListener('pointerdown', handleWelcomeActivitySignal);
     rootEl.addEventListener('pointermove', handleWelcomeActivitySignal);
     rootEl.addEventListener('click', handleWelcomeActivitySignal);
     rootEl.addEventListener('wheel', handleWelcomeActivitySignal, { passive: true });
@@ -1181,9 +1241,11 @@ export function createWelcomeModalController({
             applySelectedWheelPreset(selectedWheelPresetId, {
                 emitChange: false,
             });
+            markShowroomCinematicActivity();
             syncPreviewSize();
             updatePreviewVisualState(1 / 60);
             updateShowroomAtmosphere(0);
+            updateShowroomCinematicState(0);
             applyPreviewPose();
             renderPreview();
             schedulePreviewLoadingReady();
@@ -1205,6 +1267,7 @@ export function createWelcomeModalController({
             closeOnlineModeFlow({ clearSelection: true });
             stopPreviewDrag();
             syncPreviewInteractionUi();
+            stopShowroomCinematicSequence({ resetBlend: true });
             rootEl.hidden = true;
             stopWelcomeProfileScreensaver();
             stopWalletRevealPresentation({
@@ -1234,6 +1297,7 @@ export function createWelcomeModalController({
             updateTransition(frameDt);
             updatePreviewVisualState(frameDt);
             updateShowroomAtmosphere(frameDt);
+            updateShowroomCinematicState(frameDt);
             updateTaglineRotation(frameDt);
             updateWheelPresetPreviewStages(frameDt);
             applyPreviewPose();
@@ -1635,6 +1699,7 @@ export function createWelcomeModalController({
         if (rootEl.hidden || profileScreensaverState.automationDepth > 0) {
             return;
         }
+        markShowroomCinematicActivity();
         stopWelcomeProfileScreensaver({ restoreProfile: true });
         syncWelcomeProfileScreensaverForCurrentView();
     }
@@ -5420,7 +5485,12 @@ export function createWelcomeModalController({
     }
 
     function shouldPausePreviewSpin() {
-        return isGarageShowcaseOpen() || previewInteractionState.pointerId !== null;
+        return (
+            isGarageShowcaseOpen() ||
+            previewInteractionState.pointerId !== null ||
+            showroomCinematicState.active ||
+            showroomCinematicState.blend > 0.001
+        );
     }
 
     function syncPreviewInteractionUi() {
@@ -5456,6 +5526,7 @@ export function createWelcomeModalController({
         ) {
             return;
         }
+        handleWelcomeActivitySignal();
         const captureElement =
             event.currentTarget instanceof HTMLElement ? event.currentTarget : previewCanvasEl;
         previewInteractionState.pointerId = event.pointerId;
@@ -5600,6 +5671,157 @@ export function createWelcomeModalController({
 
         showroomAtmosphere.particles.rotation.y += safeDt * 0.014;
         showroomAtmosphere.particles.rotation.x = Math.sin(motionTime * 0.12) * 0.01;
+    }
+
+    function canRunShowroomCinematic() {
+        return Boolean(
+            !rootEl.hidden &&
+            !launchSequenceState.active &&
+            !introVideoState.active &&
+            !transition.active &&
+            (previewLoadingState.hidden || previewLoadingState.ready) &&
+            !welcomeLeaderboardOpen &&
+            !welcomeSettingsOpen &&
+            !welcomeDonateOpen &&
+            !isWelcomeOnlineOverlayOpen() &&
+            !avatarEditorState.open &&
+            !accountToolsOpen &&
+            !walletPanelOpen &&
+            !isGarageShowcaseOpen() &&
+            previewInteractionState.pointerId === null
+        );
+    }
+
+    function stopShowroomCinematicSequence({ resetBlend = false } = {}) {
+        showroomCinematicState.active = false;
+        showroomCinematicState.shotTime = 0;
+        if (resetBlend) {
+            showroomCinematicState.blend = 0;
+        }
+    }
+
+    function markShowroomCinematicActivity(nowMs = performance.now()) {
+        showroomCinematicState.lastActivityAtMs = nowMs;
+        showroomCinematicState.nextEligibleAtMs = nowMs + WELCOME_SHOWROOM_CINEMATIC_IDLE_MS;
+        stopShowroomCinematicSequence({ resetBlend: true });
+    }
+
+    function startShowroomCinematicSequence(nowMs = performance.now()) {
+        showroomCinematicState.active = true;
+        showroomCinematicState.shotIndex =
+            showroomCinematicState.sequenceCount % WELCOME_SHOWROOM_CINEMATIC_SHOTS.length;
+        showroomCinematicState.shotTime = 0;
+        showroomCinematicState.baseYaw = previewSpinYaw;
+        showroomCinematicState.nextEligibleAtMs = nowMs + WELCOME_SHOWROOM_CINEMATIC_COOLDOWN_MS;
+    }
+
+    function finishShowroomCinematicSequence(nowMs = performance.now()) {
+        showroomCinematicState.sequenceCount += 1;
+        showroomCinematicState.nextEligibleAtMs = nowMs + WELCOME_SHOWROOM_CINEMATIC_COOLDOWN_MS;
+        stopShowroomCinematicSequence();
+    }
+
+    function updateShowroomCinematicState(dt, nowMs = performance.now()) {
+        const canRun = canRunShowroomCinematic();
+        if (!canRun) {
+            stopShowroomCinematicSequence();
+        } else if (
+            !showroomCinematicState.active &&
+            nowMs >= showroomCinematicState.nextEligibleAtMs &&
+            nowMs - showroomCinematicState.lastActivityAtMs >= WELCOME_SHOWROOM_CINEMATIC_IDLE_MS
+        ) {
+            startShowroomCinematicSequence(nowMs);
+        }
+
+        if (showroomCinematicState.active) {
+            const currentShot =
+                WELCOME_SHOWROOM_CINEMATIC_SHOTS[showroomCinematicState.shotIndex] ||
+                WELCOME_SHOWROOM_CINEMATIC_SHOTS[0];
+            showroomCinematicState.shotTime += dt;
+            if (showroomCinematicState.shotTime >= currentShot.durationSec) {
+                showroomCinematicState.shotTime = 0;
+                showroomCinematicState.shotIndex += 1;
+                if (showroomCinematicState.shotIndex >= WELCOME_SHOWROOM_CINEMATIC_SHOTS.length) {
+                    showroomCinematicState.shotIndex = WELCOME_SHOWROOM_CINEMATIC_SHOTS.length - 1;
+                    showroomCinematicState.shotTime = currentShot.durationSec;
+                    finishShowroomCinematicSequence(nowMs);
+                }
+            }
+        }
+
+        const blendTarget = showroomCinematicState.active ? 1 : 0;
+        const blendRate =
+            blendTarget > showroomCinematicState.blend
+                ? WELCOME_SHOWROOM_CINEMATIC_BLEND_IN_RATE
+                : WELCOME_SHOWROOM_CINEMATIC_BLEND_OUT_RATE;
+        showroomCinematicState.blend = THREE.MathUtils.lerp(
+            showroomCinematicState.blend,
+            blendTarget,
+            1 - Math.exp(-blendRate * dt)
+        );
+        if (showroomCinematicState.blend < 0.001) {
+            showroomCinematicState.blend = 0;
+        }
+    }
+
+    function resolveShowroomCinematicPose(accountProfileScale = 1) {
+        const shot =
+            WELCOME_SHOWROOM_CINEMATIC_SHOTS[showroomCinematicState.shotIndex] ||
+            WELCOME_SHOWROOM_CINEMATIC_SHOTS[0];
+        const durationSec = Math.max(shot.durationSec || 0, 0.001);
+        const progress = clampNumber(showroomCinematicState.shotTime / durationSec, 0, 1);
+        const eased = easeInOutCubic(progress);
+        const yaw = showroomCinematicState.baseYaw;
+        const forwardX = -Math.sin(yaw);
+        const forwardZ = -Math.cos(yaw);
+        const rightX = Math.cos(yaw);
+        const rightZ = -Math.sin(yaw);
+
+        const localPositionRight =
+            THREE.MathUtils.lerp(shot.positionStart[0], shot.positionEnd[0], eased) *
+            previewRadius *
+            accountProfileScale;
+        const localPositionUp =
+            THREE.MathUtils.lerp(shot.positionStart[1], shot.positionEnd[1], eased) *
+            previewRadius *
+            accountProfileScale;
+        const localPositionForward =
+            THREE.MathUtils.lerp(shot.positionStart[2], shot.positionEnd[2], eased) *
+            previewRadius *
+            accountProfileScale;
+        const localLookAtRight =
+            THREE.MathUtils.lerp(shot.lookAtStart[0], shot.lookAtEnd[0], eased) *
+            previewRadius *
+            accountProfileScale;
+        const localLookAtUp =
+            THREE.MathUtils.lerp(shot.lookAtStart[1], shot.lookAtEnd[1], eased) *
+            previewRadius *
+            accountProfileScale;
+        const localLookAtForward =
+            THREE.MathUtils.lerp(shot.lookAtStart[2], shot.lookAtEnd[2], eased) *
+            previewRadius *
+            accountProfileScale;
+
+        previewCameraCinematicTargetPosition.set(
+            rightX * localPositionRight + forwardX * localPositionForward,
+            localPositionUp,
+            rightZ * localPositionRight + forwardZ * localPositionForward
+        );
+        previewCameraCinematicLookTarget.set(
+            rightX * localLookAtRight + forwardX * localLookAtForward,
+            localLookAtUp,
+            rightZ * localLookAtRight + forwardZ * localLookAtForward
+        );
+
+        return THREE.MathUtils.lerp(shot.fovStart, shot.fovEnd, eased);
+    }
+
+    function updatePreviewCameraFov(nextFov) {
+        if (Math.abs(previewCamera.fov - nextFov) < 0.01) {
+            return;
+        }
+        previewCamera.fov = nextFov;
+        previewCamera.updateProjectionMatrix();
     }
 
     function updateTaglineRotation(dt) {
@@ -5945,16 +6167,36 @@ export function createWelcomeModalController({
         const cameraBaseX = Math.sin(previewCameraBaseAzimuth) * cameraHorizontalRadius;
         const cameraBaseY = Math.sin(cameraPitch) * previewCameraBaseDistance;
         const cameraBaseZ = Math.cos(cameraPitch) * cameraHorizontalRadius;
-        previewCamera.position.set(
+        previewCameraBaseTargetPosition.set(
             cameraBaseX + cameraOffsetX,
             cameraBaseY + accountCameraHeightOffset,
             cameraBaseZ + accountCameraDepthOffset
         );
-        previewCamera.lookAt(
+        previewCameraBaseLookTarget.set(
             previewLookAt.x + cameraOffsetX * 0.15,
             previewLookAt.y + accountProfileFramingLift,
             previewLookAt.z
         );
+        let targetCameraFov = previewCameraBaseFov;
+        if (showroomCinematicState.blend > 0.001) {
+            targetCameraFov = THREE.MathUtils.lerp(
+                previewCameraBaseFov,
+                resolveShowroomCinematicPose(accountProfileScale),
+                showroomCinematicState.blend
+            );
+            previewCameraResolvedPosition
+                .copy(previewCameraBaseTargetPosition)
+                .lerp(previewCameraCinematicTargetPosition, showroomCinematicState.blend);
+            previewCameraResolvedLookTarget
+                .copy(previewCameraBaseLookTarget)
+                .lerp(previewCameraCinematicLookTarget, showroomCinematicState.blend);
+        } else {
+            previewCameraResolvedPosition.copy(previewCameraBaseTargetPosition);
+            previewCameraResolvedLookTarget.copy(previewCameraBaseLookTarget);
+        }
+        previewCamera.position.copy(previewCameraResolvedPosition);
+        previewCamera.lookAt(previewCameraResolvedLookTarget);
+        updatePreviewCameraFov(targetCameraFov);
 
         const outgoingVehicle =
             previewVehicles[transition.outgoingVehicleIndex] || previewVehicles[0];

@@ -16,6 +16,7 @@ const DEFAULT_WHEEL_POSITIONS = Object.freeze([
     Object.freeze({ x: -1.28, z: 1.8 }),
     Object.freeze({ x: 1.28, z: 1.8 }),
 ]);
+const REAR_MODEL_NAME = 'Minefielt Drift';
 const WRAP_TEXTURE_PROMISE_CACHE = new Map();
 
 export function addFormulaBody(car, bodyConfig = {}) {
@@ -343,9 +344,9 @@ export function addFormulaBody(car, bodyConfig = {}) {
     energyStrip.position.set(0, 0.96, 0.72);
     roofAssemblyGroup.add(energyStrip);
 
-    const rearNamePlate = createDriverPlate(displayName, 0.6, 0.16);
-    rearNamePlate.position.set(0, 0.88, 1.52);
-    rearNamePlate.rotation.x = -0.08;
+    const rearNamePlate = createRearWordmarkPlate(REAR_MODEL_NAME, 0.86, 0.17);
+    rearNamePlate.position.set(0, 0.58, 1.56);
+    rearNamePlate.rotation.x = -0.035;
     nameplateAssemblyGroup.add(rearNamePlate);
 
     const noseBadge = createDriverPlate('APEX', 0.26, 0.12);
@@ -637,6 +638,191 @@ function createDriverPlate(text, width = 0.5, height = 0.14) {
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     return mesh;
+}
+
+function createRearWordmarkTexture(text) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1536;
+    canvas.height = 320;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+        return new THREE.CanvasTexture(canvas);
+    }
+
+    const label =
+        String(text || REAR_MODEL_NAME)
+            .trim()
+            .replace(/\s+/g, ' ') || REAR_MODEL_NAME;
+    const fontFamily = "'Cormorant Garamond', 'Trajan Pro', 'Times New Roman', serif";
+    let fontSize = 204;
+    while (fontSize > 120) {
+        ctx.font = `700 italic ${fontSize}px ${fontFamily}`;
+        if (ctx.measureText(label).width <= canvas.width * 0.9) {
+            break;
+        }
+        fontSize -= 4;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `700 italic ${fontSize}px ${fontFamily}`;
+    const centerX = canvas.width * 0.5;
+    const centerY = canvas.height * 0.56;
+
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
+    ctx.shadowBlur = 22;
+    ctx.shadowOffsetY = 6;
+    ctx.strokeStyle = 'rgba(42, 20, 6, 0.7)';
+    ctx.lineWidth = Math.max(2, fontSize * 0.04);
+    ctx.strokeText(label, centerX, centerY);
+
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetY = 0;
+    const metallicGradient = ctx.createLinearGradient(0, centerY - fontSize * 0.7, 0, centerY);
+    metallicGradient.addColorStop(0, '#fff7dc');
+    metallicGradient.addColorStop(0.24, '#ffe8a8');
+    metallicGradient.addColorStop(0.55, '#d9a84a');
+    metallicGradient.addColorStop(1, '#7f4d10');
+    ctx.fillStyle = metallicGradient;
+    ctx.fillText(label, centerX, centerY);
+
+    ctx.globalCompositeOperation = 'source-atop';
+    const gloss = ctx.createLinearGradient(0, centerY - fontSize * 0.62, 0, centerY);
+    gloss.addColorStop(0, 'rgba(255, 255, 255, 0.82)');
+    gloss.addColorStop(0.45, 'rgba(255, 255, 255, 0.18)');
+    gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = gloss;
+    ctx.fillRect(0, centerY - fontSize * 0.7, canvas.width, fontSize * 0.54);
+
+    const lowerShade = ctx.createLinearGradient(
+        0,
+        centerY - fontSize * 0.1,
+        0,
+        centerY + fontSize * 0.66
+    );
+    lowerShade.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    lowerShade.addColorStop(1, 'rgba(58, 28, 8, 0.34)');
+    ctx.fillStyle = lowerShade;
+    ctx.fillRect(0, centerY - fontSize * 0.08, canvas.width, fontSize * 0.78);
+    ctx.globalCompositeOperation = 'source-over';
+
+    ctx.strokeStyle = 'rgba(255, 246, 214, 0.5)';
+    ctx.lineWidth = Math.max(1, fontSize * 0.012);
+    ctx.strokeText(label, centerX, centerY);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = 8;
+    texture.needsUpdate = true;
+    return texture;
+}
+
+function createRearWordmarkPlate(text, width = 0.86, height = 0.17) {
+    const texture = createRearWordmarkTexture(text);
+    const group = new THREE.Group();
+
+    const shadow = new THREE.Mesh(
+        new THREE.PlaneGeometry(width * 1.03, height * 1.08),
+        new THREE.MeshBasicMaterial({
+            map: texture,
+            color: 0x000000,
+            transparent: true,
+            opacity: 0.26,
+            depthWrite: false,
+            toneMapped: false,
+        })
+    );
+    shadow.position.set(0, -0.008, 0.006);
+    shadow.renderOrder = 7;
+    group.add(shadow);
+
+    const layers = [
+        {
+            z: 0.008,
+            y: -0.005,
+            scale: 1.028,
+            color: 0x513214,
+            emissive: 0x190c04,
+            emissiveIntensity: 0.1,
+            metalness: 0.72,
+            roughness: 0.56,
+        },
+        {
+            z: 0.011,
+            y: -0.003,
+            scale: 1.018,
+            color: 0x7b4b1a,
+            emissive: 0x2a1405,
+            emissiveIntensity: 0.12,
+            metalness: 0.8,
+            roughness: 0.42,
+        },
+    ];
+
+    for (let i = 0; i < layers.length; i += 1) {
+        const layer = layers[i];
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(width * layer.scale, height * layer.scale),
+            new THREE.MeshPhysicalMaterial({
+                map: texture,
+                transparent: true,
+                alphaTest: 0.08,
+                color: layer.color,
+                emissive: new THREE.Color(layer.emissive),
+                emissiveIntensity: layer.emissiveIntensity,
+                metalness: layer.metalness,
+                roughness: layer.roughness,
+                clearcoat: 0.9,
+                clearcoatRoughness: 0.18,
+                depthWrite: false,
+            })
+        );
+        mesh.position.set(0, layer.y, layer.z);
+        mesh.renderOrder = 8 + i;
+        group.add(mesh);
+    }
+
+    const face = new THREE.Mesh(
+        new THREE.PlaneGeometry(width, height),
+        new THREE.MeshPhysicalMaterial({
+            map: texture,
+            transparent: true,
+            alphaTest: 0.08,
+            color: 0xffe6b3,
+            emissive: new THREE.Color(0x9a6519),
+            emissiveIntensity: 0.24,
+            metalness: 0.92,
+            roughness: 0.2,
+            clearcoat: 1,
+            clearcoatRoughness: 0.08,
+            depthWrite: false,
+        })
+    );
+    face.position.set(0, 0, 0.016);
+    face.renderOrder = 11;
+    group.add(face);
+
+    const sheen = new THREE.Mesh(
+        new THREE.PlaneGeometry(width * 1.02, height * 1.02),
+        new THREE.MeshBasicMaterial({
+            map: texture,
+            color: 0xfff6d9,
+            transparent: true,
+            opacity: 0.18,
+            depthWrite: false,
+            toneMapped: false,
+            blending: THREE.AdditiveBlending,
+        })
+    );
+    sheen.position.set(0, 0.002, 0.02);
+    sheen.renderOrder = 12;
+    group.add(sheen);
+
+    return group;
 }
 
 function loadUserWrapTexture(url) {
