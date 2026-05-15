@@ -6,6 +6,7 @@ import {
     normalizePlayerEconomyState,
     resolvePlayerEconomyStateFromSource,
 } from './player-economy.js';
+import { resolvePlayerWheelPresetId, sanitizePlayerWheelPresetId } from './wheel-presets.js';
 
 const MP_NAME_STORAGE_KEY = 'silentdrift-mp-player-name';
 const DEFAULT_DRIVER_NAME = 'Driver';
@@ -673,6 +674,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     currentSession?.user,
                     {
                         car_wrap_path: nextCarWrapPath,
+                        garage_wrap_preset_id: '',
                     },
                     state.displayName
                 );
@@ -806,6 +808,82 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 return {
                     ok: true,
                     settings: normalizedSettings,
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    error: normalizeSupabaseAuthError(error),
+                };
+            }
+        },
+        async updateGaragePreferences(preferences = null) {
+            await initializeInternalSafe();
+            if (!supabaseClient || !state.enabled) {
+                return {
+                    ok: false,
+                    error: resolveAuthUnavailableMessage(),
+                };
+            }
+
+            if (!state.authenticated || !state.userId) {
+                return {
+                    ok: false,
+                    error: 'Sign in before saving garage settings.',
+                };
+            }
+
+            const source = preferences && typeof preferences === 'object' ? preferences : {};
+            const hasGarageWrapPresetUpdate = Object.prototype.hasOwnProperty.call(
+                source,
+                'garageWrapPresetId'
+            );
+            const hasWheelPresetUpdate = Object.prototype.hasOwnProperty.call(
+                source,
+                'wheelPresetId'
+            );
+            if (!hasGarageWrapPresetUpdate && !hasWheelPresetUpdate) {
+                return {
+                    ok: true,
+                    ignored: true,
+                };
+            }
+
+            const metadataUpdates = {};
+            if (hasGarageWrapPresetUpdate) {
+                metadataUpdates.garage_wrap_preset_id = sanitizeGarageWrapPresetId(
+                    source.garageWrapPresetId || ''
+                );
+            }
+            if (hasWheelPresetUpdate) {
+                metadataUpdates.wheel_preset_id = resolvePlayerWheelPresetId(
+                    source.wheelPresetId || ''
+                );
+            }
+
+            try {
+                const metadata = buildUpdatedUserMetadata(
+                    currentSession?.user,
+                    metadataUpdates,
+                    state.displayName
+                );
+                const { data, error } = await supabaseClient.auth.updateUser({
+                    data: metadata,
+                });
+                if (error) {
+                    throw error;
+                }
+
+                applySession(mergeCurrentSessionUser(data?.user), {
+                    preserveStatus: true,
+                });
+                return {
+                    ok: true,
+                    garageWrapPresetId: hasGarageWrapPresetUpdate
+                        ? metadataUpdates.garage_wrap_preset_id
+                        : state.accountGarageWrapPresetId,
+                    wheelPresetId: hasWheelPresetUpdate
+                        ? metadataUpdates.wheel_preset_id
+                        : state.accountWheelPresetId,
                 };
             } catch (error) {
                 return {
@@ -1136,6 +1214,14 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         const displayName = resolveDisplayName(user, email);
         const avatarStoragePath = authenticated ? resolveProfileImagePath(user) : '';
         const carWrapStoragePath = authenticated ? resolveCarWrapPath(user) : '';
+        const accountGarageWrapPresetConfigured = authenticated
+            ? hasUserMetadataField(user?.user_metadata, 'garage_wrap_preset_id')
+            : false;
+        const accountGarageWrapPresetId = authenticated ? resolveGarageWrapPresetId(user) : '';
+        const accountWheelPresetConfigured = authenticated
+            ? hasUserMetadataField(user?.user_metadata, 'wheel_preset_id')
+            : false;
+        const accountWheelPresetId = authenticated ? resolveWheelPresetId(user) : '';
         const playerEconomyState = authenticated
             ? mergePlayerEconomyStates(
                   state.userId && state.userId === resolvedUserId
@@ -1188,6 +1274,10 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             avatarStoragePath,
             carWrapUrl,
             carWrapStoragePath,
+            accountGarageWrapPresetConfigured,
+            accountGarageWrapPresetId,
+            accountWheelPresetConfigured,
+            accountWheelPresetId,
             credits: playerEconomyState.credits,
             unlockedVehicleIds: [...playerEconomyState.unlockedVehicleIds],
             economySyncSource: preserveServerEconomyProfile
@@ -1248,6 +1338,10 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             avatarStoragePath: '',
             carWrapUrl: '',
             carWrapStoragePath: '',
+            accountGarageWrapPresetConfigured: false,
+            accountGarageWrapPresetId: '',
+            accountWheelPresetConfigured: false,
+            accountWheelPresetId: '',
             credits: 0,
             unlockedVehicleIds: createDefaultPlayerEconomyState().unlockedVehicleIds,
             economySyncSource: 'local',
@@ -1532,6 +1626,10 @@ function createInitialAuthState() {
         avatarStoragePath: '',
         carWrapUrl: '',
         carWrapStoragePath: '',
+        accountGarageWrapPresetConfigured: false,
+        accountGarageWrapPresetId: '',
+        accountWheelPresetConfigured: false,
+        accountWheelPresetId: '',
         credits: 0,
         unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
         economySyncSource: 'local',
@@ -1631,12 +1729,30 @@ function sanitizeStorageObjectPath(value) {
     return normalized;
 }
 
+function sanitizeGarageWrapPresetId(value) {
+    return typeof value === 'string'
+        ? value
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9-]/g, '')
+              .slice(0, 48)
+        : '';
+}
+
 function resolveProfileImagePath(user) {
     return sanitizeProfileImagePath(user?.user_metadata?.avatar_path || '');
 }
 
 function resolveCarWrapPath(user) {
     return sanitizeStorageObjectPath(user?.user_metadata?.car_wrap_path || '');
+}
+
+function resolveGarageWrapPresetId(user) {
+    return sanitizeGarageWrapPresetId(user?.user_metadata?.garage_wrap_preset_id || '');
+}
+
+function resolveWheelPresetId(user) {
+    return sanitizePlayerWheelPresetId(user?.user_metadata?.wheel_preset_id || '');
 }
 
 function resolveChaseCameraSettings(user) {
@@ -1673,6 +1789,17 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
     const nextCarWrapPath = Object.prototype.hasOwnProperty.call(updates, 'car_wrap_path')
         ? sanitizeStorageObjectPath(updates.car_wrap_path || '')
         : sanitizeStorageObjectPath(currentMetadata.car_wrap_path || '');
+    const hasGarageWrapPresetUpdate = Object.prototype.hasOwnProperty.call(
+        updates,
+        'garage_wrap_preset_id'
+    );
+    const nextGarageWrapPresetId = hasGarageWrapPresetUpdate
+        ? sanitizeGarageWrapPresetId(updates.garage_wrap_preset_id || '')
+        : sanitizeGarageWrapPresetId(currentMetadata.garage_wrap_preset_id || '');
+    const hasWheelPresetUpdate = Object.prototype.hasOwnProperty.call(updates, 'wheel_preset_id');
+    const nextWheelPresetId = hasWheelPresetUpdate
+        ? sanitizePlayerWheelPresetId(updates.wheel_preset_id || '')
+        : sanitizePlayerWheelPresetId(currentMetadata.wheel_preset_id || '');
     const nextChaseCameraSettings = Object.prototype.hasOwnProperty.call(
         updates,
         'chase_camera_settings'
@@ -1685,12 +1812,34 @@ function buildUpdatedUserMetadata(user, updates = {}, fallbackDisplayName = '') 
         avatar_path: nextAvatarPath,
         car_wrap_path: nextCarWrapPath,
     };
+    if (
+        hasGarageWrapPresetUpdate ||
+        hasUserMetadataField(currentMetadata, 'garage_wrap_preset_id')
+    ) {
+        nextMetadata.garage_wrap_preset_id = nextGarageWrapPresetId;
+    } else {
+        delete nextMetadata.garage_wrap_preset_id;
+    }
+    if (hasWheelPresetUpdate || hasUserMetadataField(currentMetadata, 'wheel_preset_id')) {
+        nextMetadata.wheel_preset_id = nextWheelPresetId;
+    } else {
+        delete nextMetadata.wheel_preset_id;
+    }
     if (nextChaseCameraSettings) {
         nextMetadata.chase_camera_settings = nextChaseCameraSettings;
     } else {
         delete nextMetadata.chase_camera_settings;
     }
     return nextMetadata;
+}
+
+function hasUserMetadataField(metadata, key) {
+    return Boolean(
+        metadata &&
+        typeof metadata === 'object' &&
+        typeof key === 'string' &&
+        Object.prototype.hasOwnProperty.call(metadata, key)
+    );
 }
 
 function buildProfileImageStoragePath(userId, extension = 'webp') {

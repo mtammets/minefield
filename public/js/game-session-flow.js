@@ -108,6 +108,7 @@ export function createGameSessionController({
     readGuestChaseCameraSettings = () => createDefaultChaseCameraSettings(),
     persistGuestChaseCameraSettings = () => {},
     persistAccountChaseCameraSettings = null,
+    persistAccountGaragePreferences = null,
     getSelectedCarColorHex,
     setSelectedCarColorHex,
     getSelectedCarSkinId = () => '',
@@ -397,6 +398,26 @@ export function createGameSessionController({
             ? normalizeChaseCameraSettings(authState?.chaseCameraSettings)
             : normalizeChaseCameraSettings(readGuestChaseCameraSettings());
         setChaseCameraSettings(nextSettings);
+        const accountWheelPresetId =
+            authenticated && typeof authState?.accountWheelPresetId === 'string'
+                ? authState.accountWheelPresetId.trim()
+                : '';
+        if (accountWheelPresetId) {
+            const normalizedAccountWheelPresetId =
+                resolvePlayerCarWheelPresetId(accountWheelPresetId);
+            if (
+                normalizedAccountWheelPresetId !==
+                resolvePlayerCarWheelPresetId(getSelectedCarWheelPresetId())
+            ) {
+                setSelectedPlayerCarWheelPreset(normalizedAccountWheelPresetId, {
+                    persist: true,
+                    persistAccount: false,
+                });
+                welcomeModalUi.setSelectedWheelPresetId?.(normalizedAccountWheelPresetId, {
+                    emitChange: false,
+                });
+            }
+        }
         refreshPauseMenuCameraTuneStatus();
         return nextSettings;
     }
@@ -1182,7 +1203,7 @@ export function createGameSessionController({
     }
 
     function setSelectedPlayerCarWheelPreset(wheelPresetId, options = {}) {
-        const { persist = true } = options;
+        const { persist = true, persistAccount = true } = options;
         const normalizedWheelPresetId = resolvePlayerCarWheelPresetId(wheelPresetId);
         if (!normalizedWheelPresetId) {
             return;
@@ -1207,6 +1228,15 @@ export function createGameSessionController({
 
         if (persist) {
             persistPlayerCarWheelPresetId?.(normalizedWheelPresetId);
+        }
+        if (
+            persistAccount &&
+            getAuthState()?.authenticated &&
+            typeof persistAccountGaragePreferences === 'function'
+        ) {
+            void persistAccountGaragePreferences({
+                wheelPresetId: normalizedWheelPresetId,
+            });
         }
     }
 

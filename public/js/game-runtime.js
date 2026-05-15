@@ -181,6 +181,7 @@ import {
 } from './showroom-intro-video-manager.js';
 import {
     createGarageWrapPresetImage,
+    getGarageWrapPresetById,
     getGarageWrapPresetEntries,
     initializeGarageWrapPresetManager,
     removeGarageWrapPreset,
@@ -282,6 +283,23 @@ function getActivePlayerWrapUrl() {
           : '';
 }
 
+function resolveRuntimeAuthCarWrapUrl(authState = null) {
+    const presetId =
+        typeof authState?.accountGarageWrapPresetId === 'string'
+            ? authState.accountGarageWrapPresetId.trim()
+            : '';
+    if (authState?.authenticated && authState?.accountGarageWrapPresetConfigured && presetId) {
+        const presetEntry = getGarageWrapPresetById(presetId);
+        const presetUrl = typeof presetEntry?.url === 'string' ? presetEntry.url.trim() : '';
+        if (presetUrl) {
+            return presetUrl;
+        }
+    }
+    return authState?.authenticated && typeof authState?.carWrapUrl === 'string'
+        ? authState.carWrapUrl.trim()
+        : '';
+}
+
 function syncRuntimePlayerWrapAppearance() {
     setPlayerCarAppearance({
         wrapUrl: getActivePlayerWrapUrl(),
@@ -378,6 +396,9 @@ const {
     onAuthRemoveCarWrap() {
         return runtimeState.authController?.removeCarWrap?.();
     },
+    onAuthUpdateGaragePreferences(preferences = null) {
+        return runtimeState.authController?.updateGaragePreferences?.(preferences);
+    },
     onAuthChangePassword(credentials) {
         return runtimeState.authController?.changePassword?.(credentials);
     },
@@ -419,10 +440,7 @@ runtimeState.authController = createAuthController({
     },
     onStateChanged(state) {
         welcomeModalUi.setAuthState?.(state);
-        runtimeState.authCarWrapUrl =
-            state?.authenticated && typeof state?.carWrapUrl === 'string'
-                ? state.carWrapUrl.trim()
-                : '';
+        runtimeState.authCarWrapUrl = resolveRuntimeAuthCarWrapUrl(state);
         syncRuntimePlayerWrapAppearance();
         handleRuntimeAuthEconomyStateChanged(state);
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
@@ -431,11 +449,7 @@ runtimeState.authController = createAuthController({
     },
 });
 const initialRuntimeAuthState = runtimeState.authController.getState?.() || null;
-runtimeState.authCarWrapUrl =
-    initialRuntimeAuthState?.authenticated &&
-    typeof initialRuntimeAuthState?.carWrapUrl === 'string'
-        ? initialRuntimeAuthState.carWrapUrl.trim()
-        : '';
+runtimeState.authCarWrapUrl = resolveRuntimeAuthCarWrapUrl(initialRuntimeAuthState);
 syncRuntimePlayerWrapAppearance();
 welcomeModalUi.setAuthState?.(initialRuntimeAuthState);
 welcomeModalUi.setPlayerEconomy?.(runtimeState.playerEconomy);
@@ -3499,6 +3513,9 @@ runtimeState.gameSessionController = createGameSessionController({
     },
     persistAccountChaseCameraSettings(settings) {
         return runtimeState.authController?.updateChaseCameraSettings?.(settings);
+    },
+    persistAccountGaragePreferences(preferences = null) {
+        return runtimeState.authController?.updateGaragePreferences?.(preferences);
     },
     getSelectedCarColorHex: () => runtimeState.selectedCarColorHex,
     setSelectedCarColorHex(value) {

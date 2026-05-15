@@ -11,6 +11,7 @@ import {
     PLAYER_WHEEL_PRESETS,
     getPlayerWheelPresetById,
     resolvePlayerWheelPresetId,
+    sanitizePlayerWheelPresetId,
 } from './wheel-presets.js';
 import { createWheelPreviewMesh } from './wheels.js';
 import {
@@ -118,6 +119,7 @@ export function createWelcomeModalController({
     onAuthRemoveProfileImage,
     onAuthUpdateCarWrap,
     onAuthRemoveCarWrap,
+    onAuthUpdateGaragePreferences,
     onAuthChangePassword,
     onAuthDeleteAccount,
     onRefreshGlobalLeaderboard,
@@ -837,7 +839,7 @@ export function createWelcomeModalController({
             const presetId = sanitizeGarageWrapPresetId(
                 buttonEl.getAttribute('data-garage-wrap-preset-id') || ''
             );
-            handleGarageWrapPresetSelection(presetId);
+            void handleGarageWrapPresetSelection(presetId);
         });
         authGarageWheelPresetBtnEls.forEach((buttonEl) => {
             buttonEl.addEventListener('click', () => {
@@ -2289,7 +2291,22 @@ export function createWelcomeModalController({
         });
     }
 
+    function getRemoteGarageWrapPresetId() {
+        if (!authUiState?.authenticated || !authUiState?.accountGarageWrapPresetConfigured) {
+            return '';
+        }
+        return sanitizeGarageWrapPresetId(authUiState.accountGarageWrapPresetId || '');
+    }
+
     function getRemoteGarageWrapUrl() {
+        const remotePresetId = getRemoteGarageWrapPresetId();
+        if (remotePresetId) {
+            const presetEntry = getGarageWrapPresetById(remotePresetId);
+            const presetPath = sanitizeGarageWrapPresetPath(presetEntry?.url || '');
+            if (presetPath) {
+                return presetPath;
+            }
+        }
         return sanitizeGarageWrapUrl(authUiState?.carWrapUrl || '');
     }
 
@@ -2370,6 +2387,25 @@ export function createWelcomeModalController({
     function restorePersistedGarageWrapSelection({ force = false } = {}) {
         if (!force && garageWrapState.mode !== 'none') {
             return false;
+        }
+        if (authUiState?.authenticated && authUiState?.accountGarageWrapPresetConfigured) {
+            const remotePresetId = getRemoteGarageWrapPresetId();
+            if (!remotePresetId) {
+                clearStoredGarageWrapPresetId();
+                return false;
+            }
+            const remotePresetEntry = getGarageWrapPresetById(remotePresetId);
+            const remotePresetPath = sanitizeGarageWrapPresetPath(remotePresetEntry?.url || '');
+            if (!remotePresetPath) {
+                clearStoredGarageWrapPresetId();
+                return false;
+            }
+            applyGarageWrapSelection(remotePresetPath, {
+                mode: 'preset',
+                presetId: remotePresetId,
+                presetPath: remotePresetPath,
+            });
+            return true;
         }
         const storedPresetId = readStoredGarageWrapPresetId();
         if (!storedPresetId) {
@@ -4567,13 +4603,51 @@ export function createWelcomeModalController({
         }
     }
 
+    async function syncAccountGarageWrapPresetSelection(
+        presetId = '',
+        { failureMessage = '' } = {}
+    ) {
+        if (!authUiState.authenticated || typeof onAuthUpdateGaragePreferences !== 'function') {
+            return {
+                ok: true,
+                skipped: true,
+            };
+        }
+
+        const safePresetId = sanitizeGarageWrapPresetId(presetId);
+        const response = await Promise.resolve(
+            onAuthUpdateGaragePreferences({
+                garageWrapPresetId: safePresetId,
+            })
+        ).catch((error) => ({
+            ok: false,
+            error: error?.message || failureMessage || 'Could not save the selected preset skin.',
+        }));
+        if (!response?.ok) {
+            setGarageNotice(
+                response?.error || failureMessage || 'Could not save the selected preset skin.',
+                'error'
+            );
+            syncAuthUi();
+        }
+        return response;
+    }
+
     async function handleCarWrapRemoval() {
         if (authUiState.loading) {
             return;
         }
 
         if (garageWrapState.mode !== 'none') {
+            const shouldClearAccountPreset =
+                garageWrapState.mode === 'preset' && authUiState.authenticated;
             clearGarageWrapSelection();
+            if (shouldClearAccountPreset) {
+                await syncAccountGarageWrapPresetSelection('', {
+                    failureMessage:
+                        'Preset skin was cleared only on this device. Account sync could not be updated.',
+                });
+            }
             return;
         }
 
@@ -4601,7 +4675,7 @@ export function createWelcomeModalController({
         syncAuthUi();
     }
 
-    function handleGarageWrapPresetSelection(presetId = '') {
+    async function handleGarageWrapPresetSelection(presetId = '') {
         if (authUiState.loading || !presetId) {
             return;
         }
@@ -4616,6 +4690,10 @@ export function createWelcomeModalController({
             mode: 'preset',
             presetId: safePresetId,
             presetPath: safePresetPath,
+        });
+        await syncAccountGarageWrapPresetSelection(safePresetId, {
+            failureMessage:
+                'Preset skin was saved only on this device. Account sync could not be updated.',
         });
     }
 
@@ -6757,6 +6835,12 @@ export function createWelcomeModalController({
             email: sanitizeAuthEmailInput(source.email || ''),
             avatarUrl: sanitizeProfileImageUrl(source.avatarUrl || ''),
             carWrapUrl: sanitizeProfileImageUrl(source.carWrapUrl || ''),
+            accountGarageWrapPresetConfigured: Boolean(source.accountGarageWrapPresetConfigured),
+            accountGarageWrapPresetId: sanitizeGarageWrapPresetId(
+                source.accountGarageWrapPresetId || ''
+            ),
+            accountWheelPresetConfigured: Boolean(source.accountWheelPresetConfigured),
+            accountWheelPresetId: sanitizePlayerWheelPresetId(source.accountWheelPresetId || ''),
             credits: Math.max(0, Math.round(Number(source.credits) || 0)),
             unlockedVehicleIds: Array.isArray(source.unlockedVehicleIds)
                 ? source.unlockedVehicleIds
