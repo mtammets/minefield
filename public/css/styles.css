@@ -7034,7 +7034,11 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeAuthInput {
-    border: 1px solid rgba(149, 190, 214, 0.46);
+    --welcome-input-text-color: rgba(232, 242, 250, 0.98);
+    --welcome-input-border-color: rgba(149, 190, 214, 0.46);
+    --welcome-input-bg: rgba(8, 19, 30, 0.82);
+    --welcome-input-autofill-bg: rgba(8, 19, 30, 0.96);
+    border: 1px solid var(--welcome-input-border-color);
     border-radius: 10px;
     min-height: 44px;
     padding: 0 11px;
@@ -7042,14 +7046,31 @@ body.race-intro-active #botPanel {
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.45px;
-    color: rgba(232, 242, 250, 0.98);
-    background: rgba(8, 19, 30, 0.82);
+    color: var(--welcome-input-text-color);
+    background: var(--welcome-input-bg);
+    background-clip: padding-box;
+    caret-color: var(--welcome-input-text-color);
 }
 
 .welcomeAuthInput:focus-visible {
     outline: none;
     border-color: rgba(192, 223, 242, 0.92);
     box-shadow: 0 0 0 2px rgba(124, 182, 219, 0.26);
+}
+
+.welcomeAuthInput:autofill,
+.welcomeAuthInput:-webkit-autofill,
+.welcomeAuthInput:-webkit-autofill:hover,
+.welcomeAuthInput:-webkit-autofill:focus,
+.welcomeAuthInput:-webkit-autofill:focus-visible,
+.welcomeAuthInput:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--welcome-input-text-color);
+    caret-color: var(--welcome-input-text-color);
+    border: 1px solid var(--welcome-input-border-color);
+    background: var(--welcome-input-bg);
+    -webkit-box-shadow: 0 0 0 1000px var(--welcome-input-autofill-bg) inset;
+    box-shadow: 0 0 0 1000px var(--welcome-input-autofill-bg) inset;
+    transition: background-color 9999s ease-out 0s;
 }
 
 .welcomeAuthInput:disabled {
@@ -10320,7 +10341,11 @@ body.race-intro-active #botPanel {
 }
 
 .welcomeOnlineModeInput {
-    border: 1px solid rgba(149, 190, 214, 0.46);
+    --welcome-input-text-color: rgba(232, 242, 250, 0.98);
+    --welcome-input-border-color: rgba(149, 190, 214, 0.46);
+    --welcome-input-bg: rgba(8, 19, 30, 0.82);
+    --welcome-input-autofill-bg: rgba(8, 19, 30, 0.96);
+    border: 1px solid var(--welcome-input-border-color);
     border-radius: 10px;
     min-height: 44px;
     padding: 0 11px;
@@ -10328,8 +10353,10 @@ body.race-intro-active #botPanel {
     font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.45px;
-    color: rgba(232, 242, 250, 0.98);
-    background: rgba(8, 19, 30, 0.82);
+    color: var(--welcome-input-text-color);
+    background: var(--welcome-input-bg);
+    background-clip: padding-box;
+    caret-color: var(--welcome-input-text-color);
 }
 
 .welcomeOnlineModeNameInput {
@@ -10350,6 +10377,21 @@ body.race-intro-active #botPanel {
     outline: none;
     border-color: rgba(192, 223, 242, 0.92);
     box-shadow: 0 0 0 2px rgba(124, 182, 219, 0.26);
+}
+
+.welcomeOnlineModeInput:autofill,
+.welcomeOnlineModeInput:-webkit-autofill,
+.welcomeOnlineModeInput:-webkit-autofill:hover,
+.welcomeOnlineModeInput:-webkit-autofill:focus,
+.welcomeOnlineModeInput:-webkit-autofill:focus-visible,
+.welcomeOnlineModeInput:-webkit-autofill:active {
+    -webkit-text-fill-color: var(--welcome-input-text-color);
+    caret-color: var(--welcome-input-text-color);
+    border: 1px solid var(--welcome-input-border-color);
+    background: var(--welcome-input-bg);
+    -webkit-box-shadow: 0 0 0 1000px var(--welcome-input-autofill-bg) inset;
+    box-shadow: 0 0 0 1000px var(--welcome-input-autofill-bg) inset;
+    transition: background-color 9999s ease-out 0s;
 }
 
 .welcomeOnlineCodeStatus {
@@ -11176,6 +11218,113 @@ body.race-intro-active #botPanel {
     background: transparent;
     box-shadow: none;
     min-height: 0;
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage']) {
+    width: min(100%, 540px);
+    align-self: start;
+    padding: clamp(18px, 2.3vw, 26px);
+    border: 1px solid rgba(165, 205, 228, 0.44);
+    border-radius: 24px;
+    background:
+        linear-gradient(180deg, rgba(6, 15, 25, 0.97), rgba(7, 16, 27, 0.985)),
+        radial-gradient(circle at top, rgba(107, 180, 241, 0.13), rgba(107, 180, 241, 0) 58%),
+        radial-gradient(circle at 82% 16%, rgba(125, 233, 189, 0.12), rgba(125, 233, 189, 0) 34%);
+    box-shadow:
+        0 28px 58px rgba(0, 0, 0, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthModeTabs {
+    gap: 10px;
+    padding: 6px;
+    border: 1px solid rgba(132, 175, 204, 0.24);
+    border-radius: 18px;
+    background:
+        linear-gradient(180deg, rgba(9, 22, 36, 0.94), rgba(6, 15, 26, 0.98)),
+        linear-gradient(90deg, rgba(104, 180, 255, 0.06), rgba(104, 180, 255, 0));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthModeTab {
+    min-height: 52px;
+    border-radius: 14px;
+    font-size: 11px;
+    letter-spacing: 1.25px;
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthFields {
+    gap: 12px;
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthField {
+    gap: 10px;
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthLabel {
+    padding-left: 2px;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthInput {
+    --welcome-input-border-color: rgba(146, 189, 215, 0.36);
+    --welcome-input-bg:
+        linear-gradient(180deg, rgba(5, 14, 24, 0.97), rgba(4, 12, 21, 0.99)),
+        linear-gradient(90deg, rgba(99, 176, 243, 0.04), rgba(99, 176, 243, 0));
+    --welcome-input-autofill-bg: rgba(5, 14, 24, 0.985);
+    min-height: 56px;
+    padding: 0 16px;
+    border-radius: 16px;
+    border-color: var(--welcome-input-border-color);
+    background: var(--welcome-input-bg);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 0 0 1px rgba(109, 167, 212, 0.06);
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthInput::placeholder {
+    color: rgba(182, 199, 212, 0.7);
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthActions {
+    margin-top: 4px;
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthSubmitBtn {
+    min-height: 56px;
+    border-radius: 16px;
+    font-size: 11px;
+    letter-spacing: 1.25px;
+    box-shadow:
+        0 16px 30px rgba(20, 90, 61, 0.26),
+        inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+#welcomePreviewAccountOverlay
+    .welcomeAuthPanel[data-authenticated='false']:not([data-account-mode='garage'])
+    .welcomeAuthStatus {
+    min-height: 20px;
+    padding: 2px 2px 0;
 }
 
 .welcomePreviewSettingsBody .welcomeSettingsPanel {
