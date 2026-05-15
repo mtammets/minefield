@@ -322,7 +322,8 @@ function cloneRuntimeAudioPrefsSnapshot(prefs = null) {
               botVehiclesVolume: Number(prefs.botVehiclesVolume),
               effectsVolume: Number(prefs.effectsVolume),
               ambienceVolume: Number(prefs.ambienceVolume),
-              musicVolume: Number(prefs.musicVolume),
+              menuMusicVolume: Number(prefs.menuMusicVolume ?? prefs.musicVolume),
+              gameMusicVolume: Number(prefs.gameMusicVolume ?? prefs.musicVolume),
               uiVolume: Number(prefs.uiVolume),
               muted: Boolean(prefs.muted),
           }

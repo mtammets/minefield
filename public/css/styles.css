@@ -10981,7 +10981,27 @@ body.race-intro-active #botPanel {
     text-shadow: 0 0 18px rgba(178, 216, 242, 0.1);
 }
 
+.welcomePreviewSettingsOverlay .welcomePreviewAccountCard {
+    min-height: 0;
+    overflow: hidden;
+}
+
 .welcomePreviewSettingsBody {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 6px;
+    padding-bottom: 14px;
+    scrollbar-gutter: stable;
+}
+
+.welcomePreviewSettingsBody .welcomePreviewSettingsStack {
+    min-height: min-content;
+    padding-bottom: 6px;
+}
+
+.welcomePreviewSettingsBody .welcomeSettingsPanel {
+    min-height: 0;
     padding-right: 0;
 }
 

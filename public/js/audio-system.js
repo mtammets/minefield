@@ -24,7 +24,8 @@ export const DEFAULT_AUDIO_PREFS = Object.freeze({
     botVehiclesVolume: 1,
     effectsVolume: 1,
     ambienceVolume: 1,
-    musicVolume: 0.08,
+    menuMusicVolume: 0.08,
+    gameMusicVolume: 0.08,
     uiVolume: 0.9,
     muted: false,
 });
@@ -269,13 +270,13 @@ const SOUND_DEFINITIONS = Object.freeze({
     },
     welcomeMenuSnr2Loop01: {
         src: '/audio/music/welcome_menu_snr2_loop_01.mp3',
-        bus: 'music',
+        bus: 'menuMusic',
         gain: 0.92,
         loop: true,
     },
     monumentHookusPookusInstrumentalLoop01: {
         src: '/audio/ambience/monument_hookus_pookus_instrumental_loop_01.mp3',
-        bus: 'music',
+        bus: 'gameMusic',
         gain: 0.76,
         loop: true,
         stream: true,
@@ -339,8 +340,12 @@ const MIXER_SLIDERS = Object.freeze([
         label: 'Master',
     },
     {
-        key: 'musicVolume',
-        label: 'Music',
+        key: 'menuMusicVolume',
+        label: 'Menu Music',
+    },
+    {
+        key: 'gameMusicVolume',
+        label: 'Game Music',
     },
     {
         key: 'effectsVolume',
@@ -377,6 +382,16 @@ const AUDIO_FETCH_CACHE_MODES = Object.freeze(['default', 'reload']);
 const WELCOME_MENU_AMBIENCE_GAIN = 0;
 const WELCOME_MENU_CROWD_GAIN = 0;
 const WELCOME_MENU_MUSIC_GAIN = 0.01;
+const AUDIO_MIXER_PREVIEW_FADE_IN_SEC = 0.04;
+const AUDIO_MIXER_PREVIEW_FADE_OUT_SEC = 0.18;
+const AUDIO_MIXER_PREVIEW_KEYBOARD_RELEASE_MS = 240;
+const AUDIO_MIXER_PREVIEW_UI_REPEAT_MS = 680;
+const AUDIO_MIXER_PREVIEW_SFX_REPEAT_MS = 960;
+const AUDIO_MIXER_PREVIEW_MASTER_UI_REPEAT_MS = 1100;
+const AUDIO_MIXER_PREVIEW_MASTER_SFX_REPEAT_MS = 1460;
+const AUDIO_MIXER_PREVIEW_UI_THROTTLE_MS = 120;
+const AUDIO_MIXER_PREVIEW_SFX_THROTTLE_MS = 180;
+const AUDIO_MIXER_PREVIEW_MENU_DUCK = 0.18;
 const AUDIO_PRELOAD_BATCH_SIZE = 2;
 const MONUMENT_AUDIO_CONFIG = Object.freeze({
     x: centralParkingLot.centerX,
@@ -510,6 +525,19 @@ const BOT_TRAFFIC_ENGINE_SOUND_IDS = Object.freeze([
     'engineMidLoop01',
     'engineHighLoop01',
 ]);
+const AUDIO_MIXER_PREVIEW_BUFFER_SOUND_IDS = Object.freeze([
+    'chargingLoop01',
+    'engineIdleLoop01',
+    'engineLowLoop01',
+    'engineMidLoop01',
+    'pickupCollect01',
+    'pickupCollect02',
+    'raceCrowdFarLoop01',
+]);
+const AUDIO_MIXER_PREVIEW_STREAM_SOUND_IDS = Object.freeze([
+    'cityAmbienceDayLoop01',
+    MONUMENT_MUSIC_SOUND_ID,
+]);
 const BOT_TRAFFIC_AUDIO_CONFIG = Object.freeze({
     refDistance: 6.4,
     maxDistance: 138,
@@ -586,6 +614,15 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
     let runtimeDefaultsLoadPromise = null;
     let runtimeDefaultsSaveTimer = 0;
     let runtimeDefaultsSaveSignature = '';
+    let sliderPreviewState = {
+        key: '',
+        token: 0,
+        instances: [],
+        intervalIds: [],
+        keyboardReleaseTimer: 0,
+        lastUiAccentAtMs: -Number.POSITIVE_INFINITY,
+        lastEffectsAccentAtMs: -Number.POSITIVE_INFINITY,
+    };
     let monumentMusicInstance = null;
     let monumentImpulseBuffer = null;
     let lorienGalleryVideoInstance = null;
@@ -615,6 +652,7 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         lastBatteryDepleted: false,
         playerPosition: null,
         lowerLevelSilenceFactor: 0,
+        previewMenuMusicDuck: 1,
     };
 
     return {
@@ -669,6 +707,10 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         void loadRuntimeAudioDefaults();
         void preloadBuffersByIds(UI_SOUND_IDS);
         void loadBuffer(WELCOME_MENU_MUSIC_SOUND_ID);
+        void preloadBuffersByIds(AUDIO_MIXER_PREVIEW_BUFFER_SOUND_IDS);
+        for (let index = 0; index < AUDIO_MIXER_PREVIEW_STREAM_SOUND_IDS.length; index += 1) {
+            void preloadStreamingSound(AUDIO_MIXER_PREVIEW_STREAM_SOUND_IDS[index]);
+        }
         if (preloadEnabled) {
             startPreload();
         }
@@ -683,6 +725,29 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
             },
             onVolumeChanged(key, normalizedValue) {
                 setMixerVolume(key, normalizedValue);
+            },
+            onPreviewStart(key, mode = 'pointer') {
+                void unlockAudio().then((unlockedNow) => {
+                    if (!unlockedNow) {
+                        return;
+                    }
+                    beginSliderPreview(key, {
+                        mode,
+                    });
+                });
+            },
+            onPreviewChange(key, mode = 'pointer') {
+                void unlockAudio().then((unlockedNow) => {
+                    if (!unlockedNow) {
+                        return;
+                    }
+                    handleSliderPreviewInteraction(key, {
+                        mode,
+                    });
+                });
+            },
+            onPreviewEnd(key) {
+                endSliderPreview(key);
             },
             onUnlockAudio() {
                 void unlockAudio();
@@ -709,6 +774,7 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
             ui.root.parentElement.removeChild(ui.root);
         }
         ui = null;
+        endSliderPreview();
 
         for (const instance of loopInstances.values()) {
             disposeLoopInstance(instance);
@@ -822,6 +888,8 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         const effectsGain = context.createGain();
         const ambienceGain = context.createGain();
         const musicGain = context.createGain();
+        const menuMusicGain = context.createGain();
+        const gameMusicGain = context.createGain();
         const uiGain = context.createGain();
 
         const glueCompressor = context.createDynamicsCompressor();
@@ -842,6 +910,8 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         vehiclesGain.connect(masterGain);
         effectsGain.connect(masterGain);
         ambienceGain.connect(masterGain);
+        menuMusicGain.connect(musicGain);
+        gameMusicGain.connect(musicGain);
         musicGain.connect(masterGain);
         uiGain.connect(masterGain);
         masterGain.connect(glueCompressor);
@@ -856,6 +926,8 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
                 effects: effectsGain,
                 ambience: ambienceGain,
                 music: musicGain,
+                menuMusic: menuMusicGain,
+                gameMusic: gameMusicGain,
                 ui: uiGain,
             },
         };
@@ -1241,7 +1313,9 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         mixer.buses.botVehicles.gain.setTargetAtTime(prefs.botVehiclesVolume, now, 0.03);
         mixer.buses.effects.gain.setTargetAtTime(prefs.effectsVolume, now, 0.03);
         mixer.buses.ambience.gain.setTargetAtTime(prefs.ambienceVolume, now, 0.03);
-        mixer.buses.music.gain.setTargetAtTime(prefs.musicVolume, now, 0.03);
+        mixer.buses.music.gain.setTargetAtTime(1, now, 0.03);
+        mixer.buses.menuMusic.gain.setTargetAtTime(prefs.menuMusicVolume, now, 0.03);
+        mixer.buses.gameMusic.gain.setTargetAtTime(prefs.gameMusicVolume, now, 0.03);
         mixer.buses.ui.gain.setTargetAtTime(prefs.uiVolume, now, 0.03);
     }
 
@@ -1323,6 +1397,439 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
             });
         }
         return getMixerSnapshot();
+    }
+
+    function beginSliderPreview(key, options = {}) {
+        if (!isMixerSliderKey(key) || !isAudioOutputReady()) {
+            return false;
+        }
+
+        const mode = typeof options.mode === 'string' ? options.mode : 'pointer';
+        if (sliderPreviewState.key !== key) {
+            const nextToken = sliderPreviewState.token + 1;
+            endSliderPreview();
+            sliderPreviewState = {
+                key,
+                token: nextToken,
+                instances: [],
+                intervalIds: [],
+                keyboardReleaseTimer: 0,
+                lastUiAccentAtMs: -Number.POSITIVE_INFINITY,
+                lastEffectsAccentAtMs: -Number.POSITIVE_INFINITY,
+            };
+            applySliderPreviewMixState();
+            void startSliderPreviewScene(key, nextToken);
+        }
+
+        if (mode === 'keyboard') {
+            scheduleSliderPreviewKeyboardRelease();
+        } else {
+            clearSliderPreviewKeyboardReleaseTimer();
+        }
+        return true;
+    }
+
+    function handleSliderPreviewInteraction(key, options = {}) {
+        if (!isMixerSliderKey(key) || !isAudioOutputReady()) {
+            return false;
+        }
+
+        const mode = typeof options.mode === 'string' ? options.mode : 'pointer';
+        if (sliderPreviewState.key !== key) {
+            beginSliderPreview(key, {
+                mode,
+            });
+        }
+
+        if (key === 'uiVolume' || key === 'masterVolume') {
+            triggerSliderPreviewUiAccent();
+        }
+        if (key === 'effectsVolume' || key === 'masterVolume') {
+            triggerSliderPreviewEffectsAccent();
+        }
+
+        if (mode === 'keyboard') {
+            scheduleSliderPreviewKeyboardRelease();
+        }
+        return true;
+    }
+
+    function endSliderPreview(key = '') {
+        if (key && sliderPreviewState.key && sliderPreviewState.key !== key) {
+            return false;
+        }
+
+        clearSliderPreviewKeyboardReleaseTimer();
+        while (sliderPreviewState.intervalIds.length > 0) {
+            window.clearInterval(sliderPreviewState.intervalIds.pop());
+        }
+
+        const activeInstances = sliderPreviewState.instances.splice(0);
+        const hadActivePreview = Boolean(sliderPreviewState.key) || activeInstances.length > 0;
+        sliderPreviewState = {
+            key: '',
+            token: sliderPreviewState.token,
+            instances: [],
+            intervalIds: [],
+            keyboardReleaseTimer: 0,
+            lastUiAccentAtMs: -Number.POSITIVE_INFINITY,
+            lastEffectsAccentAtMs: -Number.POSITIVE_INFINITY,
+        };
+        applySliderPreviewMixState();
+
+        for (let index = 0; index < activeInstances.length; index += 1) {
+            stopSliderPreviewInstance(activeInstances[index]);
+        }
+
+        return hadActivePreview;
+    }
+
+    function clearSliderPreviewKeyboardReleaseTimer() {
+        if (!sliderPreviewState.keyboardReleaseTimer) {
+            return;
+        }
+        window.clearTimeout(sliderPreviewState.keyboardReleaseTimer);
+        sliderPreviewState.keyboardReleaseTimer = 0;
+    }
+
+    function scheduleSliderPreviewKeyboardRelease() {
+        clearSliderPreviewKeyboardReleaseTimer();
+        sliderPreviewState.keyboardReleaseTimer = window.setTimeout(() => {
+            sliderPreviewState.keyboardReleaseTimer = 0;
+            endSliderPreview();
+        }, AUDIO_MIXER_PREVIEW_KEYBOARD_RELEASE_MS);
+    }
+
+    function applySliderPreviewMixState() {
+        runtime.previewMenuMusicDuck = resolveSliderPreviewMenuDuck(sliderPreviewState.key);
+        if (isAudioOutputReady()) {
+            updateWelcomeMenuMusic({
+                welcomeVisible: runtime.welcomeVisible,
+            });
+        }
+    }
+
+    function resolveSliderPreviewMenuDuck(key = '') {
+        if (
+            key === 'gameMusicVolume' ||
+            key === 'ambienceVolume' ||
+            key === 'effectsVolume' ||
+            key === 'uiVolume' ||
+            key === 'vehiclesVolume' ||
+            key === 'botVehiclesVolume'
+        ) {
+            return AUDIO_MIXER_PREVIEW_MENU_DUCK;
+        }
+        return 1;
+    }
+
+    async function startSliderPreviewScene(key, token) {
+        if (!isSliderPreviewTokenActive(token, key)) {
+            return;
+        }
+
+        switch (key) {
+            case 'masterVolume':
+                void startSliderPreviewLoop('cityAmbienceDayLoop01', token, {
+                    gain: 1,
+                });
+                void startSliderPreviewLoop('raceCrowdFarLoop01', token, {
+                    gain: 0.44,
+                    rate: 0.98,
+                });
+                void startSliderPreviewLoop('engineIdleLoop01', token, {
+                    gain: 0.72,
+                    rate: 0.92,
+                });
+                void startSliderPreviewLoop('engineLowLoop01', token, {
+                    gain: 0.66,
+                    rate: 1.02,
+                });
+                void startSliderPreviewLoop('chargingLoop01', token, {
+                    gain: 0.72,
+                    rate: 1.02,
+                });
+                triggerSliderPreviewUiAccent(true);
+                triggerSliderPreviewEffectsAccent(true);
+                registerSliderPreviewInterval(
+                    token,
+                    AUDIO_MIXER_PREVIEW_MASTER_UI_REPEAT_MS,
+                    () => {
+                        triggerSliderPreviewUiAccent(true);
+                    }
+                );
+                registerSliderPreviewInterval(
+                    token,
+                    AUDIO_MIXER_PREVIEW_MASTER_SFX_REPEAT_MS,
+                    () => {
+                        triggerSliderPreviewEffectsAccent(true);
+                    }
+                );
+                break;
+            case 'menuMusicVolume':
+                // The live welcome-menu loop is already active on this screen.
+                break;
+            case 'gameMusicVolume':
+                void startSliderPreviewLoop(MONUMENT_MUSIC_SOUND_ID, token, {
+                    gain: 1,
+                });
+                break;
+            case 'effectsVolume':
+                void startSliderPreviewLoop('chargingLoop01', token, {
+                    gain: 0.8,
+                    rate: 1.02,
+                });
+                triggerSliderPreviewEffectsAccent(true);
+                registerSliderPreviewInterval(token, AUDIO_MIXER_PREVIEW_SFX_REPEAT_MS, () => {
+                    triggerSliderPreviewEffectsAccent(true);
+                });
+                break;
+            case 'ambienceVolume':
+                void startSliderPreviewLoop('cityAmbienceDayLoop01', token, {
+                    gain: 1,
+                });
+                void startSliderPreviewLoop('raceCrowdFarLoop01', token, {
+                    gain: 0.48,
+                    rate: 0.98,
+                });
+                break;
+            case 'uiVolume':
+                triggerSliderPreviewUiAccent(true);
+                registerSliderPreviewInterval(token, AUDIO_MIXER_PREVIEW_UI_REPEAT_MS, () => {
+                    triggerSliderPreviewUiAccent(true);
+                });
+                break;
+            case 'vehiclesVolume':
+                void startSliderPreviewLoop('engineIdleLoop01', token, {
+                    gain: 0.78,
+                    rate: 0.94,
+                });
+                void startSliderPreviewLoop('engineLowLoop01', token, {
+                    gain: 0.84,
+                    rate: 1.02,
+                });
+                break;
+            case 'botVehiclesVolume':
+                void startSliderPreviewLoop('engineLowLoop01', token, {
+                    gain: 0.64,
+                    rate: 0.98,
+                    busKey: 'botVehicles',
+                });
+                void startSliderPreviewLoop('engineMidLoop01', token, {
+                    gain: 0.48,
+                    rate: 1.06,
+                    busKey: 'botVehicles',
+                });
+                break;
+            default:
+                break;
+        }
+    }
+
+    async function startSliderPreviewLoop(soundId, token, options = {}) {
+        const instance = await createSliderPreviewLoopInstance(soundId, token, options);
+        if (!instance) {
+            return null;
+        }
+        if (!isSliderPreviewTokenActive(token)) {
+            stopSliderPreviewInstance(instance, {
+                immediate: true,
+            });
+            return null;
+        }
+        sliderPreviewState.instances.push(instance);
+        return instance;
+    }
+
+    async function createSliderPreviewLoopInstance(soundId, token, options = {}) {
+        if (!isSliderPreviewTokenActive(token)) {
+            return null;
+        }
+
+        const definition = SOUND_DEFINITIONS[soundId];
+        const audioContext = ensureAudioContext();
+        const busKey =
+            typeof options.busKey === 'string' && options.busKey.trim()
+                ? options.busKey.trim()
+                : definition?.bus;
+        const busNode = busKey ? mixer?.buses?.[busKey] : null;
+        if (!definition || !audioContext || !busNode) {
+            return null;
+        }
+
+        const targetGain =
+            clampNumber(options.gain, 0.05, 2, 1) * clampNumber(definition.gain, 0.05, 2, 1);
+        const playbackRate = clampNumber(options.rate, 0.6, 1.6, 1);
+        const now = audioContext.currentTime;
+
+        if (definition.stream) {
+            const mediaElement = document.createElement('audio');
+            mediaElement.src = definition.src;
+            mediaElement.preload = 'auto';
+            mediaElement.loop = true;
+            mediaElement.playsInline = true;
+            mediaElement.crossOrigin = 'anonymous';
+            mediaElement.playbackRate = playbackRate;
+            mediaElement.volume = 1;
+
+            const mediaSource = audioContext.createMediaElementSource(mediaElement);
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0.0001, now);
+
+            mediaSource.connect(gainNode);
+            gainNode.connect(busNode);
+            gainNode.gain.exponentialRampToValueAtTime(
+                Math.max(0.0001, targetGain),
+                now + AUDIO_MIXER_PREVIEW_FADE_IN_SEC
+            );
+
+            try {
+                await mediaElement.play();
+            } catch {
+                safeDisconnect(mediaSource);
+                safeDisconnect(gainNode);
+                return null;
+            }
+
+            return {
+                kind: 'stream-preview',
+                mediaElement,
+                mediaSource,
+                gain: gainNode,
+            };
+        }
+
+        const buffer = buffers.get(soundId) || (await loadBuffer(soundId));
+        if (!buffer || !isSliderPreviewTokenActive(token)) {
+            return null;
+        }
+
+        const source = audioContext.createBufferSource();
+        source.buffer = buffer;
+        source.loop = true;
+        source.playbackRate.setValueAtTime(playbackRate, now);
+
+        const gainNode = audioContext.createGain();
+        gainNode.gain.setValueAtTime(0.0001, now);
+
+        source.connect(gainNode);
+        gainNode.connect(busNode);
+        gainNode.gain.exponentialRampToValueAtTime(
+            Math.max(0.0001, targetGain),
+            now + AUDIO_MIXER_PREVIEW_FADE_IN_SEC
+        );
+
+        const duration = Number(buffer.duration);
+        const offset =
+            Number.isFinite(duration) && duration > 0.36
+                ? randomRange(0, Math.max(0.01, duration - 0.18))
+                : 0;
+        source.start(now, offset);
+
+        return {
+            kind: 'buffer-preview',
+            source,
+            gain: gainNode,
+        };
+    }
+
+    function stopSliderPreviewInstance(instance, options = {}) {
+        if (!instance || !context) {
+            return;
+        }
+        const immediate = options.immediate === true;
+        const now = context.currentTime;
+        const releaseSec = immediate ? 0.01 : AUDIO_MIXER_PREVIEW_FADE_OUT_SEC;
+        const targetNode = instance.gain?.gain;
+        if (targetNode) {
+            const currentValue = Math.max(0.0001, Number(targetNode.value) || 0.0001);
+            try {
+                targetNode.cancelScheduledValues(now);
+                targetNode.setValueAtTime(currentValue, now);
+                targetNode.exponentialRampToValueAtTime(0.0001, now + releaseSec);
+            } catch {
+                // Ignore nodes that are already being torn down.
+            }
+        }
+
+        const cleanupDelayMs = immediate ? 0 : Math.round((releaseSec + 0.08) * 1000);
+        window.setTimeout(() => {
+            if (instance.kind === 'stream-preview') {
+                try {
+                    instance.mediaElement?.pause?.();
+                } catch {
+                    // Ignore pause failures during teardown.
+                }
+                safeDisconnect(instance.mediaSource);
+                safeDisconnect(instance.gain);
+                return;
+            }
+            safeStopSource(instance.source);
+            safeDisconnect(instance.source);
+            safeDisconnect(instance.gain);
+        }, cleanupDelayMs);
+    }
+
+    function registerSliderPreviewInterval(token, intervalMs, callback) {
+        if (!isSliderPreviewTokenActive(token) || typeof callback !== 'function') {
+            return 0;
+        }
+
+        const intervalId = window.setInterval(() => {
+            if (!isSliderPreviewTokenActive(token)) {
+                window.clearInterval(intervalId);
+                return;
+            }
+            callback();
+        }, intervalMs);
+        sliderPreviewState.intervalIds.push(intervalId);
+        return intervalId;
+    }
+
+    function triggerSliderPreviewUiAccent(force = false) {
+        if (!isAudioOutputReady()) {
+            return false;
+        }
+        const nowMs = performance.now();
+        if (
+            !force &&
+            nowMs - sliderPreviewState.lastUiAccentAtMs < AUDIO_MIXER_PREVIEW_UI_THROTTLE_MS
+        ) {
+            return false;
+        }
+        sliderPreviewState.lastUiAccentAtMs = nowMs;
+        return playUiVariant('uiClickSoft', {
+            gain: 0.64,
+            rateScale: randomRange(0.98, 1.02),
+        });
+    }
+
+    function triggerSliderPreviewEffectsAccent(force = false) {
+        if (!isAudioOutputReady()) {
+            return false;
+        }
+        const nowMs = performance.now();
+        if (
+            !force &&
+            nowMs - sliderPreviewState.lastEffectsAccentAtMs < AUDIO_MIXER_PREVIEW_SFX_THROTTLE_MS
+        ) {
+            return false;
+        }
+        sliderPreviewState.lastEffectsAccentAtMs = nowMs;
+        return playVariant('pickupCollect', {
+            gain: 0.88,
+            rateScale: randomRange(0.98, 1.05),
+        });
+    }
+
+    function isSliderPreviewTokenActive(token, key = '') {
+        return (
+            Number.isFinite(token) &&
+            token > 0 &&
+            Boolean(sliderPreviewState.key) &&
+            sliderPreviewState.token === token &&
+            (!key || sliderPreviewState.key === key)
+        );
     }
 
     function emitPrefsChanged(reason = 'update') {
@@ -1870,7 +2377,8 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         }
         const definitionGain = SOUND_DEFINITIONS[WELCOME_MENU_MUSIC_SOUND_ID]?.gain || 1;
         instance.gain.gain.setTargetAtTime(
-            (shouldBeAudible ? WELCOME_MENU_MUSIC_GAIN : 0) * definitionGain,
+            (shouldBeAudible ? WELCOME_MENU_MUSIC_GAIN * runtime.previewMenuMusicDuck : 0) *
+                definitionGain,
             context.currentTime,
             shouldBeAudible ? 0.42 : 0.18
         );
@@ -2100,6 +2608,9 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
 
     function onWelcomeVisibilityChanged(visible) {
         runtime.welcomeVisible = Boolean(visible);
+        if (!runtime.welcomeVisible) {
+            endSliderPreview();
+        }
         if (!isRealtimeAudioReady()) {
             return;
         }
@@ -4701,6 +5212,19 @@ function formatAudioSliderPercentLabel(percentValue = 0) {
     return safePercent <= 0 ? 'OFF' : `${safePercent}%`;
 }
 
+function isAudioSliderPreviewKeyboardKey(key = '') {
+    return (
+        key === 'ArrowLeft' ||
+        key === 'ArrowRight' ||
+        key === 'ArrowUp' ||
+        key === 'ArrowDown' ||
+        key === 'Home' ||
+        key === 'End' ||
+        key === 'PageUp' ||
+        key === 'PageDown'
+    );
+}
+
 function createAudioUi(prefs, handlers) {
     const embeddedMount = document.getElementById('welcomeAudioSettingsMount');
     const embedded = embeddedMount instanceof Element;
@@ -4759,6 +5283,7 @@ function createAudioUi(prefs, handlers) {
 
     for (let i = 0; i < MIXER_SLIDERS.length; i += 1) {
         const sliderDef = MIXER_SLIDERS[i];
+        let interactionMode = 'pointer';
         const row = document.createElement('label');
         row.className = 'audioControlSliderRow';
         row.dataset.key = sliderDef.key;
@@ -4777,10 +5302,40 @@ function createAudioUi(prefs, handlers) {
         input.value = String(initialPercent);
         input.style.setProperty('--audio-slider-fill', `${initialPercent}%`);
         input.setAttribute('aria-label', `${sliderDef.label} volume`);
+        input.addEventListener('pointerdown', () => {
+            interactionMode = 'pointer';
+            handlers.onPreviewStart?.(sliderDef.key, interactionMode);
+        });
         input.addEventListener('input', () => {
             const normalized = clampNumber(Number(input.value) / 100, 0, 1, 1);
             handlers.onVolumeChanged(sliderDef.key, normalized);
-            handlers.onUnlockAudio();
+            handlers.onPreviewChange?.(sliderDef.key, interactionMode);
+        });
+        input.addEventListener('pointerup', () => {
+            interactionMode = 'pointer';
+            handlers.onPreviewEnd?.(sliderDef.key);
+        });
+        input.addEventListener('pointercancel', () => {
+            handlers.onPreviewEnd?.(sliderDef.key);
+        });
+        input.addEventListener('change', () => {
+            handlers.onPreviewEnd?.(sliderDef.key);
+        });
+        input.addEventListener('blur', () => {
+            handlers.onPreviewEnd?.(sliderDef.key);
+        });
+        input.addEventListener('keydown', (event) => {
+            if (!isAudioSliderPreviewKeyboardKey(event.key)) {
+                return;
+            }
+            interactionMode = 'keyboard';
+            handlers.onPreviewStart?.(sliderDef.key, interactionMode);
+        });
+        input.addEventListener('keyup', (event) => {
+            if (!isAudioSliderPreviewKeyboardKey(event.key)) {
+                return;
+            }
+            handlers.onPreviewEnd?.(sliderDef.key);
         });
 
         const value = document.createElement('span');
@@ -4863,21 +5418,53 @@ function persistAudioPrefs(prefs, fallbackPrefs = DEFAULT_AUDIO_PREFS) {
 function sanitizeAudioPrefs(prefs, fallbackPrefs = DEFAULT_AUDIO_PREFS) {
     const safeFallback =
         fallbackPrefs && typeof fallbackPrefs === 'object' ? fallbackPrefs : DEFAULT_AUDIO_PREFS;
-    const resolved = {
-        muted: Boolean(
-            prefs && typeof prefs === 'object' && 'muted' in prefs
-                ? prefs.muted
-                : safeFallback.muted
+    const legacyFallbackMusicVolume = clampNumber(
+        safeFallback?.musicVolume,
+        0,
+        1,
+        DEFAULT_AUDIO_PREFS.gameMusicVolume
+    );
+    const resolvedFallbacks = {
+        ...DEFAULT_AUDIO_PREFS,
+        ...safeFallback,
+        menuMusicVolume: clampNumber(
+            safeFallback?.menuMusicVolume,
+            0,
+            1,
+            legacyFallbackMusicVolume
         ),
+        gameMusicVolume: clampNumber(
+            safeFallback?.gameMusicVolume,
+            0,
+            1,
+            legacyFallbackMusicVolume
+        ),
+    };
+    const source = prefs && typeof prefs === 'object' ? prefs : null;
+    const legacySourceMusicVolume =
+        source && Object.prototype.hasOwnProperty.call(source, 'musicVolume')
+            ? source.musicVolume
+            : undefined;
+    const resolved = {
+        muted: Boolean(source && 'muted' in source ? source.muted : resolvedFallbacks.muted),
     };
 
     for (let index = 0; index < MIXER_SLIDERS.length; index += 1) {
         const key = MIXER_SLIDERS[index].key;
+        const rawValue =
+            source &&
+            (Object.prototype.hasOwnProperty.call(source, key) ||
+                ((key === 'menuMusicVolume' || key === 'gameMusicVolume') &&
+                    legacySourceMusicVolume !== undefined))
+                ? Object.prototype.hasOwnProperty.call(source, key)
+                    ? source[key]
+                    : legacySourceMusicVolume
+                : resolvedFallbacks[key];
         resolved[key] = clampNumber(
-            prefs?.[key],
+            rawValue,
             0,
             1,
-            clampNumber(safeFallback[key], 0, 1, DEFAULT_AUDIO_PREFS[key])
+            clampNumber(resolvedFallbacks[key], 0, 1, DEFAULT_AUDIO_PREFS[key])
         );
     }
 

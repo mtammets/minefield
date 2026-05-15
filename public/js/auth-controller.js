@@ -39,7 +39,8 @@ const DEFAULT_ACCOUNT_AUDIO_PREFS = Object.freeze({
     botVehiclesVolume: 1,
     effectsVolume: 1,
     ambienceVolume: 1,
-    musicVolume: 0.08,
+    menuMusicVolume: 0.08,
+    gameMusicVolume: 0.08,
     uiVolume: 0.9,
     muted: false,
 });
@@ -2152,6 +2153,10 @@ function sanitizeAccountAudioPrefs(value, fallbackPrefs = DEFAULT_ACCOUNT_AUDIO_
             ? fallbackPrefs
             : DEFAULT_ACCOUNT_AUDIO_PREFS;
     const source = value && typeof value === 'object' ? value : {};
+    const legacyFallbackMusicVolume = clampAccountAudioPref(
+        fallback.musicVolume,
+        DEFAULT_ACCOUNT_AUDIO_PREFS.gameMusicVolume
+    );
     return {
         masterVolume: clampAccountAudioPref(source.masterVolume, fallback.masterVolume),
         vehiclesVolume: clampAccountAudioPref(source.vehiclesVolume, fallback.vehiclesVolume),
@@ -2161,7 +2166,18 @@ function sanitizeAccountAudioPrefs(value, fallbackPrefs = DEFAULT_ACCOUNT_AUDIO_
         ),
         effectsVolume: clampAccountAudioPref(source.effectsVolume, fallback.effectsVolume),
         ambienceVolume: clampAccountAudioPref(source.ambienceVolume, fallback.ambienceVolume),
-        musicVolume: clampAccountAudioPref(source.musicVolume, fallback.musicVolume),
+        menuMusicVolume: clampAccountAudioPref(
+            Object.prototype.hasOwnProperty.call(source, 'menuMusicVolume')
+                ? source.menuMusicVolume
+                : source.musicVolume,
+            clampAccountAudioPref(fallback.menuMusicVolume, legacyFallbackMusicVolume)
+        ),
+        gameMusicVolume: clampAccountAudioPref(
+            Object.prototype.hasOwnProperty.call(source, 'gameMusicVolume')
+                ? source.gameMusicVolume
+                : source.musicVolume,
+            clampAccountAudioPref(fallback.gameMusicVolume, legacyFallbackMusicVolume)
+        ),
         uiVolume: clampAccountAudioPref(source.uiVolume, fallback.uiVolume),
         muted: Boolean('muted' in source ? source.muted : fallback.muted),
     };

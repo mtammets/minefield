@@ -1,14 +1,15 @@
 const fs = require('fs/promises');
 const path = require('path');
 
-const AUDIO_PREFS_VERSION = 1;
+const AUDIO_PREFS_VERSION = 2;
 const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 0.84,
     vehiclesVolume: 1,
     botVehiclesVolume: 1,
     effectsVolume: 1,
     ambienceVolume: 1,
-    musicVolume: 0.08,
+    menuMusicVolume: 0.08,
+    gameMusicVolume: 0.08,
     uiVolume: 0.9,
     muted: false,
 });
@@ -18,7 +19,8 @@ const AUDIO_PREF_KEYS = Object.freeze([
     'botVehiclesVolume',
     'effectsVolume',
     'ambienceVolume',
-    'musicVolume',
+    'menuMusicVolume',
+    'gameMusicVolume',
     'uiVolume',
 ]);
 
@@ -46,17 +48,38 @@ function createDefaultAudioPrefs() {
 function sanitizeAudioPrefs(input = {}, fallback = null) {
     const defaults = createDefaultAudioPrefs();
     const base = fallback && typeof fallback === 'object' ? fallback : defaults;
+    const legacyFallbackMusicVolume = clampNumber(
+        base?.musicVolume,
+        0,
+        1,
+        defaults.gameMusicVolume
+    );
+    const resolvedBase = {
+        ...defaults,
+        ...base,
+        menuMusicVolume: clampNumber(base?.menuMusicVolume, 0, 1, legacyFallbackMusicVolume),
+        gameMusicVolume: clampNumber(base?.gameMusicVolume, 0, 1, legacyFallbackMusicVolume),
+    };
+    const source = input && typeof input === 'object' ? input : {};
+    const legacySourceMusicVolume = Object.prototype.hasOwnProperty.call(source, 'musicVolume')
+        ? source.musicVolume
+        : undefined;
     const resolved = {
-        muted: Boolean(
-            input && typeof input === 'object' && 'muted' in input ? input.muted : base.muted
-        ),
+        muted: Boolean('muted' in source ? source.muted : resolvedBase.muted),
     };
 
     for (let index = 0; index < AUDIO_PREF_KEYS.length; index += 1) {
         const key = AUDIO_PREF_KEYS[index];
-        const fallbackValue = Number.isFinite(base[key]) ? base[key] : defaults[key];
+        const fallbackValue = Number.isFinite(resolvedBase[key])
+            ? resolvedBase[key]
+            : defaults[key];
         const rawValue =
-            input && typeof input === 'object' && key in input ? input[key] : fallbackValue;
+            key in source
+                ? source[key]
+                : (key === 'menuMusicVolume' || key === 'gameMusicVolume') &&
+                    legacySourceMusicVolume !== undefined
+                  ? legacySourceMusicVolume
+                  : fallbackValue;
         resolved[key] = clampNumber(rawValue, 0, 1, fallbackValue);
     }
 
