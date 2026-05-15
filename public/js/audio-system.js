@@ -695,6 +695,8 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         onVehicleWeaponPickup,
         onVehicleWeaponShot,
         onVehicleWeaponImpact,
+        playUiClick,
+        playUiConfirm,
     };
 
     function initialize(options = {}) {
@@ -2629,6 +2631,20 @@ export function createAudioSystem({ camera = null, onPrefsChanged = null } = {})
         playVariant('uiClickSoft', {
             gain: 0.62,
         });
+    }
+
+    function playUiClick(options = {}) {
+        if (!isRealtimeAudioReady()) {
+            return null;
+        }
+        return playUiVariant('uiClickSoft', options);
+    }
+
+    function playUiConfirm(options = {}) {
+        if (!isRealtimeAudioReady()) {
+            return null;
+        }
+        return playOneShot('uiConfirm01', options);
     }
 
     function onRaceIntroStep(step = null) {
@@ -5642,6 +5658,12 @@ function createNoopAudioSystem() {
         onVehicleWeaponPickup() {},
         onVehicleWeaponShot() {},
         onVehicleWeaponImpact() {},
+        playUiClick() {
+            return null;
+        },
+        playUiConfirm() {
+            return null;
+        },
     };
 }
 

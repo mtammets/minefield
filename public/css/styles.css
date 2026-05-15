@@ -7224,6 +7224,14 @@ body.race-intro-active #botPanel {
     transform: scale(1.03);
 }
 
+.welcomeAuthWalletToggleBtn[data-reveal-pending='true']:not([data-open='true']) {
+    animation: welcomeWalletRevealTogglePulse 920ms ease-in-out infinite;
+}
+
+.welcomeAuthWalletToggleBtn[data-reveal-pending='true']:not([data-open='true'])::after {
+    opacity: 0.92;
+}
+
 .welcomeAuthWalletToggleBtn:focus-visible {
     outline: none;
 }
@@ -7256,6 +7264,11 @@ body.race-intro-active #botPanel {
 .welcomeAuthWalletToggleBtn[data-open='true'] .welcomeAuthWalletToggleOrbit {
     opacity: 0.84;
     transform: rotate(22deg) scale(1.06);
+}
+
+.welcomeAuthWalletToggleBtn[data-reveal-pending='true'] .welcomeAuthWalletToggleOrbit,
+.welcomeAuthWalletToggleBtn[data-reveal-active='true'] .welcomeAuthWalletToggleOrbit {
+    animation: welcomeWalletRevealOrbitSweep 1.12s linear infinite;
 }
 
 .welcomeAuthWalletToggleCore {
@@ -7598,6 +7611,14 @@ body.race-intro-active #botPanel {
     opacity: 1;
 }
 
+.welcomeAuthWalletBoard[data-reveal-active='true'] {
+    border-color: rgba(176, 231, 205, 0.34);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        0 28px 42px rgba(0, 0, 0, 0.18),
+        0 0 0 1px rgba(108, 214, 170, 0.08);
+}
+
 .welcomeGuestWalletBoard {
     margin-top: 4px;
     padding: 13px 14px;
@@ -7641,6 +7662,13 @@ body.race-intro-active #botPanel {
     line-height: 0.96;
     letter-spacing: -0.04em;
     color: rgba(242, 251, 247, 0.98);
+}
+
+.welcomeAuthWalletBalance[data-reveal-active='true'] {
+    animation: welcomeWalletRevealBalancePop 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    text-shadow:
+        0 0 24px rgba(127, 244, 186, 0.18),
+        0 12px 28px rgba(0, 0, 0, 0.18);
 }
 
 .welcomeAuthWalletSubline {
@@ -7859,6 +7887,18 @@ body.race-intro-active #botPanel {
     background: rgba(7, 15, 18, 0.62);
 }
 
+.welcomeAuthWalletActivityItem[data-highlight='true'] {
+    border-color: rgba(153, 232, 192, 0.34);
+    background:
+        linear-gradient(180deg, rgba(16, 36, 31, 0.72), rgba(8, 18, 20, 0.72)),
+        rgba(7, 15, 18, 0.62);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        0 16px 28px rgba(0, 0, 0, 0.14),
+        0 0 0 1px rgba(102, 208, 164, 0.08);
+    animation: welcomeWalletRevealActivityFlash 720ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 .welcomeAuthWalletActivityItem.is-empty {
     grid-template-columns: minmax(0, 1fr);
     color: rgba(191, 216, 202, 0.72);
@@ -7884,6 +7924,53 @@ body.race-intro-active #botPanel {
 .welcomeAuthWalletActivityDelta[data-tone='spend'] {
     color: rgba(255, 219, 205, 0.98);
     background: rgba(76, 24, 16, 0.62);
+}
+
+@keyframes welcomeWalletRevealTogglePulse {
+    0%,
+    100% {
+        transform: translateY(0) scale(1);
+        filter: brightness(1);
+    }
+    42% {
+        transform: translateY(-2px) scale(1.04);
+        filter: brightness(1.08);
+    }
+}
+
+@keyframes welcomeWalletRevealOrbitSweep {
+    from {
+        transform: rotate(-10deg) scale(1);
+    }
+    to {
+        transform: rotate(350deg) scale(1.05);
+    }
+}
+
+@keyframes welcomeWalletRevealBalancePop {
+    0% {
+        transform: scale(0.96);
+        color: rgba(214, 255, 232, 0.94);
+    }
+    56% {
+        transform: scale(1.045);
+        color: rgba(255, 245, 210, 0.98);
+    }
+    100% {
+        transform: scale(1);
+        color: rgba(242, 251, 247, 0.98);
+    }
+}
+
+@keyframes welcomeWalletRevealActivityFlash {
+    0% {
+        transform: translateY(8px);
+        opacity: 0.3;
+    }
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 .welcomeAuthWalletActivityCopy {

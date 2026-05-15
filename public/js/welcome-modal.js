@@ -94,6 +94,13 @@ const WELCOME_PROFILE_SCREENSAVER_LEADERBOARD_DWELL_MS = 10000;
 const WELCOME_PROFILE_SCREENSAVER_RETURN_VIDEO_DWELL_MS = 5000;
 const WELCOME_PREVIEW_LOADING_SOFT_CAP = 0.94;
 const WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT = 3;
+const WELCOME_WALLET_REVEAL_DELAY_MS = 1000;
+const WELCOME_WALLET_REVEAL_COUNTUP_DELAY_MS = 160;
+const WELCOME_WALLET_REVEAL_MIN_DURATION_MS = 920;
+const WELCOME_WALLET_REVEAL_MAX_DURATION_MS = 1680;
+const WELCOME_WALLET_REVEAL_MIN_TICK_INTERVAL_MS = 72;
+const WELCOME_WALLET_REVEAL_HIGHLIGHT_MS = 1600;
+const WELCOME_WALLET_REVEAL_MAX_SOUND_STEPS = 10;
 const WELCOME_GARAGE_PREVIEW_YAW_DRAG_SENSITIVITY = 0.011;
 const WELCOME_GARAGE_PREVIEW_PITCH_DRAG_SENSITIVITY = 0.006;
 const WELCOME_GARAGE_PREVIEW_PITCH_OFFSET_MIN = -0.18;
@@ -129,6 +136,7 @@ export function createWelcomeModalController({
     onPurchaseVehicle,
     onBuyCredits,
     onWrapChange,
+    onPlayWalletRevealSound,
     getHideGameplayPanels,
     onHideGameplayPanelsChange,
     initialSkinId,
@@ -393,6 +401,7 @@ export function createWelcomeModalController({
             setAuthState() {},
             setPlayerEconomy() {},
             setGlobalLeaderboard() {},
+            queueWalletRewardReveal() {},
             focusAuthPanel() {},
         };
     }
@@ -485,6 +494,18 @@ export function createWelcomeModalController({
     let customCreateCodeStatus = 'idle';
     let customCreateCodeStatusCode = '';
     let playerEconomyState = normalizePlayerEconomyState(getPlayerEconomyState?.());
+    const walletRevealState = {
+        pending: null,
+        current: null,
+        highlightPayload: null,
+        timeoutHandle: null,
+        rafHandle: null,
+        highlightTimeoutHandle: null,
+        active: false,
+        displayBalance: null,
+        lastSoundStep: -1,
+        lastSoundAtMs: -Number.POSITIVE_INFINITY,
+    };
     const leaderboardNumberFormatter = new Intl.NumberFormat('en-US');
     const creditsFormatter = new Intl.NumberFormat('en-US');
     const formatCredits = (value, options = {}) =>
@@ -1168,6 +1189,7 @@ export function createWelcomeModalController({
             schedulePreviewLoadingReady();
             syncIntroVideoOverlayForCurrentView();
             syncWelcomeProfileScreensaverForCurrentView();
+            refreshWalletRevealForCurrentView();
         },
         hide() {
             cancelStartSequence();
@@ -1185,6 +1207,10 @@ export function createWelcomeModalController({
             syncPreviewInteractionUi();
             rootEl.hidden = true;
             stopWelcomeProfileScreensaver();
+            stopWalletRevealPresentation({
+                clearQueuedReveal: false,
+                clearHighlight: true,
+            });
         },
         resize() {
             syncPreviewSize();
@@ -1288,6 +1314,8 @@ export function createWelcomeModalController({
         setAuthState,
         setPlayerEconomy(nextState = null) {
             playerEconomyState = normalizePlayerEconomyState(nextState);
+            syncWalletProfileUi();
+            syncWalletRevealUiState();
             syncGaragePresentationUi({
                 authenticated: authUiState.authenticated,
                 busy: Boolean(authUiState.loading),
@@ -1299,6 +1327,20 @@ export function createWelcomeModalController({
             welcomeGlobalLeaderboardState = normalizeWelcomeGlobalLeaderboardState(nextState);
             syncWelcomeLeaderboardUi();
             syncSignedInProfileSummary();
+        },
+        queueWalletRewardReveal(reward = null) {
+            const normalizedReward = normalizeWalletRevealPayload(reward);
+            if (!normalizedReward) {
+                return false;
+            }
+            stopWalletRevealPresentation({
+                clearQueuedReveal: false,
+                clearHighlight: true,
+            });
+            walletRevealState.pending = normalizedReward;
+            refreshWalletRevealForCurrentView();
+            syncWalletProfileUi();
+            return true;
         },
         refreshGarageWrapPresets() {
             refreshGarageWrapPresetButtons(getGarageWrapPresetEntries());
@@ -2470,6 +2512,10 @@ export function createWelcomeModalController({
             writeStoredOnlinePlayerName(authUiState.displayName);
         }
         if (!authUiState.authenticated) {
+            stopWalletRevealPresentation({
+                clearQueuedReveal: true,
+                clearHighlight: true,
+            });
             walletPanelOpen = false;
             setAuthSignedInSection('security', {
                 skipSync: true,
@@ -2509,6 +2555,7 @@ export function createWelcomeModalController({
         }
         syncIntroVideoOverlayForCurrentView();
         syncWelcomeProfileScreensaverForCurrentView();
+        refreshWalletRevealForCurrentView();
     }
 
     function syncAuthUi() {
@@ -2888,6 +2935,247 @@ export function createWelcomeModalController({
         authProfileBestScoreEl.textContent = summary.bestScoreText;
     }
 
+    function canAutoRevealWalletForCurrentView() {
+        return Boolean(
+            !rootEl.hidden &&
+            welcomeAccountOpen &&
+            authUiState.authenticated &&
+            authWalletBoardEl &&
+            authWalletToggleBtnEl &&
+            !garagePanelOpen &&
+            !accountToolsOpen
+        );
+    }
+
+    function syncWalletRevealUiState() {
+        const hasPendingRevealDelay =
+            !walletRevealState.active &&
+            walletRevealState.timeoutHandle != null &&
+            canAutoRevealWalletForCurrentView();
+        const hasQueuedReveal =
+            !walletRevealState.active &&
+            walletRevealState.timeoutHandle == null &&
+            walletRevealState.pending != null &&
+            canAutoRevealWalletForCurrentView();
+
+        if (authWalletToggleBtnEl) {
+            authWalletToggleBtnEl.dataset.revealPending =
+                hasPendingRevealDelay || hasQueuedReveal ? 'true' : 'false';
+            authWalletToggleBtnEl.dataset.revealActive = walletRevealState.active
+                ? 'true'
+                : 'false';
+        }
+        if (authWalletBoardEl) {
+            authWalletBoardEl.dataset.revealActive = walletRevealState.active ? 'true' : 'false';
+        }
+        if (authWalletBalanceEl) {
+            authWalletBalanceEl.dataset.revealActive = walletRevealState.active ? 'true' : 'false';
+        }
+    }
+
+    function clearWalletRevealDelay() {
+        if (walletRevealState.timeoutHandle == null) {
+            return;
+        }
+        window.clearTimeout(walletRevealState.timeoutHandle);
+        walletRevealState.timeoutHandle = null;
+    }
+
+    function clearWalletRevealFrame() {
+        if (walletRevealState.rafHandle == null) {
+            return;
+        }
+        window.cancelAnimationFrame(walletRevealState.rafHandle);
+        walletRevealState.rafHandle = null;
+    }
+
+    function clearWalletRevealHighlight({ clearPayload = true } = {}) {
+        if (walletRevealState.highlightTimeoutHandle != null) {
+            window.clearTimeout(walletRevealState.highlightTimeoutHandle);
+            walletRevealState.highlightTimeoutHandle = null;
+        }
+        if (clearPayload) {
+            walletRevealState.highlightPayload = null;
+        }
+    }
+
+    function stopWalletRevealPresentation({
+        clearQueuedReveal = false,
+        clearHighlight = false,
+    } = {}) {
+        clearWalletRevealDelay();
+        clearWalletRevealFrame();
+        walletRevealState.active = false;
+        walletRevealState.current = null;
+        walletRevealState.displayBalance = null;
+        walletRevealState.lastSoundStep = -1;
+        walletRevealState.lastSoundAtMs = -Number.POSITIVE_INFINITY;
+        if (clearQueuedReveal) {
+            walletRevealState.pending = null;
+        }
+        if (clearHighlight) {
+            clearWalletRevealHighlight();
+        }
+        syncWalletProfileUi();
+        syncWalletRevealUiState();
+    }
+
+    function refreshWalletRevealForCurrentView() {
+        if (!canAutoRevealWalletForCurrentView()) {
+            clearWalletRevealDelay();
+            if (walletRevealState.active) {
+                stopWalletRevealPresentation({
+                    clearQueuedReveal: false,
+                    clearHighlight: true,
+                });
+                return;
+            }
+            syncWalletRevealUiState();
+            return;
+        }
+        if (
+            walletRevealState.pending == null ||
+            walletRevealState.active ||
+            walletRevealState.timeoutHandle != null
+        ) {
+            syncWalletRevealUiState();
+            return;
+        }
+
+        walletRevealState.timeoutHandle = window.setTimeout(() => {
+            walletRevealState.timeoutHandle = null;
+            if (!canAutoRevealWalletForCurrentView()) {
+                syncWalletRevealUiState();
+                return;
+            }
+            const payload = walletRevealState.pending;
+            if (!payload) {
+                syncWalletRevealUiState();
+                return;
+            }
+            walletRevealState.pending = null;
+            setWalletPanelOpen(true);
+            syncWalletProfileUi();
+            syncWalletRevealUiState();
+            walletRevealState.timeoutHandle = window.setTimeout(() => {
+                walletRevealState.timeoutHandle = null;
+                if (!canAutoRevealWalletForCurrentView()) {
+                    syncWalletRevealUiState();
+                    return;
+                }
+                startWalletRevealAnimation(payload);
+            }, WELCOME_WALLET_REVEAL_COUNTUP_DELAY_MS);
+            syncWalletRevealUiState();
+        }, WELCOME_WALLET_REVEAL_DELAY_MS);
+        syncWalletRevealUiState();
+    }
+
+    function startWalletRevealAnimation(payload) {
+        if (!payload) {
+            return;
+        }
+        clearWalletRevealDelay();
+        clearWalletRevealFrame();
+        clearWalletRevealHighlight();
+        walletRevealState.active = true;
+        walletRevealState.current = payload;
+        walletRevealState.highlightPayload = payload;
+        walletRevealState.displayBalance = payload.balanceBefore;
+        walletRevealState.lastSoundStep = -1;
+        walletRevealState.lastSoundAtMs = -Number.POSITIVE_INFINITY;
+        syncWalletProfileUi();
+        syncWalletRevealUiState();
+
+        const durationMs = resolveWalletRevealDurationMs(payload.creditsEarned);
+        const soundStepCount = Math.max(
+            1,
+            Math.min(
+                WELCOME_WALLET_REVEAL_MAX_SOUND_STEPS,
+                payload.creditsEarned,
+                Math.round(durationMs / 118)
+            )
+        );
+        const startedAtMs = performance.now();
+
+        const tick = (now) => {
+            if (!walletRevealState.active || walletRevealState.current !== payload) {
+                return;
+            }
+            const progress = Math.max(0, Math.min(1, (now - startedAtMs) / durationMs));
+            const easedProgress = 1 - Math.pow(1 - progress, 3);
+            const nextBalance =
+                progress >= 1
+                    ? payload.balanceAfter
+                    : Math.max(
+                          payload.balanceBefore,
+                          Math.min(
+                              payload.balanceAfter,
+                              Math.round(
+                                  payload.balanceBefore +
+                                      (payload.balanceAfter - payload.balanceBefore) * easedProgress
+                              )
+                          )
+                      );
+
+            if (nextBalance !== walletRevealState.displayBalance) {
+                walletRevealState.displayBalance = nextBalance;
+                syncWalletProfileUi();
+            }
+
+            const soundStep = Math.min(soundStepCount - 1, Math.floor(progress * soundStepCount));
+            if (
+                soundStep > walletRevealState.lastSoundStep &&
+                now - walletRevealState.lastSoundAtMs >= WELCOME_WALLET_REVEAL_MIN_TICK_INTERVAL_MS
+            ) {
+                walletRevealState.lastSoundStep = soundStep;
+                walletRevealState.lastSoundAtMs = now;
+                onPlayWalletRevealSound?.({
+                    type: 'tick',
+                    creditsEarned: payload.creditsEarned,
+                    balance: nextBalance,
+                    balanceAfter: payload.balanceAfter,
+                    progress: easedProgress,
+                    step: soundStep + 1,
+                    stepCount: soundStepCount,
+                });
+            }
+
+            if (progress < 1) {
+                walletRevealState.rafHandle = window.requestAnimationFrame(tick);
+                return;
+            }
+
+            finishWalletRevealAnimation(payload);
+        };
+
+        walletRevealState.rafHandle = window.requestAnimationFrame(tick);
+    }
+
+    function finishWalletRevealAnimation(payload) {
+        clearWalletRevealFrame();
+        walletRevealState.active = false;
+        walletRevealState.current = null;
+        walletRevealState.displayBalance = null;
+        walletRevealState.lastSoundStep = -1;
+        walletRevealState.lastSoundAtMs = -Number.POSITIVE_INFINITY;
+        syncWalletProfileUi();
+        syncWalletRevealUiState();
+        onPlayWalletRevealSound?.({
+            type: 'confirm',
+            creditsEarned: payload?.creditsEarned || 0,
+            balanceAfter: payload?.balanceAfter || 0,
+        });
+        clearWalletRevealHighlight({
+            clearPayload: false,
+        });
+        walletRevealState.highlightTimeoutHandle = window.setTimeout(() => {
+            walletRevealState.highlightTimeoutHandle = null;
+            walletRevealState.highlightPayload = null;
+            syncWalletProfileUi();
+            syncWalletRevealUiState();
+        }, WELCOME_WALLET_REVEAL_HIGHLIGHT_MS);
+    }
+
     function syncWalletProfileUi() {
         const hasPrimaryWalletBoard = Boolean(
             authWalletBalanceEl &&
@@ -2914,9 +3202,19 @@ export function createWelcomeModalController({
         }
 
         const walletCredits = Math.max(0, Math.round(Number(playerEconomyState?.credits) || 0));
+        const presentedWalletCredits = walletRevealState.active
+            ? Math.max(
+                  0,
+                  Math.round(Number(walletRevealState.displayBalance ?? walletCredits) || 0)
+              )
+            : walletCredits;
+        const presentedEconomyState = normalizePlayerEconomyState({
+            credits: presentedWalletCredits,
+            unlockedVehicleIds: playerEconomyState?.unlockedVehicleIds,
+        });
         const ownedVehicleCount = getOwnedVehicleCountForEconomy(playerEconomyState);
         const totalVehicleCount = PLAYER_VEHICLE_PRESETS.length;
-        const nextUnlock = resolveNextVehicleUnlockTarget(playerEconomyState);
+        const nextUnlock = resolveNextVehicleUnlockTarget(presentedEconomyState);
         const syncSource =
             typeof authUiState.economySyncSource === 'string'
                 ? authUiState.economySyncSource.trim().toLowerCase()
@@ -2937,7 +3235,7 @@ export function createWelcomeModalController({
             : `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis owned • ${formatCredits(nextUnlock.creditsShort)} to ${nextUnlock.vehicleName}.`;
         const projectedProgressText = nextUnlock.unlocked
             ? 'ALL CHASSIS ONLINE'
-            : `${creditsFormatter.format(Math.min(walletCredits, nextUnlock.unlockPriceCredits))}/${formatCredits(nextUnlock.unlockPriceCredits)}`;
+            : `${creditsFormatter.format(Math.min(presentedWalletCredits, nextUnlock.unlockPriceCredits))}/${formatCredits(nextUnlock.unlockPriceCredits)}`;
 
         const nextUnlockLabel = nextUnlock.unlocked ? 'Garage Completion' : nextUnlock.vehicleName;
         const nextUnlockState = nextUnlock.unlocked
@@ -2959,7 +3257,7 @@ export function createWelcomeModalController({
         }
 
         if (hasPrimaryWalletBoard) {
-            authWalletBalanceEl.textContent = formatCredits(walletCredits);
+            authWalletBalanceEl.textContent = formatCredits(presentedWalletCredits);
             authWalletSyncStateEl.textContent = walletCtaLabel;
             authWalletSyncStateEl.dataset.tone = 'cta';
             authWalletSyncStateEl.setAttribute('aria-label', 'Buy 1500 Credits for 1 euro');
@@ -2994,8 +3292,18 @@ export function createWelcomeModalController({
         const recentTransactions = Array.isArray(authUiState.economyRecentTransactions)
             ? authUiState.economyRecentTransactions
             : [];
+        const revealPayload = walletRevealState.highlightPayload;
+        const syntheticRevealEntry = revealPayload
+            ? buildSyntheticWalletRevealTransactionEntry(revealPayload, presentedWalletCredits)
+            : null;
+        const visibleTransactions = syntheticRevealEntry
+            ? prependWalletRevealTransactionIfNeeded(recentTransactions, syntheticRevealEntry)
+            : recentTransactions.slice();
+        const highlightedFirstEntry = Boolean(
+            revealPayload && matchesWalletRevealTransaction(visibleTransactions[0], revealPayload)
+        );
         authWalletRecentListEl.textContent = '';
-        if (recentTransactions.length <= 0) {
+        if (visibleTransactions.length <= 0) {
             const emptyEl = document.createElement('div');
             emptyEl.className = 'welcomeAuthWalletActivityItem is-empty';
             emptyEl.textContent = authUiState.authenticated
@@ -3005,30 +3313,34 @@ export function createWelcomeModalController({
             return;
         }
 
-        recentTransactions.slice(0, WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT).forEach((entry) => {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'welcomeAuthWalletActivityItem';
+        visibleTransactions
+            .slice(0, WELCOME_WALLET_ACTIVITY_VISIBLE_COUNT)
+            .forEach((entry, index) => {
+                const itemEl = document.createElement('div');
+                itemEl.className = 'welcomeAuthWalletActivityItem';
+                itemEl.dataset.highlight = highlightedFirstEntry && index === 0 ? 'true' : 'false';
+                itemEl.dataset.synthetic = entry.synthetic ? 'true' : 'false';
 
-            const deltaEl = document.createElement('div');
-            deltaEl.className = 'welcomeAuthWalletActivityDelta';
-            deltaEl.dataset.tone = entry.creditsDelta < 0 ? 'spend' : 'earn';
-            deltaEl.textContent = formatCredits(entry.creditsDelta, { includePlusSign: true });
+                const deltaEl = document.createElement('div');
+                deltaEl.className = 'welcomeAuthWalletActivityDelta';
+                deltaEl.dataset.tone = entry.creditsDelta < 0 ? 'spend' : 'earn';
+                deltaEl.textContent = formatCredits(entry.creditsDelta, { includePlusSign: true });
 
-            const copyEl = document.createElement('div');
-            copyEl.className = 'welcomeAuthWalletActivityCopy';
+                const copyEl = document.createElement('div');
+                copyEl.className = 'welcomeAuthWalletActivityCopy';
 
-            const titleEl = document.createElement('div');
-            titleEl.className = 'welcomeAuthWalletActivityTitle';
-            titleEl.textContent = entry.summary || 'Wallet update';
+                const titleEl = document.createElement('div');
+                titleEl.className = 'welcomeAuthWalletActivityTitle';
+                titleEl.textContent = entry.summary || 'Wallet update';
 
-            const metaEl = document.createElement('div');
-            metaEl.className = 'welcomeAuthWalletActivityMeta';
-            metaEl.textContent = `${formatWalletActivityTime(entry.createdAt)} • balance ${formatCredits(Math.max(0, Math.round(Number(entry.balanceAfter) || 0)))}`;
+                const metaEl = document.createElement('div');
+                metaEl.className = 'welcomeAuthWalletActivityMeta';
+                metaEl.textContent = `${formatWalletActivityTime(entry.createdAt)} • balance ${formatCredits(Math.max(0, Math.round(Number(entry.balanceAfter) || 0)))}`;
 
-            copyEl.append(titleEl, metaEl);
-            itemEl.append(deltaEl, copyEl);
-            authWalletRecentListEl.append(itemEl);
-        });
+                copyEl.append(titleEl, metaEl);
+                itemEl.append(deltaEl, copyEl);
+                authWalletRecentListEl.append(itemEl);
+            });
     }
 
     function syncGarageVehiclePips(activeIndex = selectedVehicleIndex) {
@@ -4074,6 +4386,7 @@ export function createWelcomeModalController({
             syncAuthUi();
             syncIntroVideoOverlayForCurrentView();
             syncWelcomeProfileScreensaverForCurrentView();
+            refreshWalletRevealForCurrentView();
         }
     }
 
@@ -4096,6 +4409,7 @@ export function createWelcomeModalController({
             syncAuthUi();
             syncIntroVideoOverlayForCurrentView();
             syncWelcomeProfileScreensaverForCurrentView();
+            refreshWalletRevealForCurrentView();
         }
     }
 
@@ -4234,6 +4548,7 @@ export function createWelcomeModalController({
         accountBtnEl.setAttribute('aria-expanded', welcomeAccountOpen ? 'true' : 'false');
         previewAccountOverlayEl.hidden = !welcomeAccountOpen;
         syncAuthUi();
+        refreshWalletRevealForCurrentView();
     }
 
     function setAccountToolsOpen(nextOpen, options = {}) {
@@ -4252,6 +4567,7 @@ export function createWelcomeModalController({
             syncAuthUi();
             syncIntroVideoOverlayForCurrentView();
             syncWelcomeProfileScreensaverForCurrentView();
+            refreshWalletRevealForCurrentView();
         }
     }
 
@@ -7345,6 +7661,106 @@ function resolveWelcomeProfileSummary({
         winRateText: `${numberFormatter.format(stats.winRate)}%`,
         bestScoreText: numberFormatter.format(bestScore),
     };
+}
+
+function normalizeWalletRevealPayload(reward = null) {
+    if (!reward || typeof reward !== 'object') {
+        return null;
+    }
+    const creditsEarned = Math.max(
+        0,
+        Math.round(Number(reward.creditsEarned ?? reward.creditsDelta) || 0)
+    );
+    const balanceAfter = Math.max(0, Math.round(Number(reward.balanceAfter) || 0));
+    const explicitBalanceBefore = Math.round(Number(reward.balanceBefore));
+    const balanceBefore = Number.isFinite(explicitBalanceBefore)
+        ? Math.max(0, Math.min(balanceAfter, explicitBalanceBefore))
+        : Math.max(0, balanceAfter - creditsEarned);
+    if (creditsEarned <= 0 || balanceAfter <= balanceBefore) {
+        return null;
+    }
+    return {
+        creditsEarned,
+        balanceBefore,
+        balanceAfter,
+        summary:
+            typeof reward.summary === 'string' && reward.summary.trim()
+                ? reward.summary.trim()
+                : `Wallet ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`,
+        createdAt: sanitizeWalletRevealCreatedAt(reward.createdAt),
+    };
+}
+
+function resolveWalletRevealDurationMs(creditsEarned = 0) {
+    const normalizedCredits = Math.max(0, Math.round(Number(creditsEarned) || 0));
+    return Math.max(
+        WELCOME_WALLET_REVEAL_MIN_DURATION_MS,
+        Math.min(
+            WELCOME_WALLET_REVEAL_MAX_DURATION_MS,
+            WELCOME_WALLET_REVEAL_MIN_DURATION_MS + Math.min(normalizedCredits, 120) * 6
+        )
+    );
+}
+
+function buildSyntheticWalletRevealTransactionEntry(revealPayload, displayedBalance = 0) {
+    const normalizedPayload = normalizeWalletRevealPayload(revealPayload);
+    if (!normalizedPayload) {
+        return null;
+    }
+    return {
+        kind: 'round-reward',
+        summary: normalizedPayload.summary,
+        creditsDelta: normalizedPayload.creditsEarned,
+        balanceAfter: Math.max(
+            normalizedPayload.balanceBefore,
+            Math.min(
+                normalizedPayload.balanceAfter,
+                Math.round(Number(displayedBalance) || normalizedPayload.balanceAfter)
+            )
+        ),
+        createdAt: normalizedPayload.createdAt,
+        synthetic: true,
+    };
+}
+
+function prependWalletRevealTransactionIfNeeded(transactions = [], revealEntry = null) {
+    const normalizedTransactions = Array.isArray(transactions) ? transactions.slice() : [];
+    if (!revealEntry) {
+        return normalizedTransactions;
+    }
+    if (matchesWalletRevealTransaction(normalizedTransactions[0], revealEntry)) {
+        return normalizedTransactions;
+    }
+    normalizedTransactions.unshift(revealEntry);
+    return normalizedTransactions;
+}
+
+function matchesWalletRevealTransaction(entry, revealPayload = null) {
+    if (!entry || typeof entry !== 'object') {
+        return false;
+    }
+    const normalizedPayload = normalizeWalletRevealPayload(revealPayload);
+    if (!normalizedPayload) {
+        return false;
+    }
+    const creditsDelta = Math.round(Number(entry.creditsDelta) || 0);
+    const balanceAfter = Math.max(0, Math.round(Number(entry.balanceAfter) || 0));
+    const summary = typeof entry.summary === 'string' ? entry.summary.trim() : '';
+    return (
+        (creditsDelta === normalizedPayload.creditsEarned &&
+            balanceAfter === normalizedPayload.balanceAfter) ||
+        (creditsDelta === normalizedPayload.creditsEarned &&
+            summary &&
+            summary === normalizedPayload.summary)
+    );
+}
+
+function sanitizeWalletRevealCreatedAt(value = '') {
+    const timestamp = Date.parse(typeof value === 'string' ? value : '');
+    if (!Number.isFinite(timestamp)) {
+        return new Date().toISOString();
+    }
+    return new Date(timestamp).toISOString();
 }
 
 function formatWalletActivityTime(value = '') {

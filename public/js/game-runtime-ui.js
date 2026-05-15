@@ -46,6 +46,7 @@ export function createRuntimeUiControllers({
     onBuyCredits = null,
     onWrapChange = null,
     onDownloadPerformanceLog = null,
+    onPlayWalletRevealSound = null,
     getHideGameplayPanels = () => false,
     onHideGameplayPanelsChange = null,
 }) {
@@ -117,6 +118,7 @@ export function createRuntimeUiControllers({
         onPurchaseVehicle,
         onBuyCredits,
         onWrapChange,
+        onPlayWalletRevealSound,
         toCssHex,
         getHideGameplayPanels,
         onHideGameplayPanelsChange,

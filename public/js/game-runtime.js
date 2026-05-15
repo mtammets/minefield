@@ -560,6 +560,18 @@ const {
         syncRuntimePlayerWrapAppearance();
     },
     onDownloadPerformanceLog: downloadPerformanceDiagnosticsLog,
+    onPlayWalletRevealSound(event = null) {
+        if (event?.type === 'confirm') {
+            runtimeState.audioController?.playUiConfirm?.({
+                gain: 0.76,
+            });
+            return;
+        }
+        runtimeState.audioController?.playUiClick?.({
+            gain: 0.54,
+            rateScale: 1.02,
+        });
+    },
     getHideGameplayPanels: () => gameplayPanelsHidden,
     onHideGameplayPanelsChange(nextHidden) {
         return setGameplayPanelsHidden(nextHidden, {
@@ -807,6 +819,13 @@ async function awardRuntimeRoundEconomyReward(event = null) {
         creditsEarned: reward.creditsEarned,
         balanceAfter: nextEconomyState.credits,
         breakdown: reward.breakdown,
+    });
+    welcomeModalUi.queueWalletRewardReveal?.({
+        creditsEarned: reward.creditsEarned,
+        balanceBefore: Math.max(0, nextEconomyState.credits - reward.creditsEarned),
+        balanceAfter: nextEconomyState.credits,
+        summary: buildRuntimeRoundEconomySummary(reward),
+        createdAt: new Date().toISOString(),
     });
     resetRuntimeEconomyRoundPreview();
     return {
