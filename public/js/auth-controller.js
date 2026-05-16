@@ -1,4 +1,5 @@
 import { getSupabaseBrowserClient, getSupabaseBrowserConfig } from './supabase-browser.js';
+import { clearAccountLocalData } from './account-local-data.js';
 import {
     createDefaultPlayerEconomyState,
     formatPlayerCredits,
@@ -465,8 +466,11 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     scope: 'local',
                 });
                 if (signOutError) {
-                    throw signOutError;
+                    console.warn('Local sign-out after account deletion failed:', signOutError);
                 }
+                clearAccountLocalData({
+                    projectRef: browserConfig.projectRef,
+                });
                 applySignedOutState('Account deleted. You can create a new account at any time.');
                 return {
                     ok: true,

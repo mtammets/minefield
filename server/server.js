@@ -43,6 +43,7 @@ const {
     isDonationSessionStatusFinal,
     normalizeStripeCheckoutSessionId,
 } = require('./donate-session-store');
+const { AccountDeletionError, deleteAccount } = require('./account-deletion');
 const {
     validatePickupCollection,
     markPickupCollected,
@@ -648,78 +649,33 @@ app.delete('/api/auth/account', async (req, res) => {
             return;
         }
 
-        const { error } = await supabaseServiceClient.auth.admin.deleteUser(authIdentity.userId);
-        if (error) {
-            throw error;
-        }
-
-        let deletedLeaderboardEntries = 0;
-        if (leaderboardStore.isConfigured()) {
-            try {
-                const cleanupResult = await leaderboardStore.deleteEntriesByUserId(
-                    authIdentity.userId
-                );
-                deletedLeaderboardEntries = Math.max(
-                    0,
-                    Math.round(Number(cleanupResult?.deletedCount) || 0)
-                );
-            } catch (cleanupError) {
-                console.warn('Leaderboard cleanup after account deletion failed:', cleanupError);
-            }
-        }
-
-        let deletedProfileImages = 0;
-        try {
-            const cleanupResult = await deleteStoredProfileImagesForUser(authIdentity.userId);
-            deletedProfileImages = Math.max(
-                0,
-                Math.round(Number(cleanupResult?.deletedCount) || 0)
-            );
-        } catch (cleanupError) {
-            console.warn('Profile image cleanup after account deletion failed:', cleanupError);
-        }
-
-        let deletedCarWraps = 0;
-        try {
-            const cleanupResult = await deleteStoredCarWrapsForUser(authIdentity.userId);
-            deletedCarWraps = Math.max(0, Math.round(Number(cleanupResult?.deletedCount) || 0));
-        } catch (cleanupError) {
-            console.warn('Car wrap cleanup after account deletion failed:', cleanupError);
-        }
-
-        let deletedEconomyWallets = 0;
-        let deletedEconomyTransactions = 0;
-        if (playerEconomyStore.isConfigured()) {
-            try {
-                const cleanupResult = await playerEconomyStore.deleteProfileByUserId(
-                    authIdentity.userId
-                );
-                deletedEconomyWallets = Math.max(
-                    0,
-                    Math.round(Number(cleanupResult?.deletedWallets) || 0)
-                );
-                deletedEconomyTransactions = Math.max(
-                    0,
-                    Math.round(Number(cleanupResult?.deletedTransactions) || 0)
-                );
-            } catch (cleanupError) {
-                console.warn('Player economy cleanup after account deletion failed:', cleanupError);
-            }
-        }
+        const deletionSummary = await deleteAccount({
+            userId: authIdentity.userId,
+            deleteLeaderboardEntries: leaderboardStore.isConfigured()
+                ? async (userId) => leaderboardStore.deleteEntriesByUserId(userId)
+                : null,
+            deleteEconomyProfile: playerEconomyStore.isConfigured()
+                ? async (userId) => playerEconomyStore.deleteProfileByUserId(userId)
+                : null,
+            deleteProfileImages: async (userId) => deleteStoredProfileImagesForUser(userId),
+            deleteCarWraps: async (userId) => deleteStoredCarWrapsForUser(userId),
+            deleteAuthUser: async (userId) => {
+                const { error } = await supabaseServiceClient.auth.admin.deleteUser(userId);
+                if (error) {
+                    throw error;
+                }
+            },
+        });
 
         res.json({
             ok: true,
-            deletedLeaderboardEntries,
-            deletedProfileImages,
-            deletedCarWraps,
-            deletedEconomyWallets,
-            deletedEconomyTransactions,
+            ...deletionSummary,
         });
     } catch (error) {
         console.error('Supabase account deletion failed:', error);
         res.status(502).json({
             ok: false,
-            error: 'Could not delete account right now.',
+            error: resolveAccountDeletionFailureMessage(error),
         });
     }
 });
@@ -3854,6 +3810,22 @@ function resolvePlayerCarWrapPublicUrl(carWrapPath) {
         supabaseRuntimeConfig.carWrapsBucket,
         carWrapPath
     );
+}
+
+function resolveAccountDeletionFailureMessage(error) {
+    if (!(error instanceof AccountDeletionError)) {
+        return 'Could not delete account right now.';
+    }
+    if (error.step === 'validate-user-id') {
+        return 'Could not determine which account to delete.';
+    }
+    if (error.step === 'cleanup') {
+        return 'Could not delete all account data right now. Please try again.';
+    }
+    if (error.step === 'delete-auth-user') {
+        return 'Could not finish account deletion right now. Please try again.';
+    }
+    return 'Could not delete account right now.';
 }
 
 async function deleteStoredProfileImagesForUser(userId) {

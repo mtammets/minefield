@@ -457,6 +457,71 @@ export function createWelcomeModalController({
         };
     }
 
+    const authActionDialogState = createInitialAuthActionDialogState();
+    const authActionDialogOverlayEl = document.createElement('div');
+    authActionDialogOverlayEl.className = 'welcomeAuthActionDialogOverlay';
+    authActionDialogOverlayEl.hidden = true;
+    authActionDialogOverlayEl.innerHTML = `
+        <div class="welcomeAuthActionDialogCard" role="dialog" aria-modal="true" aria-labelledby="welcomeAuthActionDialogTitle">
+            <div class="welcomeAuthActionDialogCopy">
+                <div class="welcomeAuthActionDialogEyebrow" id="welcomeAuthActionDialogEyebrow"></div>
+                <h3 class="welcomeAuthActionDialogTitle" id="welcomeAuthActionDialogTitle"></h3>
+                <p class="welcomeAuthActionDialogMessage" id="welcomeAuthActionDialogMessage"></p>
+            </div>
+            <div class="welcomeAuthActionDialogInputBlock" id="welcomeAuthActionDialogInputBlock" hidden>
+                <label class="welcomeAuthLabel" for="welcomeAuthActionDialogInput" id="welcomeAuthActionDialogInputLabel"></label>
+                <input
+                    id="welcomeAuthActionDialogInput"
+                    class="welcomeAuthInput welcomeAuthActionDialogInput"
+                    type="text"
+                    autocomplete="off"
+                    autocapitalize="characters"
+                    spellcheck="false"
+                />
+                <p class="welcomeAuthActionDialogHint" id="welcomeAuthActionDialogHint"></p>
+            </div>
+            <div class="welcomeAuthActionDialogActions">
+                <button type="button" class="welcomeAuthCompactActionBtn" id="welcomeAuthActionDialogCancelBtn"></button>
+                <button
+                    type="button"
+                    class="welcomeAuthCompactActionBtn welcomeAuthCompactActionBtnPrimary welcomeAuthActionDialogConfirmBtn"
+                    id="welcomeAuthActionDialogConfirmBtn"
+                ></button>
+            </div>
+        </div>
+    `;
+    rootEl.append(authActionDialogOverlayEl);
+    const authActionDialogCardEl = authActionDialogOverlayEl.querySelector(
+        '.welcomeAuthActionDialogCard'
+    );
+    const authActionDialogEyebrowEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogEyebrow'
+    );
+    const authActionDialogTitleEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogTitle'
+    );
+    const authActionDialogMessageEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogMessage'
+    );
+    const authActionDialogInputBlockEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogInputBlock'
+    );
+    const authActionDialogInputLabelEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogInputLabel'
+    );
+    const authActionDialogInputEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogInput'
+    );
+    const authActionDialogHintEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogHint'
+    );
+    const authActionDialogCancelBtnEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogCancelBtn'
+    );
+    const authActionDialogConfirmBtnEl = authActionDialogOverlayEl.querySelector(
+        '#welcomeAuthActionDialogConfirmBtn'
+    );
+
     const previewScene = new THREE.Scene();
     const previewCamera = new THREE.PerspectiveCamera(31, 16 / 9, 0.1, 100);
     const previewRenderer = new THREE.WebGLRenderer({
@@ -880,6 +945,32 @@ export function createWelcomeModalController({
         authDeleteAccountBtnEl.addEventListener('click', () => {
             void handleDeleteAccount();
         });
+        authActionDialogOverlayEl?.addEventListener('click', (event) => {
+            if (event.target === authActionDialogOverlayEl) {
+                closeAuthActionDialog(false);
+            }
+        });
+        authActionDialogCancelBtnEl?.addEventListener('click', () => {
+            closeAuthActionDialog(false);
+        });
+        authActionDialogConfirmBtnEl?.addEventListener('click', () => {
+            confirmAuthActionDialog();
+        });
+        authActionDialogInputEl?.addEventListener('input', () => {
+            authActionDialogState.inputValue = String(authActionDialogInputEl.value || '');
+            syncAuthActionDialogUi();
+        });
+        authActionDialogInputEl?.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                confirmAuthActionDialog();
+                return;
+            }
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeAuthActionDialog(false);
+            }
+        });
         authPasswordChangeSubmitBtnEl?.addEventListener('click', () => {
             void handlePasswordChangeSubmit();
         });
@@ -1276,6 +1367,9 @@ export function createWelcomeModalController({
         },
         hide() {
             cancelStartSequence();
+            closeAuthActionDialog(false, {
+                skipRestoreFocus: true,
+            });
             hideIntroVideoOverlay({ markDismissed: false, resetPlayback: true });
             resetTaglineTransition();
             setAuthSignedInSection('security', { skipSync: true });
@@ -1401,10 +1495,7 @@ export function createWelcomeModalController({
             playerEconomyState = normalizePlayerEconomyState(nextState);
             const shouldPreserveWheelPreview = Boolean(
                 garageWheelPreviewPresetId &&
-                    !isWheelPresetUnlockedForEconomy(
-                        playerEconomyState,
-                        garageWheelPreviewPresetId
-                    )
+                !isWheelPresetUnlockedForEconomy(playerEconomyState, garageWheelPreviewPresetId)
             );
             applySelectedWheelPreset(selectedWheelPresetId, {
                 emitChange: false,
@@ -3771,7 +3862,7 @@ export function createWelcomeModalController({
                 selectedWheelAvailability.canAfford
                     ? `${selectedWheelPreset.name} • ${formatCredits(selectedWheelAvailability.unlockPriceCredits)}`
                     : `${selectedWheelPreset.name} • ${formatCredits(selectedWheelAvailability.creditsShort)} short`
-                );
+            );
         }
         const orderedGarageWheelPresetIds = getGarageWheelPresetDisplayOrder(
             playerEconomyState,
@@ -4364,6 +4455,11 @@ export function createWelcomeModalController({
 
     function handleWelcomeGlobalKeydown(event) {
         if (event.key !== 'Escape' || rootEl.hidden) {
+            return;
+        }
+        if (authActionDialogState.open) {
+            event.preventDefault();
+            closeAuthActionDialog(false);
             return;
         }
         if (avatarEditorState.open) {
@@ -5172,7 +5268,14 @@ export function createWelcomeModalController({
             return;
         }
 
-        const confirmed = window.confirm('Remove the current profile photo?');
+        const confirmed = await requestAuthActionDialog({
+            eyebrow: 'Profile Photo',
+            title: 'Remove current profile photo?',
+            message: 'This removes the active avatar from your account profile.',
+            confirmLabel: 'Remove Photo',
+            cancelLabel: 'Keep Photo',
+            tone: 'default',
+        });
         if (!confirmed) {
             return;
         }
@@ -5429,20 +5532,19 @@ export function createWelcomeModalController({
         if (!hasAuthPanel || authUiState.loading || !authUiState.authenticated) {
             return;
         }
-        const confirmed = window.confirm(
-            'Delete this account permanently? This also removes your saved leaderboard entries.'
-        );
+        const confirmed = await requestAuthActionDialog({
+            eyebrow: 'Danger Zone',
+            title: 'Delete this account permanently?',
+            message:
+                'This removes your account and synced leaderboard data. Type DELETE to unlock the permanent action.',
+            confirmLabel: 'Delete Account',
+            cancelLabel: 'Cancel',
+            requiredValue: 'DELETE',
+            inputLabel: 'Confirmation Phrase',
+            inputPlaceholder: 'DELETE',
+            tone: 'danger',
+        });
         if (!confirmed) {
-            return;
-        }
-        const confirmationText = window.prompt('Type DELETE to confirm account deletion.', '');
-        if (
-            String(confirmationText || '')
-                .trim()
-                .toUpperCase() !== 'DELETE'
-        ) {
-            setLocalAuthStatus('Account deletion was cancelled.', 'info');
-            syncAuthUi();
             return;
         }
 
@@ -5456,6 +5558,181 @@ export function createWelcomeModalController({
             setLocalAuthStatus(String(response.error), 'error');
         }
         syncAuthUi();
+    }
+
+    function requestAuthActionDialog(options = {}) {
+        if (
+            !authActionDialogOverlayEl ||
+            !authActionDialogCardEl ||
+            !authActionDialogEyebrowEl ||
+            !authActionDialogTitleEl ||
+            !authActionDialogMessageEl ||
+            !authActionDialogInputBlockEl ||
+            !authActionDialogInputLabelEl ||
+            !authActionDialogInputEl ||
+            !authActionDialogHintEl ||
+            !authActionDialogCancelBtnEl ||
+            !authActionDialogConfirmBtnEl
+        ) {
+            return Promise.resolve(false);
+        }
+
+        if (authActionDialogState.open) {
+            closeAuthActionDialog(false, {
+                skipRestoreFocus: true,
+            });
+        }
+
+        authActionDialogState.open = true;
+        authActionDialogState.eyebrow =
+            typeof options.eyebrow === 'string' ? options.eyebrow.trim() : '';
+        authActionDialogState.title =
+            typeof options.title === 'string' && options.title.trim()
+                ? options.title.trim()
+                : 'Confirm action';
+        authActionDialogState.message =
+            typeof options.message === 'string' ? options.message.trim() : '';
+        authActionDialogState.confirmLabel =
+            typeof options.confirmLabel === 'string' && options.confirmLabel.trim()
+                ? options.confirmLabel.trim()
+                : 'Confirm';
+        authActionDialogState.cancelLabel =
+            typeof options.cancelLabel === 'string' && options.cancelLabel.trim()
+                ? options.cancelLabel.trim()
+                : 'Cancel';
+        authActionDialogState.requiredValue =
+            typeof options.requiredValue === 'string' ? options.requiredValue.trim() : '';
+        authActionDialogState.inputLabel =
+            typeof options.inputLabel === 'string' ? options.inputLabel.trim() : '';
+        authActionDialogState.inputPlaceholder =
+            typeof options.inputPlaceholder === 'string' ? options.inputPlaceholder.trim() : '';
+        authActionDialogState.inputValue = '';
+        authActionDialogState.tone = options.tone === 'danger' ? 'danger' : 'default';
+        authActionDialogState.restoreFocusEl =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+        syncAuthActionDialogUi();
+
+        const nextFocusTarget = authActionDialogState.requiredValue
+            ? authActionDialogInputEl
+            : authActionDialogConfirmBtnEl;
+        window.setTimeout(() => {
+            nextFocusTarget?.focus?.({
+                preventScroll: true,
+            });
+            if (nextFocusTarget === authActionDialogInputEl) {
+                authActionDialogInputEl.select?.();
+            }
+        }, 0);
+
+        return new Promise((resolve) => {
+            authActionDialogState.resolve = resolve;
+        });
+    }
+
+    function closeAuthActionDialog(result = false, options = {}) {
+        if (!authActionDialogState.open) {
+            return;
+        }
+
+        const resolve = authActionDialogState.resolve;
+        const restoreFocusEl = authActionDialogState.restoreFocusEl;
+        const shouldRestoreFocus = !options?.skipRestoreFocus;
+
+        authActionDialogState.open = false;
+        authActionDialogState.eyebrow = '';
+        authActionDialogState.title = '';
+        authActionDialogState.message = '';
+        authActionDialogState.confirmLabel = 'Confirm';
+        authActionDialogState.cancelLabel = 'Cancel';
+        authActionDialogState.requiredValue = '';
+        authActionDialogState.inputLabel = '';
+        authActionDialogState.inputPlaceholder = '';
+        authActionDialogState.inputValue = '';
+        authActionDialogState.tone = 'default';
+        authActionDialogState.resolve = null;
+        authActionDialogState.restoreFocusEl = null;
+
+        syncAuthActionDialogUi();
+
+        if (shouldRestoreFocus) {
+            restoreFocusEl?.focus?.({
+                preventScroll: true,
+            });
+        }
+        resolve?.(Boolean(result));
+    }
+
+    function confirmAuthActionDialog() {
+        if (!authActionDialogState.open || !isAuthActionDialogConfirmed()) {
+            if (authActionDialogState.requiredValue) {
+                authActionDialogInputEl?.focus?.({
+                    preventScroll: true,
+                });
+            }
+            return;
+        }
+        closeAuthActionDialog(true);
+    }
+
+    function syncAuthActionDialogUi() {
+        if (
+            !authActionDialogOverlayEl ||
+            !authActionDialogCardEl ||
+            !authActionDialogEyebrowEl ||
+            !authActionDialogTitleEl ||
+            !authActionDialogMessageEl ||
+            !authActionDialogInputBlockEl ||
+            !authActionDialogInputLabelEl ||
+            !authActionDialogInputEl ||
+            !authActionDialogHintEl ||
+            !authActionDialogCancelBtnEl ||
+            !authActionDialogConfirmBtnEl
+        ) {
+            return;
+        }
+
+        const requiresInput = Boolean(authActionDialogState.requiredValue);
+        const isConfirmed = isAuthActionDialogConfirmed();
+
+        authActionDialogOverlayEl.hidden = !authActionDialogState.open;
+        authActionDialogOverlayEl.dataset.open = authActionDialogState.open ? 'true' : 'false';
+        authActionDialogCardEl.dataset.tone = authActionDialogState.tone;
+        authActionDialogEyebrowEl.textContent = authActionDialogState.eyebrow;
+        authActionDialogEyebrowEl.hidden = !authActionDialogState.eyebrow;
+        authActionDialogTitleEl.textContent = authActionDialogState.title;
+        authActionDialogMessageEl.textContent = authActionDialogState.message;
+        authActionDialogInputBlockEl.hidden = !requiresInput;
+        authActionDialogInputLabelEl.textContent =
+            authActionDialogState.inputLabel || 'Confirmation phrase';
+        authActionDialogInputEl.value = authActionDialogState.inputValue;
+        authActionDialogInputEl.placeholder = authActionDialogState.inputPlaceholder || '';
+        authActionDialogHintEl.textContent = requiresInput
+            ? isConfirmed
+                ? 'Confirmation phrase accepted. You can continue.'
+                : `Type ${authActionDialogState.requiredValue} exactly to continue.`
+            : '';
+        authActionDialogHintEl.dataset.state = isConfirmed ? 'ready' : 'idle';
+        authActionDialogCancelBtnEl.textContent = authActionDialogState.cancelLabel;
+        authActionDialogConfirmBtnEl.textContent = authActionDialogState.confirmLabel;
+        authActionDialogConfirmBtnEl.dataset.tone = authActionDialogState.tone;
+        authActionDialogConfirmBtnEl.disabled = requiresInput && !isConfirmed;
+    }
+
+    function isAuthActionDialogConfirmed() {
+        if (!authActionDialogState.requiredValue) {
+            return true;
+        }
+        return (
+            normalizeAuthActionDialogValue(authActionDialogState.inputValue) ===
+            normalizeAuthActionDialogValue(authActionDialogState.requiredValue)
+        );
+    }
+
+    function normalizeAuthActionDialogValue(value) {
+        return String(value || '')
+            .trim()
+            .toUpperCase();
     }
 
     function handleAuthFieldKeydown(event) {
@@ -8132,6 +8409,24 @@ export function createWelcomeModalController({
         onlineRoomCodeStatusEl.textContent = 'Code check failed. Try again.';
         onlineRoomCodeStatusEl.dataset.tone = 'error';
     }
+}
+
+function createInitialAuthActionDialogState() {
+    return {
+        open: false,
+        eyebrow: '',
+        title: '',
+        message: '',
+        confirmLabel: 'Confirm',
+        cancelLabel: 'Cancel',
+        requiredValue: '',
+        inputLabel: '',
+        inputPlaceholder: '',
+        inputValue: '',
+        tone: 'default',
+        resolve: null,
+        restoreFocusEl: null,
+    };
 }
 
 function createInitialWelcomeGlobalLeaderboardState() {

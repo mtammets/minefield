@@ -9675,6 +9675,145 @@ body.race-intro-active #botPanel {
     transform: none;
 }
 
+.welcomeAuthActionDialogOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 14;
+    display: grid;
+    place-items: center;
+    padding: clamp(18px, 2.4vw, 30px);
+    background: rgba(3, 8, 13, 0.34);
+    backdrop-filter: blur(14px) saturate(1.08);
+}
+
+.welcomeAuthActionDialogOverlay[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthActionDialogCard {
+    width: min(100%, 470px);
+    display: grid;
+    gap: 16px;
+    padding: clamp(18px, 2.3vw, 24px);
+    border: 1px solid rgba(168, 210, 234, 0.46);
+    border-radius: 24px;
+    background:
+        linear-gradient(170deg, rgba(10, 22, 35, 0.98), rgba(6, 14, 23, 0.985)),
+        radial-gradient(circle at top, rgba(108, 183, 245, 0.12), rgba(108, 183, 245, 0) 58%);
+    box-shadow:
+        0 28px 58px rgba(0, 0, 0, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    animation: welcomeAuthPanelFadeIn 180ms ease both;
+}
+
+.welcomeAuthActionDialogCard[data-tone='danger'] {
+    border-color: rgba(210, 113, 113, 0.42);
+    background:
+        linear-gradient(170deg, rgba(28, 11, 14, 0.985), rgba(15, 6, 9, 0.99)),
+        radial-gradient(circle at top, rgba(235, 108, 108, 0.14), rgba(235, 108, 108, 0) 56%);
+}
+
+.welcomeAuthActionDialogCopy,
+.welcomeAuthActionDialogInputBlock {
+    display: grid;
+    gap: 8px;
+}
+
+.welcomeAuthActionDialogEyebrow {
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.45px;
+    text-transform: uppercase;
+    color: rgba(187, 220, 240, 0.94);
+}
+
+.welcomeAuthActionDialogCard[data-tone='danger'] .welcomeAuthActionDialogEyebrow {
+    color: rgba(255, 198, 198, 0.92);
+}
+
+.welcomeAuthActionDialogEyebrow[hidden],
+.welcomeAuthActionDialogInputBlock[hidden] {
+    display: none !important;
+}
+
+.welcomeAuthActionDialogTitle {
+    margin: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: clamp(18px, 2.2vw, 24px);
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    color: rgba(243, 249, 253, 0.98);
+}
+
+.welcomeAuthActionDialogMessage {
+    margin: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 12px;
+    line-height: 1.65;
+    font-weight: 600;
+    letter-spacing: 0.18px;
+    color: rgba(188, 214, 230, 0.9);
+}
+
+.welcomeAuthActionDialogCard[data-tone='danger'] .welcomeAuthActionDialogMessage {
+    color: rgba(239, 205, 205, 0.9);
+}
+
+.welcomeAuthActionDialogInput {
+    text-transform: uppercase;
+}
+
+.welcomeAuthActionDialogInput::placeholder {
+    color: rgba(150, 178, 196, 0.66);
+}
+
+.welcomeAuthActionDialogHint {
+    margin: 0;
+    font-family: 'Sora', sans-serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    color: rgba(177, 206, 223, 0.82);
+}
+
+.welcomeAuthActionDialogHint[data-state='ready'] {
+    color: rgba(169, 242, 196, 0.94);
+}
+
+.welcomeAuthActionDialogCard[data-tone='danger'] .welcomeAuthActionDialogHint[data-state='idle'] {
+    color: rgba(239, 184, 184, 0.88);
+}
+
+.welcomeAuthActionDialogActions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.welcomeAuthActionDialogActions .welcomeAuthCompactActionBtn,
+.welcomeAuthActionDialogActions .welcomeAuthActionDialogConfirmBtn {
+    width: 100%;
+    justify-self: stretch;
+    min-height: 44px;
+}
+
+.welcomeAuthActionDialogConfirmBtn[data-tone='danger'] {
+    border-color: rgba(230, 126, 126, 0.62);
+    color: rgba(255, 234, 234, 0.98);
+    background:
+        linear-gradient(180deg, rgba(99, 33, 33, 0.94), rgba(52, 16, 16, 0.96)),
+        linear-gradient(90deg, rgba(255, 172, 172, 0.1), rgba(255, 172, 172, 0));
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.1),
+        0 12px 22px rgba(92, 22, 22, 0.22);
+}
+
+.welcomeAuthActionDialogConfirmBtn[data-tone='danger']:hover,
+.welcomeAuthActionDialogConfirmBtn[data-tone='danger']:focus-visible {
+    border-color: rgba(248, 171, 171, 0.84);
+}
+
 @keyframes welcomeAuthPanelFadeIn {
     0% {
         opacity: 0;
@@ -9967,6 +10106,10 @@ body.race-intro-active #botPanel {
     .welcomeAuthCompactActionBtn,
     .welcomeAuthDangerInlineBtn {
         justify-self: start;
+    }
+
+    .welcomeAuthActionDialogActions {
+        grid-template-columns: 1fr;
     }
 
     .welcomeAuthSectionStage {
