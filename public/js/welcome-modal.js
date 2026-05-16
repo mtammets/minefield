@@ -16,6 +16,7 @@ import {
 import { createWheelPreviewMesh } from './wheels.js';
 import {
     formatPlayerCredits,
+    getGarageWheelPresetDisplayOrder,
     getOwnedVehicleCountForEconomy,
     getOwnedWheelPresetCountForEconomy,
     getVehiclePurchaseAvailability,
@@ -3770,8 +3771,13 @@ export function createWelcomeModalController({
                 selectedWheelAvailability.canAfford
                     ? `${selectedWheelPreset.name} • ${formatCredits(selectedWheelAvailability.unlockPriceCredits)}`
                     : `${selectedWheelPreset.name} • ${formatCredits(selectedWheelAvailability.creditsShort)} short`
-            );
+                );
         }
+        const orderedGarageWheelPresetIds = getGarageWheelPresetDisplayOrder(
+            playerEconomyState,
+            selectedWheelPreset.id
+        );
+        const garageWheelPresetButtonById = new Map();
         const garageWheelPickerOpen =
             garageWheelPickerExpanded && authGarageWheelPresetBtnEls.length > 1;
         for (let i = 0; i < authGarageWheelPresetBtnEls.length; i += 1) {
@@ -3796,9 +3802,7 @@ export function createWelcomeModalController({
             buttonEl.dataset.collapsed =
                 !garageWheelPickerOpen && !isSelectedWheelPreset ? 'true' : 'false';
             buttonEl.hidden = false;
-            buttonEl.style.order = String(
-                isSelectedWheelPreset ? PLAYER_WHEEL_PRESETS.length + 1 : i + 1
-            );
+            garageWheelPresetButtonById.set(wheelPresetId, buttonEl);
             buttonEl.setAttribute(
                 'aria-label',
                 wheelAvailability.unlocked
@@ -3828,6 +3832,14 @@ export function createWelcomeModalController({
                 isSelectedWheelPreset && garageWheelPickerOpen ? 'true' : 'false'
             );
             buttonEl.setAttribute('aria-pressed', isSelectedWheelPreset ? 'true' : 'false');
+        }
+        if (authGarageWheelPresetGridEl) {
+            for (let i = 0; i < orderedGarageWheelPresetIds.length; i += 1) {
+                const buttonEl = garageWheelPresetButtonById.get(orderedGarageWheelPresetIds[i]);
+                if (buttonEl) {
+                    authGarageWheelPresetGridEl.appendChild(buttonEl);
+                }
+            }
         }
     }
 

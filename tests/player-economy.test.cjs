@@ -49,3 +49,23 @@ test('purchasing leviathan unlocks and equips it through the economy helpers', a
         'leviathan-rift'
     );
 });
+
+test('garage wheel preset display order puts locked presets first and keeps the active preset last', async () => {
+    const { createDefaultPlayerEconomyState, getGarageWheelPresetDisplayOrder } =
+        await playerEconomyModulePromise;
+
+    const state = createDefaultPlayerEconomyState();
+
+    assert.deepEqual(getGarageWheelPresetDisplayOrder(state, 'obsidian-halo'), [
+        'leviathan-rift',
+        'scarlet-switchblade',
+        'photon-turbine',
+        'obsidian-halo',
+    ]);
+    assert.deepEqual(getGarageWheelPresetDisplayOrder(state, 'leviathan-rift'), [
+        'scarlet-switchblade',
+        'photon-turbine',
+        'obsidian-halo',
+        'leviathan-rift',
+    ]);
+});

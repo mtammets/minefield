@@ -272,6 +272,43 @@ export function getWheelPresetPurchaseAvailability(
     };
 }
 
+export function getGarageWheelPresetDisplayOrder(
+    economyState = null,
+    pinnedWheelPresetId = ''
+) {
+    const normalizedState = normalizePlayerEconomyState(economyState);
+    const normalizedPinnedWheelPresetId = pinnedWheelPresetId
+        ? resolvePlayerWheelPresetId(pinnedWheelPresetId)
+        : '';
+    const unlockedWheelPresetIds = normalizedState.unlockedWheelPresetIds;
+    const lockedWheelPresetIds = [];
+    const unlockedDisplayWheelPresetIds = [];
+    let hasPinnedWheelPreset = false;
+
+    for (let i = 0; i < PLAYER_WHEEL_PRESETS.length; i += 1) {
+        const preset = PLAYER_WHEEL_PRESETS[i];
+        const wheelPresetId = resolvePlayerWheelPresetId(preset?.id || DEFAULT_PLAYER_WHEEL_PRESET_ID);
+        if (!wheelPresetId) {
+            continue;
+        }
+        if (wheelPresetId === normalizedPinnedWheelPresetId) {
+            hasPinnedWheelPreset = true;
+            continue;
+        }
+        if (unlockedWheelPresetIds.includes(wheelPresetId)) {
+            unlockedDisplayWheelPresetIds.push(wheelPresetId);
+            continue;
+        }
+        lockedWheelPresetIds.push(wheelPresetId);
+    }
+
+    const orderedWheelPresetIds = [...lockedWheelPresetIds, ...unlockedDisplayWheelPresetIds];
+    if (hasPinnedWheelPreset) {
+        orderedWheelPresetIds.push(normalizedPinnedWheelPresetId);
+    }
+    return orderedWheelPresetIds;
+}
+
 export function resolveNextVehicleUnlockTarget(economyState = null) {
     const normalizedState = normalizePlayerEconomyState(economyState);
     for (let i = 0; i < PLAYER_VEHICLE_PRESETS.length; i += 1) {
