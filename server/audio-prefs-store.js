@@ -1,7 +1,10 @@
-const fs = require('fs/promises');
-const path = require('path');
+const { Client: PostgresClient } = require('pg');
+const { createSupabaseServiceClient } = require('./supabase-config');
 
 const AUDIO_PREFS_VERSION = 2;
+const AUDIO_PREFS_TABLE_NAME = 'audio_prefs_defaults';
+const AUDIO_PREFS_ROW_KEY = 'runtime';
+const AUDIO_PREFS_SELECT_COLUMNS = 'prefs,updated_at';
 const DEFAULT_AUDIO_PREFS = Object.freeze({
     masterVolume: 1,
     vehiclesVolume: 0.18,
@@ -24,17 +27,45 @@ const AUDIO_PREF_KEYS = Object.freeze([
     'uiVolume',
 ]);
 
-function createAudioPrefsStore({ prefsFilePath } = {}) {
-    if (!prefsFilePath) {
-        throw new Error('Audio prefs store requires a prefs file path.');
+function createAudioPrefsStore(config = {}) {
+    const hasSupabaseClientOverride = Object.prototype.hasOwnProperty.call(
+        config,
+        'supabaseClient'
+    );
+    const supabaseClient = hasSupabaseClientOverride
+        ? config.supabaseClient
+        : createSupabaseServiceClient(config);
+    if (!supabaseClient) {
+        return createNoopAudioPrefsStore();
     }
 
     return {
+        isConfigured() {
+            return true;
+        },
         async readConfig() {
-            return readAudioPrefsConfig(prefsFilePath);
+            return readAudioPrefsConfigFromSupabase(supabaseClient);
         },
         async writePrefs(prefs = {}) {
-            return writeAudioPrefsConfig(prefsFilePath, prefs);
+            return writeAudioPrefsConfigToSupabase(supabaseClient, prefs);
+        },
+    };
+}
+
+function createNoopAudioPrefsStore() {
+    return {
+        isConfigured() {
+            return false;
+        },
+        async readConfig() {
+            return createDefaultAudioPrefsConfig({
+                canPersist: false,
+            });
+        },
+        async writePrefs() {
+            const error = new Error('Audio prefs store is not configured.');
+            error.code = 'AUDIO_PREFS_STORE_NOT_CONFIGURED';
+            throw error;
         },
     };
 }
@@ -86,30 +117,108 @@ function sanitizeAudioPrefs(input = {}, fallback = null) {
     return resolved;
 }
 
-async function readAudioPrefsConfig(prefsFilePath) {
-    try {
-        const raw = await fs.readFile(prefsFilePath, 'utf8');
-        return normalizeAudioPrefsConfig(JSON.parse(raw));
-    } catch (error) {
-        if (error?.code === 'ENOENT') {
-            return createDefaultAudioPrefsConfig();
+async function readAudioPrefsConfigFromSupabase(supabaseClient) {
+    const { data, error } = await supabaseClient
+        .from(AUDIO_PREFS_TABLE_NAME)
+        .select(AUDIO_PREFS_SELECT_COLUMNS)
+        .eq('settings_key', AUDIO_PREFS_ROW_KEY)
+        .maybeSingle();
+
+    if (error) {
+        if (isAudioPrefsSchemaMissingError(error)) {
+            return createDefaultAudioPrefsConfig({
+                canPersist: false,
+            });
         }
         throw error;
     }
+    if (!data || typeof data !== 'object') {
+        return createDefaultAudioPrefsConfig({
+            canPersist: true,
+        });
+    }
+
+    return normalizeAudioPrefsConfig({
+        canPersist: true,
+        updatedAt: data.updated_at,
+        prefs: data.prefs,
+    });
 }
 
-async function writeAudioPrefsConfig(prefsFilePath, prefs = {}) {
+async function writeAudioPrefsConfigToSupabase(supabaseClient, prefs = {}) {
     const normalizedConfig = normalizeAudioPrefsConfig({
         updatedAt: new Date().toISOString(),
         prefs,
     });
-    await fs.mkdir(path.dirname(prefsFilePath), { recursive: true });
-    await fs.writeFile(prefsFilePath, `${JSON.stringify(normalizedConfig, null, 2)}\n`, 'utf8');
-    return normalizedConfig;
+    const { data, error } = await supabaseClient
+        .from(AUDIO_PREFS_TABLE_NAME)
+        .upsert(
+            {
+                settings_key: AUDIO_PREFS_ROW_KEY,
+                prefs: normalizedConfig.prefs,
+                updated_at: normalizedConfig.updatedAt,
+            },
+            {
+                onConflict: 'settings_key',
+            }
+        )
+        .select(AUDIO_PREFS_SELECT_COLUMNS)
+        .single();
+
+    if (error) {
+        throw error;
+    }
+    if (!data || typeof data !== 'object') {
+        return normalizedConfig;
+    }
+
+    return normalizeAudioPrefsConfig({
+        canPersist: true,
+        updatedAt: data.updated_at,
+        prefs: data.prefs,
+    });
 }
 
-function createDefaultAudioPrefsConfig() {
+async function ensureAudioPrefsSchema({ connectionString } = {}) {
+    if (!connectionString) {
+        return {
+            ok: false,
+            reason: 'missing-connection-string',
+        };
+    }
+
+    const client = new PostgresClient(resolvePostgresClientOptions(connectionString));
+    await client.connect();
+
+    try {
+        await client.query(`
+            create table if not exists public.${AUDIO_PREFS_TABLE_NAME} (
+                settings_key text primary key,
+                prefs jsonb not null default '{}'::jsonb,
+                updated_at timestamptz not null default now(),
+                constraint audio_prefs_defaults_settings_key_check check (settings_key <> '')
+            );
+
+            alter table public.${AUDIO_PREFS_TABLE_NAME}
+                add column if not exists prefs jsonb not null default '{}'::jsonb;
+
+            alter table public.${AUDIO_PREFS_TABLE_NAME}
+                add column if not exists updated_at timestamptz not null default now();
+
+            alter table public.${AUDIO_PREFS_TABLE_NAME} enable row level security;
+        `);
+
+        return {
+            ok: true,
+        };
+    } finally {
+        await client.end();
+    }
+}
+
+function createDefaultAudioPrefsConfig(options = {}) {
     return {
+        canPersist: Boolean(options?.canPersist),
         version: AUDIO_PREFS_VERSION,
         updatedAt: '',
         prefs: createDefaultAudioPrefs(),
@@ -119,10 +228,28 @@ function createDefaultAudioPrefsConfig() {
 function normalizeAudioPrefsConfig(config = {}) {
     const source = config && typeof config === 'object' ? config : {};
     return {
+        canPersist: source.canPersist !== false,
         version: AUDIO_PREFS_VERSION,
         updatedAt: sanitizeTimestamp(source.updatedAt),
         prefs: sanitizeAudioPrefs(source.prefs, DEFAULT_AUDIO_PREFS),
     };
+}
+
+function isAudioPrefsSchemaMissingError(error) {
+    const code = typeof error?.code === 'string' ? error.code.trim() : '';
+    const message = typeof error?.message === 'string' ? error.message.toLowerCase() : '';
+    const details = typeof error?.details === 'string' ? error.details.toLowerCase() : '';
+    if (code === '42P01' || code === 'PGRST205') {
+        return true;
+    }
+    return (
+        (message.includes(AUDIO_PREFS_TABLE_NAME) || details.includes(AUDIO_PREFS_TABLE_NAME)) &&
+        (message.includes('schema cache') ||
+            message.includes('table') ||
+            message.includes('relation') ||
+            details.includes('table') ||
+            details.includes('relation'))
+    );
 }
 
 function sanitizeTimestamp(value) {
@@ -151,11 +278,45 @@ function clampNumber(value, min, max, fallback = 0) {
     return numericValue;
 }
 
+function resolvePostgresClientOptions(connectionString) {
+    const options = {
+        connectionString,
+        statement_timeout: 10_000,
+    };
+
+    try {
+        const parsed = new URL(connectionString);
+        const hostname = String(parsed.hostname || '')
+            .trim()
+            .toLowerCase();
+        const isLocalHost =
+            hostname === 'localhost' ||
+            hostname === '127.0.0.1' ||
+            hostname === '::1' ||
+            hostname.endsWith('.local');
+        if (!isLocalHost) {
+            options.ssl = {
+                rejectUnauthorized: false,
+            };
+        }
+    } catch {
+        options.ssl = {
+            rejectUnauthorized: false,
+        };
+    }
+
+    return options;
+}
+
 module.exports = {
     AUDIO_PREF_KEYS,
+    AUDIO_PREFS_ROW_KEY,
+    AUDIO_PREFS_TABLE_NAME,
     DEFAULT_AUDIO_PREFS,
     createAudioPrefsStore,
     createDefaultAudioPrefs,
+    ensureAudioPrefsSchema,
+    isAudioPrefsSchemaMissingError,
     normalizeAudioPrefsConfig,
     sanitizeAudioPrefs,
 };

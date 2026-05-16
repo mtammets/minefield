@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const Stripe = require('stripe');
 const { Server } = require('socket.io');
-const { createAudioPrefsStore } = require('./audio-prefs-store');
+const { createAudioPrefsStore, ensureAudioPrefsSchema } = require('./audio-prefs-store');
 const { createBillboardContentStore } = require('./billboard-content-store');
 const { createGarageWrapPresetStore } = require('./garage-wrap-presets-store');
 const { createShowroomIntroVideoStore } = require('./showroom-intro-video-store');
@@ -237,9 +237,7 @@ const EVENT_RATE_LIMITS = {
 
 const app = express();
 const server = http.createServer(app);
-const audioPrefsStore = createAudioPrefsStore({
-    prefsFilePath: path.join(__dirname, 'data/audio-prefs.json'),
-});
+const audioPrefsStore = createAudioPrefsStore(supabaseRuntimeConfig);
 const garageWrapPresetStore = createGarageWrapPresetStore({
     manifestFilePath: path.join(__dirname, 'data/garage-wrap-presets.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/garage-wrap-presets'),
@@ -310,7 +308,10 @@ app.get('/api/audio-prefs/defaults', async (req, res) => {
         const config = await audioPrefsStore.readConfig();
         res.json({
             ok: true,
-            canEditDefaults: isAudioPrefsAdminAuthorized(req),
+            canEditDefaults:
+                audioPrefsStore.isConfigured() &&
+                Boolean(config?.canPersist) &&
+                isAudioPrefsAdminAuthorized(req),
             defaults: config.prefs,
             updatedAt: config.updatedAt,
         });
@@ -328,6 +329,13 @@ app.post('/api/audio-prefs/defaults', express.json({ limit: '16kb' }), async (re
         res.status(403).json({
             ok: false,
             error: 'Audio defaults admin access denied.',
+        });
+        return;
+    }
+    if (!audioPrefsStore.isConfigured()) {
+        res.status(503).json({
+            ok: false,
+            error: 'Audio defaults persistence is not configured on this server.',
         });
         return;
     }
@@ -2241,6 +2249,7 @@ io.on('connection', (socket) => {
 void startServer();
 
 async function startServer() {
+    await initializeSupabaseAudioPrefsSchema();
     await initializeSupabaseLeaderboardSchema();
     await initializeSupabasePlayerEconomySchema();
     server.listen(PORT, () => {
@@ -2256,6 +2265,9 @@ async function startServer() {
         }
         if (leaderboardStore.isConfigured()) {
             console.log('Supabase leaderboard API is enabled.');
+        }
+        if (audioPrefsStore.isConfigured()) {
+            console.log('Supabase audio defaults API is enabled.');
         }
         if (playerEconomyStore.isConfigured()) {
             console.log('Supabase player economy API is enabled.');
@@ -2274,6 +2286,41 @@ async function startServer() {
             );
         }
     });
+}
+
+async function initializeSupabaseAudioPrefsSchema() {
+    if (!audioPrefsStore.isConfigured()) {
+        return;
+    }
+    const bootstrapConnectionStrings = Array.from(
+        new Set(
+            [supabaseRuntimeConfig.dbUrl, supabaseRuntimeConfig.dbPoolerUrl].filter(
+                (value) => typeof value === 'string' && value.trim()
+            )
+        )
+    );
+    if (bootstrapConnectionStrings.length === 0) {
+        console.warn(
+            'Supabase audio defaults are enabled, but no DB connection string is available for automatic schema bootstrap.'
+        );
+        return;
+    }
+
+    let lastError = null;
+    for (let index = 0; index < bootstrapConnectionStrings.length; index += 1) {
+        try {
+            await ensureAudioPrefsSchema({
+                connectionString: bootstrapConnectionStrings[index],
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Supabase audio defaults schema bootstrap failed:', lastError);
+    }
 }
 
 async function initializeSupabaseLeaderboardSchema() {
