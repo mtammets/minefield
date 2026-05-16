@@ -3,10 +3,17 @@ import {
     PLAYER_VEHICLE_PRESETS,
     resolvePlayerVehicleId,
 } from './car-vehicles.js';
+import {
+    DEFAULT_PLAYER_WHEEL_PRESET_ID,
+    PLAYER_WHEEL_PRESETS,
+    getPlayerWheelPresetById,
+    resolvePlayerWheelPresetId,
+} from './wheel-presets.js';
 
 export const PLAYER_ECONOMY_STORAGE_KEY = 'silentdrift-player-economy-v1';
 export const PLAYER_ECONOMY_METADATA_CREDITS_KEY = 'economy_credits';
 export const PLAYER_ECONOMY_METADATA_UNLOCKS_KEY = 'economy_unlocked_vehicle_ids';
+export const PLAYER_ECONOMY_METADATA_WHEEL_UNLOCKS_KEY = 'economy_unlocked_wheel_preset_ids';
 export const PLAYER_CREDITS_LABEL = 'Credits';
 export const PLAYER_PICKUP_CREDIT_VALUE = 1;
 export const PLAYER_MINE_KILL_CREDIT_VALUE = 3;
@@ -22,6 +29,7 @@ const ONLINE_FINISH_CREDIT_BONUS = 3;
 const CAMPAIGN_COMPLETE_CREDIT_BONUS = 15;
 
 const DEFAULT_UNLOCKED_VEHICLE_IDS = Object.freeze(resolveDefaultUnlockedVehicleIds());
+const DEFAULT_UNLOCKED_WHEEL_PRESET_IDS = Object.freeze(resolveDefaultUnlockedWheelPresetIds());
 
 export function formatPlayerCredits(value = 0, { formatter = null, includePlusSign = false } = {}) {
     const numericValue = Math.round(Number(value) || 0);
@@ -30,8 +38,7 @@ export function formatPlayerCredits(value = 0, { formatter = null, includePlusSi
         formatter && typeof formatter.format === 'function'
             ? formatter
             : PLAYER_CREDITS_NUMBER_FORMATTER;
-    const prefix =
-        numericValue < 0 ? '-' : includePlusSign && numericValue > 0 ? '+' : '';
+    const prefix = numericValue < 0 ? '-' : includePlusSign && numericValue > 0 ? '+' : '';
     const unitLabel = absoluteValue === 1 ? 'Credit' : PLAYER_CREDITS_LABEL;
     return `${prefix}${resolvedFormatter.format(absoluteValue)} ${unitLabel}`;
 }
@@ -40,6 +47,7 @@ export function createDefaultPlayerEconomyState() {
     return {
         credits: 0,
         unlockedVehicleIds: [...DEFAULT_UNLOCKED_VEHICLE_IDS],
+        unlockedWheelPresetIds: [...DEFAULT_UNLOCKED_WHEEL_PRESET_IDS],
     };
 }
 
@@ -48,6 +56,7 @@ export function normalizePlayerEconomyState(value = null) {
     return {
         credits: clampCredits(source.credits),
         unlockedVehicleIds: normalizeUnlockedVehicleIds(source.unlockedVehicleIds),
+        unlockedWheelPresetIds: normalizeUnlockedWheelPresetIds(source.unlockedWheelPresetIds),
     };
 }
 
@@ -65,12 +74,26 @@ export function arePlayerEconomyStatesEqual(left = null, right = null) {
             return false;
         }
     }
+    if (
+        normalizedLeft.unlockedWheelPresetIds.length !==
+        normalizedRight.unlockedWheelPresetIds.length
+    ) {
+        return false;
+    }
+    for (let i = 0; i < normalizedLeft.unlockedWheelPresetIds.length; i += 1) {
+        if (
+            normalizedLeft.unlockedWheelPresetIds[i] !== normalizedRight.unlockedWheelPresetIds[i]
+        ) {
+            return false;
+        }
+    }
     return true;
 }
 
 export function mergePlayerEconomyStates(...states) {
     let mergedCredits = 0;
     const unlockedVehicleIds = new Set(DEFAULT_UNLOCKED_VEHICLE_IDS);
+    const unlockedWheelPresetIds = new Set(DEFAULT_UNLOCKED_WHEEL_PRESET_IDS);
 
     for (let i = 0; i < states.length; i += 1) {
         const normalizedState = normalizePlayerEconomyState(states[i]);
@@ -78,11 +101,15 @@ export function mergePlayerEconomyStates(...states) {
         for (let j = 0; j < normalizedState.unlockedVehicleIds.length; j += 1) {
             unlockedVehicleIds.add(normalizedState.unlockedVehicleIds[j]);
         }
+        for (let j = 0; j < normalizedState.unlockedWheelPresetIds.length; j += 1) {
+            unlockedWheelPresetIds.add(normalizedState.unlockedWheelPresetIds[j]);
+        }
     }
 
     return normalizePlayerEconomyState({
         credits: mergedCredits,
         unlockedVehicleIds: [...unlockedVehicleIds],
+        unlockedWheelPresetIds: [...unlockedWheelPresetIds],
     });
 }
 
@@ -105,6 +132,10 @@ export function resolvePlayerEconomyStateFromSource(source = null) {
             metadata?.[PLAYER_ECONOMY_METADATA_UNLOCKS_KEY] ??
             metadata?.unlockedVehicleIds ??
             source?.unlockedVehicleIds,
+        unlockedWheelPresetIds:
+            metadata?.[PLAYER_ECONOMY_METADATA_WHEEL_UNLOCKS_KEY] ??
+            metadata?.unlockedWheelPresetIds ??
+            source?.unlockedWheelPresetIds,
     });
 }
 
@@ -113,6 +144,7 @@ export function buildPlayerEconomyMetadataPatch(state = null) {
     return {
         [PLAYER_ECONOMY_METADATA_CREDITS_KEY]: normalizedState.credits,
         [PLAYER_ECONOMY_METADATA_UNLOCKS_KEY]: [...normalizedState.unlockedVehicleIds],
+        [PLAYER_ECONOMY_METADATA_WHEEL_UNLOCKS_KEY]: [...normalizedState.unlockedWheelPresetIds],
     };
 }
 
@@ -143,8 +175,17 @@ export function getVehicleUnlockPriceCredits(vehicleId = DEFAULT_PLAYER_VEHICLE_
     return Math.max(0, Math.round(Number(vehiclePreset?.unlockPriceCredits) || 0));
 }
 
+export function getWheelPresetUnlockPriceCredits(wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID) {
+    const wheelPreset = getPlayerWheelPresetById(wheelPresetId);
+    return Math.max(0, Math.round(Number(wheelPreset?.unlockPriceCredits) || 0));
+}
+
 export function getOwnedVehicleCountForEconomy(economyState = null) {
     return normalizePlayerEconomyState(economyState).unlockedVehicleIds.length;
+}
+
+export function getOwnedWheelPresetCountForEconomy(economyState = null) {
+    return normalizePlayerEconomyState(economyState).unlockedWheelPresetIds.length;
 }
 
 export function isVehicleUnlockedForEconomy(
@@ -154,6 +195,17 @@ export function isVehicleUnlockedForEconomy(
     const normalizedVehicleId = resolvePlayerVehicleId(vehicleId || DEFAULT_PLAYER_VEHICLE_ID);
     const normalizedState = normalizePlayerEconomyState(economyState);
     return normalizedState.unlockedVehicleIds.includes(normalizedVehicleId);
+}
+
+export function isWheelPresetUnlockedForEconomy(
+    economyState = null,
+    wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID
+) {
+    const normalizedWheelPresetId = resolvePlayerWheelPresetId(
+        wheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+    );
+    const normalizedState = normalizePlayerEconomyState(economyState);
+    return normalizedState.unlockedWheelPresetIds.includes(normalizedWheelPresetId);
 }
 
 export function resolveOwnedVehicleIdForEconomy(
@@ -167,6 +219,19 @@ export function resolveOwnedVehicleIdForEconomy(
     return DEFAULT_UNLOCKED_VEHICLE_IDS[0] || DEFAULT_PLAYER_VEHICLE_ID;
 }
 
+export function resolveOwnedWheelPresetIdForEconomy(
+    wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID,
+    economyState = null
+) {
+    const normalizedWheelPresetId = resolvePlayerWheelPresetId(
+        wheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+    );
+    if (isWheelPresetUnlockedForEconomy(economyState, normalizedWheelPresetId)) {
+        return normalizedWheelPresetId;
+    }
+    return DEFAULT_UNLOCKED_WHEEL_PRESET_IDS[0] || DEFAULT_PLAYER_WHEEL_PRESET_ID;
+}
+
 export function getVehiclePurchaseAvailability(
     economyState = null,
     vehicleId = DEFAULT_PLAYER_VEHICLE_ID
@@ -178,6 +243,27 @@ export function getVehiclePurchaseAvailability(
     const canAfford = unlocked || normalizedState.credits >= unlockPriceCredits;
     return {
         vehicleId: normalizedVehicleId,
+        unlocked,
+        unlockPriceCredits,
+        canAfford,
+        creditsBalance: normalizedState.credits,
+        creditsShort: unlocked ? 0 : Math.max(0, unlockPriceCredits - normalizedState.credits),
+    };
+}
+
+export function getWheelPresetPurchaseAvailability(
+    economyState = null,
+    wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID
+) {
+    const normalizedState = normalizePlayerEconomyState(economyState);
+    const normalizedWheelPresetId = resolvePlayerWheelPresetId(
+        wheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+    );
+    const unlockPriceCredits = getWheelPresetUnlockPriceCredits(normalizedWheelPresetId);
+    const unlocked = normalizedState.unlockedWheelPresetIds.includes(normalizedWheelPresetId);
+    const canAfford = unlocked || normalizedState.credits >= unlockPriceCredits;
+    return {
+        wheelPresetId: normalizedWheelPresetId,
         unlocked,
         unlockPriceCredits,
         canAfford,
@@ -220,6 +306,87 @@ export function resolveNextVehicleUnlockTarget(economyState = null) {
     };
 }
 
+export function resolveNextWheelPresetUnlockTarget(economyState = null) {
+    const normalizedState = normalizePlayerEconomyState(economyState);
+    for (let i = 0; i < PLAYER_WHEEL_PRESETS.length; i += 1) {
+        const preset = PLAYER_WHEEL_PRESETS[i];
+        const wheelPresetId = resolvePlayerWheelPresetId(
+            preset?.id || DEFAULT_PLAYER_WHEEL_PRESET_ID
+        );
+        const availability = getWheelPresetPurchaseAvailability(normalizedState, wheelPresetId);
+        if (availability.unlocked) {
+            continue;
+        }
+        const unlockPriceCredits = Math.max(1, availability.unlockPriceCredits);
+        const currentCredits = Math.max(0, normalizedState.credits);
+        return {
+            wheelPresetId,
+            name: preset?.name || 'Wheel set',
+            unlockPriceCredits,
+            creditsBalance: currentCredits,
+            creditsShort: availability.creditsShort,
+            canAfford: availability.canAfford,
+            progressRatio: Math.min(1, currentCredits / unlockPriceCredits),
+            unlocked: false,
+        };
+    }
+    return {
+        wheelPresetId: '',
+        name: 'All wheel sets unlocked',
+        unlockPriceCredits: 0,
+        creditsBalance: Math.max(0, normalizedState.credits),
+        creditsShort: 0,
+        canAfford: true,
+        progressRatio: 1,
+        unlocked: true,
+    };
+}
+
+export function resolveNextGarageUnlockTarget(economyState = null) {
+    const nextVehicleUnlock = resolveNextVehicleUnlockTarget(economyState);
+    if (!nextVehicleUnlock.unlocked) {
+        return {
+            type: 'vehicle',
+            id: nextVehicleUnlock.vehicleId,
+            name: nextVehicleUnlock.vehicleName,
+            unlockPriceCredits: nextVehicleUnlock.unlockPriceCredits,
+            creditsBalance: nextVehicleUnlock.creditsBalance,
+            creditsShort: nextVehicleUnlock.creditsShort,
+            canAfford: nextVehicleUnlock.canAfford,
+            progressRatio: nextVehicleUnlock.progressRatio,
+            unlocked: false,
+        };
+    }
+
+    const nextWheelUnlock = resolveNextWheelPresetUnlockTarget(economyState);
+    if (!nextWheelUnlock.unlocked) {
+        return {
+            type: 'wheel',
+            id: nextWheelUnlock.wheelPresetId,
+            name: nextWheelUnlock.name,
+            unlockPriceCredits: nextWheelUnlock.unlockPriceCredits,
+            creditsBalance: nextWheelUnlock.creditsBalance,
+            creditsShort: nextWheelUnlock.creditsShort,
+            canAfford: nextWheelUnlock.canAfford,
+            progressRatio: nextWheelUnlock.progressRatio,
+            unlocked: false,
+        };
+    }
+
+    const normalizedState = normalizePlayerEconomyState(economyState);
+    return {
+        type: 'complete',
+        id: '',
+        name: 'Garage complete',
+        unlockPriceCredits: 0,
+        creditsBalance: Math.max(0, normalizedState.credits),
+        creditsShort: 0,
+        canAfford: true,
+        progressRatio: 1,
+        unlocked: true,
+    };
+}
+
 export function purchaseVehicleWithEconomy(
     economyState = null,
     vehicleId = DEFAULT_PLAYER_VEHICLE_ID
@@ -248,6 +415,7 @@ export function purchaseVehicleWithEconomy(
     const nextState = normalizePlayerEconomyState({
         credits: normalizedState.credits - availability.unlockPriceCredits,
         unlockedVehicleIds: [...normalizedState.unlockedVehicleIds, availability.vehicleId],
+        unlockedWheelPresetIds: normalizedState.unlockedWheelPresetIds,
     });
 
     return {
@@ -259,12 +427,56 @@ export function purchaseVehicleWithEconomy(
     };
 }
 
+export function purchaseWheelPresetWithEconomy(
+    economyState = null,
+    wheelPresetId = DEFAULT_PLAYER_WHEEL_PRESET_ID
+) {
+    const normalizedState = normalizePlayerEconomyState(economyState);
+    const availability = getWheelPresetPurchaseAvailability(normalizedState, wheelPresetId);
+    if (availability.unlocked) {
+        return {
+            ok: true,
+            alreadyUnlocked: true,
+            wheelPresetId: availability.wheelPresetId,
+            costCredits: 0,
+            economy: normalizedState,
+        };
+    }
+    if (!availability.canAfford) {
+        return {
+            ok: false,
+            wheelPresetId: availability.wheelPresetId,
+            costCredits: availability.unlockPriceCredits,
+            creditsShort: availability.creditsShort,
+            error: 'not-enough-credits',
+        };
+    }
+
+    const nextState = normalizePlayerEconomyState({
+        credits: normalizedState.credits - availability.unlockPriceCredits,
+        unlockedVehicleIds: normalizedState.unlockedVehicleIds,
+        unlockedWheelPresetIds: [
+            ...normalizedState.unlockedWheelPresetIds,
+            availability.wheelPresetId,
+        ],
+    });
+
+    return {
+        ok: true,
+        alreadyUnlocked: false,
+        wheelPresetId: availability.wheelPresetId,
+        costCredits: availability.unlockPriceCredits,
+        economy: nextState,
+    };
+}
+
 export function awardCreditsToEconomy(economyState = null, credits = 0) {
     const normalizedState = normalizePlayerEconomyState(economyState);
     const creditsEarned = Math.max(0, Math.round(Number(credits) || 0));
     return normalizePlayerEconomyState({
         credits: normalizedState.credits + creditsEarned,
         unlockedVehicleIds: normalizedState.unlockedVehicleIds,
+        unlockedWheelPresetIds: normalizedState.unlockedWheelPresetIds,
     });
 }
 
@@ -386,6 +598,20 @@ function normalizeUnlockedVehicleIds(value) {
     return [...unlockedVehicleIds];
 }
 
+function normalizeUnlockedWheelPresetIds(value) {
+    const unlockedWheelPresetIds = new Set(DEFAULT_UNLOCKED_WHEEL_PRESET_IDS);
+    const entries = Array.isArray(value) ? value : [];
+    for (let i = 0; i < entries.length; i += 1) {
+        const resolvedWheelPresetId = resolvePlayerWheelPresetId(
+            entries[i] || DEFAULT_PLAYER_WHEEL_PRESET_ID
+        );
+        if (resolvedWheelPresetId) {
+            unlockedWheelPresetIds.add(resolvedWheelPresetId);
+        }
+    }
+    return [...unlockedWheelPresetIds];
+}
+
 function resolveDefaultUnlockedVehicleIds() {
     const resolvedVehicleIds = PLAYER_VEHICLE_PRESETS.filter(
         (preset) => preset?.defaultUnlocked !== false
@@ -394,6 +620,16 @@ function resolveDefaultUnlockedVehicleIds() {
         return resolvedVehicleIds;
     }
     return [DEFAULT_PLAYER_VEHICLE_ID];
+}
+
+function resolveDefaultUnlockedWheelPresetIds() {
+    const resolvedWheelPresetIds = PLAYER_WHEEL_PRESETS.filter(
+        (preset) => preset?.defaultUnlocked !== false
+    ).map((preset) => resolvePlayerWheelPresetId(preset.id));
+    if (resolvedWheelPresetIds.length > 0) {
+        return resolvedWheelPresetIds;
+    }
+    return [DEFAULT_PLAYER_WHEEL_PRESET_ID];
 }
 
 function getPlayerVehicleEconomyPreset(vehicleId = DEFAULT_PLAYER_VEHICLE_ID) {

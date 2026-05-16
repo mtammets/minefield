@@ -8,6 +8,7 @@ const PLAYER_ECONOMY_WALLET_SELECT_COLUMNS = [
     'user_id',
     'credits',
     'unlocked_vehicle_ids',
+    'unlocked_wheel_preset_ids',
     'lifetime_earned',
     'lifetime_spent',
     'transaction_count',
@@ -29,10 +30,16 @@ const PLAYER_ECONOMY_TRANSACTION_SELECT_COLUMNS = [
 ].join(',');
 const DEFAULT_PLAYER_VEHICLE_ID = 'voltline-sled';
 const DEFAULT_UNLOCKED_VEHICLE_IDS = Object.freeze([DEFAULT_PLAYER_VEHICLE_ID]);
+const DEFAULT_UNLOCKED_WHEEL_PRESET_IDS = Object.freeze([
+    'scarlet-switchblade',
+    'photon-turbine',
+    'obsidian-halo',
+]);
 const PLAYER_ECONOMY_MAX_CREDITS = Number.MAX_SAFE_INTEGER;
 const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_DEFAULT = 6;
 const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_MAX = 12;
 const PLAYER_VEHICLE_ID_MAX_LENGTH = 32;
+const PLAYER_WHEEL_PRESET_ID_MAX_LENGTH = 32;
 const PLAYER_ECONOMY_TRANSACTION_KIND_MAX_LENGTH = 32;
 const PLAYER_ECONOMY_TRANSACTION_SUMMARY_MAX_LENGTH = 160;
 
@@ -87,6 +94,10 @@ function createPlayerEconomyStore(config = {}) {
                 currentEconomy.unlockedVehicleIds,
                 nextEconomy.unlockedVehicleIds
             );
+            const nextUnlockedWheelPresetIds = mergeUnlockedWheelPresetIds(
+                currentEconomy.unlockedWheelPresetIds,
+                nextEconomy.unlockedWheelPresetIds
+            );
             const transaction = normalizePlayerEconomyTransaction(
                 rawPayload?.transaction,
                 currentEconomy.credits,
@@ -119,6 +130,7 @@ function createPlayerEconomyStore(config = {}) {
                 user_id: normalizedUserId,
                 credits: nextEconomy.credits,
                 unlocked_vehicle_ids: nextUnlockedVehicleIds,
+                unlocked_wheel_preset_ids: nextUnlockedWheelPresetIds,
                 lifetime_earned: nextLifetimeEarned,
                 lifetime_spent: nextLifetimeSpent,
                 transaction_count: nextTransactionCount,
@@ -286,6 +298,9 @@ function createNoopPlayerEconomyStore() {
                 }),
                 credits: clampCredits(rawPayload?.credits),
                 unlockedVehicleIds: normalizeUnlockedVehicleIds(rawPayload?.unlockedVehicleIds),
+                unlockedWheelPresetIds: normalizeUnlockedWheelPresetIds(
+                    rawPayload?.unlockedWheelPresetIds
+                ),
             });
         },
         async applyCreditsPurchaseByUserId() {
@@ -326,6 +341,7 @@ async function ensurePlayerEconomySchema({ connectionString } = {}) {
                 user_id text primary key,
                 credits integer not null default 0 check (credits >= 0),
                 unlocked_vehicle_ids jsonb not null default '[]'::jsonb,
+                unlocked_wheel_preset_ids jsonb not null default '[]'::jsonb,
                 lifetime_earned integer not null default 0 check (lifetime_earned >= 0),
                 lifetime_spent integer not null default 0 check (lifetime_spent >= 0),
                 transaction_count integer not null default 0 check (transaction_count >= 0),
@@ -335,6 +351,9 @@ async function ensurePlayerEconomySchema({ connectionString } = {}) {
                 created_at timestamptz not null default now(),
                 updated_at timestamptz not null default now()
             );
+
+            alter table public.${PLAYER_ECONOMY_WALLETS_TABLE_NAME}
+                add column if not exists unlocked_wheel_preset_ids jsonb not null default '[]'::jsonb;
 
             create table if not exists public.${PLAYER_ECONOMY_TRANSACTIONS_TABLE_NAME} (
                 id uuid primary key,
@@ -425,6 +444,7 @@ function createDefaultPlayerEconomyProfile(overrides = {}) {
         exists: Boolean(overrides?.exists),
         credits: 0,
         unlockedVehicleIds: [...DEFAULT_UNLOCKED_VEHICLE_IDS],
+        unlockedWheelPresetIds: [...DEFAULT_UNLOCKED_WHEEL_PRESET_IDS],
         lifetimeEarned: 0,
         lifetimeSpent: 0,
         transactionCount: 0,
@@ -440,6 +460,7 @@ function createDefaultPlayerEconomyProfile(overrides = {}) {
 function normalizePlayerEconomyProfile(value = {}) {
     const source = value && typeof value === 'object' ? value : {};
     const unlockedVehicleIds = normalizeUnlockedVehicleIds(source.unlockedVehicleIds);
+    const unlockedWheelPresetIds = normalizeUnlockedWheelPresetIds(source.unlockedWheelPresetIds);
     const credits = clampCredits(source.credits);
     const lifetimeEarned = clampCredits(source.lifetimeEarned);
     const lifetimeSpent = clampCredits(source.lifetimeSpent);
@@ -448,6 +469,7 @@ function normalizePlayerEconomyProfile(value = {}) {
         exists: Boolean(source.exists),
         credits,
         unlockedVehicleIds,
+        unlockedWheelPresetIds,
         lifetimeEarned,
         lifetimeSpent,
         transactionCount: clampCredits(source.transactionCount),
@@ -457,6 +479,7 @@ function normalizePlayerEconomyProfile(value = {}) {
         createdAt: sanitizeIsoDate(source.createdAt),
         updatedAt: sanitizeIsoDate(source.updatedAt),
         ownedVehicleCount: unlockedVehicleIds.length,
+        ownedWheelPresetCount: unlockedWheelPresetIds.length,
         recentTransactions: Array.isArray(source.recentTransactions)
             ? source.recentTransactions
                   .map((entry) => normalizeTransactionRecord(entry))
@@ -472,6 +495,9 @@ function normalizeWalletRecord(value = {}) {
         credits: clampCredits(source.credits),
         unlockedVehicleIds: normalizeUnlockedVehicleIds(
             source.unlockedVehicleIds || source.unlocked_vehicle_ids
+        ),
+        unlockedWheelPresetIds: normalizeUnlockedWheelPresetIds(
+            source.unlockedWheelPresetIds || source.unlocked_wheel_preset_ids
         ),
         lifetimeEarned: clampCredits(source.lifetimeEarned || source.lifetime_earned),
         lifetimeSpent: clampCredits(source.lifetimeSpent || source.lifetime_spent),
@@ -509,6 +535,7 @@ function normalizePlayerEconomyStatePayload(value = null) {
     return {
         credits: clampCredits(source.credits),
         unlockedVehicleIds: normalizeUnlockedVehicleIds(source.unlockedVehicleIds),
+        unlockedWheelPresetIds: normalizeUnlockedWheelPresetIds(source.unlockedWheelPresetIds),
     };
 }
 
@@ -593,6 +620,17 @@ function mergeUnlockedVehicleIds(...lists) {
     return [...merged];
 }
 
+function mergeUnlockedWheelPresetIds(...lists) {
+    const merged = new Set(DEFAULT_UNLOCKED_WHEEL_PRESET_IDS);
+    for (let index = 0; index < lists.length; index += 1) {
+        const entries = normalizeUnlockedWheelPresetIds(lists[index]);
+        for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+            merged.add(entries[entryIndex]);
+        }
+    }
+    return [...merged];
+}
+
 function normalizeUnlockedVehicleIds(value) {
     const normalizedIds = new Set(DEFAULT_UNLOCKED_VEHICLE_IDS);
     const entries = Array.isArray(value) ? value : [];
@@ -600,6 +638,18 @@ function normalizeUnlockedVehicleIds(value) {
         const vehicleId = sanitizeVehicleId(entries[index]);
         if (vehicleId) {
             normalizedIds.add(vehicleId);
+        }
+    }
+    return [...normalizedIds];
+}
+
+function normalizeUnlockedWheelPresetIds(value) {
+    const normalizedIds = new Set(DEFAULT_UNLOCKED_WHEEL_PRESET_IDS);
+    const entries = Array.isArray(value) ? value : [];
+    for (let index = 0; index < entries.length; index += 1) {
+        const wheelPresetId = sanitizeWheelPresetId(entries[index]);
+        if (wheelPresetId) {
+            normalizedIds.add(wheelPresetId);
         }
     }
     return [...normalizedIds];
@@ -619,6 +669,18 @@ function sanitizeTransactionMetadata(value = null) {
         const vehicleName = sanitizeLabel(source.vehicleName, 72);
         if (vehicleName) {
             metadata.vehicleName = vehicleName;
+        }
+    }
+    if (typeof source.wheelPresetId === 'string') {
+        const wheelPresetId = sanitizeWheelPresetId(source.wheelPresetId);
+        if (wheelPresetId) {
+            metadata.wheelPresetId = wheelPresetId;
+        }
+    }
+    if (typeof source.wheelPresetName === 'string') {
+        const wheelPresetName = sanitizeLabel(source.wheelPresetName, 72);
+        if (wheelPresetName) {
+            metadata.wheelPresetName = wheelPresetName;
         }
     }
     if (typeof source.gameMode === 'string') {
@@ -705,6 +767,17 @@ function sanitizeVehicleId(value) {
         .toLowerCase()
         .replace(/[^a-z0-9-]/g, '')
         .slice(0, PLAYER_VEHICLE_ID_MAX_LENGTH);
+}
+
+function sanitizeWheelPresetId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    return value
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '')
+        .slice(0, PLAYER_WHEEL_PRESET_ID_MAX_LENGTH);
 }
 
 function sanitizeTransactionKind(value) {
@@ -854,6 +927,7 @@ async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
                     user_id,
                     credits,
                     unlocked_vehicle_ids,
+                    unlocked_wheel_preset_ids,
                     lifetime_earned,
                     lifetime_spent,
                     transaction_count,
@@ -873,6 +947,8 @@ async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
             user_id: userId,
             unlocked_vehicle_ids:
                 currentWallet?.unlocked_vehicle_ids || DEFAULT_UNLOCKED_VEHICLE_IDS,
+            unlocked_wheel_preset_ids:
+                currentWallet?.unlocked_wheel_preset_ids || DEFAULT_UNLOCKED_WHEEL_PRESET_IDS,
         });
         const nextCredits = clampCredits(currentProfile.credits + purchase.creditsAmount);
         const nextLifetimeEarned = clampCredits(
@@ -888,18 +964,20 @@ async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
                     set
                         credits = $2,
                         unlocked_vehicle_ids = $3::jsonb,
-                        lifetime_earned = $4,
-                        transaction_count = $5,
-                        last_transaction_kind = $6,
-                        last_transaction_summary = $7,
-                        last_synced_at = $8,
-                        updated_at = $8
+                        unlocked_wheel_preset_ids = $4::jsonb,
+                        lifetime_earned = $5,
+                        transaction_count = $6,
+                        last_transaction_kind = $7,
+                        last_transaction_summary = $8,
+                        last_synced_at = $9,
+                        updated_at = $9
                     where user_id = $1
                 `,
                 [
                     userId,
                     nextCredits,
                     JSON.stringify(currentProfile.unlockedVehicleIds),
+                    JSON.stringify(currentProfile.unlockedWheelPresetIds),
                     nextLifetimeEarned,
                     nextTransactionCount,
                     'purchase',
@@ -914,6 +992,7 @@ async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
                         user_id,
                         credits,
                         unlocked_vehicle_ids,
+                        unlocked_wheel_preset_ids,
                         lifetime_earned,
                         lifetime_spent,
                         transaction_count,
@@ -923,12 +1002,13 @@ async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
                         created_at,
                         updated_at
                     )
-                    values ($1, $2, $3::jsonb, $4, 0, $5, $6, $7, $8, $8, $8)
+                    values ($1, $2, $3::jsonb, $4::jsonb, $5, 0, $6, $7, $8, $9, $9, $9)
                 `,
                 [
                     userId,
                     nextCredits,
                     JSON.stringify(currentProfile.unlockedVehicleIds),
+                    JSON.stringify(currentProfile.unlockedWheelPresetIds),
                     nextLifetimeEarned,
                     nextTransactionCount,
                     'purchase',
@@ -961,7 +1041,10 @@ async function applyCreditsPurchaseAtomic(connectionString, userId, purchase) {
 }
 
 function createDeterministicTransactionId(seed = '') {
-    const hash = crypto.createHash('sha256').update(String(seed || '')).digest('hex');
+    const hash = crypto
+        .createHash('sha256')
+        .update(String(seed || ''))
+        .digest('hex');
     const variantNibble = (((parseInt(hash.slice(16, 18), 16) || 0) & 0x3f) | 0x80)
         .toString(16)
         .padStart(2, '0');

@@ -55,6 +55,7 @@ import {
 } from './camera.js';
 import { createCarEditModeController } from './editmode.js';
 import { getCarSkinPresetById } from './car-skins.js';
+import { getPlayerWheelPresetById } from './wheel-presets.js';
 import {
     updatePlayerPhysics,
     applyInterpolatedPlayerTransform,
@@ -132,10 +133,12 @@ import {
     PLAYER_MINE_KILL_CREDIT_VALUE,
     PLAYER_PICKUP_CREDIT_VALUE,
     persistPlayerEconomyState,
+    purchaseWheelPresetWithEconomy,
     purchaseVehicleWithEconomy,
     readPersistedPlayerEconomyState,
-    resolveNextVehicleUnlockTarget,
+    resolveNextGarageUnlockTarget,
     resolveOwnedVehicleIdForEconomy,
+    resolveOwnedWheelPresetIdForEconomy,
     resolveRoundEconomyReward,
 } from './player-economy.js';
 import { readPersistedCrashDamageTuning, persistCrashDamageTuning } from './crash-damage-tuning.js';
@@ -248,7 +251,10 @@ const selectedCarVehiclePreset = getPlayerVehiclePresetById(selectedCarVehicleId
 const selectedCarSkinId = resolvePlayerCarSkinId(
     readPersistedPlayerCarSkinId(selectedCarVehiclePreset.defaultSkinId)
 );
-const selectedCarWheelPresetId = resolvePlayerWheelPresetId(readPersistedPlayerCarWheelPresetId());
+const selectedCarWheelPresetId = resolveOwnedWheelPresetIdForEconomy(
+    readPersistedPlayerCarWheelPresetId(),
+    initialPlayerEconomyState
+);
 const selectedCarSkinPreset = getCarSkinPresetById(selectedCarSkinId);
 const selectedCarColorHex = resolvePlayerCarColorHex(selectedCarSkinPreset.bodyColor);
 const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
@@ -552,6 +558,9 @@ const {
     onPurchaseVehicle(vehicleId) {
         return purchaseVehicleUnlock(vehicleId);
     },
+    onPurchaseWheelPreset(wheelPresetId) {
+        return purchaseWheelPresetUnlock(wheelPresetId);
+    },
     onBuyCredits() {
         return runtimeState.authController?.purchaseCreditsPack?.();
     },
@@ -627,6 +636,9 @@ function syncRuntimePlayerEconomyState(nextEconomyState = null, options = {}) {
         persistPlayerEconomyState(normalizedEconomyState);
     }
     welcomeModalUi.setPlayerEconomy?.(normalizedEconomyState);
+    if (options.reconcileWheel !== false) {
+        reconcileRuntimeSelectedWheelPresetWithEconomy(normalizedEconomyState);
+    }
     if (options.reconcileVehicle !== false) {
         reconcileRuntimeSelectedVehicleWithEconomy(normalizedEconomyState);
     }
@@ -644,8 +656,9 @@ function buildRuntimeEconomyHudState() {
     const projectedEconomyState = normalizePlayerEconomyState({
         credits: walletCredits + runCredits,
         unlockedVehicleIds: runtimeState.playerEconomy?.unlockedVehicleIds,
+        unlockedWheelPresetIds: runtimeState.playerEconomy?.unlockedWheelPresetIds,
     });
-    const nextUnlock = resolveNextVehicleUnlockTarget(projectedEconomyState);
+    const nextUnlock = resolveNextGarageUnlockTarget(projectedEconomyState);
     const authState = runtimeState.authController?.getState?.() || null;
     const syncSource =
         typeof authState?.economySyncSource === 'string'
@@ -661,7 +674,7 @@ function buildRuntimeEconomyHudState() {
             ? 'SYNCING'
             : 'CACHE';
     const targetValue = nextUnlock.unlocked
-        ? 'All chassis online'
+        ? 'All garage unlocks online'
         : `${Math.min(
               projectedEconomyState.credits,
               nextUnlock.unlockPriceCredits
@@ -671,7 +684,7 @@ function buildRuntimeEconomyHudState() {
         runCredits,
         syncTone,
         syncLabel,
-        targetLabel: nextUnlock.unlocked ? 'Garage complete' : `Next: ${nextUnlock.vehicleName}`,
+        targetLabel: nextUnlock.unlocked ? 'Garage complete' : `Next: ${nextUnlock.name}`,
         targetValue,
         progressRatio: Math.max(0, Math.min(1, Number(nextUnlock.progressRatio) || 0)),
         activity: runtimeState.playerEconomyLastActivity,
@@ -750,6 +763,35 @@ function reconcileRuntimeSelectedVehicleWithEconomy(economyState = null) {
         persistPlayerCarVehicleId(resolvedVehicleId);
     }
     welcomeModalUi.setSelectedVehicleId?.(resolvedVehicleId, {
+        emitChange: false,
+    });
+    return true;
+}
+
+function reconcileRuntimeSelectedWheelPresetWithEconomy(economyState = null) {
+    const resolvedWheelPresetId = resolveOwnedWheelPresetIdForEconomy(
+        runtimeState.selectedCarWheelPresetId,
+        economyState || runtimeState.playerEconomy
+    );
+    if (resolvedWheelPresetId === runtimeState.selectedCarWheelPresetId) {
+        return false;
+    }
+
+    if (runtimeState.gameSessionController?.setSelectedPlayerCarWheelPreset) {
+        runtimeState.gameSessionController.setSelectedPlayerCarWheelPreset(resolvedWheelPresetId, {
+            persist: true,
+        });
+    } else {
+        runtimeState.selectedCarWheelPresetId = resolvedWheelPresetId;
+        setPlayerCarAppearance({
+            vehicleId: runtimeState.selectedCarVehicleId,
+            skinId: runtimeState.selectedCarSkinId,
+            wheelPresetId: resolvedWheelPresetId,
+            colorHex: runtimeState.selectedCarColorHex,
+        });
+        persistPlayerCarWheelPresetId(resolvedWheelPresetId);
+    }
+    welcomeModalUi.setSelectedWheelPresetId?.(resolvedWheelPresetId, {
         emitChange: false,
     });
     return true;
@@ -887,6 +929,75 @@ async function purchaseVehicleUnlock(vehicleId = '') {
         persistPlayerCarVehicleId(purchaseResult.vehicleId);
     }
     welcomeModalUi.setSelectedVehicleId?.(purchaseResult.vehicleId, {
+        emitChange: false,
+    });
+    return {
+        ...purchaseResult,
+        economy: nextEconomyState,
+        syncWarning,
+    };
+}
+
+async function purchaseWheelPresetUnlock(wheelPresetId = '') {
+    if (!runtimeState.authController?.isAuthenticated?.()) {
+        return {
+            ok: false,
+            error: 'Sign in to unlock premium wheel sets.',
+        };
+    }
+    const purchaseResult = purchaseWheelPresetWithEconomy(
+        runtimeState.playerEconomy,
+        wheelPresetId
+    );
+    if (!purchaseResult?.ok) {
+        return purchaseResult;
+    }
+
+    const nextEconomyState = syncRuntimePlayerEconomyState(purchaseResult.economy, {
+        persistLocal: true,
+        reconcileVehicle: false,
+        reconcileWheel: false,
+    });
+    let syncWarning = '';
+    const purchasedWheelPreset = getPlayerWheelPresetById(purchaseResult.wheelPresetId) || null;
+    if (runtimeState.authController?.isAuthenticated?.()) {
+        const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(
+            nextEconomyState,
+            {
+                transaction: {
+                    kind: 'wheel-unlock',
+                    summary: `Unlocked ${purchasedWheelPreset?.name || 'wheel set'}`,
+                    creditsDelta: -Math.max(0, Math.round(Number(purchaseResult.costCredits) || 0)),
+                    metadata: {
+                        wheelPresetId: purchaseResult.wheelPresetId,
+                        wheelPresetName: purchasedWheelPreset?.name || 'Wheel set',
+                    },
+                },
+            }
+        );
+        if (!syncResult?.ok) {
+            syncWarning = syncResult?.error || 'Account sync failed.';
+        }
+    }
+
+    if (runtimeState.gameSessionController?.setSelectedPlayerCarWheelPreset) {
+        runtimeState.gameSessionController.setSelectedPlayerCarWheelPreset(
+            purchaseResult.wheelPresetId,
+            {
+                persist: true,
+            }
+        );
+    } else {
+        runtimeState.selectedCarWheelPresetId = purchaseResult.wheelPresetId;
+        setPlayerCarAppearance({
+            vehicleId: runtimeState.selectedCarVehicleId,
+            skinId: runtimeState.selectedCarSkinId,
+            wheelPresetId: purchaseResult.wheelPresetId,
+            colorHex: runtimeState.selectedCarColorHex,
+        });
+        persistPlayerCarWheelPresetId(purchaseResult.wheelPresetId);
+    }
+    welcomeModalUi.setSelectedWheelPresetId?.(purchaseResult.wheelPresetId, {
         emitChange: false,
     });
     return {
@@ -3494,6 +3605,7 @@ runtimeState.gameSessionController = createGameSessionController({
     resolvePlayerCarSkinId,
     resolvePlayerCarVehicleId: resolvePlayerVehicleId,
     resolvePlayerCarWheelPresetId: resolvePlayerWheelPresetId,
+    resolveOwnedPlayerWheelPresetIdForEconomy: resolveOwnedWheelPresetIdForEconomy,
     getCarSkinPresetById,
     persistPlayerCarColorHex,
     persistPlayerCarSkinId,
@@ -3672,6 +3784,7 @@ runtimeState.gameSessionController = createGameSessionController({
         runtimeState.isWelcomeModalVisible = Boolean(value);
     },
     getAuthState: () => runtimeState.authController?.getState?.() || null,
+    getPlayerEconomyState: () => runtimeState.playerEconomy,
     readGuestChaseCameraSettings() {
         return readPersistedChaseCameraSettings();
     },

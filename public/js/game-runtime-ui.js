@@ -43,6 +43,7 @@ export function createRuntimeUiControllers({
     getAuthState = () => null,
     getPlayerEconomyState = () => null,
     onPurchaseVehicle = null,
+    onPurchaseWheelPreset = null,
     onBuyCredits = null,
     onWrapChange = null,
     onDownloadPerformanceLog = null,
@@ -116,6 +117,7 @@ export function createRuntimeUiControllers({
         getAuthState,
         getPlayerEconomyState,
         onPurchaseVehicle,
+        onPurchaseWheelPreset,
         onBuyCredits,
         onWrapChange,
         onPlayWalletRevealSound,
@@ -130,6 +132,9 @@ export function createRuntimeUiControllers({
         },
         onWheelPresetChange(wheelPresetId) {
             getGameSessionController()?.setSelectedPlayerCarWheelPreset?.(wheelPresetId);
+        },
+        onPurchaseWheelPreset(wheelPresetId) {
+            return onPurchaseWheelPreset?.(wheelPresetId);
         },
         onStart(mode, startContext = null) {
             getGameSessionController()?.dismissWelcomeModal(mode, startContext);

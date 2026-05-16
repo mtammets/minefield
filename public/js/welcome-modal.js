@@ -17,10 +17,14 @@ import { createWheelPreviewMesh } from './wheels.js';
 import {
     formatPlayerCredits,
     getOwnedVehicleCountForEconomy,
+    getOwnedWheelPresetCountForEconomy,
     getVehiclePurchaseAvailability,
+    getWheelPresetPurchaseAvailability,
+    isWheelPresetUnlockedForEconomy,
     isVehicleUnlockedForEconomy,
     normalizePlayerEconomyState,
-    resolveNextVehicleUnlockTarget,
+    resolveNextGarageUnlockTarget,
+    resolveOwnedWheelPresetIdForEconomy,
 } from './player-economy.js';
 import {
     persistAutoFullscreenOnStart,
@@ -176,6 +180,7 @@ export function createWelcomeModalController({
     onVehicleChange,
     onWheelPresetChange,
     onPurchaseVehicle,
+    onPurchaseWheelPreset,
     onBuyCredits,
     onWrapChange,
     onPlayWalletRevealSound,
@@ -314,6 +319,9 @@ export function createWelcomeModalController({
     const authGarageWrapPresetGridEl = document.getElementById('welcomeAuthGarageSkinPresetGrid');
     const authGarageWheelCardEl = document.getElementById('welcomeAuthGarageWheelCard');
     const authGarageWheelStatusEl = document.getElementById('welcomeAuthGarageWheelStatus');
+    const authGarageWheelPurchaseBtnEl = document.getElementById(
+        'welcomeAuthGarageWheelPurchaseBtn'
+    );
     const authGarageWheelPresetGridEl = document.getElementById('welcomeAuthGarageWheelPresetGrid');
     const authGarageDockTitleEl = document.getElementById('welcomeAuthGarageDockTitle');
     const authGarageDockSubtitleEl = document.getElementById('welcomeAuthGarageDockSubtitle');
@@ -519,6 +527,7 @@ export function createWelcomeModalController({
     let garageNoticeTone = 'muted';
     let garagePurchasePending = false;
     let garageWheelPickerExpanded = false;
+    let garageWheelPreviewPresetId = '';
     let authPasswordChangeOpen = false;
     const avatarEditorState = createInitialAvatarEditorState();
     const garageWrapState = createInitialGarageWrapState();
@@ -949,8 +958,16 @@ export function createWelcomeModalController({
                 const wheelPresetId = resolvePlayerWheelPresetId(
                     buttonEl.getAttribute('data-wheel-preset-id') || ''
                 );
-                if (wheelPresetId === selectedWheelPresetId) {
+                const presentedWheelPresetId = resolvePresentedWheelPresetId();
+                if (wheelPresetId === presentedWheelPresetId) {
                     setGarageWheelPickerExpanded(!garageWheelPickerExpanded);
+                    return;
+                }
+                if (!isWheelPresetUnlockedForEconomy(playerEconomyState, wheelPresetId)) {
+                    previewWheelPreset(wheelPresetId, {
+                        announce: true,
+                    });
+                    setGarageWheelPickerExpanded(false);
                     return;
                 }
                 applySelectedWheelPreset(wheelPresetId, {
@@ -959,6 +976,9 @@ export function createWelcomeModalController({
                 });
                 setGarageWheelPickerExpanded(false);
             });
+        });
+        authGarageWheelPurchaseBtnEl?.addEventListener('click', () => {
+            void handleGarageWheelPresetPurchase(resolvePresentedWheelPresetId());
         });
         authCarWrapInputEl?.addEventListener('change', () => {
             void handleCarWrapSelection();
@@ -1378,6 +1398,17 @@ export function createWelcomeModalController({
         setAuthState,
         setPlayerEconomy(nextState = null) {
             playerEconomyState = normalizePlayerEconomyState(nextState);
+            const shouldPreserveWheelPreview = Boolean(
+                garageWheelPreviewPresetId &&
+                    !isWheelPresetUnlockedForEconomy(
+                        playerEconomyState,
+                        garageWheelPreviewPresetId
+                    )
+            );
+            applySelectedWheelPreset(selectedWheelPresetId, {
+                emitChange: false,
+                preservePreview: shouldPreserveWheelPreview,
+            });
             syncWalletProfileUi();
             syncWalletRevealUiState();
             syncGaragePresentationUi({
@@ -2443,6 +2474,60 @@ export function createWelcomeModalController({
         return garageWrapState.url || getRemoteGarageWrapUrl();
     }
 
+    function resolvePresentedWheelPresetId(fallbackWheelPresetId = selectedWheelPresetId) {
+        return resolvePlayerWheelPresetId(
+            garageWheelPreviewPresetId ||
+                fallbackWheelPresetId ||
+                currentWheelPresetGetter() ||
+                DEFAULT_PLAYER_WHEEL_PRESET_ID
+        );
+    }
+
+    function syncPreviewVehicleWheelPreset(wheelPresetId = resolvePresentedWheelPresetId()) {
+        const resolvedWheelPresetId = resolvePlayerWheelPresetId(
+            wheelPresetId || selectedWheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+        );
+        for (let i = 0; i < previewVehicles.length; i += 1) {
+            previewVehicles[i].rig.setAppearance({
+                wheelPresetId: resolvedWheelPresetId,
+            });
+        }
+    }
+
+    function previewWheelPreset(nextWheelPresetId, options = {}) {
+        const { announce = false } = options;
+        const resolvedWheelPresetId = resolvePlayerWheelPresetId(
+            nextWheelPresetId || resolvePresentedWheelPresetId()
+        );
+        if (!resolvedWheelPresetId) {
+            return selectedWheelPresetId;
+        }
+
+        garageWheelPreviewPresetId = isWheelPresetUnlockedForEconomy(
+            playerEconomyState,
+            resolvedWheelPresetId
+        )
+            ? ''
+            : resolvedWheelPresetId;
+        syncPreviewVehicleWheelPreset(resolvePresentedWheelPresetId(resolvedWheelPresetId));
+        if (announce) {
+            clearGarageNotice();
+        }
+        markWheelPresetPreviewStagesDirty();
+        syncGaragePresentationUi({
+            authenticated: authUiState.authenticated,
+            busy: Boolean(authUiState.loading),
+            canManageCarWrap: Boolean(authCarWrapInputEl && authGarageWrapUploadBtnEl),
+            hasCarWrap: Boolean(getEffectiveGarageWrapUrl()),
+        });
+        if (isGarageShowcaseOpen()) {
+            renderWheelPresetPreviewStages({
+                force: true,
+            });
+        }
+        return resolvePresentedWheelPresetId(resolvedWheelPresetId);
+    }
+
     function resolveGarageWrapSelectionMode() {
         if (garageWrapState.mode === 'preset') {
             return 'preset';
@@ -3270,10 +3355,13 @@ export function createWelcomeModalController({
         const presentedEconomyState = normalizePlayerEconomyState({
             credits: presentedWalletCredits,
             unlockedVehicleIds: playerEconomyState?.unlockedVehicleIds,
+            unlockedWheelPresetIds: playerEconomyState?.unlockedWheelPresetIds,
         });
         const ownedVehicleCount = getOwnedVehicleCountForEconomy(playerEconomyState);
+        const ownedWheelPresetCount = getOwnedWheelPresetCountForEconomy(playerEconomyState);
         const totalVehicleCount = PLAYER_VEHICLE_PRESETS.length;
-        const nextUnlock = resolveNextVehicleUnlockTarget(presentedEconomyState);
+        const totalWheelPresetCount = PLAYER_WHEEL_PRESETS.length;
+        const nextUnlock = resolveNextGarageUnlockTarget(presentedEconomyState);
         const syncSource =
             typeof authUiState.economySyncSource === 'string'
                 ? authUiState.economySyncSource.trim().toLowerCase()
@@ -3289,14 +3377,15 @@ export function createWelcomeModalController({
             0,
             Math.round(Number(authUiState.economyLifetimeSpent) || 0)
         );
+        const ownershipSummary = `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis • ${creditsFormatter.format(ownedWheelPresetCount)}/${creditsFormatter.format(totalWheelPresetCount)} wheel sets`;
         const walletSubline = nextUnlock.unlocked
-            ? `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis owned. Garage complete.`
-            : `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} chassis owned • ${formatCredits(nextUnlock.creditsShort)} to ${nextUnlock.vehicleName}.`;
+            ? `${ownershipSummary} unlocked. Garage complete.`
+            : `${ownershipSummary} • ${formatCredits(nextUnlock.creditsShort)} to ${nextUnlock.name}.`;
         const projectedProgressText = nextUnlock.unlocked
-            ? 'ALL CHASSIS ONLINE'
+            ? 'ALL GARAGE UNLOCKS ONLINE'
             : `${creditsFormatter.format(Math.min(presentedWalletCredits, nextUnlock.unlockPriceCredits))}/${formatCredits(nextUnlock.unlockPriceCredits)}`;
 
-        const nextUnlockLabel = nextUnlock.unlocked ? 'Garage Completion' : nextUnlock.vehicleName;
+        const nextUnlockLabel = nextUnlock.unlocked ? 'Garage Completion' : nextUnlock.name;
         const nextUnlockState = nextUnlock.unlocked
             ? 'complete'
             : nextUnlock.canAfford
@@ -3324,7 +3413,7 @@ export function createWelcomeModalController({
             authWalletSublineEl.textContent = walletSubline;
             authWalletEarnedEl.textContent = formatCredits(lifetimeEarned);
             authWalletSpentEl.textContent = formatCredits(lifetimeSpent);
-            authWalletOwnedEl.textContent = `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)}`;
+            authWalletOwnedEl.textContent = `${creditsFormatter.format(ownedVehicleCount)}/${creditsFormatter.format(totalVehicleCount)} • ${creditsFormatter.format(ownedWheelPresetCount)}/${creditsFormatter.format(totalWheelPresetCount)}`;
             authWalletNextUnlockLabelEl.textContent = nextUnlockLabel;
             authWalletNextUnlockValueEl.textContent = projectedProgressText;
             authWalletNextUnlockValueEl.dataset.state = nextUnlockState;
@@ -3339,8 +3428,8 @@ export function createWelcomeModalController({
             guestWalletSyncStateEl.setAttribute('aria-label', 'Buy 1500 Credits for 1 euro');
             guestWalletSyncStateEl.setAttribute('title', 'Buy 1500 Credits for 1 euro');
             guestWalletSublineEl.textContent = nextUnlock.unlocked
-                ? 'All chassis are unlocked in this local garage.'
-                : `${formatCredits(nextUnlock.creditsShort)} to unlock ${nextUnlock.vehicleName}.`;
+                ? 'All chassis and wheel sets are unlocked in this local garage.'
+                : `${formatCredits(nextUnlock.creditsShort)} to unlock ${nextUnlock.name}.`;
             guestWalletNextUnlockLabelEl.textContent = nextUnlockLabel;
             guestWalletNextUnlockValueEl.textContent = projectedProgressText;
             guestWalletNextUnlockValueEl.dataset.state = nextUnlockState;
@@ -3435,7 +3524,8 @@ export function createWelcomeModalController({
     } = {}) {
         const selectedPreset =
             PLAYER_VEHICLE_PRESETS[selectedVehicleIndex] || PLAYER_VEHICLE_PRESETS[0] || null;
-        const selectedWheelPreset = getPlayerWheelPresetById(selectedWheelPresetId);
+        const presentedWheelPresetId = resolvePresentedWheelPresetId();
+        const selectedWheelPreset = getPlayerWheelPresetById(presentedWheelPresetId);
         const selectedVehicleId = resolveVehicleId(selectedPreset?.id || DEFAULT_PLAYER_VEHICLE_ID);
         const vehicleName = selectedPreset?.name || 'Garage';
         const vehicleCategory = selectedPreset?.category || 'Driver Build';
@@ -3445,6 +3535,10 @@ export function createWelcomeModalController({
         const purchaseAvailability = getVehiclePurchaseAvailability(
             playerEconomyState,
             selectedVehicleId
+        );
+        const selectedWheelAvailability = getWheelPresetPurchaseAvailability(
+            playerEconomyState,
+            selectedWheelPreset.id
         );
         const vehicleUnlocked = purchaseAvailability.unlocked;
         const walletCredits = authenticated
@@ -3483,7 +3577,9 @@ export function createWelcomeModalController({
                   : activeSelection === 'remote'
                     ? `${vehicleName}. Saved account wrap equipped.`
                     : `${vehicleName}. Stock finish equipped.`;
-        const wheelSummary = `${selectedWheelPreset.name}. ${selectedWheelPreset.family}. ${selectedWheelPreset.description}`;
+        const wheelSummary = selectedWheelAvailability.unlocked
+            ? `${selectedWheelPreset.name}. ${selectedWheelPreset.family}. ${selectedWheelPreset.description}`
+            : `${selectedWheelPreset.name}. ${selectedWheelPreset.family}. Unlock cost: ${formatCredits(selectedWheelAvailability.unlockPriceCredits)}.`;
         const defaultGarageHint = !vehicleUnlocked
             ? !authenticated
                 ? 'Sign in to unlock additional chassis and earn credits.'
@@ -3634,10 +3730,47 @@ export function createWelcomeModalController({
             authGarageWheelCardEl.hidden = false;
             authGarageWheelCardEl.dataset.activePreset = selectedWheelPreset.id;
             authGarageWheelCardEl.dataset.expanded = garageWheelPickerExpanded ? 'true' : 'false';
+            authGarageWheelCardEl.dataset.locked = selectedWheelAvailability.unlocked
+                ? 'false'
+                : 'true';
             authGarageWheelCardEl.setAttribute('title', wheelSummary);
         }
         if (authGarageWheelStatusEl) {
             authGarageWheelStatusEl.textContent = '';
+            authGarageWheelStatusEl.hidden = true;
+            authGarageWheelStatusEl.dataset.state = selectedWheelAvailability.unlocked
+                ? 'owned'
+                : selectedWheelAvailability.canAfford
+                  ? 'ready'
+                  : 'locked';
+        }
+        if (authGarageWheelPurchaseBtnEl) {
+            const purchaseState = selectedWheelAvailability.canAfford ? 'ready' : 'locked';
+            authGarageWheelPurchaseBtnEl.hidden =
+                selectedWheelAvailability.unlocked ||
+                typeof onPurchaseWheelPreset !== 'function' ||
+                selectedWheelAvailability.unlockPriceCredits <= 0;
+            authGarageWheelPurchaseBtnEl.disabled =
+                busy ||
+                garagePurchasePending ||
+                (authenticated && !selectedWheelAvailability.canAfford);
+            authGarageWheelPurchaseBtnEl.dataset.state = purchaseState;
+            authGarageWheelPurchaseBtnEl.dataset.affordable = selectedWheelAvailability.canAfford
+                ? 'true'
+                : 'false';
+            authGarageWheelPurchaseBtnEl.dataset.busy = garagePurchasePending ? 'true' : 'false';
+            authGarageWheelPurchaseBtnEl.setAttribute(
+                'aria-label',
+                selectedWheelAvailability.canAfford
+                    ? `Unlock ${selectedWheelPreset.name} for ${formatCredits(selectedWheelAvailability.unlockPriceCredits)}`
+                    : `${selectedWheelPreset.name} requires ${formatCredits(selectedWheelAvailability.creditsShort)} more credits`
+            );
+            authGarageWheelPurchaseBtnEl.setAttribute(
+                'title',
+                selectedWheelAvailability.canAfford
+                    ? `${selectedWheelPreset.name} • ${formatCredits(selectedWheelAvailability.unlockPriceCredits)}`
+                    : `${selectedWheelPreset.name} • ${formatCredits(selectedWheelAvailability.creditsShort)} short`
+            );
         }
         const garageWheelPickerOpen =
             garageWheelPickerExpanded && authGarageWheelPresetBtnEls.length > 1;
@@ -3646,17 +3779,50 @@ export function createWelcomeModalController({
             const wheelPresetId = resolvePlayerWheelPresetId(
                 buttonEl.getAttribute('data-wheel-preset-id') || ''
             );
+            const wheelAvailability = getWheelPresetPurchaseAvailability(
+                playerEconomyState,
+                wheelPresetId
+            );
+            const wheelPreset = getPlayerWheelPresetById(wheelPresetId);
             const isSelectedWheelPreset = wheelPresetId === selectedWheelPreset.id;
+            const priceBadgeEl = buttonEl.querySelector('.welcomeAuthGarageWheelPresetPrice');
             buttonEl.disabled = busy || garagePurchasePending;
             buttonEl.dataset.selected = isSelectedWheelPreset ? 'true' : 'false';
             buttonEl.dataset.expanded = garageWheelPickerOpen ? 'true' : 'false';
             buttonEl.dataset.launcher = isSelectedWheelPreset ? 'true' : 'false';
+            buttonEl.dataset.locked = wheelAvailability.unlocked ? 'false' : 'true';
+            buttonEl.dataset.ready =
+                !wheelAvailability.unlocked && wheelAvailability.canAfford ? 'true' : 'false';
             buttonEl.dataset.collapsed =
                 !garageWheelPickerOpen && !isSelectedWheelPreset ? 'true' : 'false';
             buttonEl.hidden = false;
             buttonEl.style.order = String(
                 isSelectedWheelPreset ? PLAYER_WHEEL_PRESETS.length + 1 : i + 1
             );
+            buttonEl.setAttribute(
+                'aria-label',
+                wheelAvailability.unlocked
+                    ? `${wheelPreset.name}. ${wheelPreset.family}. ${wheelPreset.description}`
+                    : wheelAvailability.canAfford
+                      ? `${wheelPreset.name}. Locked. Unlock for ${formatCredits(wheelAvailability.unlockPriceCredits)}.`
+                      : `${wheelPreset.name}. Locked. Need ${formatCredits(wheelAvailability.creditsShort)} more.`
+            );
+            buttonEl.setAttribute(
+                'title',
+                wheelAvailability.unlocked
+                    ? wheelPreset.name
+                    : `${wheelPreset.name} • ${formatCredits(wheelAvailability.unlockPriceCredits)}`
+            );
+            if (priceBadgeEl instanceof HTMLElement) {
+                const showPriceBadge =
+                    !wheelAvailability.unlocked &&
+                    isSelectedWheelPreset &&
+                    wheelAvailability.unlockPriceCredits > 0;
+                priceBadgeEl.hidden = !showPriceBadge;
+                priceBadgeEl.textContent = showPriceBadge
+                    ? creditsFormatter.format(wheelAvailability.unlockPriceCredits)
+                    : '';
+            }
             buttonEl.setAttribute(
                 'aria-expanded',
                 isSelectedWheelPreset && garageWheelPickerOpen ? 'true' : 'false'
@@ -4381,6 +4547,79 @@ export function createWelcomeModalController({
         syncAuthUi();
     }
 
+    async function handleGarageWheelPresetPurchase(targetWheelPresetId = '') {
+        if (
+            garagePurchasePending ||
+            authUiState.loading ||
+            typeof onPurchaseWheelPreset !== 'function'
+        ) {
+            return;
+        }
+        if (!authUiState.authenticated) {
+            setWelcomeAccountOpen(true);
+            openGaragePanel();
+            setGarageNotice('Sign in to unlock premium wheel sets.', 'info');
+            syncAuthUi();
+            return;
+        }
+
+        const resolvedWheelPresetId = resolvePlayerWheelPresetId(
+            targetWheelPresetId || DEFAULT_PLAYER_WHEEL_PRESET_ID
+        );
+        const wheelPreset = getPlayerWheelPresetById(resolvedWheelPresetId);
+        const purchaseAvailability = getWheelPresetPurchaseAvailability(
+            playerEconomyState,
+            resolvedWheelPresetId
+        );
+        if (purchaseAvailability.unlocked) {
+            applySelectedWheelPreset(resolvedWheelPresetId, {
+                emitChange: true,
+                announce: true,
+            });
+            setGarageWheelPickerExpanded(false);
+            return;
+        }
+        if (!purchaseAvailability.canAfford) {
+            setGarageNotice(
+                `Need ${formatCredits(purchaseAvailability.creditsShort)} more to unlock ${wheelPreset.name}.`,
+                'error'
+            );
+            syncAuthUi();
+            return;
+        }
+
+        garagePurchasePending = true;
+        clearGarageNotice();
+        syncAuthUi();
+
+        const response = await Promise.resolve(onPurchaseWheelPreset(resolvedWheelPresetId)).catch(
+            (error) => ({
+                ok: false,
+                error: error?.message || 'Could not unlock this wheel set.',
+            })
+        );
+
+        garagePurchasePending = false;
+        if (!response?.ok) {
+            setGarageNotice(response?.error || 'Could not unlock this wheel set.', 'error');
+            syncAuthUi();
+            return;
+        }
+
+        playerEconomyState = normalizePlayerEconomyState(response?.economy || playerEconomyState);
+        applySelectedWheelPreset(resolvedWheelPresetId, {
+            emitChange: false,
+        });
+        setGarageWheelPickerExpanded(false);
+        setGarageNotice(
+            response?.syncWarning
+                ? 'Wheel set unlocked locally. Account sync will retry later.'
+                : `${wheelPreset.name} unlocked and equipped.`,
+            response?.syncWarning ? 'info' : 'success'
+        );
+        syncAuthUi();
+    }
+
     function handleLockedVehicleStartAttempt() {
         const selectedPreset =
             PLAYER_VEHICLE_PRESETS[selectedVehicleIndex] || PLAYER_VEHICLE_PRESETS[0] || null;
@@ -4440,6 +4679,9 @@ export function createWelcomeModalController({
         }
         if (!garagePanelOpen) {
             garageWheelPickerExpanded = false;
+            garageWheelPreviewPresetId = '';
+            syncPreviewVehicleWheelPreset(selectedWheelPresetId);
+            markWheelPresetPreviewStagesDirty();
         }
         if (!options.skipSync) {
             syncAuthUi();
@@ -5955,7 +6197,7 @@ export function createWelcomeModalController({
         incomingVehicle.rig.setAppearance({
             vehicleId: targetPreset.id,
             skinId: previewSkinId,
-            wheelPresetId: selectedWheelPresetId,
+            wheelPresetId: resolvePresentedWheelPresetId(),
         });
         incomingVehicle.car.visible = false;
 
@@ -6095,7 +6337,7 @@ export function createWelcomeModalController({
         previewVehicles[activeVehicleIndex].rig.setAppearance({
             vehicleId: selectedPreset.id,
             skinId: previewSkinId,
-            wheelPresetId: selectedWheelPresetId,
+            wheelPresetId: resolvePresentedWheelPresetId(),
         });
         clearGarageNotice();
         updateVehicleButtonLabels();
@@ -6112,19 +6354,20 @@ export function createWelcomeModalController({
     }
 
     function applySelectedWheelPreset(nextWheelPresetId, options = {}) {
-        const { emitChange = true, announce = false } = options;
+        const { emitChange = true, announce = false, preservePreview = false } = options;
         const resolvedWheelPresetId = resolvePlayerWheelPresetId(
             nextWheelPresetId || currentWheelPresetGetter() || DEFAULT_PLAYER_WHEEL_PRESET_ID
         );
-        selectedWheelPresetId = resolvedWheelPresetId;
-
-        for (let i = 0; i < previewVehicles.length; i += 1) {
-            previewVehicles[i].rig.setAppearance({
-                wheelPresetId: resolvedWheelPresetId,
-            });
+        selectedWheelPresetId = resolveOwnedWheelPresetIdForEconomy(
+            resolvedWheelPresetId,
+            playerEconomyState
+        );
+        if (!preservePreview) {
+            garageWheelPreviewPresetId = '';
         }
+        syncPreviewVehicleWheelPreset(resolvePresentedWheelPresetId());
 
-        const selectedWheelPreset = getPlayerWheelPresetById(resolvedWheelPresetId);
+        const selectedWheelPreset = getPlayerWheelPresetById(selectedWheelPresetId);
         if (announce) {
             clearGarageNotice();
         }
@@ -6141,9 +6384,9 @@ export function createWelcomeModalController({
             });
         }
         if (emitChange) {
-            onWheelPresetChange?.(resolvedWheelPresetId, selectedWheelPreset);
+            onWheelPresetChange?.(selectedWheelPresetId, selectedWheelPreset);
         }
-        return resolvedWheelPresetId;
+        return selectedWheelPresetId;
     }
 
     function applyPreviewPose() {
@@ -7326,7 +7569,7 @@ export function createWelcomeModalController({
 
         for (let i = 0; i < wheelPresetPreviewStages.length; i += 1) {
             const previewStage = wheelPresetPreviewStages[i];
-            const selected = previewStage.wheelPresetId === selectedWheelPresetId;
+            const selected = previewStage.wheelPresetId === resolvePresentedWheelPresetId();
             const targetYaw =
                 previewStage.baseYaw + (selected ? 0.16 : 0) + (previewStage.hover ? 0.06 : 0);
             const targetBank = selected ? -0.08 : previewStage.hover ? -0.04 : 0;
@@ -7420,8 +7663,17 @@ export function createWelcomeModalController({
             canvasEl.height = 92;
             canvasEl.setAttribute('aria-hidden', 'true');
 
+            const lockEl = document.createElement('span');
+            lockEl.className = 'welcomeAuthGarageWheelPresetLock';
+            lockEl.setAttribute('aria-hidden', 'true');
+
+            const priceEl = document.createElement('span');
+            priceEl.className = 'welcomeAuthGarageWheelPresetPrice';
+            priceEl.hidden = true;
+            priceEl.setAttribute('aria-hidden', 'true');
+
             stageEl.appendChild(canvasEl);
-            buttonEl.appendChild(stageEl);
+            buttonEl.append(stageEl, lockEl, priceEl);
             containerEl.appendChild(buttonEl);
         }
     }
@@ -7494,6 +7746,9 @@ export function createWelcomeModalController({
             credits: Math.max(0, Math.round(Number(source.credits) || 0)),
             unlockedVehicleIds: Array.isArray(source.unlockedVehicleIds)
                 ? source.unlockedVehicleIds
+                : [],
+            unlockedWheelPresetIds: Array.isArray(source.unlockedWheelPresetIds)
+                ? source.unlockedWheelPresetIds
                 : [],
             economySyncSource:
                 typeof source.economySyncSource === 'string' ? source.economySyncSource : 'local',

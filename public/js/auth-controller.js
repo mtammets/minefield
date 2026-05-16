@@ -1080,6 +1080,9 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 carWrapStoragePath: '',
                 credits: 0,
                 unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+                unlockedWheelPresetIds: [
+                    ...createDefaultPlayerEconomyState().unlockedWheelPresetIds,
+                ],
                 economySyncSource: 'local',
                 economyLastSyncedAt: '',
                 economyLifetimeEarned: 0,
@@ -1122,6 +1125,9 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                     carWrapStoragePath: '',
                     credits: 0,
                     unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+                    unlockedWheelPresetIds: [
+                        ...createDefaultPlayerEconomyState().unlockedWheelPresetIds,
+                    ],
                     economySyncSource: 'local',
                     economyLastSyncedAt: '',
                     economyLifetimeEarned: 0,
@@ -1178,6 +1184,9 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 carWrapStoragePath: '',
                 credits: 0,
                 unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+                unlockedWheelPresetIds: [
+                    ...createDefaultPlayerEconomyState().unlockedWheelPresetIds,
+                ],
                 economySyncSource: 'local',
                 economyLastSyncedAt: '',
                 economyLifetimeEarned: 0,
@@ -1299,6 +1308,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             fallbackEconomy: {
                 credits: state.credits,
                 unlockedVehicleIds: state.unlockedVehicleIds,
+                unlockedWheelPresetIds: state.unlockedWheelPresetIds,
             },
             source: options?.source,
         });
@@ -1308,6 +1318,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
         updateState({
             credits: normalizedProfile.credits,
             unlockedVehicleIds: [...normalizedProfile.unlockedVehicleIds],
+            unlockedWheelPresetIds: [...normalizedProfile.unlockedWheelPresetIds],
             economySyncSource: normalizedProfile.syncSource,
             economyLastSyncedAt: normalizedProfile.lastSyncedAt,
             economyLifetimeEarned: normalizedProfile.lifetimeEarned,
@@ -1365,6 +1376,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                       ? {
                             credits: state.credits,
                             unlockedVehicleIds: state.unlockedVehicleIds,
+                            unlockedWheelPresetIds: state.unlockedWheelPresetIds,
                         }
                       : null,
                   resolvePlayerEconomyStateFromSource(user)
@@ -1425,6 +1437,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             accountAudioPrefs: accountAudioPrefs ? { ...accountAudioPrefs } : null,
             credits: playerEconomyState.credits,
             unlockedVehicleIds: [...playerEconomyState.unlockedVehicleIds],
+            unlockedWheelPresetIds: [...playerEconomyState.unlockedWheelPresetIds],
             economySyncSource: preserveServerEconomyProfile
                 ? 'server'
                 : authenticated
@@ -1497,6 +1510,7 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
             accountAudioPrefs: null,
             credits: 0,
             unlockedVehicleIds: createDefaultPlayerEconomyState().unlockedVehicleIds,
+            unlockedWheelPresetIds: createDefaultPlayerEconomyState().unlockedWheelPresetIds,
             economySyncSource: 'local',
             economyLastSyncedAt: '',
             economyLifetimeEarned: 0,
@@ -1793,6 +1807,7 @@ function createInitialAuthState() {
         accountAudioPrefs: null,
         credits: 0,
         unlockedVehicleIds: [...createDefaultPlayerEconomyState().unlockedVehicleIds],
+        unlockedWheelPresetIds: [...createDefaultPlayerEconomyState().unlockedWheelPresetIds],
         economySyncSource: 'local',
         economyLastSyncedAt: '',
         economyLifetimeEarned: 0,
@@ -2530,6 +2545,7 @@ async function postPlayerEconomyProfile(
         body: JSON.stringify({
             credits: normalizedEconomyState.credits,
             unlockedVehicleIds: normalizedEconomyState.unlockedVehicleIds,
+            unlockedWheelPresetIds: normalizedEconomyState.unlockedWheelPresetIds,
             recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT,
             transaction: normalizePlayerEconomySyncTransaction(transaction),
         }),
@@ -2547,6 +2563,7 @@ function normalizePlayerEconomyProfileState(profile = null, options = {}) {
     const economy = normalizePlayerEconomyState({
         credits: source.credits,
         unlockedVehicleIds: source.unlockedVehicleIds,
+        unlockedWheelPresetIds: source.unlockedWheelPresetIds,
     });
     const recentTransactions = Array.isArray(source.recentTransactions)
         ? source.recentTransactions
@@ -2563,6 +2580,10 @@ function normalizePlayerEconomyProfileState(profile = null, options = {}) {
             Array.isArray(source.unlockedVehicleIds) && source.unlockedVehicleIds.length > 0
                 ? [...economy.unlockedVehicleIds]
                 : [...fallbackEconomy.unlockedVehicleIds],
+        unlockedWheelPresetIds:
+            Array.isArray(source.unlockedWheelPresetIds) && source.unlockedWheelPresetIds.length > 0
+                ? [...economy.unlockedWheelPresetIds]
+                : [...fallbackEconomy.unlockedWheelPresetIds],
         syncSource:
             typeof options?.source === 'string' && options.source.trim()
                 ? options.source.trim().toLowerCase()
@@ -2636,6 +2657,18 @@ function normalizePlayerEconomyTransactionMetadata(value = null) {
             metadata.vehicleName = vehicleName;
         }
     }
+    if (typeof source.wheelPresetId === 'string') {
+        const wheelPresetId = sanitizeEconomyVehicleId(source.wheelPresetId);
+        if (wheelPresetId) {
+            metadata.wheelPresetId = wheelPresetId;
+        }
+    }
+    if (typeof source.wheelPresetName === 'string') {
+        const wheelPresetName = sanitizeEconomyTransactionSummary(source.wheelPresetName, 72);
+        if (wheelPresetName) {
+            metadata.wheelPresetName = wheelPresetName;
+        }
+    }
     if (typeof source.gameMode === 'string') {
         const gameMode = sanitizeEconomyTransactionKind(source.gameMode);
         if (gameMode) {
@@ -2676,7 +2709,10 @@ function shouldMigrateLegacyEconomyState(value = null) {
     if (legacyState.credits > 0) {
         return true;
     }
-    return legacyState.unlockedVehicleIds.length > defaultState.unlockedVehicleIds.length;
+    if (legacyState.unlockedVehicleIds.length > defaultState.unlockedVehicleIds.length) {
+        return true;
+    }
+    return legacyState.unlockedWheelPresetIds.length > defaultState.unlockedWheelPresetIds.length;
 }
 
 function sanitizeEconomyVehicleId(value) {

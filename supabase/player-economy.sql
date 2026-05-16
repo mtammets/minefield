@@ -2,6 +2,7 @@ create table if not exists public.player_economy_wallets (
     user_id text primary key,
     credits integer not null default 0 check (credits >= 0),
     unlocked_vehicle_ids jsonb not null default '[]'::jsonb,
+    unlocked_wheel_preset_ids jsonb not null default '[]'::jsonb,
     lifetime_earned integer not null default 0 check (lifetime_earned >= 0),
     lifetime_spent integer not null default 0 check (lifetime_spent >= 0),
     transaction_count integer not null default 0 check (transaction_count >= 0),
@@ -11,6 +12,9 @@ create table if not exists public.player_economy_wallets (
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now()
 );
+
+alter table public.player_economy_wallets
+    add column if not exists unlocked_wheel_preset_ids jsonb not null default '[]'::jsonb;
 
 create table if not exists public.player_economy_transactions (
     id uuid primary key,

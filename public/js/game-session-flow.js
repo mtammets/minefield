@@ -51,6 +51,7 @@ export function createGameSessionController({
     resolvePlayerCarSkinId,
     resolvePlayerCarVehicleId = (vehicleId) => vehicleId || '',
     resolvePlayerCarWheelPresetId = (wheelPresetId) => wheelPresetId || '',
+    resolveOwnedPlayerWheelPresetIdForEconomy = (wheelPresetId) => wheelPresetId || '',
     getCarSkinPresetById = () => null,
     persistPlayerCarColorHex,
     persistPlayerCarSkinId,
@@ -105,6 +106,7 @@ export function createGameSessionController({
     getIsWelcomeModalVisible,
     setIsWelcomeModalVisible,
     getAuthState = () => null,
+    getPlayerEconomyState = () => null,
     readGuestChaseCameraSettings = () => createDefaultChaseCameraSettings(),
     persistGuestChaseCameraSettings = () => {},
     persistAccountChaseCameraSettings = null,
@@ -403,8 +405,10 @@ export function createGameSessionController({
                 ? authState.accountWheelPresetId.trim()
                 : '';
         if (accountWheelPresetId) {
-            const normalizedAccountWheelPresetId =
-                resolvePlayerCarWheelPresetId(accountWheelPresetId);
+            const normalizedAccountWheelPresetId = resolveOwnedPlayerWheelPresetIdForEconomy(
+                resolvePlayerCarWheelPresetId(accountWheelPresetId),
+                getPlayerEconomyState()
+            );
             if (
                 normalizedAccountWheelPresetId !==
                 resolvePlayerCarWheelPresetId(getSelectedCarWheelPresetId())
@@ -1204,7 +1208,10 @@ export function createGameSessionController({
 
     function setSelectedPlayerCarWheelPreset(wheelPresetId, options = {}) {
         const { persist = true, persistAccount = true } = options;
-        const normalizedWheelPresetId = resolvePlayerCarWheelPresetId(wheelPresetId);
+        const normalizedWheelPresetId = resolveOwnedPlayerWheelPresetIdForEconomy(
+            resolvePlayerCarWheelPresetId(wheelPresetId),
+            getPlayerEconomyState()
+        );
         if (!normalizedWheelPresetId) {
             return;
         }
