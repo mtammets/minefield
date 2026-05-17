@@ -59,7 +59,9 @@ test('resolveSupabaseRuntimeConfig reports public and service readiness', () => 
     assert.equal(config.projectRef, 'uffldlrjjvxzbjftgyxg');
     assert.equal(config.profileImagesBucket, 'profile-images');
     assert.equal(config.carWrapsBucket, 'car-wraps');
+    assert.equal(config.garageWrapPresetsBucket, 'garage-wrap-presets');
     assert.equal(config.billboardMediaBucket, 'billboard-media');
+    assert.equal(config.showroomIntroBucket, 'showroom-intro-media');
 });
 
 test('resolveSupabaseRuntimeConfig prefers the pooler connection for live database reads', () => {
@@ -98,8 +100,12 @@ test('buildSupabasePublicConfig only exposes browser-safe fields', () => {
         profileImagesEnabled: false,
         carWrapsBucket: '',
         carWrapsEnabled: false,
+        garageWrapPresetsBucket: '',
+        garageWrapPresetsEnabled: false,
         billboardMediaBucket: '',
         billboardMediaEnabled: false,
+        showroomIntroBucket: '',
+        showroomIntroEnabled: false,
         leaderboardEnabled: true,
     });
 });
@@ -127,8 +133,12 @@ test('buildSupabasePublicConfig exposes profile image storage settings', () => {
         profileImagesEnabled: true,
         carWrapsBucket: '',
         carWrapsEnabled: false,
+        garageWrapPresetsBucket: '',
+        garageWrapPresetsEnabled: false,
         billboardMediaBucket: '',
         billboardMediaEnabled: false,
+        showroomIntroBucket: '',
+        showroomIntroEnabled: false,
         leaderboardEnabled: false,
     });
 });
@@ -156,8 +166,12 @@ test('buildSupabasePublicConfig exposes car wrap storage settings', () => {
         profileImagesEnabled: false,
         carWrapsBucket: 'car-wraps',
         carWrapsEnabled: true,
+        garageWrapPresetsBucket: '',
+        garageWrapPresetsEnabled: false,
         billboardMediaBucket: '',
         billboardMediaEnabled: false,
+        showroomIntroBucket: '',
+        showroomIntroEnabled: false,
         leaderboardEnabled: false,
     });
 });
@@ -190,8 +204,12 @@ test('applySupabaseStorageAvailability disables missing buckets without exposing
             profileImagesEnabled: true,
             carWrapsBucket: 'car-wraps',
             carWrapsEnabled: true,
+            garageWrapPresetsBucket: '',
+            garageWrapPresetsEnabled: false,
             billboardMediaBucket: '',
             billboardMediaEnabled: false,
+            showroomIntroBucket: '',
+            showroomIntroEnabled: false,
             leaderboardEnabled: true,
         },
         {
@@ -209,8 +227,12 @@ test('applySupabaseStorageAvailability disables missing buckets without exposing
         profileImagesEnabled: true,
         carWrapsBucket: '',
         carWrapsEnabled: false,
+        garageWrapPresetsBucket: '',
+        garageWrapPresetsEnabled: false,
         billboardMediaBucket: '',
         billboardMediaEnabled: false,
+        showroomIntroBucket: '',
+        showroomIntroEnabled: false,
         leaderboardEnabled: true,
     });
 });

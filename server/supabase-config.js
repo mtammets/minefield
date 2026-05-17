@@ -3,7 +3,9 @@ const WebSocket = require('ws');
 
 const DEFAULT_SUPABASE_PROFILE_IMAGES_BUCKET = 'profile-images';
 const DEFAULT_SUPABASE_CAR_WRAPS_BUCKET = 'car-wraps';
+const DEFAULT_SUPABASE_GARAGE_WRAP_PRESETS_BUCKET = 'garage-wrap-presets';
 const DEFAULT_SUPABASE_BILLBOARD_MEDIA_BUCKET = 'billboard-media';
+const DEFAULT_SUPABASE_SHOWROOM_INTRO_BUCKET = 'showroom-intro-media';
 
 function sanitizeSupabaseProjectRef(value) {
     if (typeof value !== 'string') {
@@ -86,8 +88,14 @@ function resolveSupabaseRuntimeConfig(env = process.env) {
     const carWrapsBucket = sanitizeSupabaseStorageBucketName(
         env?.SUPABASE_CAR_WRAPS_BUCKET || DEFAULT_SUPABASE_CAR_WRAPS_BUCKET
     );
+    const garageWrapPresetsBucket = sanitizeSupabaseStorageBucketName(
+        env?.SUPABASE_GARAGE_WRAP_PRESETS_BUCKET || DEFAULT_SUPABASE_GARAGE_WRAP_PRESETS_BUCKET
+    );
     const billboardMediaBucket = sanitizeSupabaseStorageBucketName(
         env?.SUPABASE_BILLBOARD_MEDIA_BUCKET || DEFAULT_SUPABASE_BILLBOARD_MEDIA_BUCKET
+    );
+    const showroomIntroBucket = sanitizeSupabaseStorageBucketName(
+        env?.SUPABASE_SHOWROOM_INTRO_BUCKET || DEFAULT_SUPABASE_SHOWROOM_INTRO_BUCKET
     );
     const dbUrl = sanitizePostgresConnectionString(env?.SUPABASE_DB_URL || '');
     const dbPoolerUrl = sanitizePostgresConnectionString(env?.SUPABASE_DB_POOLER_URL || '');
@@ -100,7 +108,9 @@ function resolveSupabaseRuntimeConfig(env = process.env) {
         serviceRoleKey,
         profileImagesBucket,
         carWrapsBucket,
+        garageWrapPresetsBucket,
         billboardMediaBucket,
+        showroomIntroBucket,
         dbUrl,
         dbPoolerUrl,
         databaseConnectionString,
@@ -118,8 +128,14 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
         runtimeConfig.profileImagesBucket || ''
     );
     const carWrapsBucket = sanitizeSupabaseStorageBucketName(runtimeConfig.carWrapsBucket || '');
+    const garageWrapPresetsBucket = sanitizeSupabaseStorageBucketName(
+        runtimeConfig.garageWrapPresetsBucket || ''
+    );
     const billboardMediaBucket = sanitizeSupabaseStorageBucketName(
         runtimeConfig.billboardMediaBucket || ''
+    );
+    const showroomIntroBucket = sanitizeSupabaseStorageBucketName(
+        runtimeConfig.showroomIntroBucket || ''
     );
 
     return {
@@ -131,8 +147,14 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
         profileImagesEnabled: Boolean(runtimeConfig.publicEnabled && profileImagesBucket),
         carWrapsBucket: runtimeConfig.publicEnabled ? carWrapsBucket : '',
         carWrapsEnabled: Boolean(runtimeConfig.publicEnabled && carWrapsBucket),
+        garageWrapPresetsBucket: runtimeConfig.publicEnabled ? garageWrapPresetsBucket : '',
+        garageWrapPresetsEnabled: Boolean(
+            runtimeConfig.publicEnabled && garageWrapPresetsBucket
+        ),
         billboardMediaBucket: runtimeConfig.publicEnabled ? billboardMediaBucket : '',
         billboardMediaEnabled: Boolean(runtimeConfig.publicEnabled && billboardMediaBucket),
+        showroomIntroBucket: runtimeConfig.publicEnabled ? showroomIntroBucket : '',
+        showroomIntroEnabled: Boolean(runtimeConfig.publicEnabled && showroomIntroBucket),
         leaderboardEnabled,
     };
 }
@@ -161,12 +183,22 @@ function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) 
     const carWrapsBucket = enabled
         ? sanitizeSupabaseStorageBucketName(source.carWrapsBucket || '')
         : '';
+    const garageWrapPresetsBucket = enabled
+        ? sanitizeSupabaseStorageBucketName(source.garageWrapPresetsBucket || '')
+        : '';
     const billboardMediaBucket = enabled
         ? sanitizeSupabaseStorageBucketName(source.billboardMediaBucket || '')
         : '';
+    const showroomIntroBucket = enabled
+        ? sanitizeSupabaseStorageBucketName(source.showroomIntroBucket || '')
+        : '';
     const profileImagesEnabled = Boolean(source.profileImagesEnabled && profileImagesBucket);
     const carWrapsEnabled = Boolean(source.carWrapsEnabled && carWrapsBucket);
+    const garageWrapPresetsEnabled = Boolean(
+        source.garageWrapPresetsEnabled && garageWrapPresetsBucket
+    );
     const billboardMediaEnabled = Boolean(source.billboardMediaEnabled && billboardMediaBucket);
+    const showroomIntroEnabled = Boolean(source.showroomIntroEnabled && showroomIntroBucket);
     const adjustedAvailability =
         availability && typeof availability === 'object' ? availability : {};
 
@@ -185,6 +217,14 @@ function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) 
             adjustedAvailability.carWrapsBucketAvailable === false ? '' : carWrapsBucket,
         carWrapsEnabled:
             adjustedAvailability.carWrapsBucketAvailable === false ? false : carWrapsEnabled,
+        garageWrapPresetsBucket:
+            adjustedAvailability.garageWrapPresetsBucketAvailable === false
+                ? ''
+                : garageWrapPresetsBucket,
+        garageWrapPresetsEnabled:
+            adjustedAvailability.garageWrapPresetsBucketAvailable === false
+                ? false
+                : garageWrapPresetsEnabled,
         billboardMediaBucket:
             adjustedAvailability.billboardMediaBucketAvailable === false
                 ? ''
@@ -193,6 +233,12 @@ function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) 
             adjustedAvailability.billboardMediaBucketAvailable === false
                 ? false
                 : billboardMediaEnabled,
+        showroomIntroBucket:
+            adjustedAvailability.showroomIntroBucketAvailable === false ? '' : showroomIntroBucket,
+        showroomIntroEnabled:
+            adjustedAvailability.showroomIntroBucketAvailable === false
+                ? false
+                : showroomIntroEnabled,
         leaderboardEnabled: Boolean(source.leaderboardEnabled),
     };
 }

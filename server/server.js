@@ -12,8 +12,14 @@ const {
     createBillboardContentStore,
     ensureBillboardContentSchema,
 } = require('./billboard-content-store');
-const { createGarageWrapPresetStore } = require('./garage-wrap-presets-store');
-const { createShowroomIntroVideoStore } = require('./showroom-intro-video-store');
+const {
+    createGarageWrapPresetStore,
+    ensureGarageWrapPresetSchema,
+} = require('./garage-wrap-presets-store');
+const {
+    createShowroomIntroVideoStore,
+    ensureShowroomIntroVideoSchema,
+} = require('./showroom-intro-video-store');
 const {
     createLeaderboardStore,
     ensureLeaderboardSchema,
@@ -249,6 +255,7 @@ const audioPrefsStore = createAudioPrefsStore(supabaseRuntimeConfig);
 const garageWrapPresetStore = createGarageWrapPresetStore({
     manifestFilePath: path.join(__dirname, 'data/garage-wrap-presets.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/garage-wrap-presets'),
+    supabaseConfig: supabaseRuntimeConfig,
 });
 const billboardContentStore = createBillboardContentStore({
     manifestFilePath: path.join(__dirname, 'data/billboard-content.json'),
@@ -259,6 +266,7 @@ const showroomIntroVideoStore = createShowroomIntroVideoStore({
     manifestFilePath: path.join(__dirname, 'data/showroom-intro-video.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/showroom-intro'),
     defaultVideoFilePath: path.join(__dirname, '../public/assets/Demo/Demo.mp4'),
+    supabaseConfig: supabaseRuntimeConfig,
 });
 const io = new Server(server, {
     cors: {
@@ -2270,7 +2278,9 @@ void startServer();
 
 async function startServer() {
     await initializeSupabaseAudioPrefsSchema();
+    await initializeSupabaseGarageWrapPresetSchema();
     await initializeSupabaseBillboardContentSchema();
+    await initializeSupabaseShowroomIntroVideoSchema();
     await initializeSupabaseLeaderboardSchema();
     await initializeSupabasePlayerEconomySchema();
     server.listen(PORT, () => {
@@ -2290,8 +2300,14 @@ async function startServer() {
         if (audioPrefsStore.isConfigured()) {
             console.log('Supabase audio defaults API is enabled.');
         }
+        if (garageWrapPresetStore.isConfigured?.()) {
+            console.log('Supabase garage wrap presets API is enabled.');
+        }
         if (billboardContentStore.isConfigured?.()) {
             console.log('Supabase billboard media API is enabled.');
+        }
+        if (showroomIntroVideoStore.isConfigured?.()) {
+            console.log('Supabase showroom intro video API is enabled.');
         }
         if (playerEconomyStore.isConfigured()) {
             console.log('Supabase player economy API is enabled.');
@@ -2379,6 +2395,76 @@ async function initializeSupabaseBillboardContentSchema() {
 
     if (lastError) {
         console.error('Supabase billboard media schema bootstrap failed:', lastError);
+    }
+}
+
+async function initializeSupabaseGarageWrapPresetSchema() {
+    if (!garageWrapPresetStore.isConfigured?.()) {
+        return;
+    }
+    const bootstrapConnectionStrings = Array.from(
+        new Set(
+            [supabaseRuntimeConfig.dbUrl, supabaseRuntimeConfig.dbPoolerUrl].filter(
+                (value) => typeof value === 'string' && value.trim()
+            )
+        )
+    );
+    if (bootstrapConnectionStrings.length === 0) {
+        console.warn(
+            'Supabase garage wrap presets are enabled, but no DB connection string is available for automatic schema bootstrap.'
+        );
+        return;
+    }
+
+    let lastError = null;
+    for (let index = 0; index < bootstrapConnectionStrings.length; index += 1) {
+        try {
+            await ensureGarageWrapPresetSchema({
+                connectionString: bootstrapConnectionStrings[index],
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Supabase garage wrap presets schema bootstrap failed:', lastError);
+    }
+}
+
+async function initializeSupabaseShowroomIntroVideoSchema() {
+    if (!showroomIntroVideoStore.isConfigured?.()) {
+        return;
+    }
+    const bootstrapConnectionStrings = Array.from(
+        new Set(
+            [supabaseRuntimeConfig.dbUrl, supabaseRuntimeConfig.dbPoolerUrl].filter(
+                (value) => typeof value === 'string' && value.trim()
+            )
+        )
+    );
+    if (bootstrapConnectionStrings.length === 0) {
+        console.warn(
+            'Supabase showroom intro video is enabled, but no DB connection string is available for automatic schema bootstrap.'
+        );
+        return;
+    }
+
+    let lastError = null;
+    for (let index = 0; index < bootstrapConnectionStrings.length; index += 1) {
+        try {
+            await ensureShowroomIntroVideoSchema({
+                connectionString: bootstrapConnectionStrings[index],
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Supabase showroom intro video schema bootstrap failed:', lastError);
     }
 }
 
@@ -3986,9 +4072,17 @@ async function resolveSupabaseStorageAvailability() {
                     !SUPABASE_PUBLIC_CONFIG.carWrapsBucket ||
                     bucketNames.has(SUPABASE_PUBLIC_CONFIG.carWrapsBucket)
                 ),
+                garageWrapPresetsBucketAvailable: Boolean(
+                    !SUPABASE_PUBLIC_CONFIG.garageWrapPresetsBucket ||
+                    bucketNames.has(SUPABASE_PUBLIC_CONFIG.garageWrapPresetsBucket)
+                ),
                 billboardMediaBucketAvailable: Boolean(
                     !SUPABASE_PUBLIC_CONFIG.billboardMediaBucket ||
                     bucketNames.has(SUPABASE_PUBLIC_CONFIG.billboardMediaBucket)
+                ),
+                showroomIntroBucketAvailable: Boolean(
+                    !SUPABASE_PUBLIC_CONFIG.showroomIntroBucket ||
+                    bucketNames.has(SUPABASE_PUBLIC_CONFIG.showroomIntroBucket)
                 ),
             };
 
@@ -4022,10 +4116,22 @@ function logMissingSupabaseStorageBuckets(availability) {
         missingBuckets.push(SUPABASE_PUBLIC_CONFIG.carWrapsBucket);
     }
     if (
+        SUPABASE_PUBLIC_CONFIG.garageWrapPresetsBucket &&
+        availability?.garageWrapPresetsBucketAvailable === false
+    ) {
+        missingBuckets.push(SUPABASE_PUBLIC_CONFIG.garageWrapPresetsBucket);
+    }
+    if (
         SUPABASE_PUBLIC_CONFIG.billboardMediaBucket &&
         availability?.billboardMediaBucketAvailable === false
     ) {
         missingBuckets.push(SUPABASE_PUBLIC_CONFIG.billboardMediaBucket);
+    }
+    if (
+        SUPABASE_PUBLIC_CONFIG.showroomIntroBucket &&
+        availability?.showroomIntroBucketAvailable === false
+    ) {
+        missingBuckets.push(SUPABASE_PUBLIC_CONFIG.showroomIntroBucket);
     }
 
     const nextWarning = missingBuckets.join(', ');
