@@ -172,6 +172,7 @@ import {
 } from './graphics-quality-controller.js';
 import { preloadBillboardMedia } from './environment/billboards.js';
 import {
+    configureBillboardContentManager,
     getBillboardContentExtraImageUrls,
     getBillboardContentExtraVideoUrls,
     getBillboardContentGroups,
@@ -606,6 +607,11 @@ runtimeState.authController = createAuthController({
         handleRuntimeAuthEconomyStateChanged(state);
         runtimeState.multiplayerController?.handleAuthenticationStateChanged?.(state);
         runtimeState.gameSessionController?.handleAuthStateChanged?.(state);
+        void initializeBillboardContentManager({ force: true })
+            .catch(() => {})
+            .finally(() => {
+                runtimeState.editModeController?.refreshBillboardGroups?.();
+            });
         void runtimeState.globalLeaderboardController?.refresh?.();
         lastRuntimeAuthState = state;
     },
@@ -624,6 +630,9 @@ runtimeState.globalLeaderboardController = createGlobalLeaderboardController({
     },
     getAccessToken: () => runtimeState.authController?.getAccessToken?.() || '',
     getAuthState: () => runtimeState.authController?.getState?.() || null,
+});
+configureBillboardContentManager({
+    getAccessToken: () => runtimeState.authController?.getAccessToken?.() || '',
 });
 welcomeModalUi.setGlobalLeaderboard?.(runtimeState.globalLeaderboardController.getState?.());
 void runtimeState.authController.initialize().catch(() => {});

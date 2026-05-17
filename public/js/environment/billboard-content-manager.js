@@ -62,11 +62,19 @@ const BILLBOARD_CONTENT_GROUPS = Object.freeze([
 const groupDefinitionsById = new Map(BILLBOARD_CONTENT_GROUPS.map((group) => [group.id, group]));
 const registeredEntriesByGroup = new Map();
 const runtimePlaybackStateByGroup = new Map();
+let accessTokenProvider = null;
 const contentState = {
     initialized: false,
     initializationPromise: null,
     manifest: createEmptyManifest(),
+    canEdit: false,
+    editorStatusText: '',
+    storageMode: 'local',
 };
+
+export function configureBillboardContentManager({ getAccessToken = null } = {}) {
+    accessTokenProvider = typeof getAccessToken === 'function' ? getAccessToken : null;
+}
 
 export function getBillboardContentGroups() {
     return BILLBOARD_CONTENT_GROUPS.map((definition) => buildBillboardGroupSummary(definition));
@@ -101,8 +109,9 @@ export function registerBillboardContentEntry(entry) {
     applyGroupManifestToEntry(groupId, entry);
 }
 
-export async function initializeBillboardContentManager() {
-    if (contentState.initializationPromise) {
+export async function initializeBillboardContentManager(options = {}) {
+    const force = Boolean(options?.force);
+    if (contentState.initializationPromise && !force) {
         return contentState.initializationPromise;
     }
 
@@ -111,18 +120,32 @@ export async function initializeBillboardContentManager() {
             const response = await window.fetch(BILLBOARD_CONTENT_API_PATH, {
                 method: 'GET',
                 cache: 'no-store',
-                headers: {
+                credentials: 'same-origin',
+                headers: buildBillboardRequestHeaders({
                     Accept: 'application/json',
-                },
+                }),
             });
             if (!response.ok) {
                 throw new Error(`Billboard content config request failed (${response.status}).`);
             }
             const payload = await response.json();
             contentState.manifest = normalizeBillboardManifest(payload?.manifest);
+            contentState.canEdit = payload?.canEdit === true;
+            contentState.editorStatusText =
+                typeof payload?.editorStatusText === 'string'
+                    ? payload.editorStatusText.trim()
+                    : '';
+            contentState.storageMode =
+                typeof payload?.storageMode === 'string' && payload.storageMode.trim()
+                    ? payload.storageMode.trim()
+                    : 'local';
         } catch (error) {
             console.warn('Billboard content config could not be loaded. Using defaults.', error);
-            contentState.manifest = createEmptyManifest();
+            if (!contentState.initialized || force) {
+                contentState.manifest = createEmptyManifest();
+            }
+            contentState.canEdit = false;
+            contentState.editorStatusText = '';
         }
 
         contentState.initialized = true;
@@ -156,10 +179,11 @@ export async function uploadBillboardGroupFiles(groupId, fileList) {
         {
             method: 'POST',
             cache: 'no-store',
-            headers: {
+            credentials: 'same-origin',
+            headers: buildBillboardRequestHeaders({
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
-            },
+            }),
             body: JSON.stringify({
                 mediaKind: definition.mediaKind,
                 items,
@@ -172,6 +196,9 @@ export async function uploadBillboardGroupFiles(groupId, fileList) {
     }
 
     contentState.manifest = normalizeBillboardManifest(payload.manifest);
+    if (payload?.canEdit === false) {
+        contentState.canEdit = false;
+    }
     applyAllRegisteredGroupContent();
     return buildBillboardGroupSummary(definition);
 }
@@ -187,9 +214,10 @@ export async function resetBillboardGroupContent(groupId) {
         {
             method: 'DELETE',
             cache: 'no-store',
-            headers: {
+            credentials: 'same-origin',
+            headers: buildBillboardRequestHeaders({
                 Accept: 'application/json',
-            },
+            }),
         }
     );
     const payload = await safeReadJson(response);
@@ -198,6 +226,9 @@ export async function resetBillboardGroupContent(groupId) {
     }
 
     contentState.manifest = normalizeBillboardManifest(payload.manifest);
+    if (payload?.canEdit === false) {
+        contentState.canEdit = false;
+    }
     applyAllRegisteredGroupContent();
     return buildBillboardGroupSummary(definition);
 }
@@ -278,6 +309,9 @@ function buildBillboardGroupSummary(definition) {
         ...definition,
         screenCount,
         isCustom,
+        canEdit: contentState.canEdit,
+        editorStatusText: contentState.editorStatusText,
+        storageMode: contentState.storageMode,
         playbackEnabled:
             definition.mediaKind === 'video'
                 ? isBillboardGroupPlaybackEnabled(definition.id)
@@ -286,7 +320,9 @@ function buildBillboardGroupSummary(definition) {
         items: activeItems,
         statusText: isCustom
             ? `${customItems.length} custom ${definition.mediaKind === 'video' ? 'video' : 'image'} file${customItems.length === 1 ? '' : 's'} active`
-            : 'Using built-in default playlist',
+            : contentState.canEdit
+              ? 'Using built-in default playlist'
+              : contentState.editorStatusText || 'Using built-in default playlist',
     };
 }
 
@@ -416,6 +452,23 @@ async function safeReadJson(response) {
     }
 }
 
+function buildBillboardRequestHeaders(headers = {}) {
+    const nextHeaders = headers && typeof headers === 'object' ? { ...headers } : {};
+    const accessToken = resolveBillboardAccessToken();
+    if (accessToken) {
+        nextHeaders.Authorization = `Bearer ${accessToken}`;
+    }
+    return nextHeaders;
+}
+
+function resolveBillboardAccessToken() {
+    if (typeof accessTokenProvider !== 'function') {
+        return '';
+    }
+    const token = accessTokenProvider();
+    return typeof token === 'string' ? token.trim() : '';
+}
+
 function normalizeBillboardGroupId(value) {
     return typeof value === 'string' ? value.trim().toLowerCase() : '';
 }
@@ -525,7 +578,7 @@ function resolveBillboardApiErrorMessage(statusCode, serverMessage, action = 'up
             : 'Request payload is too large.';
     }
     if (statusCode === 403) {
-        return 'Billboard admin access is denied for this server.';
+        return serverMessage || 'Billboard editor access is denied for this server.';
     }
     return serverMessage || `Billboard ${action} failed.`;
 }

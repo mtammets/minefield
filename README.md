@@ -43,8 +43,8 @@ Notes:
 
 ## Supabase Auth Media
 
-If you want signed-in users to upload profile photos and custom car wraps, configure Supabase auth
-plus Storage:
+If you want signed-in users to upload profile photos, custom car wraps, and editor-managed
+billboard media, configure Supabase auth plus Storage:
 
 ```bash
 SUPABASE_PROJECT_REF=your-project-ref
@@ -58,19 +58,26 @@ SUPABASE_DB_POOLER_URL=postgresql://...
 # Optional overrides:
 SUPABASE_PROFILE_IMAGES_BUCKET=profile-images
 SUPABASE_CAR_WRAPS_BUCKET=car-wraps
+SUPABASE_BILLBOARD_MEDIA_BUCKET=billboard-media
+# Optional editor allowlist:
+BILLBOARD_EDITOR_USER_IDS=user-id-1,user-id-2
 ```
 
 Apply the Storage bucket/policy SQL in Supabase:
 
 - `supabase/profile-images.sql`
 - `supabase/car-wraps.sql`
+- `supabase/billboard-media.sql`
 
 How it works:
 
 - profile photos are stored in the authenticated user's own folder inside `profile-images`
 - custom car wraps are stored in the authenticated user's own folder inside `car-wraps`
+- billboard uploads are normalized server-side before publish and stored in `billboard-media`
 - the selected wrap path is saved in Supabase `user_metadata.car_wrap_path`
 - account deletion now removes leaderboard entries, profile photos, and saved car wrap uploads
+- billboard editing is allowed for users in `BILLBOARD_EDITOR_USER_IDS` or users with
+  `admin`/`editor`/`billboard_editor` style flags in Supabase `app_metadata` or `user_metadata`
 
 Local webhook testing with Stripe CLI:
 
@@ -148,6 +155,8 @@ How it works:
 - In Edit Mode you can:
     - toggle visible car parts/modules
     - change crash/damage tuning values (explosion intensity, collision thresholds, wheel detach speeds)
+- Editor-authorized accounts can also replace billboard image/video playlists; uploads are
+  normalized server-side and published from Supabase Storage when configured.
 - Crash/damage tuning values are persisted to `localStorage` and re-applied on next launch.
 
 ## Audio System

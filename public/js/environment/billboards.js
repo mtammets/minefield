@@ -1881,6 +1881,8 @@ function loadBillboardImage(url) {
 
     const promise = new Promise((resolve, reject) => {
         const image = new Image();
+        image.crossOrigin = 'anonymous';
+        image.decoding = 'async';
         image.onload = () => resolve(image);
         image.onerror = reject;
         image.src = url;

@@ -59,6 +59,7 @@ test('resolveSupabaseRuntimeConfig reports public and service readiness', () => 
     assert.equal(config.projectRef, 'uffldlrjjvxzbjftgyxg');
     assert.equal(config.profileImagesBucket, 'profile-images');
     assert.equal(config.carWrapsBucket, 'car-wraps');
+    assert.equal(config.billboardMediaBucket, 'billboard-media');
 });
 
 test('resolveSupabaseRuntimeConfig prefers the pooler connection for live database reads', () => {
@@ -97,6 +98,8 @@ test('buildSupabasePublicConfig only exposes browser-safe fields', () => {
         profileImagesEnabled: false,
         carWrapsBucket: '',
         carWrapsEnabled: false,
+        billboardMediaBucket: '',
+        billboardMediaEnabled: false,
         leaderboardEnabled: true,
     });
 });
@@ -124,6 +127,8 @@ test('buildSupabasePublicConfig exposes profile image storage settings', () => {
         profileImagesEnabled: true,
         carWrapsBucket: '',
         carWrapsEnabled: false,
+        billboardMediaBucket: '',
+        billboardMediaEnabled: false,
         leaderboardEnabled: false,
     });
 });
@@ -151,6 +156,8 @@ test('buildSupabasePublicConfig exposes car wrap storage settings', () => {
         profileImagesEnabled: false,
         carWrapsBucket: 'car-wraps',
         carWrapsEnabled: true,
+        billboardMediaBucket: '',
+        billboardMediaEnabled: false,
         leaderboardEnabled: false,
     });
 });
@@ -183,6 +190,8 @@ test('applySupabaseStorageAvailability disables missing buckets without exposing
             profileImagesEnabled: true,
             carWrapsBucket: 'car-wraps',
             carWrapsEnabled: true,
+            billboardMediaBucket: '',
+            billboardMediaEnabled: false,
             leaderboardEnabled: true,
         },
         {
@@ -200,6 +209,8 @@ test('applySupabaseStorageAvailability disables missing buckets without exposing
         profileImagesEnabled: true,
         carWrapsBucket: '',
         carWrapsEnabled: false,
+        billboardMediaBucket: '',
+        billboardMediaEnabled: false,
         leaderboardEnabled: true,
     });
 });

@@ -3,6 +3,7 @@ const WebSocket = require('ws');
 
 const DEFAULT_SUPABASE_PROFILE_IMAGES_BUCKET = 'profile-images';
 const DEFAULT_SUPABASE_CAR_WRAPS_BUCKET = 'car-wraps';
+const DEFAULT_SUPABASE_BILLBOARD_MEDIA_BUCKET = 'billboard-media';
 
 function sanitizeSupabaseProjectRef(value) {
     if (typeof value !== 'string') {
@@ -85,6 +86,9 @@ function resolveSupabaseRuntimeConfig(env = process.env) {
     const carWrapsBucket = sanitizeSupabaseStorageBucketName(
         env?.SUPABASE_CAR_WRAPS_BUCKET || DEFAULT_SUPABASE_CAR_WRAPS_BUCKET
     );
+    const billboardMediaBucket = sanitizeSupabaseStorageBucketName(
+        env?.SUPABASE_BILLBOARD_MEDIA_BUCKET || DEFAULT_SUPABASE_BILLBOARD_MEDIA_BUCKET
+    );
     const dbUrl = sanitizePostgresConnectionString(env?.SUPABASE_DB_URL || '');
     const dbPoolerUrl = sanitizePostgresConnectionString(env?.SUPABASE_DB_POOLER_URL || '');
     const databaseConnectionString = dbPoolerUrl || dbUrl;
@@ -96,6 +100,7 @@ function resolveSupabaseRuntimeConfig(env = process.env) {
         serviceRoleKey,
         profileImagesBucket,
         carWrapsBucket,
+        billboardMediaBucket,
         dbUrl,
         dbPoolerUrl,
         databaseConnectionString,
@@ -113,6 +118,9 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
         runtimeConfig.profileImagesBucket || ''
     );
     const carWrapsBucket = sanitizeSupabaseStorageBucketName(runtimeConfig.carWrapsBucket || '');
+    const billboardMediaBucket = sanitizeSupabaseStorageBucketName(
+        runtimeConfig.billboardMediaBucket || ''
+    );
 
     return {
         enabled: Boolean(runtimeConfig.publicEnabled),
@@ -123,6 +131,8 @@ function buildSupabasePublicConfig(config = {}, options = {}) {
         profileImagesEnabled: Boolean(runtimeConfig.publicEnabled && profileImagesBucket),
         carWrapsBucket: runtimeConfig.publicEnabled ? carWrapsBucket : '',
         carWrapsEnabled: Boolean(runtimeConfig.publicEnabled && carWrapsBucket),
+        billboardMediaBucket: runtimeConfig.publicEnabled ? billboardMediaBucket : '',
+        billboardMediaEnabled: Boolean(runtimeConfig.publicEnabled && billboardMediaBucket),
         leaderboardEnabled,
     };
 }
@@ -151,8 +161,12 @@ function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) 
     const carWrapsBucket = enabled
         ? sanitizeSupabaseStorageBucketName(source.carWrapsBucket || '')
         : '';
+    const billboardMediaBucket = enabled
+        ? sanitizeSupabaseStorageBucketName(source.billboardMediaBucket || '')
+        : '';
     const profileImagesEnabled = Boolean(source.profileImagesEnabled && profileImagesBucket);
     const carWrapsEnabled = Boolean(source.carWrapsEnabled && carWrapsBucket);
+    const billboardMediaEnabled = Boolean(source.billboardMediaEnabled && billboardMediaBucket);
     const adjustedAvailability =
         availability && typeof availability === 'object' ? availability : {};
 
@@ -171,6 +185,14 @@ function applySupabaseStorageAvailability(publicConfig = {}, availability = {}) 
             adjustedAvailability.carWrapsBucketAvailable === false ? '' : carWrapsBucket,
         carWrapsEnabled:
             adjustedAvailability.carWrapsBucketAvailable === false ? false : carWrapsEnabled,
+        billboardMediaBucket:
+            adjustedAvailability.billboardMediaBucketAvailable === false
+                ? ''
+                : billboardMediaBucket,
+        billboardMediaEnabled:
+            adjustedAvailability.billboardMediaBucketAvailable === false
+                ? false
+                : billboardMediaEnabled,
         leaderboardEnabled: Boolean(source.leaderboardEnabled),
     };
 }

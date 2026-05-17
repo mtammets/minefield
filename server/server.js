@@ -8,7 +8,10 @@ const path = require('path');
 const Stripe = require('stripe');
 const { Server } = require('socket.io');
 const { createAudioPrefsStore, ensureAudioPrefsSchema } = require('./audio-prefs-store');
-const { createBillboardContentStore } = require('./billboard-content-store');
+const {
+    createBillboardContentStore,
+    ensureBillboardContentSchema,
+} = require('./billboard-content-store');
 const { createGarageWrapPresetStore } = require('./garage-wrap-presets-store');
 const { createShowroomIntroVideoStore } = require('./showroom-intro-video-store');
 const {
@@ -140,6 +143,9 @@ const donateSessionStore = createDonationSessionStore();
 const BILLBOARD_CONTENT_ADMIN_TOKEN = sanitizeAdminToken(
     process.env.BILLBOARD_CONTENT_ADMIN_TOKEN || ''
 );
+const BILLBOARD_EDITOR_USER_IDS = parseSupabaseUserIdAllowlist(
+    process.env.BILLBOARD_EDITOR_USER_IDS || ''
+);
 const GA_MEASUREMENT_ID = sanitizeGaMeasurementId(
     process.env.GA_MEASUREMENT_ID || process.env.GOOGLE_ANALYTICS_MEASUREMENT_ID || ''
 );
@@ -170,16 +176,18 @@ const HTTP_IMG_SRC_VALUES = [
     'https://www.google-analytics.com',
     'https://stats.g.doubleclick.net',
 ];
+const HTTP_MEDIA_SRC_VALUES = ["'self'", 'data:', 'blob:'];
 if (SUPABASE_CONNECT_ORIGIN) {
     HTTP_CONNECT_SRC_VALUES.push(SUPABASE_CONNECT_ORIGIN);
     HTTP_IMG_SRC_VALUES.push(SUPABASE_CONNECT_ORIGIN);
+    HTTP_MEDIA_SRC_VALUES.push(SUPABASE_CONNECT_ORIGIN);
 }
 const HTTP_CONTENT_SECURITY_POLICY = [
     "default-src 'self'",
     "script-src 'self' https://cdn.jsdelivr.net https://www.googletagmanager.com",
     "style-src 'self' 'unsafe-inline'",
     `img-src ${Array.from(new Set(HTTP_IMG_SRC_VALUES)).join(' ')}`,
-    "media-src 'self' data: blob:",
+    `media-src ${Array.from(new Set(HTTP_MEDIA_SRC_VALUES)).join(' ')}`,
     "font-src 'self' data:",
     `connect-src ${Array.from(new Set(HTTP_CONNECT_SRC_VALUES)).join(' ')}`,
     "frame-ancestors 'none'",
@@ -245,6 +253,7 @@ const garageWrapPresetStore = createGarageWrapPresetStore({
 const billboardContentStore = createBillboardContentStore({
     manifestFilePath: path.join(__dirname, 'data/billboard-content.json'),
     uploadsDirectoryPath: path.join(__dirname, '../public/uploads/billboards'),
+    supabaseConfig: supabaseRuntimeConfig,
 });
 const showroomIntroVideoStore = createShowroomIntroVideoStore({
     manifestFilePath: path.join(__dirname, 'data/showroom-intro-video.json'),
@@ -289,10 +298,17 @@ app.post(
 app.get('/api/billboard-content', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     try {
+        const editorAccess = await resolveBillboardEditorAccess(req);
         const manifest = await billboardContentStore.readManifest();
         res.json({
             ok: true,
             manifest,
+            canEdit: Boolean(editorAccess.canEdit),
+            editorStatusText: editorAccess.statusText,
+            storageMode:
+                typeof billboardContentStore.getStorageMode === 'function'
+                    ? billboardContentStore.getStorageMode()
+                    : 'local',
         });
     } catch (error) {
         console.error('Billboard content manifest read failed:', error);
@@ -357,16 +373,19 @@ app.post('/api/audio-prefs/defaults', express.json({ limit: '16kb' }), async (re
 });
 app.post('/api/billboard-content/:groupId', express.json({ limit: '512mb' }), async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (!isBillboardContentAdminAuthorized(req)) {
+    const editorAccess = await resolveBillboardEditorAccess(req);
+    if (!editorAccess.canEdit) {
         res.status(403).json({
             ok: false,
-            error: 'Billboard content admin access denied.',
+            error: editorAccess.statusText || 'Billboard editor access denied.',
         });
         return;
     }
 
     try {
-        const result = await billboardContentStore.writeGroupMedia(req.params?.groupId, req.body);
+        const result = await billboardContentStore.writeGroupMedia(req.params?.groupId, req.body, {
+            userId: editorAccess.authIdentity?.userId || '',
+        });
         res.json({
             ok: true,
             manifest: result.manifest,
@@ -561,10 +580,11 @@ app.delete('/api/showroom-intro-video', async (req, res) => {
 });
 app.delete('/api/billboard-content/:groupId', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
-    if (!isBillboardContentAdminAuthorized(req)) {
+    const editorAccess = await resolveBillboardEditorAccess(req);
+    if (!editorAccess.canEdit) {
         res.status(403).json({
             ok: false,
-            error: 'Billboard content admin access denied.',
+            error: editorAccess.statusText || 'Billboard editor access denied.',
         });
         return;
     }
@@ -2250,6 +2270,7 @@ void startServer();
 
 async function startServer() {
     await initializeSupabaseAudioPrefsSchema();
+    await initializeSupabaseBillboardContentSchema();
     await initializeSupabaseLeaderboardSchema();
     await initializeSupabasePlayerEconomySchema();
     server.listen(PORT, () => {
@@ -2268,6 +2289,9 @@ async function startServer() {
         }
         if (audioPrefsStore.isConfigured()) {
             console.log('Supabase audio defaults API is enabled.');
+        }
+        if (billboardContentStore.isConfigured?.()) {
+            console.log('Supabase billboard media API is enabled.');
         }
         if (playerEconomyStore.isConfigured()) {
             console.log('Supabase player economy API is enabled.');
@@ -2320,6 +2344,41 @@ async function initializeSupabaseAudioPrefsSchema() {
 
     if (lastError) {
         console.error('Supabase audio defaults schema bootstrap failed:', lastError);
+    }
+}
+
+async function initializeSupabaseBillboardContentSchema() {
+    if (!billboardContentStore.isConfigured?.()) {
+        return;
+    }
+    const bootstrapConnectionStrings = Array.from(
+        new Set(
+            [supabaseRuntimeConfig.dbUrl, supabaseRuntimeConfig.dbPoolerUrl].filter(
+                (value) => typeof value === 'string' && value.trim()
+            )
+        )
+    );
+    if (bootstrapConnectionStrings.length === 0) {
+        console.warn(
+            'Supabase billboard media is enabled, but no DB connection string is available for automatic schema bootstrap.'
+        );
+        return;
+    }
+
+    let lastError = null;
+    for (let index = 0; index < bootstrapConnectionStrings.length; index += 1) {
+        try {
+            await ensureBillboardContentSchema({
+                connectionString: bootstrapConnectionStrings[index],
+            });
+            return;
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    if (lastError) {
+        console.error('Supabase billboard media schema bootstrap failed:', lastError);
     }
 }
 
@@ -2573,6 +2632,59 @@ function resolveDonateBaseUrl(req) {
 
 function isBillboardContentAdminAuthorized(req) {
     return isAdminTokenAuthorized(req, BILLBOARD_CONTENT_ADMIN_TOKEN);
+}
+
+async function resolveBillboardEditorAccess(req) {
+    if (isBillboardContentAdminAuthorized(req)) {
+        return {
+            canEdit: true,
+            authIdentity: null,
+            statusText: '',
+            source: 'admin-token',
+        };
+    }
+
+    if (!supabaseRuntimeConfig.publicEnabled) {
+        return {
+            canEdit: false,
+            authIdentity: null,
+            statusText: 'Billboard editor sign-in is not configured on this server.',
+            source: 'disabled',
+        };
+    }
+    if (!supabaseServiceClient) {
+        return {
+            canEdit: false,
+            authIdentity: null,
+            statusText: 'Billboard editor auth is unavailable on this server.',
+            source: 'disabled',
+        };
+    }
+
+    const authIdentity = await resolveAuthenticatedRequestIdentity(req);
+    if (!authIdentity?.userId) {
+        return {
+            canEdit: false,
+            authIdentity: null,
+            statusText: 'Sign in with an editor account to manage billboard media.',
+            source: 'auth-required',
+        };
+    }
+    if (!authIdentity.canManageBillboards) {
+        return {
+            canEdit: false,
+            authIdentity,
+            statusText: 'This account does not have billboard editor access.',
+            source: 'forbidden',
+        };
+    }
+
+    return {
+        canEdit: true,
+        authIdentity,
+        statusText: '',
+        source: 'auth',
+    };
 }
 
 function isAudioPrefsAdminAuthorized(req) {
@@ -3131,10 +3243,101 @@ async function resolveSupabaseIdentityFromAccessToken(accessToken) {
             carWrapPath: sanitizeSupabaseStorageObjectPath(
                 data.user?.user_metadata?.car_wrap_path || ''
             ),
+            canManageBillboards: userCanManageBillboards(data.user),
         };
     } catch {
         return null;
     }
+}
+
+function userCanManageBillboards(user = null) {
+    const safeUserId = sanitizeSupabaseUserId(user?.id);
+    if (safeUserId && BILLBOARD_EDITOR_USER_IDS.has(safeUserId)) {
+        return true;
+    }
+
+    const roleTokens = collectSupabaseUserRoleTokens(user);
+    return (
+        roleTokens.has('admin') ||
+        roleTokens.has('editor') ||
+        roleTokens.has('billboard-editor') ||
+        roleTokens.has('billboard_admin') ||
+        roleTokens.has('billboardadmin')
+    );
+}
+
+function collectSupabaseUserRoleTokens(user = null) {
+    const tokens = new Set();
+    const sources = [user?.app_metadata, user?.user_metadata];
+
+    for (let index = 0; index < sources.length; index += 1) {
+        const source = sources[index];
+        if (!source || typeof source !== 'object') {
+            continue;
+        }
+
+        addSupabaseRoleToken(tokens, source.role);
+        if (Array.isArray(source.roles)) {
+            source.roles.forEach((value) => addSupabaseRoleToken(tokens, value));
+        } else {
+            addSupabaseRoleToken(tokens, source.roles);
+        }
+
+        if (source.admin === true || source.is_admin === true) {
+            tokens.add('admin');
+        }
+        if (source.editor === true || source.is_editor === true) {
+            tokens.add('editor');
+        }
+        if (
+            source.billboard_editor === true ||
+            source.billboard_admin === true ||
+            source.can_manage_billboards === true
+        ) {
+            tokens.add('billboard-editor');
+        }
+    }
+
+    return tokens;
+}
+
+function addSupabaseRoleToken(target, value) {
+    if (typeof value === 'string') {
+        const normalized = normalizeSupabaseRoleToken(value);
+        if (normalized) {
+            target.add(normalized);
+        }
+        return;
+    }
+    if (Array.isArray(value)) {
+        value.forEach((entry) => addSupabaseRoleToken(target, entry));
+        return;
+    }
+    if (value && typeof value === 'object') {
+        Object.entries(value).forEach(([key, enabled]) => {
+            if (enabled) {
+                addSupabaseRoleToken(target, key);
+            }
+        });
+    }
+}
+
+function normalizeSupabaseRoleToken(value) {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase();
+    if (!normalized) {
+        return '';
+    }
+    return normalized.replace(/[^a-z0-9_-]+/g, '-');
+}
+
+function parseSupabaseUserIdAllowlist(value) {
+    const entries = String(value || '')
+        .split(',')
+        .map((entry) => sanitizeSupabaseUserId(entry))
+        .filter(Boolean);
+    return new Set(entries);
 }
 
 async function resolveUnlockedWheelPresetIdsForAuthIdentity(authIdentity = null) {
@@ -3747,7 +3950,7 @@ function resolveSupabaseStorageObjectPublicUrl(baseUrl, bucketName, objectPath) 
 }
 
 async function resolveSupabaseStorageAvailability() {
-    if (!supabaseServiceClient || !SUPABASE_PUBLIC_CONFIG.enabled) {
+    if (!supabaseServiceClient) {
         return null;
     }
 
@@ -3783,6 +3986,10 @@ async function resolveSupabaseStorageAvailability() {
                     !SUPABASE_PUBLIC_CONFIG.carWrapsBucket ||
                     bucketNames.has(SUPABASE_PUBLIC_CONFIG.carWrapsBucket)
                 ),
+                billboardMediaBucketAvailable: Boolean(
+                    !SUPABASE_PUBLIC_CONFIG.billboardMediaBucket ||
+                    bucketNames.has(SUPABASE_PUBLIC_CONFIG.billboardMediaBucket)
+                ),
             };
 
             logMissingSupabaseStorageBuckets(availability);
@@ -3813,6 +4020,12 @@ function logMissingSupabaseStorageBuckets(availability) {
     }
     if (SUPABASE_PUBLIC_CONFIG.carWrapsBucket && availability?.carWrapsBucketAvailable === false) {
         missingBuckets.push(SUPABASE_PUBLIC_CONFIG.carWrapsBucket);
+    }
+    if (
+        SUPABASE_PUBLIC_CONFIG.billboardMediaBucket &&
+        availability?.billboardMediaBucketAvailable === false
+    ) {
+        missingBuckets.push(SUPABASE_PUBLIC_CONFIG.billboardMediaBucket);
     }
 
     const nextWarning = missingBuckets.join(', ');

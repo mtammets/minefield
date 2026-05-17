@@ -311,6 +311,12 @@ export function createCarEditModeController({
             return active;
         },
         setActive,
+        refreshBillboardGroups() {
+            if (!active) {
+                return;
+            }
+            renderBillboardGroupList();
+        },
         toggle() {
             setActive(!active);
         },
@@ -962,9 +968,11 @@ function createEditModeUi({
                 status.className = 'editModeBillboardStatus';
                 status.textContent = uiState.message
                     ? uiState.message
-                    : group.mediaKind === 'video' && group.playbackEnabled === false
-                      ? 'Video playback is disabled for this screen group.'
-                      : group.statusText || 'Using built-in default playlist';
+                    : group.canEdit === false && group.editorStatusText
+                      ? group.editorStatusText
+                      : group.mediaKind === 'video' && group.playbackEnabled === false
+                        ? 'Video playback is disabled for this screen group.'
+                        : group.statusText || 'Using built-in default playlist';
 
                 let playbackToggle = null;
                 if (
@@ -995,12 +1003,12 @@ function createEditModeUi({
                 const uploadButton = document.createElement('button');
                 uploadButton.type = 'button';
                 uploadButton.textContent = uiState.busy ? 'WORKING...' : 'UPLOAD FILES';
-                uploadButton.disabled = uiState.busy;
+                uploadButton.disabled = uiState.busy || group.canEdit === false;
 
                 const resetButton = document.createElement('button');
                 resetButton.type = 'button';
                 resetButton.textContent = 'RESET DEFAULTS';
-                resetButton.disabled = uiState.busy || !group.isCustom;
+                resetButton.disabled = uiState.busy || !group.isCustom || group.canEdit === false;
 
                 const fileInput = document.createElement('input');
                 fileInput.type = 'file';
@@ -1009,7 +1017,7 @@ function createEditModeUi({
                 fileInput.accept = group.accept || '';
 
                 uploadButton.addEventListener('click', () => {
-                    if (uiState.busy) {
+                    if (uiState.busy || group.canEdit === false) {
                         return;
                     }
                     fileInput.click();
@@ -1410,6 +1418,7 @@ function createNoopController() {
             return false;
         },
         setActive() {},
+        refreshBillboardGroups() {},
         toggle() {},
         update() {},
         handleKey() {
