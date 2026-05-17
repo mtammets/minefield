@@ -886,7 +886,7 @@ export function createVehicleWeaponSystem({
             playAudio: false,
             pulseSwitch: true,
         });
-        onStatus('VX-9 online. R swaps hood tools. Hold T to fire.', 2600);
+        onStatus('VX-9 online. X swaps hood tools. Hold T to fire.', 2600);
         getAudioController()?.onVehicleWeaponPickup?.();
     }
 

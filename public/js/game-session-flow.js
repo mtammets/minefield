@@ -341,10 +341,10 @@ export function createGameSessionController({
         setCameraKeyboardControlsEnabled(false);
         if (chaseCameraTunePauseOwned) {
             setPauseState(true, {
-                showPauseMenu: true,
+                showPauseMenu: false,
             });
         } else {
-            pauseMenuUi.show();
+            pauseMenuUi.hide();
         }
         refreshPauseMenuCameraTuneStatus();
         objectiveUi.showInfo('Camera tune: arrows adjust, R reset, C close.', 1800);
@@ -519,6 +519,7 @@ export function createGameSessionController({
         }
 
         const previousViewMode = chaseCameraTunePreviousViewMode;
+        const shouldRestorePauseMenu = !chaseCameraTunePauseOwned && getIsGamePaused();
         const shouldResumeGameplay = resumeGameplay && chaseCameraTunePauseOwned;
         chaseCameraTuneModeActive = false;
         chaseCameraTunePauseOwned = false;
@@ -533,6 +534,8 @@ export function createGameSessionController({
         refreshPauseMenuCameraTuneStatus();
         if (shouldResumeGameplay) {
             setPauseState(false);
+        } else if (shouldRestorePauseMenu) {
+            pauseMenuUi.show();
         }
         return getCameraTuneUiSnapshot();
     }

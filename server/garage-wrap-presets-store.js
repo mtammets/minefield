@@ -1462,12 +1462,25 @@ function sanitizeSupabaseStorageObjectPath(value) {
         return '';
     }
     const normalized = value.trim().replace(/^\/+|\/+$/g, '');
-    if (!normalized || normalized.length > 512 || normalized.includes('..')) {
+    if (!normalized || normalized.length > 512) {
         return '';
     }
 
     const segments = normalized.split('/');
-    if (segments.some((segment) => !/^[a-zA-Z0-9._-]{1,120}$/u.test(segment))) {
+    if (
+        segments.some((segment) => {
+            if (typeof segment !== 'string') {
+                return true;
+            }
+            if (!segment || segment.length > 120) {
+                return true;
+            }
+            if (segment === '.' || segment === '..') {
+                return true;
+            }
+            return /[\\\u0000-\u001f\u007f]/u.test(segment);
+        })
+    ) {
         return '';
     }
     return normalized;

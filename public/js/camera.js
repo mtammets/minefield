@@ -40,6 +40,14 @@ const CHASE_CAMERA_LOOKAHEAD_DISTANCE_FACTOR = 2.1;
 const CHASE_CAMERA_LOOKAHEAD_HEIGHT_FACTOR = 0.36;
 const CHASE_CAMERA_FOV_DISTANCE_FACTOR = 5.6;
 const CHASE_CAMERA_FOV_HEIGHT_FACTOR = 1.4;
+const CHASE_CAMERA_BACK_DISTANCE_MIN = 5.2;
+const CHASE_CAMERA_BACK_DISTANCE_MAX = 7.8;
+const CHASE_CAMERA_HEIGHT_MIN = 1.9;
+const CHASE_CAMERA_HEIGHT_MAX = 2.7;
+const CHASE_CAMERA_LOOKAHEAD_MIN = 5.5;
+const CHASE_CAMERA_LOOKAHEAD_MAX = 10.8;
+const CHASE_CAMERA_TARGET_FOV_MIN = 76;
+const CHASE_CAMERA_TARGET_FOV_MAX = 82;
 const CINEMATIC_LOOP_TRACK = Object.freeze([
     { t: 0, radius: 11.8, height: 6.4, fov: 76, lookAhead: 2.6, lookHeight: 1.12 },
     { t: 0.22, radius: 10.1, height: 5.5, fov: 71, lookAhead: 2.2, lookHeight: 1.02 },
@@ -548,19 +556,31 @@ function resolveChaseCameraTargets(car, speed, dt) {
     const distanceBias = chaseCameraSettings.distanceBias;
     const heightBias = chaseCameraSettings.heightBias;
     const backDistance = THREE.MathUtils.clamp(
-        THREE.MathUtils.lerp(5.2, 9.6, dynamicSpeedRatio) +
+        THREE.MathUtils.lerp(
+            CHASE_CAMERA_BACK_DISTANCE_MIN,
+            CHASE_CAMERA_BACK_DISTANCE_MAX,
+            dynamicSpeedRatio
+        ) +
             distanceBias * CHASE_CAMERA_DISTANCE_ADJUSTMENT,
         3.2,
         12.8
     );
     const chaseHeight = THREE.MathUtils.clamp(
-        THREE.MathUtils.lerp(1.9, 3.2, dynamicSpeedRatio) +
+        THREE.MathUtils.lerp(
+            CHASE_CAMERA_HEIGHT_MIN,
+            CHASE_CAMERA_HEIGHT_MAX,
+            dynamicSpeedRatio
+        ) +
             heightBias * CHASE_CAMERA_HEIGHT_ADJUSTMENT,
         1,
         5.2
     );
     const lookAhead = THREE.MathUtils.clamp(
-        THREE.MathUtils.lerp(5.5, 14, dynamicSpeedRatio) +
+        THREE.MathUtils.lerp(
+            CHASE_CAMERA_LOOKAHEAD_MIN,
+            CHASE_CAMERA_LOOKAHEAD_MAX,
+            dynamicSpeedRatio
+        ) +
             distanceBias * CHASE_CAMERA_LOOKAHEAD_DISTANCE_FACTOR +
             heightBias * CHASE_CAMERA_LOOKAHEAD_HEIGHT_FACTOR,
         4.4,
@@ -601,7 +621,11 @@ function resolveChaseCameraTargets(car, speed, dt) {
         followBlend: 1 - Math.exp(-THREE.MathUtils.lerp(5.8, 10.6, dynamicSpeedRatio) * dt),
         lookBlend: 1 - Math.exp(-THREE.MathUtils.lerp(6.2, 11.2, dynamicSpeedRatio) * dt),
         targetFov: clampFiniteNumber(
-            THREE.MathUtils.lerp(76, 88, dynamicSpeedRatio) +
+            THREE.MathUtils.lerp(
+                CHASE_CAMERA_TARGET_FOV_MIN,
+                CHASE_CAMERA_TARGET_FOV_MAX,
+                dynamicSpeedRatio
+            ) +
                 distanceBias * CHASE_CAMERA_FOV_DISTANCE_FACTOR +
                 heightBias * CHASE_CAMERA_FOV_HEIGHT_FACTOR,
             CAMERA_FOV_MIN,

@@ -73,101 +73,13 @@ const CONTROL_LAYOUTS = Object.freeze({
     ]),
     pause: Object.freeze([
         {
-            title: 'Core Driving',
+            title: 'Quick Keys',
             rows: Object.freeze([
-                { label: 'Accelerate', actionId: ACTION_IDS.driveForward },
-                { label: 'Brake / Reverse', actionId: ACTION_IDS.driveBackward },
-                { label: 'Steer Left', actionId: ACTION_IDS.driveLeft },
-                { label: 'Steer Right', actionId: ACTION_IDS.driveRight },
-                { label: 'Handbrake Drift', actionId: ACTION_IDS.handbrake },
-            ]),
-        },
-        {
-            title: 'Race Systems',
-            rows: Object.freeze([
-                {
-                    label: 'Tactical Map',
-                    actionId: ACTION_IDS.mapToggle,
-                },
-                { label: 'Pause / Resume', actionId: ACTION_IDS.pauseToggle },
-                {
-                    label: 'Recover Vehicle',
-                    actionId: ACTION_IDS.recoverVehicle,
-                    hint: 'Low speed',
-                },
+                { label: 'Resume', actionId: ACTION_IDS.pauseToggle },
                 { label: 'Restart Round', actionId: ACTION_IDS.restartRound },
+                { label: 'Tactical Map', actionId: ACTION_IDS.mapToggle },
+                { label: 'Recover Vehicle', actionId: ACTION_IDS.recoverVehicle },
                 { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
-                { label: 'Graphics Quality', actionId: ACTION_IDS.graphicsCycle },
-            ]),
-        },
-        {
-            title: 'Roof Interface',
-            rows: Object.freeze([
-                { label: 'Next Roof Tab', actionId: ACTION_IDS.roofMenuNext },
-                { label: 'Previous Roof Tab', actionId: ACTION_IDS.roofMenuPrevious },
-                { label: 'Roof Direct Tabs', keyLabels: ['1', '2', '3', '4'] },
-            ]),
-        },
-        {
-            title: 'Camera',
-            rows: Object.freeze([
-                { label: 'Chase Camera Tune', actionId: ACTION_IDS.cameraTuneToggle },
-                { label: 'Next View', keyLabels: ['+'] },
-                { label: 'Cinematic Camera', actionId: ACTION_IDS.cameraCinematicToggle },
-            ]),
-        },
-        {
-            title: 'Mine Combat',
-            rows: Object.freeze([
-                {
-                    label: 'Drop Mine',
-                    actionId: ACTION_IDS.mineDrop,
-                },
-                {
-                    label: 'Use Hood Tool',
-                    actionId: ACTION_IDS.mineThrow,
-                    hint: 'Throws mine by default',
-                },
-                {
-                    label: 'Swap Hood Tool',
-                    actionId: ACTION_IDS.combatModeToggle,
-                    hint: 'Switch mine / VX-9 when online',
-                },
-            ]),
-        },
-        {
-            title: 'Vehicle Weapon',
-            rows: Object.freeze([
-                {
-                    label: 'Use Hood Tool',
-                    actionId: ACTION_IDS.mineThrow,
-                    hint: 'Fires VX-9 when weapon mode is active',
-                },
-                {
-                    label: 'Swap Hood Tool',
-                    actionId: ACTION_IDS.combatModeToggle,
-                    hint: 'Mine and VX-9 share the hood mount',
-                },
-                {
-                    label: 'Aim Zoom',
-                    actionId: ACTION_IDS.vehicleWeaponZoom,
-                    hint: 'Hold to tighten VX-9 aim',
-                },
-            ]),
-        },
-        {
-            title: 'Developer',
-            rows: Object.freeze([
-                {
-                    label: 'Edit Mode',
-                    actionId: ACTION_IDS.editModeToggle,
-                    developerOnly: true,
-                },
-                {
-                    label: 'Edit Camera Reset',
-                    actionId: ACTION_IDS.editModeResetView,
-                    developerOnly: true,
-                },
             ]),
         },
     ]),
