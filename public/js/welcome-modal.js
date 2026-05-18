@@ -2746,12 +2746,35 @@ export function createWelcomeModalController({
             !didCompleteInteractiveAuth &&
             (!previousAuthUiState.ready ||
                 (previousAuthUiState.loading && !previousAuthUiState.pendingAction));
+        const didSignOutFromAuthenticatedSession =
+            previousAuthUiState.authenticated && !nextAuthUiState.authenticated;
+        const didReceiveSignedOutFormState =
+            !nextAuthUiState.authenticated &&
+            !nextAuthUiState.loading &&
+            (previousAuthUiState.email !== nextAuthUiState.email ||
+                previousAuthUiState.displayName !== nextAuthUiState.displayName);
 
         authUiState = nextAuthUiState;
         garagePurchasePending = false;
         clearGarageNotice();
         if (authUiState.authenticated && authUiState.displayName) {
             writeStoredOnlinePlayerName(authUiState.displayName);
+        }
+        if (didSignOutFromAuthenticatedSession || didReceiveSignedOutFormState) {
+            if (authDisplayNameInputEl) {
+                authDisplayNameInputEl.value = sanitizeOnlinePlayerNameInput(
+                    authUiState.displayName || ''
+                );
+            }
+            if (authEmailInputEl) {
+                authEmailInputEl.value = sanitizeAuthEmailInput(authUiState.email || '');
+            }
+            if (authPasswordInputEl) {
+                authPasswordInputEl.value = '';
+            }
+            if (authConfirmPasswordInputEl) {
+                authConfirmPasswordInputEl.value = '';
+            }
         }
         if (!authUiState.authenticated) {
             stopWalletRevealPresentation({
