@@ -25,7 +25,11 @@ const {
     ensureLeaderboardSchema,
     sanitizeLeaderboardLimit,
 } = require('./leaderboard-store');
-const { createPlayerEconomyStore, ensurePlayerEconomySchema } = require('./player-economy-store');
+const {
+    PlayerEconomySyncError,
+    createPlayerEconomyStore,
+    ensurePlayerEconomySchema,
+} = require('./player-economy-store');
 const { consumeRateLimit } = require('./rate-limit');
 const { validateCollisionRelay } = require('./collision-guard');
 const {
@@ -77,6 +81,7 @@ const PLAYER_VEHICLE_ID_MAX_LENGTH = 32;
 const PLAYER_WHEEL_PRESET_ID_MAX_LENGTH = 32;
 const DEFAULT_PLAYER_SKIN_ID = 'midnight-comet';
 const DEFAULT_PLAYER_VEHICLE_ID = 'voltline-sled';
+const DEFAULT_UNLOCKED_VEHICLE_IDS = Object.freeze([DEFAULT_PLAYER_VEHICLE_ID]);
 const DEFAULT_PLAYER_WHEEL_PRESET_ID = 'scarlet-switchblade';
 const DEFAULT_UNLOCKED_WHEEL_PRESET_IDS = Object.freeze([
     'scarlet-switchblade',
@@ -804,6 +809,14 @@ app.post('/api/player-economy/sync', express.json({ limit: '64kb' }), async (req
             profile,
         });
     } catch (error) {
+        if (error instanceof PlayerEconomySyncError) {
+            res.status(error.statusCode || 400).json({
+                ok: false,
+                error: error.message,
+                reason: error.reason,
+            });
+            return;
+        }
         console.error('Player economy sync failed:', error);
         res.status(502).json({
             ok: false,
@@ -1297,13 +1310,14 @@ io.on('connection', (socket) => {
             if (!authIdentity) {
                 return;
             }
-            const unlockedWheelPresetIds =
-                await resolveUnlockedWheelPresetIdsForAuthIdentity(authIdentity);
+            const { unlockedVehicleIds, unlockedWheelPresetIds } =
+                await resolveUnlockedGarageIdsForAuthIdentity(authIdentity);
             const profile = resolveProfile(
                 payload?.profile,
                 createAuthenticatedProfile(authIdentity, socket.id),
                 socket.id,
                 authIdentity,
+                unlockedVehicleIds,
                 unlockedWheelPresetIds
             );
             socket.data.profile = profile;
@@ -1418,13 +1432,14 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const unlockedWheelPresetIds =
-                await resolveUnlockedWheelPresetIdsForAuthIdentity(authIdentity);
+            const { unlockedVehicleIds, unlockedWheelPresetIds } =
+                await resolveUnlockedGarageIdsForAuthIdentity(authIdentity);
             const profile = resolveProfile(
                 payload?.profile,
                 createAuthenticatedProfile(authIdentity, socket.id),
                 socket.id,
                 authIdentity,
+                unlockedVehicleIds,
                 unlockedWheelPresetIds
             );
             socket.data.profile = profile;
@@ -1475,14 +1490,14 @@ io.on('connection', (socket) => {
         if (!consumeInboundEventQuota(socket, 'mp:updateProfile')) {
             return;
         }
-        const unlockedWheelPresetIds = await resolveUnlockedWheelPresetIdsForAuthIdentity(
-            socket.data.authIdentity
-        );
+        const { unlockedVehicleIds, unlockedWheelPresetIds } =
+            await resolveUnlockedGarageIdsForAuthIdentity(socket.data.authIdentity);
         const profile = resolveProfile(
             payload,
             socket.data.profile,
             socket.id,
             socket.data.authIdentity,
+            unlockedVehicleIds,
             unlockedWheelPresetIds
         );
         socket.data.profile = profile;
@@ -3426,16 +3441,27 @@ function parseSupabaseUserIdAllowlist(value) {
     return new Set(entries);
 }
 
-async function resolveUnlockedWheelPresetIdsForAuthIdentity(authIdentity = null) {
+async function resolveUnlockedGarageIdsForAuthIdentity(authIdentity = null) {
     const safeUserId = sanitizeSupabaseUserId(authIdentity?.userId);
     if (!safeUserId || !playerEconomyStore.isConfigured()) {
-        return [...DEFAULT_UNLOCKED_WHEEL_PRESET_IDS];
+        return {
+            unlockedVehicleIds: [...DEFAULT_UNLOCKED_VEHICLE_IDS],
+            unlockedWheelPresetIds: [...DEFAULT_UNLOCKED_WHEEL_PRESET_IDS],
+        };
     }
     try {
         const profile = await playerEconomyStore.readProfileByUserId(safeUserId);
-        return normalizeUnlockedWheelPresetIds(profile?.unlockedWheelPresetIds);
+        return {
+            unlockedVehicleIds: normalizeUnlockedVehicleIds(profile?.unlockedVehicleIds),
+            unlockedWheelPresetIds: normalizeUnlockedWheelPresetIds(
+                profile?.unlockedWheelPresetIds
+            ),
+        };
     } catch {
-        return [...DEFAULT_UNLOCKED_WHEEL_PRESET_IDS];
+        return {
+            unlockedVehicleIds: [...DEFAULT_UNLOCKED_VEHICLE_IDS],
+            unlockedWheelPresetIds: [...DEFAULT_UNLOCKED_WHEEL_PRESET_IDS],
+        };
     }
 }
 
@@ -3460,6 +3486,18 @@ function createAuthenticatedProfile(authIdentity = null, socketId = '') {
     };
 }
 
+function normalizeUnlockedVehicleIds(value) {
+    const normalizedIds = new Set(DEFAULT_UNLOCKED_VEHICLE_IDS);
+    const entries = Array.isArray(value) ? value : [];
+    for (let i = 0; i < entries.length; i += 1) {
+        const vehicleId = sanitizePlayerVehicleId(entries[i], '');
+        if (vehicleId) {
+            normalizedIds.add(vehicleId);
+        }
+    }
+    return [...normalizedIds];
+}
+
 function normalizeUnlockedWheelPresetIds(value) {
     const normalizedIds = new Set(DEFAULT_UNLOCKED_WHEEL_PRESET_IDS);
     const entries = Array.isArray(value) ? value : [];
@@ -3470,6 +3508,26 @@ function normalizeUnlockedWheelPresetIds(value) {
         }
     }
     return [...normalizedIds];
+}
+
+function resolveOwnedVehicleId(
+    vehicleId,
+    unlockedVehicleIds = DEFAULT_UNLOCKED_VEHICLE_IDS,
+    fallbackVehicleId = DEFAULT_PLAYER_VEHICLE_ID
+) {
+    const ownedVehicleIds = normalizeUnlockedVehicleIds(unlockedVehicleIds);
+    const normalizedVehicleId = sanitizePlayerVehicleId(vehicleId, '');
+    if (normalizedVehicleId && ownedVehicleIds.includes(normalizedVehicleId)) {
+        return normalizedVehicleId;
+    }
+    const normalizedFallbackVehicleId = sanitizePlayerVehicleId(
+        fallbackVehicleId,
+        DEFAULT_PLAYER_VEHICLE_ID
+    );
+    if (ownedVehicleIds.includes(normalizedFallbackVehicleId)) {
+        return normalizedFallbackVehicleId;
+    }
+    return ownedVehicleIds[0] || DEFAULT_PLAYER_VEHICLE_ID;
 }
 
 function resolveOwnedWheelPresetId(
@@ -4289,6 +4347,7 @@ function resolveProfile(
     fallback,
     socketId,
     authIdentity = null,
+    unlockedVehicleIds = DEFAULT_UNLOCKED_VEHICLE_IDS,
     unlockedWheelPresetIds = DEFAULT_UNLOCKED_WHEEL_PRESET_IDS
 ) {
     const defaultProfile = fallback || createDefaultProfile(socketId);
@@ -4301,7 +4360,11 @@ function resolveProfile(
     return {
         name: sanitizePlayerName(input?.name, defaultProfile.name),
         colorHex: sanitizeColorHex(input?.colorHex, defaultProfile.colorHex),
-        vehicleId: sanitizePlayerVehicleId(input?.vehicleId, defaultProfile.vehicleId),
+        vehicleId: resolveOwnedVehicleId(
+            input?.vehicleId,
+            unlockedVehicleIds,
+            defaultProfile.vehicleId
+        ),
         skinId: sanitizePlayerSkinId(input?.skinId, defaultProfile.skinId),
         wheelPresetId: resolveOwnedWheelPresetId(
             input?.wheelPresetId,

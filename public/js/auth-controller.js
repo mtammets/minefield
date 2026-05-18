@@ -342,11 +342,9 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 };
             }
 
-            const normalizedEconomyState = normalizePlayerEconomyState(nextEconomyState);
             try {
                 const payload = await postPlayerEconomyProfile(
                     currentSession.access_token,
-                    normalizedEconomyState,
                     options?.transaction || null
                 );
                 applyPlayerEconomyProfileState(payload?.profile, {
@@ -354,11 +352,9 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 });
                 return {
                     ok: true,
-                    economy: normalizePlayerEconomyState(
-                        payload?.profile || normalizedEconomyState
-                    ),
+                    economy: normalizePlayerEconomyState(payload?.profile || state),
                     profile: normalizePlayerEconomyProfileState(payload?.profile, {
-                        fallbackEconomy: normalizedEconomyState,
+                        fallbackEconomy: state,
                         source: 'server',
                     }),
                 };
@@ -1253,33 +1249,6 @@ export function createAuthController({ onStateChanged = null, onToast = null } =
                 fallbackEconomy: legacyFallback,
                 source: 'server',
             });
-            if (!normalizedProfile.exists && shouldMigrateLegacyEconomyState(legacyFallback)) {
-                const migrationPayload = await postPlayerEconomyProfile(
-                    currentSession.access_token,
-                    legacyFallback,
-                    null
-                );
-                if (state.userId !== requestUserId) {
-                    return {
-                        ok: false,
-                        ignored: true,
-                    };
-                }
-                applyPlayerEconomyProfileState(migrationPayload?.profile, {
-                    source: 'server',
-                });
-                return {
-                    ok: true,
-                    migrated: true,
-                    economy: normalizePlayerEconomyState(
-                        migrationPayload?.profile || legacyFallback
-                    ),
-                    profile: normalizePlayerEconomyProfileState(migrationPayload?.profile, {
-                        fallbackEconomy: legacyFallback,
-                        source: 'server',
-                    }),
-                };
-            }
             if (state.userId !== requestUserId) {
                 return {
                     ok: false,
@@ -2532,12 +2501,7 @@ async function requestCreditsPurchaseSessionStatus(accessToken = '', checkoutSes
     return payload;
 }
 
-async function postPlayerEconomyProfile(
-    accessToken = '',
-    nextEconomyState = null,
-    transaction = null
-) {
-    const normalizedEconomyState = normalizePlayerEconomyState(nextEconomyState);
+async function postPlayerEconomyProfile(accessToken = '', transaction = null) {
     const response = await window.fetch(PLAYER_ECONOMY_SYNC_ENDPOINT_PATH, {
         method: 'POST',
         cache: 'no-store',
@@ -2547,9 +2511,6 @@ async function postPlayerEconomyProfile(
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            credits: normalizedEconomyState.credits,
-            unlockedVehicleIds: normalizedEconomyState.unlockedVehicleIds,
-            unlockedWheelPresetIds: normalizedEconomyState.unlockedWheelPresetIds,
             recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT,
             transaction: normalizePlayerEconomySyncTransaction(transaction),
         }),
@@ -2685,6 +2646,32 @@ function normalizePlayerEconomyTransactionMetadata(value = null) {
             metadata.finishReason = finishReason;
         }
     }
+    if (source.pickupCount != null) {
+        metadata.pickupCount = clampEconomyInteger(source.pickupCount);
+    }
+    if (source.mineKillCount != null) {
+        metadata.mineKillCount = clampEconomyInteger(source.mineKillCount);
+    }
+    if (source.selfScore != null) {
+        metadata.selfScore = clampEconomyInteger(source.selfScore);
+    }
+    if (source.runSettled != null) {
+        metadata.runSettled = Boolean(source.runSettled);
+    }
+    if (source.isWinner != null) {
+        metadata.isWinner = Boolean(source.isWinner);
+    }
+    if (typeof source.clientTransactionId === 'string') {
+        const clientTransactionId = sanitizeEconomyTransactionSummary(
+            source.clientTransactionId,
+            96
+        )
+            .toLowerCase()
+            .replace(/[^a-z0-9:_-]/g, '');
+        if (clientTransactionId.length >= 8) {
+            metadata.clientTransactionId = clientTransactionId;
+        }
+    }
     if (Array.isArray(source.breakdown)) {
         const breakdown = source.breakdown
             .map((entry) => {
@@ -2705,18 +2692,6 @@ function normalizePlayerEconomyTransactionMetadata(value = null) {
         }
     }
     return metadata;
-}
-
-function shouldMigrateLegacyEconomyState(value = null) {
-    const legacyState = normalizePlayerEconomyState(value);
-    const defaultState = createDefaultPlayerEconomyState();
-    if (legacyState.credits > 0) {
-        return true;
-    }
-    if (legacyState.unlockedVehicleIds.length > defaultState.unlockedVehicleIds.length) {
-        return true;
-    }
-    return legacyState.unlockedWheelPresetIds.length > defaultState.unlockedWheelPresetIds.length;
 }
 
 function sanitizeEconomyVehicleId(value) {

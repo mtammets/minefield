@@ -35,6 +35,40 @@ const DEFAULT_UNLOCKED_WHEEL_PRESET_IDS = Object.freeze([
     'photon-turbine',
     'obsidian-halo',
 ]);
+const PLAYER_VEHICLE_ECONOMY_PRESETS = Object.freeze({
+    'voltline-sled': Object.freeze({
+        id: 'voltline-sled',
+        name: 'Voltline Sled',
+        unlockPriceCredits: 0,
+    }),
+    'apex-formula': Object.freeze({
+        id: 'apex-formula',
+        name: 'Apex Formula',
+        unlockPriceCredits: 180,
+    }),
+});
+const PLAYER_WHEEL_ECONOMY_PRESETS = Object.freeze({
+    'scarlet-switchblade': Object.freeze({
+        id: 'scarlet-switchblade',
+        name: 'Scarlet Switchblade',
+        unlockPriceCredits: 0,
+    }),
+    'photon-turbine': Object.freeze({
+        id: 'photon-turbine',
+        name: 'Photon Turbine',
+        unlockPriceCredits: 0,
+    }),
+    'obsidian-halo': Object.freeze({
+        id: 'obsidian-halo',
+        name: 'Obsidian Halo',
+        unlockPriceCredits: 0,
+    }),
+    'leviathan-rift': Object.freeze({
+        id: 'leviathan-rift',
+        name: 'Leviathan Rift',
+        unlockPriceCredits: 140,
+    }),
+});
 const PLAYER_ECONOMY_MAX_CREDITS = Number.MAX_SAFE_INTEGER;
 const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_DEFAULT = 6;
 const PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_MAX = 12;
@@ -42,6 +76,26 @@ const PLAYER_VEHICLE_ID_MAX_LENGTH = 32;
 const PLAYER_WHEEL_PRESET_ID_MAX_LENGTH = 32;
 const PLAYER_ECONOMY_TRANSACTION_KIND_MAX_LENGTH = 32;
 const PLAYER_ECONOMY_TRANSACTION_SUMMARY_MAX_LENGTH = 160;
+const PLAYER_PICKUP_CREDIT_VALUE = 1;
+const PLAYER_MINE_KILL_CREDIT_VALUE = 3;
+const ROUND_SETTLEMENT_CREDIT_BONUS = 2;
+const ROUND_WIN_CREDIT_BONUS = 5;
+const OPPONENT_SWEEP_CREDIT_BONUS = 4;
+const ONLINE_FINISH_CREDIT_BONUS = 3;
+const CAMPAIGN_COMPLETE_CREDIT_BONUS = 15;
+
+class PlayerEconomySyncError extends Error {
+    constructor(message, options = {}) {
+        super(
+            typeof message === 'string' && message.trim()
+                ? message.trim()
+                : 'Wallet sync failed.'
+        );
+        this.name = 'PlayerEconomySyncError';
+        this.reason = sanitizeTransactionKind(options?.reason) || 'invalid-sync';
+        this.statusCode = Number.isInteger(options?.statusCode) ? options.statusCode : 400;
+    }
+}
 
 function createPlayerEconomyStore(config = {}) {
     const supabaseClient = createSupabaseServiceClient(config);
@@ -77,7 +131,7 @@ function createPlayerEconomyStore(config = {}) {
                 exists: Boolean(wallet.exists),
             });
         },
-        async syncProfileByUserId(userId, rawPayload = {}) {
+        async syncProfileByUserId(userId, rawPayload = {}, options = {}) {
             const normalizedUserId = sanitizeSupabaseUserId(userId);
             if (!normalizedUserId) {
                 return createDefaultPlayerEconomyProfile({
@@ -88,21 +142,19 @@ function createPlayerEconomyStore(config = {}) {
             const currentProfile = await this.readProfileByUserId(normalizedUserId, {
                 recentLimit: sanitizeRecentTransactionLimit(rawPayload?.recentLimit),
             });
-            const currentEconomy = normalizePlayerEconomyStatePayload(currentProfile);
-            const nextEconomy = normalizePlayerEconomyStatePayload(rawPayload);
-            const nextUnlockedVehicleIds = mergeUnlockedVehicleIds(
-                currentEconomy.unlockedVehicleIds,
-                nextEconomy.unlockedVehicleIds
+            const transactionRequest = normalizePlayerEconomySyncTransactionRequest(
+                rawPayload?.transaction
             );
-            const nextUnlockedWheelPresetIds = mergeUnlockedWheelPresetIds(
-                currentEconomy.unlockedWheelPresetIds,
-                nextEconomy.unlockedWheelPresetIds
+            const syncUpdate = applyAuthoritativeSyncTransactionToProfile(
+                currentProfile,
+                transactionRequest,
+                options
             );
-            const transaction = normalizePlayerEconomyTransaction(
-                rawPayload?.transaction,
-                currentEconomy.credits,
-                nextEconomy.credits
-            );
+            if (!syncUpdate.changed || !syncUpdate.transaction) {
+                return currentProfile;
+            }
+            const nextEconomy = normalizePlayerEconomyStatePayload(syncUpdate.nextEconomy);
+            const transaction = syncUpdate.transaction;
 
             let nextLifetimeEarned = currentProfile.lifetimeEarned;
             let nextLifetimeSpent = currentProfile.lifetimeSpent;
@@ -129,8 +181,8 @@ function createPlayerEconomyStore(config = {}) {
             const walletRecord = {
                 user_id: normalizedUserId,
                 credits: nextEconomy.credits,
-                unlocked_vehicle_ids: nextUnlockedVehicleIds,
-                unlocked_wheel_preset_ids: nextUnlockedWheelPresetIds,
+                unlocked_vehicle_ids: nextEconomy.unlockedVehicleIds,
+                unlocked_wheel_preset_ids: nextEconomy.unlockedWheelPresetIds,
                 lifetime_earned: nextLifetimeEarned,
                 lifetime_spent: nextLifetimeSpent,
                 transaction_count: nextTransactionCount,
@@ -220,12 +272,7 @@ function createPlayerEconomyStore(config = {}) {
                 };
             }
 
-            const currentProfile = await this.readProfileByUserId(normalizedUserId, {
-                recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_DEFAULT,
-            });
             const profile = await this.syncProfileByUserId(normalizedUserId, {
-                credits: clampCredits(currentProfile.credits + purchase.creditsAmount),
-                unlockedVehicleIds: currentProfile.unlockedVehicleIds,
                 recentLimit: PLAYER_ECONOMY_RECENT_TRANSACTION_LIMIT_DEFAULT,
                 transaction: {
                     kind: 'purchase',
@@ -233,6 +280,8 @@ function createPlayerEconomyStore(config = {}) {
                     summary: purchase.summary,
                     metadata: purchase.metadata,
                 },
+            }, {
+                allowPurchase: true,
             });
             return {
                 ok: true,
@@ -291,16 +340,9 @@ function createNoopPlayerEconomyStore() {
                 exists: false,
             });
         },
-        async syncProfileByUserId(_userId, rawPayload = {}) {
-            return normalizePlayerEconomyProfile({
-                ...createDefaultPlayerEconomyProfile({
-                    exists: false,
-                }),
-                credits: clampCredits(rawPayload?.credits),
-                unlockedVehicleIds: normalizeUnlockedVehicleIds(rawPayload?.unlockedVehicleIds),
-                unlockedWheelPresetIds: normalizeUnlockedWheelPresetIds(
-                    rawPayload?.unlockedWheelPresetIds
-                ),
+        async syncProfileByUserId() {
+            return createDefaultPlayerEconomyProfile({
+                exists: false,
             });
         },
         async applyCreditsPurchaseByUserId() {
@@ -539,31 +581,346 @@ function normalizePlayerEconomyStatePayload(value = null) {
     };
 }
 
-function normalizePlayerEconomyTransaction(value = null, currentCredits = 0, nextCredits = 0) {
+function normalizePlayerEconomySyncTransactionRequest(value = null) {
     if (!value || typeof value !== 'object') {
         return null;
     }
     const kind = sanitizeTransactionKind(value.kind);
-    const fallbackDelta = clampSignedCredits(
-        clampCredits(nextCredits) - clampCredits(currentCredits)
-    );
-    const creditsDelta = clampSignedCredits(
-        Number.isFinite(Number(value.creditsDelta)) ? value.creditsDelta : fallbackDelta
-    );
+    const creditsDelta = clampSignedCredits(value.creditsDelta);
     const summary = sanitizeTransactionSummary(value.summary || value.label || value.description);
+    const metadata = sanitizeTransactionMetadata(value.metadata);
     if (!kind && creditsDelta === 0 && !summary) {
         return null;
     }
     return {
         kind: kind || (creditsDelta < 0 ? 'spend' : 'earn'),
         creditsDelta,
-        summary:
-            summary ||
-            (creditsDelta < 0
-                ? `Spent ${Math.abs(creditsDelta)} ${Math.abs(creditsDelta) === 1 ? 'Credit' : 'Credits'}`
-                : `Earned ${Math.abs(creditsDelta)} ${Math.abs(creditsDelta) === 1 ? 'Credit' : 'Credits'}`),
-        metadata: sanitizeTransactionMetadata(value.metadata),
+        summary,
+        metadata,
     };
+}
+
+function applyAuthoritativeSyncTransactionToProfile(
+    currentProfile = null,
+    transactionRequest = null,
+    options = {}
+) {
+    const normalizedProfile = normalizePlayerEconomyProfile(currentProfile);
+    if (!transactionRequest) {
+        return {
+            changed: false,
+            nextEconomy: normalizePlayerEconomyStatePayload(normalizedProfile),
+            transaction: null,
+        };
+    }
+
+    switch (transactionRequest.kind) {
+        case 'round-reward':
+            return applyAuthoritativeRoundRewardTransaction(normalizedProfile, transactionRequest);
+        case 'vehicle-unlock':
+            return applyAuthoritativeVehicleUnlockTransaction(normalizedProfile, transactionRequest);
+        case 'wheel-unlock':
+            return applyAuthoritativeWheelUnlockTransaction(normalizedProfile, transactionRequest);
+        case 'purchase':
+            if (options?.allowPurchase) {
+                return applyAuthoritativePurchaseTransaction(normalizedProfile, transactionRequest);
+            }
+            break;
+        default:
+            break;
+    }
+
+    throw new PlayerEconomySyncError('This wallet sync operation is not allowed.', {
+        reason: 'unsupported-transaction',
+        statusCode: 400,
+    });
+}
+
+function applyAuthoritativeRoundRewardTransaction(currentProfile, transactionRequest) {
+    const reward = resolveAuthoritativeRoundRewardFromMetadata(transactionRequest?.metadata);
+    assertRequestedCreditsDeltaMatches(
+        transactionRequest?.creditsDelta,
+        reward.creditsEarned,
+        'Round reward payload does not match the server calculation.'
+    );
+    if (reward.creditsEarned <= 0) {
+        return {
+            changed: false,
+            nextEconomy: normalizePlayerEconomyStatePayload(currentProfile),
+            transaction: null,
+        };
+    }
+    return {
+        changed: true,
+        nextEconomy: {
+            credits: clampCredits(currentProfile.credits + reward.creditsEarned),
+            unlockedVehicleIds: currentProfile.unlockedVehicleIds,
+            unlockedWheelPresetIds: currentProfile.unlockedWheelPresetIds,
+        },
+        transaction: {
+            kind: 'round-reward',
+            creditsDelta: reward.creditsEarned,
+            summary: buildAuthoritativeRoundRewardSummary(reward),
+            metadata: {
+                gameMode: reward.gameMode,
+                finishReason: reward.finishReason,
+                pickupCount: reward.pickupCount,
+                mineKillCount: reward.mineKillCount,
+                selfScore: reward.selfScore,
+                runSettled: reward.runSettled,
+                isWinner: reward.isWinner,
+                breakdown: reward.breakdown,
+                clientTransactionId: transactionRequest?.metadata?.clientTransactionId || '',
+            },
+        },
+    };
+}
+
+function applyAuthoritativeVehicleUnlockTransaction(currentProfile, transactionRequest) {
+    const vehicleId = sanitizeVehicleId(transactionRequest?.metadata?.vehicleId);
+    const vehiclePreset = getPlayerVehicleEconomyPreset(vehicleId);
+    if (!vehicleId || !vehiclePreset || vehiclePreset.id !== vehicleId) {
+        throw new PlayerEconomySyncError('Choose a valid chassis to unlock.', {
+            reason: 'invalid-vehicle',
+            statusCode: 400,
+        });
+    }
+    if (currentProfile.unlockedVehicleIds.includes(vehicleId)) {
+        return {
+            changed: false,
+            nextEconomy: normalizePlayerEconomyStatePayload(currentProfile),
+            transaction: null,
+        };
+    }
+    const costCredits = clampCredits(vehiclePreset.unlockPriceCredits);
+    assertRequestedCreditsDeltaMatches(
+        transactionRequest?.creditsDelta,
+        -costCredits,
+        'Chassis unlock payload does not match the server price.'
+    );
+    if (currentProfile.credits < costCredits) {
+        throw new PlayerEconomySyncError(
+            `Need ${costCredits} Credits to unlock ${vehiclePreset.name}.`,
+            {
+                reason: 'not-enough-credits',
+                statusCode: 409,
+            }
+        );
+    }
+    return {
+        changed: true,
+        nextEconomy: {
+            credits: clampCredits(currentProfile.credits - costCredits),
+            unlockedVehicleIds: mergeUnlockedVehicleIds(
+                currentProfile.unlockedVehicleIds,
+                [vehicleId]
+            ),
+            unlockedWheelPresetIds: currentProfile.unlockedWheelPresetIds,
+        },
+        transaction: {
+            kind: 'vehicle-unlock',
+            creditsDelta: -costCredits,
+            summary: `Unlocked ${vehiclePreset.name}`,
+            metadata: {
+                vehicleId: vehiclePreset.id,
+                vehicleName: vehiclePreset.name,
+                clientTransactionId: transactionRequest?.metadata?.clientTransactionId || '',
+            },
+        },
+    };
+}
+
+function applyAuthoritativeWheelUnlockTransaction(currentProfile, transactionRequest) {
+    const wheelPresetId = sanitizeWheelPresetId(transactionRequest?.metadata?.wheelPresetId);
+    const wheelPreset = getPlayerWheelEconomyPreset(wheelPresetId);
+    if (!wheelPresetId || !wheelPreset || wheelPreset.id !== wheelPresetId) {
+        throw new PlayerEconomySyncError('Choose a valid wheel set to unlock.', {
+            reason: 'invalid-wheel-preset',
+            statusCode: 400,
+        });
+    }
+    if (currentProfile.unlockedWheelPresetIds.includes(wheelPresetId)) {
+        return {
+            changed: false,
+            nextEconomy: normalizePlayerEconomyStatePayload(currentProfile),
+            transaction: null,
+        };
+    }
+    const costCredits = clampCredits(wheelPreset.unlockPriceCredits);
+    assertRequestedCreditsDeltaMatches(
+        transactionRequest?.creditsDelta,
+        -costCredits,
+        'Wheel unlock payload does not match the server price.'
+    );
+    if (currentProfile.credits < costCredits) {
+        throw new PlayerEconomySyncError(
+            `Need ${costCredits} Credits to unlock ${wheelPreset.name}.`,
+            {
+                reason: 'not-enough-credits',
+                statusCode: 409,
+            }
+        );
+    }
+    return {
+        changed: true,
+        nextEconomy: {
+            credits: clampCredits(currentProfile.credits - costCredits),
+            unlockedVehicleIds: currentProfile.unlockedVehicleIds,
+            unlockedWheelPresetIds: mergeUnlockedWheelPresetIds(
+                currentProfile.unlockedWheelPresetIds,
+                [wheelPresetId]
+            ),
+        },
+        transaction: {
+            kind: 'wheel-unlock',
+            creditsDelta: -costCredits,
+            summary: `Unlocked ${wheelPreset.name}`,
+            metadata: {
+                wheelPresetId: wheelPreset.id,
+                wheelPresetName: wheelPreset.name,
+                clientTransactionId: transactionRequest?.metadata?.clientTransactionId || '',
+            },
+        },
+    };
+}
+
+function applyAuthoritativePurchaseTransaction(currentProfile, transactionRequest) {
+    const creditsDelta = clampCredits(transactionRequest?.creditsDelta);
+    if (creditsDelta <= 0) {
+        throw new PlayerEconomySyncError('Credits purchase payload is invalid.', {
+            reason: 'invalid-purchase',
+            statusCode: 400,
+        });
+    }
+    return {
+        changed: true,
+        nextEconomy: {
+            credits: clampCredits(currentProfile.credits + creditsDelta),
+            unlockedVehicleIds: currentProfile.unlockedVehicleIds,
+            unlockedWheelPresetIds: currentProfile.unlockedWheelPresetIds,
+        },
+        transaction: {
+            kind: 'purchase',
+            creditsDelta,
+            summary:
+                transactionRequest?.summary ||
+                `Purchased ${creditsDelta} ${creditsDelta === 1 ? 'Credit' : 'Credits'}`,
+            metadata: sanitizeTransactionMetadata(transactionRequest?.metadata),
+        },
+    };
+}
+
+function resolveAuthoritativeRoundRewardFromMetadata(value = null) {
+    const metadata = sanitizeTransactionMetadata(value);
+    const pickupCount = clampCredits(metadata.pickupCount);
+    const mineKillCount = clampCredits(metadata.mineKillCount);
+    const selfScore = clampCredits(metadata.selfScore);
+    const runSettled = Boolean(metadata.runSettled);
+    const isWinner = Boolean(metadata.isWinner);
+    const finishReason = sanitizeLabel(metadata.finishReason, 40).toLowerCase();
+    const gameMode = sanitizeLabel(metadata.gameMode, 16).toLowerCase() === 'online'
+        ? 'online'
+        : 'bots';
+    const earnedAnything = pickupCount > 0 || mineKillCount > 0 || selfScore > 0;
+    const breakdown = [];
+
+    addBreakdownLine(breakdown, 'pickup-run', 'Pickup run', pickupCount * PLAYER_PICKUP_CREDIT_VALUE);
+    addBreakdownLine(breakdown, 'mine-kills', 'Mine kills', mineKillCount * PLAYER_MINE_KILL_CREDIT_VALUE);
+    if (runSettled) {
+        addBreakdownLine(
+            breakdown,
+            'settlement',
+            finishReason === 'mission-failed' ? 'Run settled' : 'Finished round',
+            ROUND_SETTLEMENT_CREDIT_BONUS
+        );
+    }
+    if (isWinner) {
+        addBreakdownLine(breakdown, 'winner', 'Round winner', ROUND_WIN_CREDIT_BONUS);
+    }
+    if (gameMode === 'online' && earnedAnything) {
+        addBreakdownLine(breakdown, 'online', 'Online room finish', ONLINE_FINISH_CREDIT_BONUS);
+    }
+    if (finishReason === 'opponents-eliminated') {
+        addBreakdownLine(breakdown, 'sweep', 'Sector sweep', OPPONENT_SWEEP_CREDIT_BONUS);
+    }
+    if (finishReason === 'campaign-complete') {
+        addBreakdownLine(breakdown, 'campaign', 'Campaign clear', CAMPAIGN_COMPLETE_CREDIT_BONUS);
+    }
+
+    return {
+        creditsEarned: breakdown.reduce((sum, line) => sum + line.credits, 0),
+        breakdown,
+        gameMode,
+        finishReason,
+        pickupCount,
+        mineKillCount,
+        selfScore,
+        runSettled,
+        isWinner,
+    };
+}
+
+function buildAuthoritativeRoundRewardSummary(reward = null) {
+    const creditsEarned = clampCredits(reward?.creditsEarned);
+    if (creditsEarned <= 0) {
+        return 'Round settled';
+    }
+    const finishReason = sanitizeLabel(reward?.finishReason, 40).toLowerCase();
+    if (finishReason === 'campaign-complete') {
+        return `Campaign clear +${creditsEarned} Credits`;
+    }
+    if (finishReason === 'mission-failed') {
+        return `Run settled +${creditsEarned} Credits`;
+    }
+    if (finishReason === 'opponents-eliminated') {
+        return `Sector sweep +${creditsEarned} Credits`;
+    }
+    if (reward?.isWinner) {
+        return `Victory payout +${creditsEarned} Credits`;
+    }
+    return `Round payout +${creditsEarned} Credits`;
+}
+
+function addBreakdownLine(breakdown, id, label, credits) {
+    const normalizedCredits = clampCredits(credits);
+    if (!normalizedCredits) {
+        return;
+    }
+    breakdown.push({
+        id: sanitizeLabel(id, 32),
+        label: sanitizeLabel(label, 48) || 'Reward',
+        credits: normalizedCredits,
+    });
+}
+
+function assertRequestedCreditsDeltaMatches(requestedCreditsDelta, expectedCreditsDelta, message) {
+    const requested = clampSignedCredits(requestedCreditsDelta);
+    if (requested === 0) {
+        return;
+    }
+    if (requested !== expectedCreditsDelta) {
+        throw new PlayerEconomySyncError(message, {
+            reason: 'credits-mismatch',
+            statusCode: 400,
+        });
+    }
+}
+
+function getPlayerVehicleEconomyPreset(vehicleId = DEFAULT_PLAYER_VEHICLE_ID) {
+    const normalizedVehicleId = sanitizeVehicleId(vehicleId) || DEFAULT_PLAYER_VEHICLE_ID;
+    return (
+        PLAYER_VEHICLE_ECONOMY_PRESETS[normalizedVehicleId] ||
+        PLAYER_VEHICLE_ECONOMY_PRESETS[DEFAULT_PLAYER_VEHICLE_ID]
+    );
+}
+
+function getPlayerWheelEconomyPreset(wheelPresetId = DEFAULT_UNLOCKED_WHEEL_PRESET_IDS[0]) {
+    const normalizedWheelPresetId =
+        sanitizeWheelPresetId(wheelPresetId) || DEFAULT_UNLOCKED_WHEEL_PRESET_IDS[0];
+    return (
+        PLAYER_WHEEL_ECONOMY_PRESETS[normalizedWheelPresetId] ||
+        PLAYER_WHEEL_ECONOMY_PRESETS[DEFAULT_UNLOCKED_WHEEL_PRESET_IDS[0]]
+    );
 }
 
 function normalizeCreditsPurchase(value = null) {
@@ -727,6 +1084,27 @@ function sanitizeTransactionMetadata(value = null) {
             metadata.currencyCode = currencyCode;
         }
     }
+    if (source.pickupCount != null) {
+        metadata.pickupCount = clampCredits(source.pickupCount);
+    }
+    if (source.mineKillCount != null) {
+        metadata.mineKillCount = clampCredits(source.mineKillCount);
+    }
+    if (source.selfScore != null) {
+        metadata.selfScore = clampCredits(source.selfScore);
+    }
+    if (source.runSettled != null) {
+        metadata.runSettled = Boolean(source.runSettled);
+    }
+    if (source.isWinner != null) {
+        metadata.isWinner = Boolean(source.isWinner);
+    }
+    if (typeof source.clientTransactionId === 'string') {
+        const clientTransactionId = sanitizeClientTransactionId(source.clientTransactionId);
+        if (clientTransactionId) {
+            metadata.clientTransactionId = clientTransactionId;
+        }
+    }
 
     return metadata;
 }
@@ -814,6 +1192,14 @@ function sanitizeCheckoutSessionId(value) {
     }
     const normalized = value.trim();
     return /^cs_[a-z0-9_]{12,255}$/iu.test(normalized) ? normalized : '';
+}
+
+function sanitizeClientTransactionId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().toLowerCase();
+    return /^[a-z0-9:_-]{8,96}$/u.test(normalized) ? normalized : '';
 }
 
 function sanitizeCurrencyCode(value, fallback = '') {
@@ -1058,8 +1444,10 @@ function createDeterministicTransactionId(seed = '') {
 }
 
 module.exports = {
+    PlayerEconomySyncError,
     PLAYER_ECONOMY_WALLETS_TABLE_NAME,
     PLAYER_ECONOMY_TRANSACTIONS_TABLE_NAME,
+    applyAuthoritativeSyncTransactionToProfile,
     createPlayerEconomyStore,
     ensurePlayerEconomySchema,
 };

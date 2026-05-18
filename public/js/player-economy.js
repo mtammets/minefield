@@ -19,6 +19,7 @@ export const PLAYER_PICKUP_CREDIT_VALUE = 1;
 export const PLAYER_MINE_KILL_CREDIT_VALUE = 3;
 
 const PLAYER_ECONOMY_MAX_CREDITS = Number.MAX_SAFE_INTEGER;
+const PLAYER_ECONOMY_STORAGE_VERSION = 2;
 const PLAYER_CREDITS_NUMBER_FORMATTER = new Intl.NumberFormat('en-US');
 const PICKUP_CREDIT_VALUE = PLAYER_PICKUP_CREDIT_VALUE;
 const MINE_KILL_CREDIT_VALUE = PLAYER_MINE_KILL_CREDIT_VALUE;
@@ -148,23 +149,43 @@ export function buildPlayerEconomyMetadataPatch(state = null) {
     };
 }
 
-export function readPersistedPlayerEconomyState() {
+export function readPersistedPlayerEconomyState(options = {}) {
     const fallback = createDefaultPlayerEconomyState();
+    const ownerUserId = sanitizePlayerEconomyOwnerUserId(options?.ownerUserId);
     try {
         const storedValue = window.localStorage.getItem(PLAYER_ECONOMY_STORAGE_KEY);
         if (!storedValue) {
             return fallback;
         }
-        return normalizePlayerEconomyState(JSON.parse(storedValue));
+        const parsedValue = JSON.parse(storedValue);
+        const scopedEntry = normalizePlayerEconomyStorageEntry(parsedValue);
+        if (scopedEntry) {
+            if (ownerUserId) {
+                return scopedEntry.ownerUserId === ownerUserId ? scopedEntry.state : fallback;
+            }
+            return scopedEntry.ownerUserId ? fallback : scopedEntry.state;
+        }
+        if (ownerUserId) {
+            return fallback;
+        }
+        return normalizePlayerEconomyState(parsedValue);
     } catch {
         return fallback;
     }
 }
 
-export function persistPlayerEconomyState(state = null) {
+export function persistPlayerEconomyState(state = null, options = {}) {
     const normalizedState = normalizePlayerEconomyState(state);
+    const ownerUserId = sanitizePlayerEconomyOwnerUserId(options?.ownerUserId);
     try {
-        window.localStorage.setItem(PLAYER_ECONOMY_STORAGE_KEY, JSON.stringify(normalizedState));
+        window.localStorage.setItem(
+            PLAYER_ECONOMY_STORAGE_KEY,
+            JSON.stringify({
+                version: PLAYER_ECONOMY_STORAGE_VERSION,
+                ownerUserId,
+                state: normalizedState,
+            })
+        );
     } catch {
         // localStorage can fail in restricted browsing modes.
     }
@@ -677,4 +698,26 @@ function getPlayerVehicleEconomyPreset(vehicleId = DEFAULT_PLAYER_VEHICLE_ID) {
         }
     }
     return PLAYER_VEHICLE_PRESETS[0] || null;
+}
+
+function normalizePlayerEconomyStorageEntry(value = null) {
+    if (!value || typeof value !== 'object') {
+        return null;
+    }
+    const version = Math.round(Number(value.version) || 0);
+    if (version !== PLAYER_ECONOMY_STORAGE_VERSION) {
+        return null;
+    }
+    return {
+        ownerUserId: sanitizePlayerEconomyOwnerUserId(value.ownerUserId),
+        state: normalizePlayerEconomyState(value.state),
+    };
+}
+
+function sanitizePlayerEconomyOwnerUserId(value) {
+    if (typeof value !== 'string') {
+        return '';
+    }
+    const normalized = value.trim().slice(0, 128);
+    return /^[a-zA-Z0-9-]{6,128}$/u.test(normalized) ? normalized : '';
 }

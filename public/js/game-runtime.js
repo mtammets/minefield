@@ -125,17 +125,13 @@ import {
 } from './car-vehicles.js';
 import {
     createDefaultPlayerEconomyState,
-    arePlayerEconomyStatesEqual,
-    awardCreditsToEconomy,
     formatPlayerCredits,
-    mergePlayerEconomyStates,
     normalizePlayerEconomyState,
     PLAYER_MINE_KILL_CREDIT_VALUE,
     PLAYER_PICKUP_CREDIT_VALUE,
     persistPlayerEconomyState,
     purchaseWheelPresetWithEconomy,
     purchaseVehicleWithEconomy,
-    readPersistedPlayerEconomyState,
     resolveNextGarageUnlockTarget,
     resolveOwnedVehicleIdForEconomy,
     resolveOwnedWheelPresetIdForEconomy,
@@ -642,7 +638,10 @@ function syncRuntimePlayerEconomyState(nextEconomyState = null, options = {}) {
     const normalizedEconomyState = normalizePlayerEconomyState(nextEconomyState);
     runtimeState.playerEconomy = normalizedEconomyState;
     if (options.persistLocal !== false) {
-        persistPlayerEconomyState(normalizedEconomyState);
+        const authState = runtimeState.authController?.getState?.() || null;
+        persistPlayerEconomyState(normalizedEconomyState, {
+            ownerUserId: authState?.authenticated ? authState.userId : '',
+        });
     }
     welcomeModalUi.setPlayerEconomy?.(normalizedEconomyState);
     if (options.reconcileWheel !== false) {
@@ -748,6 +747,20 @@ function buildRuntimeRoundEconomySummary(reward = null) {
     return `Round payout ${formatPlayerCredits(creditsEarned, { includePlusSign: true })}`;
 }
 
+function createEconomyClientTransactionId(kind = 'sync') {
+    const normalizedKind =
+        typeof kind === 'string' && kind.trim()
+            ? kind.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-')
+            : 'sync';
+    const randomUuid = globalThis.crypto?.randomUUID?.();
+    if (typeof randomUuid === 'string' && randomUuid) {
+        return `${normalizedKind}:${randomUuid}`;
+    }
+    const timestamp = Date.now().toString(36);
+    const randomSuffix = Math.random().toString(36).slice(2, 12);
+    return `${normalizedKind}:${timestamp}-${randomSuffix}`;
+}
+
 function reconcileRuntimeSelectedVehicleWithEconomy(economyState = null) {
     const resolvedVehicleId = resolveOwnedVehicleIdForEconomy(
         runtimeState.selectedCarVehicleId,
@@ -815,21 +828,11 @@ function handleRuntimeAuthEconomyStateChanged(authState = null) {
         });
         return;
     }
-    const mergedEconomyState = mergePlayerEconomyStates(
-        readPersistedPlayerEconomyState(),
-        authState
-    );
     const normalizedAuthEconomyState = normalizePlayerEconomyState(authState);
-    syncRuntimePlayerEconomyState(mergedEconomyState, {
+    syncRuntimePlayerEconomyState(normalizedAuthEconomyState, {
         persistLocal: true,
         reconcileVehicle: true,
     });
-    if (
-        authState?.authenticated &&
-        !arePlayerEconomyStatesEqual(mergedEconomyState, normalizedAuthEconomyState)
-    ) {
-        void runtimeState.authController?.syncPlayerEconomy?.(mergedEconomyState);
-    }
 }
 
 async function awardRuntimeRoundEconomyReward(event = null) {
@@ -845,27 +848,34 @@ async function awardRuntimeRoundEconomyReward(event = null) {
         event,
         gameMode: runtimeState.gameMode,
     });
-    const nextEconomyState = syncRuntimePlayerEconomyState(
-        awardCreditsToEconomy(runtimeState.playerEconomy, reward.creditsEarned),
-        {
-            persistLocal: true,
-            reconcileVehicle: false,
-        }
-    );
-    if (runtimeState.authController?.isAuthenticated?.()) {
-        await runtimeState.authController?.syncPlayerEconomy?.(nextEconomyState, {
-            transaction: {
-                kind: 'round-reward',
-                summary: buildRuntimeRoundEconomySummary(reward),
-                creditsDelta: reward.creditsEarned,
-                metadata: {
-                    breakdown: reward.breakdown,
-                    gameMode: runtimeState.gameMode,
-                    finishReason: reward.finishReason,
-                },
+    const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(null, {
+        transaction: {
+            kind: 'round-reward',
+            summary: buildRuntimeRoundEconomySummary(reward),
+            creditsDelta: reward.creditsEarned,
+            metadata: {
+                breakdown: reward.breakdown,
+                gameMode: runtimeState.gameMode,
+                finishReason: reward.finishReason,
+                pickupCount: reward.pickupCount,
+                mineKillCount: reward.mineKillCount,
+                selfScore: reward.selfScore,
+                runSettled: reward.breakdown.some((entry) => entry?.id === 'settlement'),
+                isWinner: reward.isWinner,
+                clientTransactionId: createEconomyClientTransactionId('round-reward'),
             },
-        });
+        },
+    });
+    if (!syncResult?.ok) {
+        finalScoreboardUi.setEconomyReward?.(null);
+        resetRuntimeEconomyRoundPreview();
+        return {
+            reward: null,
+            economy: runtimeState.playerEconomy,
+            error: syncResult?.error || 'Wallet sync failed.',
+        };
     }
+    const nextEconomyState = normalizePlayerEconomyState(syncResult.economy || runtimeState.playerEconomy);
     finalScoreboardUi.setEconomyReward?.({
         creditsEarned: reward.creditsEarned,
         balanceAfter: nextEconomyState.credits,
@@ -897,31 +907,26 @@ async function purchaseVehicleUnlock(vehicleId = '') {
         return purchaseResult;
     }
 
-    const nextEconomyState = syncRuntimePlayerEconomyState(purchaseResult.economy, {
-        persistLocal: true,
-        reconcileVehicle: false,
+    const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(null, {
+        transaction: {
+            kind: 'vehicle-unlock',
+            summary: `Unlocked ${getPlayerVehiclePresetById(purchaseResult.vehicleId)?.name || 'chassis'}`,
+            creditsDelta: -Math.max(0, Math.round(Number(purchaseResult.costCredits) || 0)),
+            metadata: {
+                vehicleId: purchaseResult.vehicleId,
+                vehicleName:
+                    getPlayerVehiclePresetById(purchaseResult.vehicleId)?.name || 'Chassis',
+                clientTransactionId: createEconomyClientTransactionId('vehicle-unlock'),
+            },
+        },
     });
-    let syncWarning = '';
-    if (runtimeState.authController?.isAuthenticated?.()) {
-        const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(
-            nextEconomyState,
-            {
-                transaction: {
-                    kind: 'vehicle-unlock',
-                    summary: `Unlocked ${getPlayerVehiclePresetById(purchaseResult.vehicleId)?.name || 'chassis'}`,
-                    creditsDelta: -Math.max(0, Math.round(Number(purchaseResult.costCredits) || 0)),
-                    metadata: {
-                        vehicleId: purchaseResult.vehicleId,
-                        vehicleName:
-                            getPlayerVehiclePresetById(purchaseResult.vehicleId)?.name || 'Chassis',
-                    },
-                },
-            }
-        );
-        if (!syncResult?.ok) {
-            syncWarning = syncResult?.error || 'Account sync failed.';
-        }
+    if (!syncResult?.ok) {
+        return {
+            ok: false,
+            error: syncResult?.error || 'Account sync failed.',
+        };
     }
+    const nextEconomyState = normalizePlayerEconomyState(syncResult.economy || runtimeState.playerEconomy);
 
     if (runtimeState.gameSessionController?.setSelectedPlayerCarVehicle) {
         runtimeState.gameSessionController.setSelectedPlayerCarVehicle(purchaseResult.vehicleId, {
@@ -943,7 +948,7 @@ async function purchaseVehicleUnlock(vehicleId = '') {
     return {
         ...purchaseResult,
         economy: nextEconomyState,
-        syncWarning,
+        syncWarning: '',
     };
 }
 
@@ -962,32 +967,26 @@ async function purchaseWheelPresetUnlock(wheelPresetId = '') {
         return purchaseResult;
     }
 
-    const nextEconomyState = syncRuntimePlayerEconomyState(purchaseResult.economy, {
-        persistLocal: true,
-        reconcileVehicle: false,
-        reconcileWheel: false,
-    });
-    let syncWarning = '';
     const purchasedWheelPreset = getPlayerWheelPresetById(purchaseResult.wheelPresetId) || null;
-    if (runtimeState.authController?.isAuthenticated?.()) {
-        const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(
-            nextEconomyState,
-            {
-                transaction: {
-                    kind: 'wheel-unlock',
-                    summary: `Unlocked ${purchasedWheelPreset?.name || 'wheel set'}`,
-                    creditsDelta: -Math.max(0, Math.round(Number(purchaseResult.costCredits) || 0)),
-                    metadata: {
-                        wheelPresetId: purchaseResult.wheelPresetId,
-                        wheelPresetName: purchasedWheelPreset?.name || 'Wheel set',
-                    },
-                },
-            }
-        );
-        if (!syncResult?.ok) {
-            syncWarning = syncResult?.error || 'Account sync failed.';
-        }
+    const syncResult = await runtimeState.authController?.syncPlayerEconomy?.(null, {
+        transaction: {
+            kind: 'wheel-unlock',
+            summary: `Unlocked ${purchasedWheelPreset?.name || 'wheel set'}`,
+            creditsDelta: -Math.max(0, Math.round(Number(purchaseResult.costCredits) || 0)),
+            metadata: {
+                wheelPresetId: purchaseResult.wheelPresetId,
+                wheelPresetName: purchasedWheelPreset?.name || 'Wheel set',
+                clientTransactionId: createEconomyClientTransactionId('wheel-unlock'),
+            },
+        },
+    });
+    if (!syncResult?.ok) {
+        return {
+            ok: false,
+            error: syncResult?.error || 'Account sync failed.',
+        };
     }
+    const nextEconomyState = normalizePlayerEconomyState(syncResult.economy || runtimeState.playerEconomy);
 
     if (runtimeState.gameSessionController?.setSelectedPlayerCarWheelPreset) {
         runtimeState.gameSessionController.setSelectedPlayerCarWheelPreset(
@@ -1012,7 +1011,7 @@ async function purchaseWheelPresetUnlock(wheelPresetId = '') {
     return {
         ...purchaseResult,
         economy: nextEconomyState,
-        syncWarning,
+        syncWarning: '',
     };
 }
 

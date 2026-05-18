@@ -6,12 +6,15 @@ const playerEconomyModulePromise = import('../public/js/player-economy.js');
 test('default economy keeps leviathan locked while the three standard wheel sets are owned', async () => {
     const {
         createDefaultPlayerEconomyState,
+        isVehicleUnlockedForEconomy,
         getOwnedWheelPresetCountForEconomy,
         isWheelPresetUnlockedForEconomy,
     } = await playerEconomyModulePromise;
 
     const state = createDefaultPlayerEconomyState();
 
+    assert.equal(isVehicleUnlockedForEconomy(state, 'voltline-sled'), true);
+    assert.equal(isVehicleUnlockedForEconomy(state, 'apex-formula'), false);
     assert.equal(getOwnedWheelPresetCountForEconomy(state), 3);
     assert.equal(isWheelPresetUnlockedForEconomy(state, 'scarlet-switchblade'), true);
     assert.equal(isWheelPresetUnlockedForEconomy(state, 'photon-turbine'), true);
@@ -69,3 +72,93 @@ test('garage wheel preset display order puts locked presets first and keeps the 
         'leviathan-rift',
     ]);
 });
+
+test('authenticated wallet cache is restored only for the matching account', async () => {
+    const { persistPlayerEconomyState, readPersistedPlayerEconomyState } =
+        await playerEconomyModulePromise;
+    const previousWindow = global.window;
+    const storage = createMockStorage();
+    global.window = {
+        localStorage: storage,
+    };
+
+    try {
+        persistPlayerEconomyState(
+            {
+                credits: 2088,
+                unlockedVehicleIds: ['voltline-sled', 'apex-formula'],
+            },
+            {
+                ownerUserId: 'user-123456',
+            }
+        );
+
+        const sameAccount = readPersistedPlayerEconomyState({
+            ownerUserId: 'user-123456',
+        });
+        assert.equal(sameAccount.credits, 2088);
+        assert.deepEqual(sameAccount.unlockedVehicleIds, ['voltline-sled', 'apex-formula']);
+
+        const otherAccount = readPersistedPlayerEconomyState({
+            ownerUserId: 'user-654321',
+        });
+        assert.equal(otherAccount.credits, 0);
+        assert.deepEqual(otherAccount.unlockedVehicleIds, ['voltline-sled']);
+    } finally {
+        global.window = previousWindow;
+    }
+});
+
+test('legacy unscoped wallet cache is ignored after sign-in', async () => {
+    const { PLAYER_ECONOMY_STORAGE_KEY, readPersistedPlayerEconomyState } =
+        await playerEconomyModulePromise;
+    const previousWindow = global.window;
+    const storage = createMockStorage();
+    global.window = {
+        localStorage: storage,
+    };
+
+    try {
+        storage.setItem(
+            PLAYER_ECONOMY_STORAGE_KEY,
+            JSON.stringify({
+                credits: 2088,
+                unlockedVehicleIds: ['voltline-sled', 'apex-formula'],
+                unlockedWheelPresetIds: [
+                    'scarlet-switchblade',
+                    'photon-turbine',
+                    'obsidian-halo',
+                    'leviathan-rift',
+                ],
+            })
+        );
+
+        const authenticatedState = readPersistedPlayerEconomyState({
+            ownerUserId: 'user-123456',
+        });
+        assert.equal(authenticatedState.credits, 0);
+        assert.deepEqual(authenticatedState.unlockedVehicleIds, ['voltline-sled']);
+        assert.deepEqual(authenticatedState.unlockedWheelPresetIds, [
+            'scarlet-switchblade',
+            'photon-turbine',
+            'obsidian-halo',
+        ]);
+    } finally {
+        global.window = previousWindow;
+    }
+});
+
+function createMockStorage() {
+    const values = new Map();
+    return {
+        getItem(key) {
+            return values.has(key) ? values.get(key) : null;
+        },
+        setItem(key, value) {
+            values.set(String(key), String(value));
+        },
+        removeItem(key) {
+            values.delete(String(key));
+        },
+    };
+}
