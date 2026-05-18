@@ -74,6 +74,46 @@ Apply the Storage bucket/policy SQL in Supabase:
 - `supabase/billboard-media.sql`
 - `supabase/showroom-intro-media.sql`
 
+### Branded Auth Emails
+
+If account emails still arrive as `Supabase Auth <noreply@mail.app.supabase.io>`, the project is
+still using Supabase's default SMTP sender. For a production-style setup, switch Auth email sending
+to your own SMTP/domain and push branded templates:
+
+```bash
+SUPABASE_MANAGEMENT_TOKEN=...
+SUPABASE_PROJECT_REF=your-project-ref
+SUPABASE_AUTH_SMTP_HOST=smtp.resend.com
+SUPABASE_AUTH_SMTP_PORT=465
+SUPABASE_AUTH_SMTP_USER=resend
+SUPABASE_AUTH_SMTP_PASS=...
+SUPABASE_AUTH_FROM_EMAIL=no-reply@auth.minefield.games
+SUPABASE_AUTH_SENDER_NAME="Minefield Drift"
+npm run supabase:auth-email -- --live
+```
+
+If you use Resend, the script can fill in the SMTP host, port, and username automatically from a
+single API key:
+
+```bash
+SUPABASE_MANAGEMENT_TOKEN=...
+SUPABASE_PROJECT_REF=your-project-ref
+RESEND_API_KEY=re_...
+RESEND_FROM_EMAIL=no-reply@auth.minefield.games
+SUPABASE_AUTH_SENDER_NAME="Minefield Drift"
+npm run supabase:auth-email -- --live
+```
+
+Notes:
+
+- the script reads templates from `supabase/auth-email-templates/`
+- run `npm run supabase:auth-email` first for a dry run preview
+- if SMTP vars are missing, only the HTML templates are updated and the sender will still show as
+  `Supabase Auth`
+- for Resend, verify the sending domain first and then use any address on that verified domain
+- use a dedicated auth sender/domain (`no-reply@auth.your-domain`) plus SPF, DKIM, and DMARC
+  records for better deliverability
+
 How it works:
 
 - profile photos are stored in the authenticated user's own folder inside `profile-images`

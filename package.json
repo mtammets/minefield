@@ -7,6 +7,7 @@
         "start": "node server/server.js",
         "test": "node --test tests",
         "test:e2e:account-settings": "node scripts/test-account-settings-e2e.cjs",
+        "supabase:auth-email": "node scripts/configure-supabase-auth-email.cjs",
         "format": "prettier --write \"**/*.{js,css,html,json,md}\"",
         "format:check": "prettier --check \"**/*.{js,css,html,json,md}\"",
         "check:syntax": "node scripts/check-syntax.cjs",
