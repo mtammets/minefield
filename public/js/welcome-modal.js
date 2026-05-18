@@ -1406,17 +1406,20 @@ export function createWelcomeModalController({
                 return;
             }
             const frameDt = Math.min(Math.max(dt || 0, 0), 0.05);
-            if (!transition.active && !shouldPausePreviewSpin()) {
+            const pauseShowroomPreview = shouldPauseShowroomPreview();
+            if (!pauseShowroomPreview && !transition.active && !shouldPausePreviewSpin()) {
                 previewSpinYaw += frameDt * WELCOME_CAR_SPIN_SPEED;
             }
-            updateTransition(frameDt);
-            updatePreviewVisualState(frameDt);
-            updateShowroomAtmosphere(frameDt);
-            updateShowroomCinematicState(frameDt);
             updateTaglineRotation(frameDt);
             updateWheelPresetPreviewStages(frameDt);
-            applyPreviewPose();
-            renderPreview();
+            if (!pauseShowroomPreview) {
+                updateTransition(frameDt);
+                updatePreviewVisualState(frameDt);
+                updateShowroomAtmosphere(frameDt);
+                updateShowroomCinematicState(frameDt);
+                applyPreviewPose();
+                renderPreview();
+            }
             schedulePreviewLoadingReady();
         },
         isVisible() {
@@ -1586,6 +1589,15 @@ export function createWelcomeModalController({
 
         const requestToken = introVideoState.requestToken + 1;
         introVideoState.requestToken = requestToken;
+        const currentConfig = getShowroomIntroVideoConfig();
+        if (currentConfig.available && currentConfig.url) {
+            applyShowroomIntroVideoConfig(currentConfig, {
+                restartPlayback: false,
+            });
+            showIntroVideoOverlay();
+        } else {
+            revealIntroVideoOverlay();
+        }
 
         void (async () => {
             await refreshManagedShowroomIntroVideoSource();
@@ -1597,7 +1609,9 @@ export function createWelcomeModalController({
             ) {
                 return;
             }
-            showIntroVideoOverlay();
+            if (!introVideoState.active || introVideoOverlayEl.hidden) {
+                showIntroVideoOverlay();
+            }
         })();
     }
 
@@ -1616,10 +1630,15 @@ export function createWelcomeModalController({
         if (
             rootEl.hidden ||
             launchSequenceState.active ||
-            shouldDeferIntroVideoUntilAuthReady() ||
             shouldHideIntroVideoForCurrentView()
         ) {
             hideIntroVideoOverlay({ markDismissed: false, resetPlayback: true });
+            return;
+        }
+        if (shouldDeferIntroVideoUntilAuthReady()) {
+            if (!introVideoState.dismissed) {
+                revealIntroVideoOverlay();
+            }
             return;
         }
         if (introVideoState.active && !introVideoOverlayEl.hidden) {
@@ -1838,17 +1857,18 @@ export function createWelcomeModalController({
 
     function initializePreviewLoadingUi() {
         if (previewShellEl) {
-            previewShellEl.dataset.previewLoading = previewLoadingState.active ? 'true' : 'false';
+            previewShellEl.dataset.previewLoading = 'false';
         }
         if (!previewLoadingState.active) {
             return;
         }
-        previewLoadingState.hidden = false;
-        previewLoadingState.ready = false;
-        previewLoadingEl.hidden = false;
+        previewLoadingState.hidden = true;
+        previewLoadingState.ready = true;
+        previewLoadingState.progress = 1;
+        previewLoadingState.targetProgress = 1;
+        previewLoadingEl.hidden = true;
         previewLoadingEl.classList.remove('is-hiding');
-        previewLoadingEl.setAttribute('aria-hidden', 'false');
-        setPreviewLoadingProgress(0);
+        previewLoadingEl.setAttribute('aria-hidden', 'true');
     }
 
     function startPreviewLoadingAnimation() {
@@ -1960,7 +1980,7 @@ export function createWelcomeModalController({
         return 0.88 + tail * 0.06;
     }
 
-    function hidePreviewLoadingUi() {
+    function hidePreviewLoadingUi({ immediate = false } = {}) {
         if (!previewLoadingState.active || previewLoadingState.hidden) {
             return;
         }
@@ -1981,6 +2001,13 @@ export function createWelcomeModalController({
         if (previewShellEl) {
             previewShellEl.dataset.previewLoading = 'false';
         }
+        if (immediate) {
+            previewLoadingEl.hidden = true;
+            previewLoadingEl.classList.remove('is-hiding');
+            previewLoadingEl.setAttribute('aria-hidden', 'true');
+            previewLoadingState.hideTimeoutHandle = null;
+            return;
+        }
         previewLoadingEl.classList.add('is-hiding');
         previewLoadingEl.setAttribute('aria-hidden', 'true');
         previewLoadingState.hideTimeoutHandle = window.setTimeout(() => {
@@ -1998,6 +2025,25 @@ export function createWelcomeModalController({
         ) {
             return;
         }
+        revealIntroVideoOverlay();
+        try {
+            introVideoEl.currentTime = 0;
+        } catch {
+            // Ignore browsers that block seeking before metadata is ready.
+        }
+        const playPromise = introVideoEl.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+            playPromise.catch(() => {
+                hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
+            });
+        }
+    }
+
+    function revealIntroVideoOverlay() {
+        if (!introVideoState.available) {
+            return;
+        }
+        hidePreviewLoadingUi({ immediate: true });
         if (introVideoState.hideTimeoutHandle != null) {
             window.clearTimeout(introVideoState.hideTimeoutHandle);
             introVideoState.hideTimeoutHandle = null;
@@ -2010,17 +2056,6 @@ export function createWelcomeModalController({
             previewShellEl.dataset.introVideoActive = 'true';
         }
         bindIntroVideoDismissListeners();
-        try {
-            introVideoEl.currentTime = 0;
-        } catch {
-            // Ignore browsers that block seeking before metadata is ready.
-        }
-        const playPromise = introVideoEl.play();
-        if (playPromise && typeof playPromise.catch === 'function') {
-            playPromise.catch(() => {
-                hideIntroVideoOverlay({ markDismissed: true, resetPlayback: true });
-            });
-        }
     }
 
     function hideIntroVideoOverlay({ markDismissed = false, resetPlayback = false } = {}) {
@@ -6045,6 +6080,10 @@ export function createWelcomeModalController({
             showroomCinematicState.active ||
             showroomCinematicState.blend > 0.001
         );
+    }
+
+    function shouldPauseShowroomPreview() {
+        return introVideoState.active;
     }
 
     function syncPreviewInteractionUi() {

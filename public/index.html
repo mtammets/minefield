@@ -5,6 +5,10 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Minefield Drift</title>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <script>
+            window.__MINEFIELD_SHOWROOM_INTRO_BOOTSTRAP__ =
+                __MINEFIELD_SHOWROOM_INTRO_BOOTSTRAP_JSON__;
+        </script>
         <script src="js/runtime-mode-boot.js"></script>
         <!-- Stiilide viide -->
         <link rel="stylesheet" href="css/styles.css" />
@@ -1066,35 +1070,6 @@
                 </section>
                 <section id="welcomePreviewShell" class="welcomeShowroomBay">
                     <div
-                        id="welcomePreviewLoading"
-                        class="welcomePreviewLoading"
-                        role="status"
-                        aria-live="polite"
-                        aria-label="Preparing showroom preview"
-                    >
-                        <div class="welcomePreviewLoadingKicker">SHOWROOM BOOT</div>
-                        <div id="welcomePreviewLoadingStatus" class="welcomePreviewLoadingStatus">
-                            Synchronizing vehicle systems...
-                        </div>
-                        <div
-                            id="welcomePreviewLoadingProgress"
-                            class="welcomePreviewLoadingProgress"
-                            role="progressbar"
-                            aria-label="Vehicle preview loading progress"
-                            aria-valuemin="0"
-                            aria-valuemax="100"
-                            aria-valuenow="0"
-                        >
-                            <div
-                                id="welcomePreviewLoadingFill"
-                                class="welcomePreviewLoadingFill"
-                            ></div>
-                        </div>
-                        <div id="welcomePreviewLoadingPercent" class="welcomePreviewLoadingPercent">
-                            0%
-                        </div>
-                    </div>
-                    <div
                         id="welcomeIntroVideoOverlay"
                         class="welcomeIntroVideoOverlay"
                         aria-hidden="true"
@@ -1109,7 +1084,7 @@
                             playsinline
                             preload="auto"
                         >
-                            <source type="video/mp4" />
+                            <source src="__MINEFIELD_SHOWROOM_INTRO_SOURCE_URL__" type="video/mp4" />
                         </video>
                     </div>
                     <canvas

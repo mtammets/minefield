@@ -10955,6 +10955,7 @@ body.race-intro-active #botPanel {
 }
 
 .welcomePreviewLoading {
+    display: none !important;
     position: absolute;
     inset: 0;
     z-index: 7;

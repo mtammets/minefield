@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const express = require('express');
 const crypto = require('crypto');
+const fs = require('fs/promises');
 const http = require('http');
 const os = require('os');
 const path = require('path');
@@ -72,6 +73,11 @@ const {
 } = require('./room-round-state');
 
 const PORT = process.env.PORT || 3000;
+const PUBLIC_DIRECTORY_PATH = path.join(__dirname, '../public');
+const PUBLIC_INDEX_TEMPLATE_PATH = path.join(PUBLIC_DIRECTORY_PATH, 'index.html');
+const SHOWROOM_INTRO_BOOTSTRAP_JSON_PLACEHOLDER =
+    '__MINEFIELD_SHOWROOM_INTRO_BOOTSTRAP_JSON__';
+const SHOWROOM_INTRO_SOURCE_URL_PLACEHOLDER = '__MINEFIELD_SHOWROOM_INTRO_SOURCE_URL__';
 const ROOM_CODE_LENGTH = 6;
 const MAX_PLAYERS_PER_ROOM = 8;
 const MAX_ACTIVE_ROOMS = 500;
@@ -288,6 +294,7 @@ let supabaseStorageAvailabilityCache = null;
 let supabaseStorageAvailabilityCacheExpiresAt = 0;
 let supabaseStorageAvailabilityRefreshPromise = null;
 let lastSupabaseStorageAvailabilityWarning = '';
+let publicIndexTemplatePromise = null;
 let pendingGlobalLeaderboardBroadcastReason = 'update';
 let globalLeaderboardBroadcastTimer = null;
 
@@ -649,7 +656,82 @@ app.delete('/api/garage-wrap-presets/:presetId', async (req, res) => {
     }
 });
 app.use(express.json({ limit: '16kb' }));
-app.use(express.static(path.join(__dirname, '../public')));
+
+app.get(['/', '/index.html'], async (req, res, next) => {
+    try {
+        const template = await readPublicIndexTemplate();
+        const showroomIntroVideo = await resolveIndexShowroomIntroVideoConfig();
+        const bootstrapPayload = serializeInlineScriptJson(showroomIntroVideo);
+        const introSourceUrl = escapeHtmlAttribute(showroomIntroVideo?.url || '');
+        const html = template
+            .replace(SHOWROOM_INTRO_BOOTSTRAP_JSON_PLACEHOLDER, bootstrapPayload)
+            .replace(SHOWROOM_INTRO_SOURCE_URL_PLACEHOLDER, introSourceUrl);
+        res.setHeader('Cache-Control', 'no-store');
+        res.type('html').send(html);
+    } catch (error) {
+        next(error);
+    }
+});
+
+app.use(
+    express.static(PUBLIC_DIRECTORY_PATH, {
+        index: false,
+    })
+);
+
+function readPublicIndexTemplate() {
+    if (!publicIndexTemplatePromise) {
+        publicIndexTemplatePromise = fs.readFile(PUBLIC_INDEX_TEMPLATE_PATH, 'utf8').catch(
+            (error) => {
+                publicIndexTemplatePromise = null;
+                throw error;
+            }
+        );
+    }
+    return publicIndexTemplatePromise;
+}
+
+async function resolveIndexShowroomIntroVideoConfig() {
+    try {
+        return await showroomIntroVideoStore.readConfig();
+    } catch (error) {
+        console.warn('Index showroom intro video bootstrap fell back to default.', error);
+        return {
+            available: true,
+            isCustom: false,
+            canReset: false,
+            sourceLabel: 'Built-in default',
+            statusText: 'Using built-in showroom demo.',
+            fileName: 'Demo.mp4',
+            originalFileName: '',
+            mimeType: 'video/mp4',
+            uploadedMimeType: '',
+            width: 1680,
+            height: 900,
+            frameRate: 30,
+            sizeBytes: 0,
+            updatedAt: null,
+            url: '/assets/Demo/Demo.mp4',
+        };
+    }
+}
+
+function serializeInlineScriptJson(value) {
+    return JSON.stringify(value ?? null)
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/&/g, '\\u0026')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+}
+
+function escapeHtmlAttribute(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
 
 app.get('/api/ping', (req, res) => {
     res.json({

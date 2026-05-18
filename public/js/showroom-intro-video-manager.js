@@ -6,11 +6,12 @@ const SHOWROOM_INTRO_VIDEO_DEFAULT_FRAME_RATE = 30;
 const SHOWROOM_INTRO_VIDEO_UPLOAD_ACCEPT =
     'video/mp4,video/webm,video/quicktime,video/x-m4v,.mov,.mp4,.webm,.m4v';
 const SHOWROOM_INTRO_VIDEO_MAX_UPLOAD_BYTES = 300 * 1024 * 1024;
+const SHOWROOM_INTRO_VIDEO_CACHE_KEY = 'minefield-showroom-intro-video-config-v1';
 
 export const SHOWROOM_INTRO_VIDEO_UPDATED_EVENT = 'silentdrift:showroom-intro-video-updated';
 
 const showroomIntroVideoState = {
-    config: createPendingShowroomIntroVideoConfig(),
+    config: createBootstrapShowroomIntroVideoConfig(),
     initializationPromise: null,
 };
 
@@ -101,6 +102,7 @@ export async function resetShowroomIntroVideo() {
 
 function setShowroomIntroVideoConfig(config) {
     showroomIntroVideoState.config = normalizeShowroomIntroVideoConfig(config);
+    persistShowroomIntroVideoConfig(showroomIntroVideoState.config);
     dispatchShowroomIntroVideoUpdate(showroomIntroVideoState.config);
     return getShowroomIntroVideoConfig();
 }
@@ -137,6 +139,19 @@ function createDefaultShowroomIntroVideoConfig() {
     };
 }
 
+function createBootstrapShowroomIntroVideoConfig() {
+    const windowBootstrapConfig = readWindowBootstrapShowroomIntroVideoConfig();
+    if (windowBootstrapConfig?.available && windowBootstrapConfig.url) {
+        persistShowroomIntroVideoConfig(windowBootstrapConfig);
+        return windowBootstrapConfig;
+    }
+    const persistedConfig = readPersistedShowroomIntroVideoConfig();
+    if (persistedConfig?.available && persistedConfig.url) {
+        return persistedConfig;
+    }
+    return createDefaultShowroomIntroVideoConfig();
+}
+
 function createPendingShowroomIntroVideoConfig() {
     return {
         available: false,
@@ -156,6 +171,50 @@ function createPendingShowroomIntroVideoConfig() {
         url: '',
         accept: SHOWROOM_INTRO_VIDEO_UPLOAD_ACCEPT,
     };
+}
+
+function readPersistedShowroomIntroVideoConfig() {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return null;
+    }
+    try {
+        const rawValue = window.localStorage.getItem(SHOWROOM_INTRO_VIDEO_CACHE_KEY);
+        if (!rawValue) {
+            return null;
+        }
+        const parsed = JSON.parse(rawValue);
+        if (!parsed || typeof parsed !== 'object') {
+            return null;
+        }
+        return normalizeShowroomIntroVideoConfig(parsed);
+    } catch {
+        return null;
+    }
+}
+
+function readWindowBootstrapShowroomIntroVideoConfig() {
+    if (typeof window === 'undefined') {
+        return null;
+    }
+    const bootstrapConfig = window.__MINEFIELD_SHOWROOM_INTRO_BOOTSTRAP__;
+    if (!bootstrapConfig || typeof bootstrapConfig !== 'object') {
+        return null;
+    }
+    return normalizeShowroomIntroVideoConfig(bootstrapConfig);
+}
+
+function persistShowroomIntroVideoConfig(config) {
+    if (typeof window === 'undefined' || !window.localStorage) {
+        return;
+    }
+    try {
+        window.localStorage.setItem(
+            SHOWROOM_INTRO_VIDEO_CACHE_KEY,
+            JSON.stringify(normalizeShowroomIntroVideoConfig(config))
+        );
+    } catch {
+        // Ignore storage write failures.
+    }
 }
 
 function normalizeShowroomIntroVideoConfig(config) {
