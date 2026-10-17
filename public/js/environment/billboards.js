@@ -133,6 +133,13 @@ const BILLBOARD_RUNTIME_PROFILES = Object.freeze({
         trimOpacityScale: 0.82,
     }),
 });
+const LED_SCREEN_IMPACT_PROFILE_KIOSK_TOTEM = 'kiosk_totem';
+const LED_SCREEN_DAMAGE_MAX_BARS = 5;
+const LED_SCREEN_DAMAGE_FLASH_DECAY_MS = 820;
+const LED_SCREEN_DAMAGE_PULSE_DECAY_MS = 1240;
+const LED_SCREEN_DAMAGE_FLICKER_DECAY_MS = 1520;
+const LED_SCREEN_DAMAGE_BAR_MIN_DURATION_MS = 900;
+const LED_SCREEN_DAMAGE_BAR_MAX_DURATION_MS = 2300;
 
 let glowTexture = null;
 
@@ -364,6 +371,14 @@ export function updateBillboardRuntime(cityScenery, playerPosition = null) {
             runtimeProfile.visualUpdateIntervalMs <= 0 ||
             now - (screenEntry.lastVisualUpdateAt || -Infinity) >=
                 runtimeProfile.visualUpdateIntervalMs;
+        const shouldRefreshDamage =
+            shouldUpdateContent ||
+            shouldUpdateVisuals ||
+            Boolean(screenEntry.damageState?.dirty) ||
+            hasAnimatedLedScreenDamage(screenEntry);
+        if (shouldRefreshDamage) {
+            renderDamagedScreenEntry(screenEntry, now, runtimeProfile);
+        }
         if (!shouldUpdateVisuals) {
             return;
         }
@@ -906,6 +921,7 @@ function createStreetKioskMesh({
         screenEntries,
         cycleIntervalMs,
         phaseOffsetMs,
+        impactProfile: LED_SCREEN_IMPACT_PROFILE_KIOSK_TOTEM,
         styleConfig: {
             depth: 0.92,
             framePadding: 0.14,
@@ -1392,6 +1408,7 @@ function createDisplayPanel({
     registerRuntimeEntry = true,
     initialTexture = null,
     initialAssetKey = null,
+    impactProfile = '',
 }) {
     const group = new THREE.Group();
     const depth = styleConfig.depth ?? 0.52;
@@ -1472,6 +1489,7 @@ function createDisplayPanel({
         defaultPlaylistKeys: playlistKeys.slice(),
         defaultAssetKey: resolvedInitialAssetKey,
         currentIndex: -1,
+        currentAssetKey: resolvedInitialAssetKey,
         cycleIntervalMs: Math.max(2800, cycleIntervalMs),
         phaseOffsetMs,
         pulseSpeed: 0.002 + Math.random() * 0.0008,
@@ -1479,6 +1497,8 @@ function createDisplayPanel({
         screenMaterials,
         glowMaterials,
         trimMaterials,
+        impactProfile,
+        damageState: null,
         aspect: width / height,
         worldX: Number.NaN,
         worldY: Number.NaN,
@@ -1498,6 +1518,22 @@ function createDisplayPanel({
             applyScreenAsset(screenEntry, 0);
         },
     };
+    assignLedScreenImpactReceiver(frontScreen, screenEntry);
+    for (let index = 0; index < group.children.length; index += 1) {
+        const child = group.children[index];
+        if (child !== frontScreen && child?.isMesh && child.geometry === screenGeometry) {
+            assignLedScreenImpactReceiver(child, screenEntry);
+        }
+    }
+    if (impactProfile) {
+        addLedScreenImpactPlanes(group, {
+            width,
+            height,
+            depth,
+            doubleSided,
+            screenEntry,
+        });
+    }
     if (registerRuntimeEntry && screenEntries) {
         screenEntries.push(screenEntry);
         applyScreenAsset(screenEntry, 0);
@@ -1643,8 +1679,13 @@ function applyScreenAsset(screenEntry, assetIndex) {
         return;
     }
 
-    const texture = getBillboardTexture(assetKey, screenEntry.aspect);
-    setScreenEntryTexture(screenEntry, texture);
+    screenEntry.currentAssetKey = assetKey;
+    if (screenEntry.damageState?.texture) {
+        screenEntry.damageState.dirty = true;
+    } else {
+        const texture = getBillboardTexture(assetKey, screenEntry.aspect);
+        setScreenEntryTexture(screenEntry, texture);
+    }
     screenEntry.glowMaterials.forEach((material) => {
         material.color.setHex(asset.glowColor);
     });
@@ -1652,6 +1693,486 @@ function applyScreenAsset(screenEntry, assetIndex) {
         material.color.setHex(asset.accentColor);
     });
     screenEntry.currentIndex = assetIndex;
+}
+
+function assignLedScreenImpactReceiver(mesh, screenEntry) {
+    if (!mesh?.userData || !screenEntry?.impactProfile) {
+        return;
+    }
+    mesh.userData.ledScreenImpactEntry = screenEntry;
+}
+
+function addLedScreenImpactPlanes(
+    group,
+    { width = 1, height = 1, depth = 0.5, doubleSided = true, screenEntry = null } = {}
+) {
+    if (!group || !screenEntry?.impactProfile) {
+        return;
+    }
+
+    const geometry = new THREE.PlaneGeometry(width, height);
+    const material = new THREE.MeshBasicMaterial({
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        toneMapped: false,
+    });
+    material.colorWrite = false;
+
+    const frontPlane = new THREE.Mesh(geometry, material);
+    frontPlane.position.z = depth * 0.5 + 0.03;
+    assignLedScreenImpactReceiver(frontPlane, screenEntry);
+    group.add(frontPlane);
+
+    if (!doubleSided) {
+        return;
+    }
+
+    const backPlane = new THREE.Mesh(geometry, material.clone());
+    backPlane.position.z = -(depth * 0.5 + 0.03);
+    backPlane.rotation.y = Math.PI;
+    backPlane.material.colorWrite = false;
+    assignLedScreenImpactReceiver(backPlane, screenEntry);
+    group.add(backPlane);
+}
+
+function hasAnimatedLedScreenDamage(screenEntry) {
+    const damageState = screenEntry?.damageState;
+    if (!damageState) {
+        return false;
+    }
+    if (damageState.flicker > 0.001 || damageState.pulse > 0.001) {
+        return true;
+    }
+    if (Array.isArray(damageState.bars) && damageState.bars.length > 0) {
+        return true;
+    }
+    return Array.isArray(damageState.hits)
+        ? damageState.hits.some((hit) => Number(hit?.flash) > 0.001)
+        : false;
+}
+
+function ensureLedScreenDamageState(screenEntry) {
+    if (!screenEntry || screenEntry.impactProfile !== LED_SCREEN_IMPACT_PROFILE_KIOSK_TOTEM) {
+        return null;
+    }
+    if (screenEntry.damageState?.texture) {
+        return screenEntry.damageState;
+    }
+
+    const canvas = document.createElement('canvas');
+    const canvasSize = resolveBillboardCanvasSize(screenEntry.aspect);
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
+
+    const bufferCanvas = document.createElement('canvas');
+    bufferCanvas.width = canvas.width;
+    bufferCanvas.height = canvas.height;
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+
+    const damageState = {
+        texture,
+        canvas,
+        ctx: canvas.getContext('2d'),
+        bufferCanvas,
+        bufferCtx: bufferCanvas.getContext('2d'),
+        hits: [],
+        bars: [],
+        dirty: true,
+        flicker: 0,
+        pulse: 0,
+        lastRenderAt: -Infinity,
+        loadedImageUrl: '',
+        pendingImageUrl: '',
+        loadedImage: null,
+    };
+    screenEntry.damageState = damageState;
+    setScreenEntryTexture(screenEntry, texture);
+    return damageState;
+}
+
+function resolveCurrentBillboardAsset(screenEntry) {
+    const assetKey =
+        screenEntry?.currentAssetKey ||
+        screenEntry?.playlistKeys?.[screenEntry?.currentIndex] ||
+        screenEntry?.defaultAssetKey ||
+        '';
+    return BILLBOARD_ASSETS[assetKey] || null;
+}
+
+function advanceLedScreenDamageState(damageState, now) {
+    if (!damageState) {
+        return;
+    }
+    const elapsedMs =
+        Number.isFinite(damageState.lastRenderAt) && damageState.lastRenderAt > 0
+            ? Math.max(0, now - damageState.lastRenderAt)
+            : 16;
+    const persistentFlickerFloor = Math.min(
+        0.34,
+        damageState.hits.length * 0.024 + damageState.bars.length * 0.016
+    );
+    const persistentFlashFloor = damageState.hits.length > 0 ? 0.24 : 0;
+
+    damageState.flicker = Math.max(
+        persistentFlickerFloor,
+        damageState.flicker - elapsedMs / LED_SCREEN_DAMAGE_FLICKER_DECAY_MS
+    );
+    damageState.pulse = Math.max(
+        0.2,
+        damageState.pulse - elapsedMs / LED_SCREEN_DAMAGE_PULSE_DECAY_MS
+    );
+
+    for (let index = damageState.hits.length - 1; index >= 0; index -= 1) {
+        const hit = damageState.hits[index];
+        if (!hit) {
+            continue;
+        }
+        hit.flash = Math.max(
+            persistentFlashFloor,
+            Number(hit.flash) - elapsedMs / LED_SCREEN_DAMAGE_FLASH_DECAY_MS
+        );
+    }
+}
+
+function renderDamagedScreenEntry(
+    screenEntry,
+    now,
+    runtimeProfile = BILLBOARD_RUNTIME_PROFILES.near
+) {
+    const damageState = screenEntry?.damageState;
+    if (!damageState?.ctx || !damageState?.bufferCtx || !damageState?.texture) {
+        return;
+    }
+
+    advanceLedScreenDamageState(damageState, now);
+    const asset = resolveCurrentBillboardAsset(screenEntry);
+    if (!asset) {
+        return;
+    }
+
+    const ctx = damageState.ctx;
+    const canvas = damageState.canvas;
+    const width = canvas.width;
+    const height = canvas.height;
+
+    ctx.clearRect(0, 0, width, height);
+    paintBillboardAssetFrame(screenEntry, asset);
+    if (damageState.hits.length > 0) {
+        const damageLevel = THREE.MathUtils.clamp(
+            damageState.hits.length * 0.14 +
+                damageState.bars.length * 0.08 +
+                damageState.flicker * 0.22,
+            0,
+            1
+        );
+        const profileScale =
+            runtimeProfile?.key === 'far' ? 0.7 : runtimeProfile?.key === 'mid' ? 0.86 : 1;
+        const bufferCtx = damageState.bufferCtx;
+        bufferCtx.clearRect(0, 0, width, height);
+        bufferCtx.drawImage(canvas, 0, 0);
+
+        ctx.save();
+        ctx.fillStyle = `rgba(4, 8, 12, ${Math.min(0.26, damageLevel * 0.16)})`;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
+
+        drawLedDamageSliceGlitches(ctx, damageState, now, damageLevel * profileScale);
+        drawLedDamageColorBars(ctx, damageState, now, damageLevel * profileScale);
+        drawLedDamageHits(ctx, damageState, now, damageLevel);
+
+        if (damageState.flicker > 0.001) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'screen';
+            ctx.fillStyle = `rgba(255, 244, 218, ${damageState.flicker * 0.08})`;
+            ctx.fillRect(0, 0, width, height);
+            ctx.restore();
+        }
+    }
+
+    damageState.texture.needsUpdate = true;
+    damageState.lastRenderAt = now;
+    damageState.dirty = false;
+
+    function paintBillboardAssetFrame(targetScreenEntry, targetAsset) {
+        if (typeof targetAsset.drawTexture === 'function') {
+            damageState.loadedImage = null;
+            damageState.loadedImageUrl = '';
+            damageState.pendingImageUrl = '';
+            targetAsset.drawTexture(ctx, canvas, targetAsset);
+            return;
+        }
+
+        const assetUrl = typeof targetAsset.url === 'string' ? targetAsset.url.trim() : '';
+        const loadedImage =
+            assetUrl && damageState.loadedImageUrl === assetUrl ? damageState.loadedImage : null;
+        drawBillboardFallback(ctx, canvas, targetAsset);
+        if (loadedImage) {
+            drawLedCreative(ctx, canvas, loadedImage, targetAsset);
+            return;
+        }
+
+        if (assetUrl && damageState.pendingImageUrl !== assetUrl) {
+            damageState.loadedImage = null;
+            damageState.loadedImageUrl = '';
+            damageState.pendingImageUrl = assetUrl;
+            loadBillboardImage(assetUrl)
+                .then((image) => {
+                    if (damageState.pendingImageUrl !== assetUrl) {
+                        return;
+                    }
+                    damageState.loadedImage = image;
+                    damageState.loadedImageUrl = assetUrl;
+                    damageState.pendingImageUrl = '';
+                    damageState.dirty = true;
+                    renderDamagedScreenEntry(
+                        targetScreenEntry,
+                        performance.now(),
+                        BILLBOARD_RUNTIME_PROFILES[targetScreenEntry.lastRuntimeProfileKey] ||
+                            BILLBOARD_RUNTIME_PROFILES.near
+                    );
+                })
+                .catch(() => {
+                    if (damageState.pendingImageUrl === assetUrl) {
+                        damageState.pendingImageUrl = '';
+                    }
+                });
+        }
+    }
+}
+
+function drawLedDamageSliceGlitches(ctx, damageState, now, intensity = 0) {
+    const sourceCanvas = damageState?.bufferCanvas;
+    if (!sourceCanvas || intensity <= 0.001) {
+        return;
+    }
+
+    const width = sourceCanvas.width;
+    const height = sourceCanvas.height;
+    const sliceCount = Math.min(
+        7,
+        1 + damageState.bars.length + Math.max(1, Math.round(intensity * 4))
+    );
+
+    for (let index = 0; index < sliceCount; index += 1) {
+        const seed = 17.19 + index * 11.7 + damageState.hits.length * 5.1;
+        const y = pseudoRandom(seed + now * 0.00012) * height;
+        const sliceHeight = (0.022 + pseudoRandom(seed + 3.8) * 0.06) * height;
+        const drift =
+            Math.sin(now * (0.006 + pseudoRandom(seed + 9.4) * 0.018) + seed) *
+            width *
+            (0.008 + intensity * 0.032);
+        ctx.drawImage(sourceCanvas, 0, y, width, sliceHeight, drift, y, width, sliceHeight);
+    }
+}
+
+function drawLedDamageColorBars(ctx, damageState, now, intensity = 0) {
+    if (!Array.isArray(damageState?.bars) || damageState.bars.length <= 0 || intensity <= 0.001) {
+        return;
+    }
+
+    const { width, height } = damageState.canvas;
+    for (let index = 0; index < damageState.bars.length; index += 1) {
+        const bar = damageState.bars[index];
+        if (!bar) {
+            continue;
+        }
+        const lifeRatio = Number.isFinite(Number(bar.endsAt))
+            ? THREE.MathUtils.clamp(
+                  (Number(bar.endsAt) - now) / Math.max(1, Number(bar.durationMs) || 1),
+                  0,
+                  1
+              )
+            : 1;
+        const bandY = THREE.MathUtils.clamp(Number(bar.v) || 0.5, 0, 1) * height;
+        const bandHeight = THREE.MathUtils.clamp(Number(bar.height) || 0.1, 0.04, 0.22) * height;
+        const drift =
+            Math.sin(now * (0.014 + Number(bar.speed) * 0.004) + Number(bar.phase)) *
+            width *
+            (0.01 + Number(bar.drift) * 0.05);
+        const alpha = (0.16 + Number(bar.alpha) * 0.22) * lifeRatio * (0.7 + intensity * 0.6);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, bandY - bandHeight * 0.5, width, bandHeight);
+        ctx.clip();
+
+        ctx.globalCompositeOperation = 'screen';
+        ctx.fillStyle = `rgba(255, 62, 64, ${alpha})`;
+        ctx.fillRect(drift - width * 0.012, bandY - bandHeight * 0.5, width, bandHeight * 0.34);
+        ctx.fillStyle = `rgba(74, 255, 160, ${alpha * 0.86})`;
+        ctx.fillRect(-drift * 0.5, bandY - bandHeight * 0.08, width, bandHeight * 0.3);
+        ctx.fillStyle = `rgba(84, 160, 255, ${alpha * 0.94})`;
+        ctx.fillRect(drift * 0.7, bandY + bandHeight * 0.14, width, bandHeight * 0.28);
+        ctx.globalCompositeOperation = 'source-over';
+
+        ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.18})`;
+        const lineCount = 3 + Math.round(Number(bar.seed) * 4);
+        for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+            const offset = ((lineIndex + 1) / (lineCount + 1) - 0.5) * bandHeight * 0.9;
+            ctx.fillRect(0, bandY + offset, width, Math.max(1, bandHeight * 0.022));
+        }
+        ctx.restore();
+    }
+}
+
+function drawLedDamageHits(ctx, damageState, now, intensity = 0) {
+    if (!Array.isArray(damageState?.hits) || damageState.hits.length <= 0) {
+        return;
+    }
+
+    const { width, height } = damageState.canvas;
+    const minDimension = Math.min(width, height);
+    for (let index = 0; index < damageState.hits.length; index += 1) {
+        const hit = damageState.hits[index];
+        if (!hit) {
+            continue;
+        }
+        const x = THREE.MathUtils.clamp(Number(hit.u) || 0.5, 0.04, 0.96) * width;
+        const y = THREE.MathUtils.clamp(Number(hit.v) || 0.5, 0.04, 0.96) * height;
+        const radius =
+            minDimension * THREE.MathUtils.clamp(Number(hit.radius) || 0.05, 0.024, 0.12);
+        const flash = THREE.MathUtils.clamp(Number(hit.flash) || 0, 0, 1);
+        const pulse = 1 + Math.sin(now * 0.016 + Number(hit.seed) * 11.3) * 0.08 * flash;
+        const haloRadius = radius * (1.44 + flash * 0.36) * pulse;
+
+        ctx.save();
+        const halo = ctx.createRadialGradient(x, y, radius * 0.18, x, y, haloRadius);
+        halo.addColorStop(0, `rgba(255, 234, 214, ${0.14 + flash * 0.2})`);
+        halo.addColorStop(0.58, `rgba(255, 128, 94, ${0.11 + intensity * 0.12})`);
+        halo.addColorStop(1, 'rgba(14, 8, 8, 0)');
+        ctx.fillStyle = halo;
+        ctx.beginPath();
+        ctx.arc(x, y, haloRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = `rgba(240, 246, 255, ${0.16 + flash * 0.18})`;
+        ctx.lineWidth = Math.max(1.2, radius * 0.08);
+        for (let crackIndex = 0; crackIndex < 5; crackIndex += 1) {
+            const crackSeed = Number(hit.seed) * 31 + crackIndex * 1.73;
+            const angle = crackSeed + Math.sin(now * 0.002 + crackSeed) * 0.18;
+            const crackLength = radius * (1.1 + pseudoRandom(crackSeed + 2.1) * 0.95);
+            const midLength = crackLength * (0.46 + pseudoRandom(crackSeed + 5.4) * 0.16);
+            ctx.beginPath();
+            ctx.moveTo(x + Math.cos(angle) * radius * 0.22, y + Math.sin(angle) * radius * 0.22);
+            ctx.lineTo(
+                x + Math.cos(angle + 0.08) * midLength,
+                y + Math.sin(angle - 0.06) * midLength
+            );
+            ctx.lineTo(
+                x + Math.cos(angle - 0.04) * crackLength,
+                y + Math.sin(angle + 0.05) * crackLength
+            );
+            ctx.stroke();
+        }
+
+        const hole = ctx.createRadialGradient(x, y, radius * 0.12, x, y, radius);
+        hole.addColorStop(0, 'rgba(6, 6, 7, 0.98)');
+        hole.addColorStop(0.44, 'rgba(14, 12, 12, 0.96)');
+        hole.addColorStop(0.78, 'rgba(48, 18, 10, 0.72)');
+        hole.addColorStop(1, 'rgba(18, 10, 8, 0.08)');
+        ctx.fillStyle = hole;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        const pixelClusterCount = 6;
+        for (let pixelIndex = 0; pixelIndex < pixelClusterCount; pixelIndex += 1) {
+            const pixelSeed = Number(hit.seed) * 97 + pixelIndex * 13.2;
+            const distance = radius * (0.7 + pseudoRandom(pixelSeed + 1.1) * 1.12);
+            const angle = pixelSeed;
+            const pixelSize = Math.max(2, radius * (0.08 + pseudoRandom(pixelSeed + 2.6) * 0.11));
+            const pixelX = x + Math.cos(angle) * distance;
+            const pixelY = y + Math.sin(angle) * distance;
+            ctx.fillStyle =
+                pixelIndex % 3 === 0
+                    ? 'rgba(255, 86, 88, 0.52)'
+                    : pixelIndex % 3 === 1
+                      ? 'rgba(74, 255, 160, 0.46)'
+                      : 'rgba(84, 160, 255, 0.48)';
+            ctx.fillRect(pixelX, pixelY, pixelSize, pixelSize);
+        }
+        ctx.restore();
+    }
+}
+
+function pseudoRandom(seed) {
+    const raw = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+    return raw - Math.floor(raw);
+}
+
+export function applyLedScreenWeaponImpact(hitObject, impactPosition = null, impactUv = null) {
+    const screenEntry = hitObject?.userData?.ledScreenImpactEntry || null;
+    if (!screenEntry || screenEntry.impactProfile !== LED_SCREEN_IMPACT_PROFILE_KIOSK_TOTEM) {
+        return null;
+    }
+
+    const damageState = ensureLedScreenDamageState(screenEntry);
+    if (!damageState) {
+        return null;
+    }
+
+    const now = performance.now();
+    const clampedUv = {
+        u: THREE.MathUtils.clamp(Number(impactUv?.x), 0.04, 0.96),
+        v: THREE.MathUtils.clamp(1 - Number(impactUv?.y), 0.04, 0.96),
+    };
+    if (!Number.isFinite(clampedUv.u) || !Number.isFinite(clampedUv.v)) {
+        clampedUv.u = 0.5;
+        clampedUv.v = 0.5;
+    }
+
+    damageState.hits.push({
+        u: clampedUv.u,
+        v: clampedUv.v,
+        radius: 0.03 + Math.random() * 0.028,
+        flash: 1,
+        seed:
+            Math.random() * 10 +
+            (Number(impactPosition?.x) || 0) * 0.17 +
+            (Number(impactPosition?.z) || 0) * 0.11,
+    });
+
+    if (Math.random() < 0.78) {
+        const durationMs =
+            LED_SCREEN_DAMAGE_BAR_MIN_DURATION_MS +
+            Math.random() *
+                (LED_SCREEN_DAMAGE_BAR_MAX_DURATION_MS - LED_SCREEN_DAMAGE_BAR_MIN_DURATION_MS);
+        damageState.bars.push({
+            v: clampedUv.v + (Math.random() - 0.5) * 0.18,
+            height: 0.05 + Math.random() * 0.1,
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.7 + Math.random() * 1.8,
+            drift: 0.2 + Math.random() * 0.8,
+            alpha: 0.5 + Math.random() * 0.5,
+            seed: Math.random(),
+            durationMs,
+            endsAt: Number.POSITIVE_INFINITY,
+        });
+        while (damageState.bars.length > LED_SCREEN_DAMAGE_MAX_BARS) {
+            damageState.bars.shift();
+        }
+    }
+
+    damageState.flicker = Math.min(1, Math.max(damageState.flicker * 0.64, 0.34));
+    damageState.pulse = 1;
+    damageState.dirty = true;
+    renderDamagedScreenEntry(
+        screenEntry,
+        now,
+        BILLBOARD_RUNTIME_PROFILES[screenEntry.lastRuntimeProfileKey] ||
+            BILLBOARD_RUNTIME_PROFILES.near
+    );
+
+    return {
+        ok: true,
+        hitCount: damageState.hits.length,
+        barCount: damageState.bars.length,
+    };
 }
 
 function createLedScreenMaterial(texture, styleConfig = {}) {

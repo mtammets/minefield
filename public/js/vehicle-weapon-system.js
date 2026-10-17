@@ -1,4 +1,5 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { applyLedScreenWeaponImpact } from './environment/billboards.js';
 import {
     appendLorienVelmoreDoorTraceObstacles,
     applyLorienVelmoreDoorWeaponImpact,
@@ -346,7 +347,11 @@ export function createVehicleWeaponSystem({
     }
 
     function shouldIgnoreWeaponSoftOccluderObstacle(obstacle) {
-        return obstacle?.category === 'lamp_post';
+        return (
+            obstacle?.category === 'lamp_post' ||
+            obstacle?.category === 'billboard_support' ||
+            obstacle?.category === 'billboard_kiosk'
+        );
     }
 
     function shouldIgnoreWeaponSoftOccluderSceneRaycastHit(hitObject) {
@@ -433,6 +438,7 @@ export function createVehicleWeaponSystem({
                 point: intersection.point.clone(),
                 normal: weaponSceneImpactNormal.clone(),
                 object: hitObject,
+                uv: intersection.uv?.clone?.() || null,
                 distance: intersection.distance,
             };
         }
@@ -1484,10 +1490,12 @@ export function createVehicleWeaponSystem({
         });
         let resolvedHitTarget = hitTarget;
         let obstacleNormal = null;
+        let obstacleImpactData = null;
         if (obstacleImpact) {
             shotEndPoint.copy(obstacleImpact.point);
             resolvedHitTarget = null;
             obstacleNormal = obstacleImpact.normal.clone();
+            obstacleImpactData = obstacleImpact;
         }
 
         const projectileSpeed =
@@ -1502,6 +1510,7 @@ export function createVehicleWeaponSystem({
             direction: weaponShotDirection,
             hitTarget: resolvedHitTarget,
             obstacleNormal,
+            obstacleImpactData,
             gameMode,
             speed: projectileSpeed,
         });
@@ -2007,9 +2016,11 @@ export function createVehicleWeaponSystem({
 
         let resolvedHitTarget = null;
         let obstacleNormal = null;
+        let obstacleImpactData = null;
         if (obstacleImpact) {
             shotEndPoint.copy(obstacleImpact.point);
             obstacleNormal = obstacleImpact.normal.clone();
+            obstacleImpactData = obstacleImpact;
         } else if (hitPlayer) {
             resolvedHitTarget = {
                 targetKind: 'player',
@@ -2025,6 +2036,7 @@ export function createVehicleWeaponSystem({
             direction: resolvedShotDirection,
             hitTarget: resolvedHitTarget,
             obstacleNormal,
+            obstacleImpactData,
             gameMode: 'bots',
         });
         getAudioController()?.onVehicleWeaponShot?.({
@@ -2058,6 +2070,7 @@ export function createVehicleWeaponSystem({
         direction,
         hitTarget = null,
         obstacleNormal = null,
+        obstacleImpactData = null,
         gameMode = 'bots',
         speed = PROJECTILE_SPEED,
     } = {}) {
@@ -2120,6 +2133,8 @@ export function createVehicleWeaponSystem({
                       : '',
             targetName: typeof hitTarget?.name === 'string' ? hitTarget.name : 'Target',
             obstacleNormal: obstacleNormal?.clone?.() || null,
+            obstacleImpactObject: obstacleImpactData?.object || null,
+            obstacleImpactUv: obstacleImpactData?.uv?.clone?.() || null,
             gameMode,
         });
     }
@@ -2387,13 +2402,21 @@ export function createVehicleWeaponSystem({
         }
 
         spawnImpact(projectile.impactPoint, projectile.direction, Boolean(projectile.targetKind));
-        if (projectile.obstacleNormal) {
+        const hitLedScreen = Boolean(
+            projectile.obstacleImpactObject?.userData?.ledScreenImpactEntry
+        );
+        if (projectile.obstacleNormal && !hitLedScreen) {
             spawnBulletMark(
                 projectile.impactPoint,
                 projectile.obstacleNormal,
                 Boolean(projectile.targetKind)
             );
         }
+        applyLedScreenWeaponImpact(
+            projectile.obstacleImpactObject,
+            projectile.impactPoint,
+            projectile.obstacleImpactUv
+        );
         applyLorienVelmoreDoorWeaponImpact(getBuildingLayer(), projectile.impactPoint);
         const impactDistanceMeters = Number(projectile.impactPoint.distanceTo?.(car.position)) || 0;
 
