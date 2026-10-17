@@ -4,9 +4,11 @@
     "private": true,
     "main": "server/server.js",
     "scripts": {
+        "dev": "node --watch server/server.js",
         "start": "node server/server.js",
         "test": "node --test tests",
         "test:e2e:account-settings": "node scripts/test-account-settings-e2e.cjs",
+        "test:e2e:combat-rendering": "node scripts/test-combat-rendering-e2e.cjs",
         "supabase:auth-email": "node scripts/configure-supabase-auth-email.cjs",
         "format": "prettier --write \"**/*.{js,css,html,json,md}\"",
         "format:check": "prettier --check \"**/*.{js,css,html,json,md}\"",

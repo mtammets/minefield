@@ -6059,7 +6059,7 @@ export function createWelcomeModalController({
             1,
             Math.round(previewCanvasEl.clientHeight || previewCanvasEl.height || 300)
         );
-        previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1));
         previewRenderer.setSize(width, height, false);
         previewCamera.aspect = width / height;
         previewCamera.updateProjectionMatrix();

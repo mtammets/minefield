@@ -178,6 +178,7 @@ export function createInputController(options = {}) {
                 matchesAction(ACTION_IDS.restartRound) ||
                 matchesAction(ACTION_IDS.restartFromScoreboard) ||
                 matchesAction(ACTION_IDS.pauseToggle) ||
+                matchesAction(ACTION_IDS.controlsHelp) ||
                 matchesAction(ACTION_IDS.cameraTuneToggle) ||
                 matchesAction(ACTION_IDS.roofMenuNext) ||
                 matchesAction(ACTION_IDS.roofMenuPrevious) ||
@@ -214,6 +215,16 @@ export function createInputController(options = {}) {
         const inputContext = getInputContext();
         const worldMapVisible = Boolean(isWorldMapVisible());
         const cameraTuneModeActive = Boolean(getIsCameraTuneModeActive());
+
+        if (matchesAction(ACTION_IDS.controlsHelp)) {
+            event.preventDefault();
+            if (isKeyDown && !isRaceIntroActive && !finalScoreboardUi.isVisible()) {
+                releaseVehicleWeaponTrigger();
+                releaseVehicleWeaponZoom();
+                onSetPauseState(!getIsGamePaused());
+            }
+            return;
+        }
 
         if (matchesAction(ACTION_IDS.pauseToggle)) {
             event.preventDefault();

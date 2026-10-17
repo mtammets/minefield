@@ -250,6 +250,7 @@ function addLightsToCar(car, lightConfig = {}) {
         enableTaillightSignature = true,
         enableTaillightHalo = true,
         enableReverseLights = true,
+        enableReversePointLights = true,
         accentLedColor = ACCENT_LED_COLOR,
         accentLedSecondaryColor = ACCENT_LED_SECONDARY_COLOR,
         accentBaseEmissive = 0.95,
@@ -1325,15 +1326,21 @@ function addLightsToCar(car, lightConfig = {}) {
             reverseLightsGroup.add(reverseMesh);
             reverseLensMaterials.push(reverseMaterial);
 
-            const reversePoint = createPoint({
-                color: 0xf4f9ff,
-                intensity: 0,
-                distance: reverseLightDistance,
-                decay: reverseLightDecay,
-                position: [centerX + sideSign * reverseXOffset, centerY - 0.012, centerZ + 0.01],
-                parent: reverseLightsGroup,
-            });
-            reversePointLights.push(reversePoint);
+            if (enableReversePointLights) {
+                const reversePoint = createPoint({
+                    color: 0xf4f9ff,
+                    intensity: 0,
+                    distance: reverseLightDistance,
+                    decay: reverseLightDecay,
+                    position: [
+                        centerX + sideSign * reverseXOffset,
+                        centerY - 0.012,
+                        centerZ + 0.01,
+                    ],
+                    parent: reverseLightsGroup,
+                });
+                reversePointLights.push(reversePoint);
+            }
         }
     }
 

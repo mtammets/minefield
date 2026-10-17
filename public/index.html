@@ -1084,7 +1084,10 @@
                             playsinline
                             preload="auto"
                         >
-                            <source src="__MINEFIELD_SHOWROOM_INTRO_SOURCE_URL__" type="video/mp4" />
+                            <source
+                                src="__MINEFIELD_SHOWROOM_INTRO_SOURCE_URL__"
+                                type="video/mp4"
+                            />
                         </video>
                     </div>
                     <canvas
@@ -1703,9 +1706,14 @@
                 </div>
             </div>
         </div>
-        <div id="pauseModal" aria-label="Pause menu" aria-live="polite" hidden>
+        <div id="pauseModal" role="dialog" aria-modal="true" aria-label="Pause and controls" hidden>
             <div class="pauseCard">
                 <div id="pauseTitle">PAUSE</div>
+                <section
+                    id="pauseControlsPanel"
+                    class="controlsPanelHost controlsPanelHostPause"
+                    aria-label="Driving controls"
+                ></section>
                 <div id="pauseGraphicsPanel" class="pauseGraphicsPanel">
                     <div class="pauseGraphicsHeader">
                         <span class="pauseGraphicsLabel">GRAPHICS</span>
@@ -1726,11 +1734,6 @@
                         </button>
                     </div>
                 </div>
-                <section
-                    id="pauseControlsPanel"
-                    class="controlsPanelHost controlsPanelHostPause"
-                    aria-label="Driving controls"
-                ></section>
                 <div class="pauseActions">
                     <button id="pauseExitBtn" class="pauseBtn exit" type="button">EXIT</button>
                     <button id="pauseResumeBtn" class="pauseBtn resume" type="button">

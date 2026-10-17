@@ -1,4 +1,5 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.module.js';
+import { installPersistentVehicleLights } from './persistent-vehicle-lights.js';
 
 export function initializeScene({
     sceneBackgroundColor,
@@ -15,6 +16,7 @@ export function initializeScene({
     scene.background = sceneBackgroundColor;
     scene.fog = sceneFog;
     scene.add(ambientLight, skyLight, sunLight, car, ground, cityScenery, worldBoundary);
+    installPersistentVehicleLights(scene, car);
     return scene;
 }
 

@@ -254,12 +254,10 @@ const selectedCarWheelPresetId = resolveOwnedWheelPresetIdForEconomy(
 );
 const selectedCarSkinPreset = getCarSkinPresetById(selectedCarSkinId);
 const selectedCarColorHex = resolvePlayerCarColorHex(selectedCarSkinPreset.bodyColor);
-const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(
-    GRAPHICS_QUALITY_MODES.balanced
-);
+const persistedGraphicsQualityMode = readPersistedGraphicsQualityMode(GRAPHICS_QUALITY_MODES.auto);
 const initialGraphicsQualityMode = GRAPHICS_PRESET_MODE_ORDER.includes(persistedGraphicsQualityMode)
     ? persistedGraphicsQualityMode
-    : GRAPHICS_QUALITY_MODES.balanced;
+    : GRAPHICS_QUALITY_MODES.auto;
 let gameplayPanelsHidden = readPersistedHideGameplayPanels(false);
 document.body?.classList.toggle('gameplay-panels-hidden', gameplayPanelsHidden);
 const runtimeState = createGameRuntimeState({

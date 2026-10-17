@@ -59,6 +59,9 @@ export function createRuntimeUiControllers({
         getIsInOnlineRoom,
         getMineInventorySnapshot,
         getCombatLoadoutSnapshot,
+        onOpenControls() {
+            getGameSessionController()?.setPauseState(true);
+        },
     });
 
     const botStatusUi = createBotStatusController({

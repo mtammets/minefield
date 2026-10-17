@@ -115,6 +115,7 @@ const ufoDiskoTeeTextureCache = new Map();
 let ufoDiskoStoreFootprint = null;
 let lorienVelmoreGalleryBuilding = null;
 let ufoDiskoDoorOpenAmount = 0;
+const staticDecorMeshes = new WeakSet();
 
 export function getLorienVelmoreGalleryVideoDisplayState() {
     return lorienVelmoreGalleryVideoDisplayState;
@@ -2005,6 +2006,7 @@ function createDriveThroughBuildingMesh(baseGeometry, baseMaterial, building) {
             group.userData.lorienVelmoreRoofLiftSystems.filter(Boolean);
     }
 
+    batchStaticDecorMeshes(group);
     return group;
 }
 
@@ -3696,6 +3698,7 @@ function addDecorBox(group, baseGeometry, material, { x, y, z, width, height, de
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     group.add(mesh);
+    staticDecorMeshes.add(mesh);
     return mesh;
 }
 
@@ -3712,7 +3715,52 @@ function addRotatedDecorBox(
     mesh.castShadow = false;
     mesh.receiveShadow = false;
     group.add(mesh);
+    staticDecorMeshes.add(mesh);
     return mesh;
+}
+
+function batchStaticDecorMeshes(root) {
+    const parents = [];
+    root.traverse((node) => {
+        if (node.children.length) {
+            parents.push(node);
+        }
+    });
+    for (const parent of parents) {
+        const batches = new Map();
+        for (const mesh of parent.children) {
+            // Preserve independently controlled meshes and transparent depth sorting.
+            if (
+                !staticDecorMeshes.has(mesh) ||
+                !mesh.visible ||
+                mesh.children.length ||
+                mesh.material.transparent ||
+                Object.keys(mesh.userData).length
+            ) {
+                continue;
+            }
+            const key = `${mesh.geometry.id}:${mesh.material.id}`;
+            const batch = batches.get(key) || [];
+            batch.push(mesh);
+            batches.set(key, batch);
+        }
+        for (const meshes of batches.values()) {
+            if (meshes.length < 3) {
+                continue;
+            }
+            const first = meshes[0];
+            const batch = new THREE.InstancedMesh(first.geometry, first.material, meshes.length);
+            batch.name = 'static_building_details';
+            meshes.forEach((mesh, index) => {
+                mesh.updateMatrix();
+                batch.setMatrixAt(index, mesh.matrix);
+                parent.remove(mesh);
+            });
+            batch.instanceMatrix.needsUpdate = true;
+            batch.computeBoundingSphere();
+            parent.add(batch);
+        }
+    }
 }
 
 function registerLorienVelmoreAccentMaterial(group, material) {

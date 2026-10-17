@@ -147,6 +147,7 @@ const weaponSceneRayDirection = new THREE.Vector3();
 const weaponSceneImpactNormal = new THREE.Vector3();
 const weaponSceneImpactFallbackNormal = new THREE.Vector3();
 const weaponSceneImpactNormalMatrix = new THREE.Matrix3();
+const weaponSceneInstanceMatrix = new THREE.Matrix4();
 const weaponTempColor = new THREE.Color();
 const weaponModeColor = new THREE.Color();
 const weaponHudProjection = new THREE.Vector3();
@@ -352,6 +353,9 @@ export function createVehicleWeaponSystem({
         return hitObject?.userData?.weaponLockSoftOccluder === true;
     }
 
+    let weaponSceneMatricesUpdated = false;
+    const weaponSceneRaycastObjects = [];
+
     function traceSceneGeometryImpact({
         start = null,
         end = null,
@@ -370,13 +374,26 @@ export function createVehicleWeaponSystem({
         }
 
         weaponSceneRayDirection.multiplyScalar(1 / rayDistance);
-        cityScenery.updateWorldMatrix(true, true);
+        if (!weaponSceneMatricesUpdated) {
+            cityScenery.updateWorldMatrix(true, true);
+            weaponSceneRaycastObjects.length = 0;
+            cityScenery.traverseVisible((object) => {
+                if (object.isMesh && !shouldIgnoreSceneRaycastHit(object)) {
+                    weaponSceneRaycastObjects.push(object);
+                }
+            });
+            weaponSceneMatricesUpdated = true;
+        }
         weaponSceneRaycaster.camera = camera || null;
         weaponSceneRaycaster.near = Math.max(0, Number(ignoreOriginRadius) || 0);
         weaponSceneRaycaster.far = rayDistance;
         weaponSceneRaycaster.set(start, weaponSceneRayDirection);
         weaponSceneIntersections.length = 0;
-        weaponSceneRaycaster.intersectObject(cityScenery, true, weaponSceneIntersections);
+        weaponSceneRaycaster.intersectObjects(
+            weaponSceneRaycastObjects,
+            false,
+            weaponSceneIntersections
+        );
 
         for (let index = 0; index < weaponSceneIntersections.length; index += 1) {
             const intersection = weaponSceneIntersections[index];
@@ -390,7 +407,13 @@ export function createVehicleWeaponSystem({
             }
 
             if (intersection.face?.normal) {
-                weaponSceneImpactNormalMatrix.getNormalMatrix(hitObject.matrixWorld);
+                if (hitObject.isInstancedMesh && intersection.instanceId != null) {
+                    hitObject.getMatrixAt(intersection.instanceId, weaponSceneInstanceMatrix);
+                    weaponSceneInstanceMatrix.premultiply(hitObject.matrixWorld);
+                    weaponSceneImpactNormalMatrix.getNormalMatrix(weaponSceneInstanceMatrix);
+                } else {
+                    weaponSceneImpactNormalMatrix.getNormalMatrix(hitObject.matrixWorld);
+                }
                 weaponSceneImpactNormal
                     .copy(intersection.face.normal)
                     .applyMatrix3(weaponSceneImpactNormalMatrix)
@@ -581,6 +604,7 @@ export function createVehicleWeaponSystem({
     };
 
     function update(deltaTime = 1 / 60, frameState = {}) {
+        weaponSceneMatricesUpdated = false;
         const dt = Math.min(Math.max(Number(deltaTime) || 0, 0), 0.05);
         state.hoverPhase += dt * 2.2;
         state.lockPulse += dt * 6.8;
@@ -633,7 +657,7 @@ export function createVehicleWeaponSystem({
         mountParent = ensureWeaponMountAttachment(car, mount, mountParent);
         const weaponMotionState = resolveWeaponMotionState(vehicleState);
         applyWeaponBasePoseToMount(mount, weaponMotionState);
-        const aimState = resolveAimState(gameMode);
+        const aimState = resolveAimState(gameMode, vehicleWeaponActive);
         state.currentLock = weaponModeActive ? aimState.lockedTarget : null;
         if (
             weaponModeActive &&
@@ -1144,7 +1168,7 @@ export function createVehicleWeaponSystem({
         return result.visibleCount > 0 ? result : null;
     }
 
-    function resolveFreeAimState() {
+    function resolveFreeAimState(traceEnvironment = true) {
         mount.root.updateWorldMatrix(true, true);
         mount.muzzleAnchor.getWorldPosition(weaponAimOrigin);
         mountParent.getWorldQuaternion(weaponBaseQuaternion);
@@ -1153,6 +1177,10 @@ export function createVehicleWeaponSystem({
         weaponAimFocusPoint
             .copy(weaponAimOrigin)
             .addScaledVector(weaponAimDirection, FREE_AIM_FOCUS_DISTANCE);
+
+        if (!traceEnvironment) {
+            return;
+        }
 
         const obstacleImpact = traceWeaponEnvironmentImpact({
             start: weaponAimOrigin,
@@ -1173,11 +1201,11 @@ export function createVehicleWeaponSystem({
         }
     }
 
-    function resolveAimState(gameMode = 'bots') {
-        resolveFreeAimState();
+    function resolveAimState(gameMode = 'bots', weaponActive = true) {
+        resolveFreeAimState(weaponActive);
         const botTrafficSystem = gameMode === 'bots' ? getBotTrafficSystem() : null;
         const lockedTarget =
-            state.hasWeapon && resolveActiveCombatMode() === COMBAT_MODE_WEAPON
+            weaponActive && state.hasWeapon && resolveActiveCombatMode() === COMBAT_MODE_WEAPON
                 ? resolveAutoLockTarget(botTrafficSystem)
                 : null;
         if (lockedTarget?.point) {
@@ -2598,7 +2626,10 @@ function createWeaponPickup(anchor, rootName = 'vx9_pickup') {
         emissiveIntensity: 1.2,
         metalness: 0.4,
         roughness: 0.1,
-        transmission: 0.12,
+        // This small glow needs transparency, not a second render of the entire city.
+        transparent: true,
+        opacity: 0.88,
+        depthWrite: false,
         clearcoat: 1,
         clearcoatRoughness: 0.04,
     });

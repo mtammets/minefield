@@ -428,7 +428,8 @@ export function createGameLoopController(options = {}) {
             }
         };
 
-        const frameDelta = Math.min(clock.getDelta(), 0.05);
+        const rawFrameDelta = clock.getDelta();
+        const frameDelta = Math.min(rawFrameDelta, 0.05);
         frameSequence = frameSequence >= 0x3fffffff ? 1 : frameSequence + 1;
         const heavyEventTokenBudget =
             frameDelta > 1 / 38
@@ -932,14 +933,20 @@ export function createGameLoopController(options = {}) {
 
         const qualityAdaptiveAllowed =
             !gamePaused && !isEditModeActive && !readWelcomeModalVisible() && !worldMapOpen;
-        maybeApplyPreRenderLoadShed({
-            adaptiveAllowed: qualityAdaptiveAllowed,
-            gameMode: readGameMode(),
-            worldMapOpen,
-            crashCollisionTriggered: frameCrashCollisionTriggered,
-            vehicleContactsCount: frameVehicleContactsCount,
-        });
         if (renderWorldSceneThisFrame) {
+            // Pixel-ratio changes clear the canvas, so apply them only before drawing a frame.
+            measureStage('quality', () => {
+                graphicsQualityController?.sampleFrame?.(rawFrameDelta, {
+                    allowAdaptive: qualityAdaptiveAllowed,
+                });
+            });
+            maybeApplyPreRenderLoadShed({
+                adaptiveAllowed: qualityAdaptiveAllowed,
+                gameMode: readGameMode(),
+                worldMapOpen,
+                crashCollisionTriggered: frameCrashCollisionTriggered,
+                vehicleContactsCount: frameVehicleContactsCount,
+            });
             updateSunLightPosition();
             measureStage('render', () => {
                 renderer.render(scene, camera);
@@ -952,12 +959,6 @@ export function createGameLoopController(options = {}) {
             gameMode: readGameMode(),
             worldMapOpen,
         });
-        measureStage('quality', () => {
-            graphicsQualityController?.sampleFrame?.(frameDelta, {
-                allowAdaptive: qualityAdaptiveAllowed,
-            });
-        });
-
         reportFrameDiagnostics(frameStartMs, frameDelta, stageDurations, {
             welcomeVisible: isWelcomeVisible,
             gameMode: readGameMode(),

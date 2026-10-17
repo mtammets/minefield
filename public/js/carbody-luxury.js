@@ -1597,7 +1597,9 @@ function createProjectedWrapOverlayMaterial(panelSize) {
         transparent: true,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: -2,
+        // The overlay is already lifted off the body. A slope-scaled depth bias
+        // pulls it in front of the raised roof screen at oblique camera angles.
+        polygonOffsetFactor: 0,
         polygonOffsetUnits: -2,
         side: THREE.FrontSide,
         toneMapped: false,

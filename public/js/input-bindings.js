@@ -5,6 +5,7 @@ export const ACTION_IDS = Object.freeze({
     driveRight: 'drive_right',
     handbrake: 'handbrake',
     pauseToggle: 'pause_toggle',
+    controlsHelp: 'controls_help',
     mapToggle: 'map_toggle',
     fullscreenToggle: 'fullscreen_toggle',
     recoverVehicle: 'recover_vehicle',
@@ -21,6 +22,7 @@ export const ACTION_IDS = Object.freeze({
     roofModeChassis: 'roof_mode_chassis',
     graphicsCycle: 'graphics_cycle',
     cameraTuneToggle: 'camera_tune_toggle',
+    cameraViewNext: 'camera_view_next',
     cameraView1: 'camera_view_1',
     cameraView2: 'camera_view_2',
     cameraView3: 'camera_view_3',
@@ -42,6 +44,7 @@ export const DEFAULT_KEY_BINDINGS = Object.freeze({
     [ACTION_IDS.driveRight]: Object.freeze(['d', 'arrowright']),
     [ACTION_IDS.handbrake]: Object.freeze(['space']),
     [ACTION_IDS.pauseToggle]: Object.freeze(['escape']),
+    [ACTION_IDS.controlsHelp]: Object.freeze(['h']),
     [ACTION_IDS.mapToggle]: Object.freeze(['m']),
     [ACTION_IDS.fullscreenToggle]: Object.freeze(['f']),
     [ACTION_IDS.recoverVehicle]: Object.freeze(['r']),
@@ -58,6 +61,7 @@ export const DEFAULT_KEY_BINDINGS = Object.freeze({
     [ACTION_IDS.roofModeChassis]: Object.freeze(['4']),
     [ACTION_IDS.graphicsCycle]: Object.freeze(['y']),
     [ACTION_IDS.cameraTuneToggle]: Object.freeze(['c']),
+    [ACTION_IDS.cameraViewNext]: Object.freeze(['v']),
     [ACTION_IDS.cameraView1]: Object.freeze(['alt+1']),
     [ACTION_IDS.cameraView2]: Object.freeze(['alt+2']),
     [ACTION_IDS.cameraView3]: Object.freeze(['alt+3']),
@@ -133,7 +137,12 @@ export function actionMatchesEvent(
         if (!parsed) {
             continue;
         }
-        if (parsed.key !== eventKey) {
+        // macOS Option shortcuts can report symbols (e.g. Option+1 -> ¡).
+        const optionKey =
+            parsed.alt && /^(Key[A-Z]|Digit[0-9])$/.test(event?.code || '')
+                ? event.code.replace(/^(Key|Digit)/, '').toLowerCase()
+                : '';
+        if (parsed.key !== eventKey && parsed.key !== optionKey) {
             continue;
         }
         if (Boolean(parsed.shift) !== Boolean(event?.shiftKey)) {

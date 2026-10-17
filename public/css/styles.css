@@ -1330,9 +1330,171 @@ canvas#gameCanvas {
 }
 
 #pauseControlsPanel .controlsPanelBody {
-    max-height: min(36vh, 320px);
+    max-height: min(48vh, 440px);
     overflow: auto;
     padding-right: 2px;
+}
+
+@media (min-width: 640px) {
+    #pauseControlsPanel.controlsPanelCard .controlsPanelBody {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+        align-items: start;
+    }
+}
+
+#gameplayControlsHud {
+    position: fixed;
+    right: clamp(14px, 2vw, 24px);
+    bottom: max(18px, env(safe-area-inset-bottom));
+    z-index: 7;
+    width: 276px;
+    padding: 13px 15px 12px;
+    box-sizing: border-box;
+    border: 1px solid rgba(154, 205, 243, 0.36);
+    border-radius: 18px;
+    background: linear-gradient(155deg, rgba(11, 23, 35, 0.94), rgba(6, 13, 22, 0.96));
+    box-shadow: 0 8px 26px rgba(0, 0, 0, 0.25);
+    color: #e9f5ff;
+    font-family: 'Sora', sans-serif;
+    pointer-events: auto;
+}
+
+#gameplayControlsHud[hidden],
+#gameplayControlsHud [hidden],
+body.gameplay-panels-hidden #gameplayControlsHud,
+body.edit-mode-active #gameplayControlsHud,
+body.world-map-open #gameplayControlsHud {
+    display: none;
+}
+
+.gameplayControlsHeader,
+.gameplayControlsRow,
+.gameplayControlsHelp {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.gameplayControlsHeader {
+    margin-bottom: 5px;
+    color: #abd1e0;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+}
+
+.gameplayControlsCollapse {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 1px solid rgba(154, 205, 243, 0.26);
+    border-radius: 8px;
+    background: rgba(154, 205, 243, 0.06);
+    color: #d9f4ff;
+    font-size: 18px;
+    cursor: pointer;
+}
+
+.gameplayControlsRow {
+    min-height: 32px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.gameplayControlsRow[data-available='false'] {
+    color: #a1b1bf;
+}
+
+#gameplayControlsHud kbd {
+    flex: 0 0 auto;
+    min-width: 27px;
+    padding: 4px 7px;
+    box-sizing: border-box;
+    border: 1px solid rgba(145, 214, 232, 0.35);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    background: rgba(107, 205, 226, 0.09);
+    color: #e3fbff;
+    font-family: inherit;
+    font-size: 10px;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.gameplayControlsHint {
+    margin: 8px 0 11px;
+    color: #a1b7c5;
+    font-size: 10px;
+    line-height: 1.5;
+}
+
+.gameplayControlsHelp {
+    width: 100%;
+    padding: 10px 0 0;
+    border: 0;
+    border-top: 1px solid rgba(154, 205, 243, 0.18);
+    background: transparent;
+    color: #9fe7ef;
+    font:
+        600 11px 'Sora',
+        sans-serif;
+    cursor: pointer;
+}
+
+.gameplayControlsHelp:hover,
+.gameplayControlsCollapse:hover {
+    color: #fff;
+}
+
+#gameplayControlsHud button:focus-visible,
+.controlsPanelBody:focus-visible {
+    outline: 2px solid #9fe7ef;
+    outline-offset: 3px;
+}
+
+@media (max-height: 740px), (max-width: 1050px) {
+    #gameplayControlsHud {
+        width: 240px;
+        padding: 9px 12px;
+        bottom: 12px;
+    }
+
+    .gameplayControlsRow {
+        min-height: 28px;
+        font-size: 10px;
+    }
+
+    .gameplayControlsRow[data-control='drive'],
+    .gameplayControlsRow[data-control='drift'] {
+        display: none;
+    }
+}
+
+@media (max-width: 640px), (max-height: 640px) {
+    #gameplayControlsHud {
+        width: 190px;
+    }
+
+    #gameplayControlsHud .gameplayControlsHeader,
+    #gameplayControlsHud .gameplayControlsKeys,
+    #gameplayControlsHud .gameplayControlsHint {
+        display: none;
+    }
+
+    .gameplayControlsHelp {
+        padding: 0;
+        border-top: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    #gameplayControlsHud {
+        bottom: max(164px, env(safe-area-inset-bottom));
+    }
 }
 
 @media (max-width: 900px) {
@@ -4662,7 +4824,9 @@ body.race-intro-active #miniMapHud {
 }
 
 .pauseCard {
-    width: min(560px, calc(100vw - 28px));
+    width: min(760px, calc(100vw - 28px));
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
     border: 1px solid rgba(157, 198, 255, 0.56);
     border-radius: 14px;
     padding: 16px;

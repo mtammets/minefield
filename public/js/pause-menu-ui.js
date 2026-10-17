@@ -18,6 +18,13 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
         return createNoopController();
     }
 
+    rootEl.setAttribute('role', 'dialog');
+    rootEl.setAttribute('aria-modal', 'true');
+    rootEl.setAttribute('aria-label', 'Pause and controls');
+    rootEl.removeAttribute('aria-live');
+    const controlsPanelEl = rootEl.querySelector('#pauseControlsPanel');
+    if (controlsPanelEl && graphicsPanelEl) graphicsPanelEl.before(controlsPanelEl);
+
     let getGraphicsQualitySnapshot = () => null;
     let onCycleGraphicsQualityMode = null;
     let getHudVisibilitySnapshot = () => null;
@@ -27,6 +34,23 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
     let lastGraphicsSignature = '';
     let lastHudSignature = '';
     let lastCameraTuneSignature = '';
+    let previousFocus = null;
+
+    rootEl.addEventListener('keydown', (event) => {
+        if (event.key !== 'Tab' || rootEl.hidden) return;
+        const focusable = [
+            ...rootEl.querySelectorAll('button:not(:disabled), [tabindex="0"]'),
+        ].filter((element) => element.getClientRects().length > 0);
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first?.focus();
+        }
+    });
 
     exitBtnEl.addEventListener('click', () => {
         onExit?.();
@@ -81,14 +105,23 @@ export function createPauseMenuController({ onExit, onResume } = {}) {
     };
 
     function show() {
+        const wasHidden = rootEl.hidden;
+        if (wasHidden) previousFocus = document.activeElement;
         rootEl.hidden = false;
         refreshGraphicsStatus();
         refreshHudVisibilityStatus();
         refreshCameraTuneStatus();
+        if (wasHidden) {
+            const controlsList = rootEl.querySelector('.controlsPanelBody');
+            (controlsList || resumeBtnEl).focus({ preventScroll: true });
+        }
     }
 
     function hide() {
+        const wasVisible = !rootEl.hidden;
         rootEl.hidden = true;
+        if (wasVisible && previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+        previousFocus = null;
     }
 
     function isVisible() {

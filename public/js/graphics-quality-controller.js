@@ -5,9 +5,10 @@ const AUTO_MAX_SCALE = 1.22;
 const AUTO_DEGRADE_STEP = 0.06;
 const AUTO_UPGRADE_STEP = 0.035;
 const AUTO_DEGRADE_THRESHOLD_MS = 18.8;
-const AUTO_UPGRADE_THRESHOLD_MS = 15.4;
+// A healthy 60 Hz display delivers frames every 16.67 ms, even with spare GPU capacity.
+const AUTO_UPGRADE_THRESHOLD_MS = 17;
 const AUTO_DEGRADE_HOLD_SEC = 0.36;
-const AUTO_UPGRADE_HOLD_SEC = 1.18;
+const AUTO_UPGRADE_HOLD_SEC = 3;
 const FRAME_TIME_SMOOTHING = 0.12;
 const STALL_GUARD_MIN_SCALE = 0.62;
 const STALL_GUARD_BASE_STEP = 0.12;
@@ -134,6 +135,7 @@ export function createGraphicsQualityController({
         activeProfileKey: AUTO_BASE_PROFILE_KEY,
         activePixelRatioCap: Number.NaN,
         appliedPixelRatio: Number.NaN,
+        pendingQualityUpdate: false,
         mapUiController,
         skidMarkController,
         stallGuardScale: 1,
@@ -176,7 +178,7 @@ export function createGraphicsQualityController({
         state.stallGuardCooldownSec = Math.max(0, state.stallGuardCooldownSec - dt);
         state.stallGuardRecoverDelaySec = Math.max(0, state.stallGuardRecoverDelaySec - dt);
 
-        let shouldApply = false;
+        let shouldApply = state.pendingQualityUpdate;
         if (state.mode === GRAPHICS_QUALITY_MODES.auto) {
             if (allowAdaptive) {
                 if (state.smoothedFrameMs > AUTO_DEGRADE_THRESHOLD_MS) {
@@ -285,11 +287,7 @@ export function createGraphicsQualityController({
             STALL_GUARD_BASE_STEP,
             STALL_GUARD_MAX_STEP
         );
-        const nextScale = clamp(
-            state.stallGuardScale - reductionStep,
-            STALL_GUARD_MIN_SCALE,
-            1
-        );
+        const nextScale = clamp(state.stallGuardScale - reductionStep, STALL_GUARD_MIN_SCALE, 1);
         const scaleChanged = Math.abs(nextScale - state.stallGuardScale) > 1e-6;
         if (scaleChanged) {
             state.stallGuardScale = nextScale;
@@ -314,10 +312,12 @@ export function createGraphicsQualityController({
         state.stallGuardRecoverAccumulatorSec = 0;
         state.stallGuardTriggerCount += 1;
 
-        applyCurrentQuality();
+        // This report arrives after rendering. Resizing here would erase the completed frame.
+        // Apply the new quality in sampleFrame, immediately before the next render instead.
+        state.pendingQualityUpdate = true;
         return {
             triggered: true,
-            applied: scaleChanged,
+            applied: false,
             stallGuardScale: state.stallGuardScale,
             pixelRatioCap: state.activePixelRatioCap,
         };
@@ -449,6 +449,7 @@ export function createGraphicsQualityController({
     }
 
     function applyCurrentQuality() {
+        state.pendingQualityUpdate = false;
         const nextProfileKey =
             state.mode === GRAPHICS_QUALITY_MODES.auto ? resolveAutoProfileKey() : state.mode;
         if (nextProfileKey !== state.activeProfileKey) {

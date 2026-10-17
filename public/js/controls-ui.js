@@ -1,89 +1,81 @@
 import { MINE_MAX_PER_OWNER } from './constants.js';
-import { ACTION_IDS, actionMatchesEvent, resolveActionBindingLabels } from './input-bindings.js';
+import { ACTION_IDS, resolveActionBindingLabels } from './input-bindings.js';
 
-const CONTROL_LAYOUTS = Object.freeze({
-    welcome: Object.freeze([
-        {
-            title: 'Core Driving',
-            rows: Object.freeze([
-                { label: 'Accelerate', actionId: ACTION_IDS.driveForward },
-                { label: 'Brake / Reverse', actionId: ACTION_IDS.driveBackward },
-                { label: 'Steer Left', actionId: ACTION_IDS.driveLeft },
-                { label: 'Steer Right', actionId: ACTION_IDS.driveRight },
-                { label: 'Handbrake Drift', actionId: ACTION_IDS.handbrake },
-            ]),
-        },
-        {
-            title: 'Session',
-            rows: Object.freeze([
-                {
-                    label: 'Tactical Map',
-                    actionId: ACTION_IDS.mapToggle,
-                },
-                { label: 'Pause / Resume', actionId: ACTION_IDS.pauseToggle },
-                {
-                    label: 'Recover Vehicle',
-                    actionId: ACTION_IDS.recoverVehicle,
-                    hint: 'Low speed',
-                },
-                { label: 'Restart Round', actionId: ACTION_IDS.restartRound },
-                { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
-                { label: 'Camera Tune', actionId: ACTION_IDS.cameraTuneToggle },
-            ]),
-        },
-        {
-            title: 'Mine Combat',
-            rows: Object.freeze([
-                {
-                    label: 'Drop Mine',
-                    actionId: ACTION_IDS.mineDrop,
-                },
-                {
-                    label: 'Use Hood Tool',
-                    actionId: ACTION_IDS.mineThrow,
-                    hint: 'Throws mine by default',
-                },
-                {
-                    label: 'Swap Hood Tool',
-                    actionId: ACTION_IDS.combatModeToggle,
-                    hint: 'Switch mine / VX-9 when online',
-                },
-            ]),
-        },
-        {
-            title: 'Vehicle Weapon',
-            rows: Object.freeze([
-                {
-                    label: 'Use Hood Tool',
-                    actionId: ACTION_IDS.mineThrow,
-                    hint: 'Fires VX-9 when weapon mode is active',
-                },
-                {
-                    label: 'Swap Hood Tool',
-                    actionId: ACTION_IDS.combatModeToggle,
-                    hint: 'Mine and VX-9 share the hood mount',
-                },
-                {
-                    label: 'Aim Zoom',
-                    actionId: ACTION_IDS.vehicleWeaponZoom,
-                    hint: 'Hold to tighten VX-9 aim',
-                },
-            ]),
-        },
-    ]),
-    pause: Object.freeze([
-        {
-            title: 'Quick Keys',
-            rows: Object.freeze([
-                { label: 'Resume', actionId: ACTION_IDS.pauseToggle },
-                { label: 'Restart Round', actionId: ACTION_IDS.restartRound },
-                { label: 'Tactical Map', actionId: ACTION_IDS.mapToggle },
-                { label: 'Recover Vehicle', actionId: ACTION_IDS.recoverVehicle },
-                { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
-            ]),
-        },
-    ]),
-});
+const CONTROL_GROUPS = Object.freeze([
+    {
+        title: 'Drive',
+        rows: [
+            { label: 'Accelerate', actionId: ACTION_IDS.driveForward },
+            { label: 'Brake / reverse', actionId: ACTION_IDS.driveBackward },
+            { label: 'Steer left', actionId: ACTION_IDS.driveLeft },
+            { label: 'Steer right', actionId: ACTION_IDS.driveRight },
+            { label: 'Handbrake / drift', actionId: ACTION_IDS.handbrake },
+        ],
+    },
+    {
+        title: 'Weapons & mines',
+        rows: [
+            { label: 'Fire VX-9', actionId: ACTION_IDS.mineThrow, hint: 'Hold in VX-9 mode' },
+            {
+                label: 'Swap mine / VX-9',
+                actionId: ACTION_IDS.combatModeToggle,
+                hint: 'Collect a VX-9 pickup to unlock',
+            },
+            {
+                label: 'Aim zoom',
+                actionId: ACTION_IDS.vehicleWeaponZoom,
+                hint: 'Hold in VX-9 mode',
+            },
+            { label: 'Throw mine forward', actionId: ACTION_IDS.mineThrow, hint: 'In mine mode' },
+            { label: 'Drop mine behind', actionId: ACTION_IDS.mineDrop },
+        ],
+    },
+    {
+        title: 'Camera',
+        rows: [
+            {
+                label: 'Next camera view',
+                actionId: ACTION_IDS.cameraViewNext,
+                hint: 'Cycle through 8 views',
+            },
+            {
+                label: 'Select a view',
+                actionRange: [ACTION_IDS.cameraView1, ACTION_IDS.cameraView8],
+                hint: 'Alt is Option (⌥) on Mac',
+            },
+            { label: 'Cinematic camera', actionId: ACTION_IDS.cameraCinematicToggle },
+            {
+                label: 'Adjust chase camera',
+                actionId: ACTION_IDS.cameraTuneToggle,
+                hint: 'Then use arrow keys; R resets, Esc returns',
+            },
+        ],
+    },
+    {
+        title: 'Session',
+        rows: [
+            { label: 'Controls / resume', actionId: ACTION_IDS.controlsHelp },
+            { label: 'Pause / resume', actionId: ACTION_IDS.pauseToggle },
+            { label: 'Recover vehicle', actionId: ACTION_IDS.recoverVehicle, hint: 'At low speed' },
+            { label: 'Restart round', actionId: ACTION_IDS.restartRound },
+            { label: 'Fullscreen', actionId: ACTION_IDS.fullscreenToggle },
+            { label: 'Graphics quality', actionId: ACTION_IDS.graphicsCycle },
+        ],
+    },
+    {
+        title: 'Car roof screen',
+        rows: [
+            { label: 'Next screen', actionId: ACTION_IDS.roofMenuNext },
+            { label: 'Previous screen', actionId: ACTION_IDS.roofMenuPrevious },
+            { label: 'Dashboard', actionId: ACTION_IDS.roofModeDashboard },
+            { label: 'Battery', actionId: ACTION_IDS.roofModeBattery },
+            { label: 'Navigation', actionId: ACTION_IDS.roofModeNavigation },
+            { label: 'Chassis', actionId: ACTION_IDS.roofModeChassis },
+        ],
+    },
+]);
+
+const CONTROL_LAYOUTS = Object.freeze({ welcome: CONTROL_GROUPS, pause: CONTROL_GROUPS });
 
 export function createControlsHelpController({
     getIsInOnlineRoom = () => false,
@@ -91,10 +83,11 @@ export function createControlsHelpController({
     getMineInventorySnapshot = () => null,
     getCombatLoadoutSnapshot = () => null,
     keyBindings = null,
+    onOpenControls = () => {},
 } = {}) {
     const welcomeHostEl = document.getElementById('welcomeControlsPanel');
     const pauseHostEl = document.getElementById('pauseControlsPanel');
-    const gameplayStarterHud = null;
+    const gameplayStarterHud = mountGameplayStarterHud(keyBindings, onOpenControls);
     const gameplayMineHud = mountGameplayMineHud(keyBindings);
     if (!welcomeHostEl && !pauseHostEl && !gameplayStarterHud && !gameplayMineHud) {
         return createNoopController();
@@ -164,7 +157,9 @@ export function createControlsHelpController({
     }
 
     function refreshCombatLoadout() {
-        gameplayMineHud?.updateCombatLoadout?.(getCombatLoadoutSnapshot());
+        const snapshot = getCombatLoadoutSnapshot();
+        gameplayStarterHud?.updateCombatLoadout?.(snapshot);
+        gameplayMineHud?.updateCombatLoadout?.(snapshot);
     }
 
     function refreshContext() {
@@ -198,6 +193,7 @@ export function createControlsHelpController({
         gameplayStarterHud?.applyState?.({
             gameplayVisible: state.gameplayVisible,
             gameMode: state.gameMode,
+            combatLoadout: getCombatLoadoutSnapshot(),
         });
         gameplayMineHud?.applyState?.({
             gameplayVisible: state.gameplayVisible,
@@ -271,12 +267,14 @@ function mountControlsHost(rootEl, surface, keyBindings) {
     headerEl.className = 'controlsPanelHeader';
     headerEl.innerHTML = `
         <div class="controlsPanelTitle">Controls</div>
-        <div class="controlsPanelKicker">Keyboard</div>
+        <div class="controlsPanelKicker">${surface === 'pause' ? 'H / Esc to resume' : 'Keyboard'}</div>
     `;
     rootEl.appendChild(headerEl);
 
     const bodyEl = document.createElement('div');
     bodyEl.className = 'controlsPanelBody';
+    bodyEl.tabIndex = 0;
+    bodyEl.setAttribute('aria-label', 'Keyboard control list');
     rootEl.appendChild(bodyEl);
 
     const groups = CONTROL_LAYOUTS[surface] || [];
@@ -370,6 +368,13 @@ function resolveRowKeyLabels(row, keyBindings = null) {
     if (Array.isArray(row?.keyLabels) && row.keyLabels.length > 0) {
         return row.keyLabels.map((entry) => String(entry || '').trim()).filter(Boolean);
     }
+    if (row?.actionRange) {
+        return [
+            row.actionRange
+                .map((actionId) => resolvePrimaryKeyLabel(actionId, keyBindings))
+                .join(' … '),
+        ];
+    }
     if (!row?.actionId) {
         return ['—'];
     }
@@ -380,494 +385,136 @@ function resolveRowKeyLabels(row, keyBindings = null) {
     return labels;
 }
 
-function mountGameplayStarterHud(keyBindings) {
+function mountGameplayStarterHud(keyBindings, onOpenControls) {
     if (typeof document === 'undefined' || !document.body) {
         return null;
     }
-
-    const actionGroups = Object.freeze([
-        {
-            name: 'drive',
-            actionIds: Object.freeze([
-                ACTION_IDS.driveForward,
-                ACTION_IDS.driveBackward,
-                ACTION_IDS.driveLeft,
-                ACTION_IDS.driveRight,
-            ]),
-        },
-        {
-            name: 'mines',
-            actionIds: Object.freeze([ACTION_IDS.mineDrop, ACTION_IDS.mineThrow]),
-        },
-        {
-            name: 'camera',
-            actionIds: Object.freeze([
-                ACTION_IDS.cameraView1,
-                ACTION_IDS.cameraView2,
-                ACTION_IDS.cameraView3,
-                ACTION_IDS.cameraView4,
-                ACTION_IDS.cameraView5,
-                ACTION_IDS.cameraView6,
-                ACTION_IDS.cameraView7,
-                ACTION_IDS.cameraView8,
-                ACTION_IDS.cameraCinematicToggle,
-            ]),
-        },
-    ]);
-    const completeCollapseDelayMs = 900;
-    const driveStartCollapseDelayMs = 520;
-    const exitAnimationMs = 260;
-    const pulseDurationMs = 220;
-    const pulseTimers = new Map();
-
     const rootEl = document.createElement('aside');
-    rootEl.id = 'starterControlsHud';
-    rootEl.setAttribute('aria-label', 'Gameplay controls');
-    rootEl.setAttribute('aria-hidden', 'true');
+    rootEl.id = 'gameplayControlsHud';
+    rootEl.setAttribute('aria-label', 'Quick controls');
     rootEl.hidden = true;
     rootEl.innerHTML = `
-        <button
-            class="starterControlsHudToggle"
-            type="button"
-            aria-label="Minimize controls"
-            title="Minimize controls"
-        ></button>
-        <div class="starterControlsHudHeader" aria-hidden="true">
-            <span class="starterControlsHudEyebrow">Controls</span>
+        <div class="gameplayControlsHeader">
+            <span>Controls</span>
+            <button class="gameplayControlsCollapse" type="button"
+                aria-controls="gameplayControlsKeys" aria-expanded="true"
+                aria-label="Minimize quick controls">−</button>
         </div>
-        <div class="starterControlsHudGrid">
-            <section
-                class="starterControlCard starterControlCard--drive"
-                data-control-group="drive"
-                aria-label="Drive with keyboard"
-            >
-                <div class="starterControlHead">
-                    <span class="starterControlLabel">Drive</span>
-                    <span class="starterControlStateDot" aria-hidden="true"></span>
-                </div>
-                <div class="starterDriveCluster" aria-hidden="true">
-                    <span class="starterKey starterKey--offset" data-drive-key="forward"></span>
-                    <span class="starterKey" data-drive-key="left"></span>
-                    <span class="starterKey" data-drive-key="backward"></span>
-                    <span class="starterKey" data-drive-key="right"></span>
-                </div>
-            </section>
-            <section
-                class="starterControlCard starterControlCard--mines"
-                data-control-group="mines"
-                aria-label="Deploy mines"
-            >
-                <div class="starterControlHead">
-                    <span class="starterControlLabel">Mines</span>
-                    <span class="starterControlStateDot" aria-hidden="true"></span>
-                </div>
-                <div class="starterActionList" aria-hidden="true">
-                    <div class="starterActionRow">
-                        <span class="starterKey" data-mine-key="drop"></span>
-                        <span class="starterActionText">Drop</span>
-                    </div>
-                    <div class="starterActionRow">
-                        <span class="starterKey" data-mine-key="throw"></span>
-                        <span class="starterActionText">Throw</span>
-                    </div>
-                </div>
-            </section>
-            <section
-                class="starterControlCard starterControlCard--camera"
-                data-control-group="camera"
-                aria-label="Switch camera views"
-            >
-                <div class="starterControlHead">
-                    <span class="starterControlLabel">Cam</span>
-                    <span class="starterControlStateDot" aria-hidden="true"></span>
-                </div>
-                <div class="starterCameraLayout" aria-hidden="true">
-                    <div class="starterCameraModifierRow">
-                        <div class="starterActionRow">
-                            <span
-                                class="starterKey starterKey--wide"
-                                data-camera-key="modifier"
-                            >
-                                +
-                            </span>
-                            <span
-                                class="starterKey starterKey--range"
-                                data-camera-key="views"
-                            >
-                                Next
-                            </span>
-                            <span class="starterActionText">Views</span>
-                        </div>
-                    </div>
-                    <div class="starterActionList starterActionList--compact">
-                        <div class="starterActionRow">
-                            <span class="starterKey" data-camera-key="cine">C</span>
-                            <span class="starterActionText">Cine</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </div>
+        <div id="gameplayControlsKeys" class="gameplayControlsKeys"></div>
+        <p class="gameplayControlsHint" data-weapon-hint></p>
+        <button class="gameplayControlsHelp" type="button" aria-controls="pauseModal">
+            <span>All controls · pause</span><kbd></kbd>
+        </button>
     `;
-    document.body.append(rootEl);
-
-    const sectionEls = {
-        drive: rootEl.querySelector('[data-control-group="drive"]'),
-        mines: rootEl.querySelector('[data-control-group="mines"]'),
-        camera: rootEl.querySelector('[data-control-group="camera"]'),
-    };
-    const collapseToggleEl = rootEl.querySelector('.starterControlsHudToggle');
-    const state = {
-        activeSession: false,
-        available: false,
-        collapseTimer: null,
-        collapsed: false,
-        gameplayVisible: false,
-        visible: false,
-        driveCollapseTriggered: false,
-    };
-
-    const keyElements = {
-        driveForward: rootEl.querySelector('[data-drive-key="forward"]'),
-        driveLeft: rootEl.querySelector('[data-drive-key="left"]'),
-        driveBackward: rootEl.querySelector('[data-drive-key="backward"]'),
-        driveRight: rootEl.querySelector('[data-drive-key="right"]'),
-        mineDrop: rootEl.querySelector('[data-mine-key="drop"]'),
-        mineThrow: rootEl.querySelector('[data-mine-key="throw"]'),
-        cameraModifier: rootEl.querySelector('[data-camera-key="modifier"]'),
-        cameraViews: rootEl.querySelector('[data-camera-key="views"]'),
-        cameraCine: rootEl.querySelector('[data-camera-key="cine"]'),
-    };
-    const trackedKeys = [
-        {
-            id: 'driveForward',
-            section: 'drive',
-            element: keyElements.driveForward,
-            actionIds: [ACTION_IDS.driveForward],
-        },
-        {
-            id: 'driveLeft',
-            section: 'drive',
-            element: keyElements.driveLeft,
-            actionIds: [ACTION_IDS.driveLeft],
-        },
-        {
-            id: 'driveBackward',
-            section: 'drive',
-            element: keyElements.driveBackward,
-            actionIds: [ACTION_IDS.driveBackward],
-        },
-        {
-            id: 'driveRight',
-            section: 'drive',
-            element: keyElements.driveRight,
-            actionIds: [ACTION_IDS.driveRight],
-        },
-        {
-            id: 'mineDrop',
-            section: 'mines',
-            element: keyElements.mineDrop,
-            actionIds: [ACTION_IDS.mineDrop],
-        },
-        {
-            id: 'mineThrow',
-            section: 'mines',
-            element: keyElements.mineThrow,
-            actionIds: [ACTION_IDS.mineThrow],
-        },
-        {
-            id: 'cameraModifier',
-            section: 'camera',
-            element: keyElements.cameraModifier,
-            actionIds: actionGroups[2].actionIds.slice(0, 8),
-        },
-        {
-            id: 'cameraViews',
-            section: 'camera',
-            element: keyElements.cameraViews,
-            actionIds: actionGroups[2].actionIds.slice(0, 8),
-        },
-        {
-            id: 'cameraCine',
-            section: 'camera',
-            element: keyElements.cameraCine,
-            actionIds: [ACTION_IDS.cameraCinematicToggle],
-        },
+    const list = rootEl.querySelector('.gameplayControlsKeys');
+    const hint = rootEl.querySelector('[data-weapon-hint]');
+    const collapseButton = rootEl.querySelector('.gameplayControlsCollapse');
+    const helpButton = rootEl.querySelector('.gameplayControlsHelp');
+    helpButton.querySelector('kbd').textContent = resolvePrimaryKeyLabel(
+        ACTION_IDS.controlsHelp,
+        keyBindings
+    );
+    const rows = new Map();
+    const definitions = [
+        [
+            'drive',
+            'Drive',
+            [
+                ACTION_IDS.driveForward,
+                ACTION_IDS.driveLeft,
+                ACTION_IDS.driveBackward,
+                ACTION_IDS.driveRight,
+            ],
+        ],
+        ['fire', 'Throw mine', [ACTION_IDS.mineThrow]],
+        ['swap', 'Swap mine / VX-9', [ACTION_IDS.combatModeToggle]],
+        ['aim', 'Drop mine behind', [ACTION_IDS.mineDrop]],
+        ['camera', 'Next camera view', [ACTION_IDS.cameraViewNext]],
+        ['drift', 'Handbrake / drift', [ACTION_IDS.handbrake]],
     ];
-    const learnedKeyIds = new Set();
-
-    if (keyElements.driveForward) {
-        keyElements.driveForward.textContent = resolvePreferredDriveKeyLabel(
-            ACTION_IDS.driveForward,
-            keyBindings
-        );
+    for (const [id, label, actions] of definitions) {
+        const row = document.createElement('div');
+        row.className = 'gameplayControlsRow';
+        row.dataset.control = id;
+        const text = document.createElement('span');
+        text.textContent = label;
+        const key = document.createElement('kbd');
+        key.textContent = actions
+            .map((action) => resolvePrimaryKeyLabel(action, keyBindings))
+            .join(' ');
+        row.append(text, key);
+        list.append(row);
+        rows.set(id, { row, text, key });
     }
-    if (keyElements.driveLeft) {
-        keyElements.driveLeft.textContent = resolvePreferredDriveKeyLabel(
-            ACTION_IDS.driveLeft,
-            keyBindings
-        );
-    }
-    if (keyElements.driveBackward) {
-        keyElements.driveBackward.textContent = resolvePreferredDriveKeyLabel(
-            ACTION_IDS.driveBackward,
-            keyBindings
-        );
-    }
-    if (keyElements.driveRight) {
-        keyElements.driveRight.textContent = resolvePreferredDriveKeyLabel(
-            ACTION_IDS.driveRight,
-            keyBindings
-        );
-    }
-    if (keyElements.mineDrop) {
-        keyElements.mineDrop.textContent = resolvePrimaryKeyLabel(ACTION_IDS.mineDrop, keyBindings);
-    }
-    if (keyElements.mineThrow) {
-        keyElements.mineThrow.textContent = resolvePrimaryKeyLabel(
-            ACTION_IDS.mineThrow,
-            keyBindings
-        );
-    }
-
-    syncLearnedState();
-    syncCollapsedState();
-
-    const onCollapseToggleClick = () => {
-        if (!state.visible || !state.available || !state.activeSession) {
-            return;
-        }
-        setCollapsed(!state.collapsed);
-    };
-
-    const onKeydown = (event) => {
-        if (!state.visible || !state.available || !state.activeSession || event?.repeat) {
-            return;
-        }
-        const matchedKeyIds = resolveTrackedKeyIds(event);
-        if (matchedKeyIds.length <= 0) {
-            return;
-        }
-        const affectedSections = new Set();
-        for (let index = 0; index < matchedKeyIds.length; index += 1) {
-            const keyId = matchedKeyIds[index];
-            pulseKey(keyId);
-            const trackedKey = trackedKeys.find((entry) => entry.id === keyId);
-            if (trackedKey?.section) {
-                affectedSections.add(trackedKey.section);
-            }
-            learnedKeyIds.add(keyId);
-        }
-        for (const sectionName of affectedSections.values()) {
-            pulseSection(sectionName);
-        }
-        syncLearnedState();
-        if (!state.driveCollapseTriggered && affectedSections.has('drive') && !state.collapsed) {
-            state.driveCollapseTriggered = true;
-            scheduleCollapse(driveStartCollapseDelayMs);
-        }
-        if (learnedKeyIds.size >= trackedKeys.length && !state.collapsed) {
-            scheduleCollapse(completeCollapseDelayMs);
-        }
-    };
-
-    collapseToggleEl?.addEventListener('click', onCollapseToggleClick);
-    window.addEventListener('keydown', onKeydown, { passive: true });
+    document.body.append(rootEl);
+    let gameplayVisible = false;
+    let collapsed = false;
+    let lastLoadout = '';
+    const onCollapse = () => setExpanded(collapsed);
+    const onHelp = () => onOpenControls();
+    collapseButton.addEventListener('click', onCollapse);
+    helpButton.addEventListener('click', onHelp);
 
     return {
-        applyState({ gameplayVisible = false, gameMode = 'bots' } = {}) {
-            const normalizedMode = normalizeGameMode(gameMode);
-            state.gameplayVisible = Boolean(gameplayVisible);
-            state.available = normalizedMode === 'online' || normalizedMode === 'bots';
-            rootEl.dataset.mode = normalizedMode;
-            syncVisibility();
+        applyState({ gameplayVisible: visible = false, combatLoadout = null } = {}) {
+            gameplayVisible = Boolean(visible);
+            rootEl.hidden = !gameplayVisible;
+            updateCombatLoadout(combatLoadout);
         },
-        notifyRoundStart() {
-            state.activeSession = true;
-            state.collapsed = false;
-            state.driveCollapseTriggered = false;
-            learnedKeyIds.clear();
-            syncLearnedState();
-            syncCollapsedState();
-            clearTimers();
-            syncVisibility();
-        },
+        notifyRoundStart() {},
+        updateCombatLoadout,
         toggleVisible() {
-            if (!state.available) {
-                return false;
-            }
-            if (!state.visible) {
-                state.activeSession = true;
-                clearTimers();
-            } else if (state.collapsed) {
-                state.collapsed = false;
-                syncCollapsedState();
-            }
-            applyVisibility(!state.visible);
-            return state.visible;
+            setExpanded(collapsed);
+            return !collapsed;
         },
-        setVisible(nextVisible) {
-            if (!nextVisible) {
-                state.activeSession = false;
-                clearTimers();
-            }
-            applyVisibility(Boolean(nextVisible));
+        setVisible(visible) {
+            setExpanded(Boolean(visible));
         },
         isVisible() {
-            return state.visible;
+            return gameplayVisible && !collapsed;
         },
         dispose() {
-            collapseToggleEl?.removeEventListener('click', onCollapseToggleClick);
-            window.removeEventListener('keydown', onKeydown, { passive: true });
-            clearTimers();
-            for (const timer of pulseTimers.values()) {
-                window.clearTimeout(timer);
-            }
+            collapseButton.removeEventListener('click', onCollapse);
+            helpButton.removeEventListener('click', onHelp);
             rootEl.remove();
         },
     };
 
-    function syncVisibility() {
-        if (!state.gameplayVisible || !state.available || !state.activeSession) {
-            applyVisibility(false, { immediate: true });
-            return;
-        }
-        applyVisibility(true);
+    function setExpanded(expanded) {
+        collapsed = !expanded;
+        rootEl.dataset.collapsed = String(collapsed);
+        list.hidden = collapsed;
+        hint.hidden = collapsed;
+        collapseButton.textContent = collapsed ? '+' : '−';
+        collapseButton.setAttribute('aria-expanded', String(expanded));
+        collapseButton.setAttribute(
+            'aria-label',
+            collapsed ? 'Expand quick controls' : 'Minimize quick controls'
+        );
     }
 
-    function syncCollapsedState() {
-        rootEl.dataset.collapsed = state.collapsed ? 'true' : 'false';
-        if (collapseToggleEl) {
-            const actionLabel = state.collapsed ? 'Expand controls' : 'Minimize controls';
-            collapseToggleEl.setAttribute('aria-label', actionLabel);
-            collapseToggleEl.setAttribute('title', actionLabel);
-        }
-    }
-
-    function applyVisibility(nextVisible, options = {}) {
-        const shouldShow = Boolean(nextVisible);
-        const immediate = Boolean(options.immediate);
-        if (shouldShow) {
-            rootEl.hidden = false;
-            rootEl.setAttribute('aria-hidden', 'false');
-            rootEl.classList.remove('is-exiting');
-            requestAnimationFrame(() => {
-                rootEl.classList.add('is-visible');
-            });
-            state.visible = true;
-            return;
-        }
-
-        rootEl.classList.remove('is-visible');
-        state.visible = false;
-        if (immediate) {
-            rootEl.classList.remove('is-exiting');
-            rootEl.hidden = true;
-            rootEl.setAttribute('aria-hidden', 'true');
-            return;
-        }
-        rootEl.classList.add('is-exiting');
-        window.setTimeout(() => {
-            if (state.visible) {
-                return;
-            }
-            rootEl.classList.remove('is-exiting');
-            rootEl.hidden = true;
-            rootEl.setAttribute('aria-hidden', 'true');
-        }, exitAnimationMs);
-    }
-
-    function resolveTrackedKeyIds(event) {
-        const matches = [];
-        for (let index = 0; index < trackedKeys.length; index += 1) {
-            const trackedKey = trackedKeys[index];
-            for (let actionIndex = 0; actionIndex < trackedKey.actionIds.length; actionIndex += 1) {
-                if (
-                    actionMatchesEvent(
-                        trackedKey.actionIds[actionIndex],
-                        event,
-                        keyBindings || undefined
-                    )
-                ) {
-                    matches.push(trackedKey.id);
-                    break;
-                }
-            }
-        }
-        return matches;
-    }
-
-    function syncLearnedState() {
-        rootEl.dataset.progress = `${learnedKeyIds.size}/${trackedKeys.length}`;
-        for (let index = 0; index < trackedKeys.length; index += 1) {
-            const trackedKey = trackedKeys[index];
-            if (!trackedKey.element) {
-                continue;
-            }
-            trackedKey.element.dataset.learned = learnedKeyIds.has(trackedKey.id)
-                ? 'true'
-                : 'false';
-        }
-        for (let index = 0; index < actionGroups.length; index += 1) {
-            const group = actionGroups[index];
-            const sectionEl = sectionEls[group.name];
-            if (!sectionEl) {
-                continue;
-            }
-            const sectionCompleted = trackedKeys
-                .filter((trackedKey) => trackedKey.section === group.name)
-                .every((trackedKey) => learnedKeyIds.has(trackedKey.id));
-            sectionEl.dataset.learned = sectionCompleted ? 'true' : 'false';
-        }
-    }
-
-    function pulseKey(keyId) {
-        const trackedKey = trackedKeys.find((entry) => entry.id === keyId);
-        const keyEl = trackedKey?.element;
-        if (!keyEl) {
-            return;
-        }
-        keyEl.classList.remove('is-pulsing');
-        void keyEl.offsetWidth;
-        keyEl.classList.add('is-pulsing');
-        window.setTimeout(() => {
-            keyEl.classList.remove('is-pulsing');
-        }, pulseDurationMs);
-    }
-
-    function pulseSection(groupName) {
-        const sectionEl = sectionEls[groupName];
-        if (!sectionEl) {
-            return;
-        }
-        sectionEl.classList.remove('is-pulsing');
-        void sectionEl.offsetWidth;
-        sectionEl.classList.add('is-pulsing');
-        window.clearTimeout(pulseTimers.get(groupName));
-        const timer = window.setTimeout(() => {
-            sectionEl.classList.remove('is-pulsing');
-            pulseTimers.delete(groupName);
-        }, pulseDurationMs);
-        pulseTimers.set(groupName, timer);
-    }
-
-    function scheduleCollapse(delayMs) {
-        window.clearTimeout(state.collapseTimer);
-        state.collapseTimer = window.setTimeout(() => {
-            setCollapsed(true);
-            state.collapseTimer = null;
-        }, delayMs);
-    }
-
-    function setCollapsed(nextCollapsed) {
-        clearTimers();
-        state.collapsed = Boolean(nextCollapsed);
-        syncCollapsedState();
-    }
-
-    function clearTimers() {
-        window.clearTimeout(state.collapseTimer);
-        state.collapseTimer = null;
+    function updateCombatLoadout(snapshot) {
+        const { hasWeapon, activeMode } = normalizeCombatLoadoutSnapshot(snapshot);
+        const signature = `${hasWeapon}:${activeMode}`;
+        if (signature === lastLoadout) return;
+        lastLoadout = signature;
+        const weaponActive = activeMode === 'weapon';
+        rows.get('fire').text.textContent = weaponActive
+            ? 'Fire VX-9 · hold'
+            : 'Throw mine forward';
+        rows.get('aim').text.textContent = weaponActive ? 'Aim zoom · hold' : 'Drop mine behind';
+        rows.get('aim').key.textContent = resolvePrimaryKeyLabel(
+            weaponActive ? ACTION_IDS.vehicleWeaponZoom : ACTION_IDS.mineDrop,
+            keyBindings
+        );
+        rows.get('swap').row.dataset.available = String(hasWeapon);
+        const fireKey = resolvePrimaryKeyLabel(ACTION_IDS.mineThrow, keyBindings);
+        const swapKey = resolvePrimaryKeyLabel(ACTION_IDS.combatModeToggle, keyBindings);
+        hint.textContent = hasWeapon
+            ? weaponActive
+                ? `VX-9 ready · release ${fireKey} to stop firing.`
+                : `Mine mode · switch to VX-9 with ${swapKey}.`
+            : 'Collect a VX-9 pickup to unlock firing.';
     }
 }
 
@@ -1097,8 +744,7 @@ function mountGameplayMineHud(keyBindings = null) {
             combatModeValueEl.textContent = snapshot.activeMode === 'weapon' ? 'VX-9' : 'MINE';
         }
         if (combatModeHintEl) {
-            combatModeHintEl.textContent =
-                snapshot.activeMode === 'weapon' ? 'T fires VX-9' : 'T throws mine';
+            combatModeHintEl.textContent = `${resolvePrimaryKeyLabel(ACTION_IDS.mineThrow, keyBindings)} ${snapshot.activeMode === 'weapon' ? 'fires VX-9 · hold' : 'throws mine'}`;
         }
         if (combatModeSwitchLabelEl) {
             combatModeSwitchLabelEl.textContent = snapshot.hasWeapon ? 'SWAP' : 'LOCKED';
@@ -1235,17 +881,6 @@ function formatCooldownLabel(remainingMs) {
 
 function resolvePrimaryKeyLabel(actionId, keyBindings = null) {
     const labels = resolveActionBindingLabels(actionId, keyBindings || undefined);
-    return labels[0] || '—';
-}
-
-function resolvePreferredDriveKeyLabel(actionId, keyBindings = null) {
-    const labels = resolveActionBindingLabels(actionId, keyBindings || undefined);
-    for (let index = 0; index < labels.length; index += 1) {
-        const label = labels[index];
-        if (label === '↑' || label === '↓' || label === '←' || label === '→') {
-            return label;
-        }
-    }
     return labels[0] || '—';
 }
 

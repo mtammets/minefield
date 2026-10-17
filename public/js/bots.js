@@ -1650,6 +1650,8 @@ function createBot(
             enableHeadlightProjectors: false,
             enableTaillightPointLights: false,
             enableAccentPointLights: false,
+            // Keep emissive lenses, but no scene lights that disappear on destruction.
+            enableReversePointLights: false,
         },
     });
 

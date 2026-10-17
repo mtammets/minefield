@@ -100,7 +100,10 @@ document.addEventListener('keydown', (event) => {
     }
 
     const normalizedKey = normalizeKeyboardKey(event?.key || '');
-    if (isCameraViewCycleEvent(event, normalizedKey)) {
+    if (
+        actionMatchesEvent(ACTION_IDS.cameraViewNext, event, DEFAULT_KEY_BINDINGS, normalizedKey) ||
+        isCameraViewCycleEvent(event, normalizedKey)
+    ) {
         event.preventDefault();
         cycleCameraViewMode();
         return;
@@ -566,11 +569,7 @@ function resolveChaseCameraTargets(car, speed, dt) {
         12.8
     );
     const chaseHeight = THREE.MathUtils.clamp(
-        THREE.MathUtils.lerp(
-            CHASE_CAMERA_HEIGHT_MIN,
-            CHASE_CAMERA_HEIGHT_MAX,
-            dynamicSpeedRatio
-        ) +
+        THREE.MathUtils.lerp(CHASE_CAMERA_HEIGHT_MIN, CHASE_CAMERA_HEIGHT_MAX, dynamicSpeedRatio) +
             heightBias * CHASE_CAMERA_HEIGHT_ADJUSTMENT,
         1,
         5.2
@@ -736,7 +735,8 @@ function createDefaultChaseCameraSettings() {
 
 function normalizeChaseCameraSettings(value = {}, fallback = createDefaultChaseCameraSettings()) {
     const source = value && typeof value === 'object' ? value : {};
-    const base = fallback && typeof fallback === 'object' ? fallback : createDefaultChaseCameraSettings();
+    const base =
+        fallback && typeof fallback === 'object' ? fallback : createDefaultChaseCameraSettings();
     return {
         distanceBias: clampChaseCameraSettingValue(source.distanceBias, base.distanceBias),
         heightBias: clampChaseCameraSettingValue(source.heightBias, base.heightBias),
@@ -754,9 +754,11 @@ function resolveFiniteNumber(value, fallback = 0) {
 
 function normalizeChaseCameraSettingPercent(value) {
     const normalized = clampChaseCameraSettingValue(value, 0);
-    return ((normalized - CHASE_CAMERA_SETTING_MIN) /
-        (CHASE_CAMERA_SETTING_MAX - CHASE_CAMERA_SETTING_MIN)) *
-        100;
+    return (
+        ((normalized - CHASE_CAMERA_SETTING_MIN) /
+            (CHASE_CAMERA_SETTING_MAX - CHASE_CAMERA_SETTING_MIN)) *
+        100
+    );
 }
 
 function resolveChaseCameraDistanceTone(value) {

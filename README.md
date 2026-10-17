@@ -6,10 +6,17 @@ Browser-based 3D driving game built with Three.js and served with a minimal Expr
 
 ```bash
 npm install
-npm start
+npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+`npm run dev` automatically restarts the server when its JavaScript files change. Refresh the
+browser to see frontend changes. Use `npm start` to run without automatic server restarts.
+
+With the server running, `npm run test:e2e:combat-rendering` checks opponent destruction,
+player hits and respawning in Chromium. It catches scene-light changes and extra full-scene
+render passes that can freeze combat. Set `E2E_COMBAT_URL` to test a different local server URL.
 
 ## Donations (Stripe Checkout + Apple Pay)
 
